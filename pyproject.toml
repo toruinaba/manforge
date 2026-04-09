@@ -16,3 +16,6 @@ dev = ["pytest"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
