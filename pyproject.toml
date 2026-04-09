@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "manforge"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "jax[cpu]>=0.4.20",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/manforge"]
