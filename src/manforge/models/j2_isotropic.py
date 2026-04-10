@@ -24,7 +24,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 
 import jax.numpy as jnp
 
-from manforge.autodiff.operators import vonmises
+from manforge.autodiff.operators import dev, vonmises, I_dev_voigt, I_vol_voigt
 from manforge.core.material import MaterialModel
 
 
@@ -109,3 +109,106 @@ class J2IsotropicHardening(MaterialModel):
             ``{"ep": ep + dlambda}``
         """
         return {"ep": state["ep"] + dlambda}
+
+    def plastic_corrector(self, stress_trial, C, state_n, params):
+        """J2 radial return — closed-form plastic correction.
+
+        Computes the converged stress, updated state, and plastic multiplier
+        analytically without Newton-Raphson iteration.
+
+        Notes
+        -----
+        For isotropic J2 with linear hardening, ``C n_voigt = 3μ s_trial / σ_vm``
+        for all Voigt components (the volumetric part of the gradient vanishes),
+        so the radial return reduces to a single scalar equation in Δλ.
+
+        Parameters
+        ----------
+        stress_trial : jnp.ndarray, shape (6,)
+            Elastic trial stress.
+        C : jnp.ndarray, shape (6, 6)
+            Elastic stiffness (passed from return_mapping, not recomputed).
+        state_n : dict with key ``ep``
+            State at the beginning of the increment.
+        params : dict with keys ``E``, ``nu``, ``sigma_y0``, ``H``
+
+        Returns
+        -------
+        tuple[jnp.ndarray, dict, jnp.ndarray]
+            ``(stress_new, state_new, dlambda)``
+        """
+        E = params["E"]
+        nu = params["nu"]
+        mu = E / (2.0 * (1.0 + nu))
+        H = params["H"]
+        sigma_y0 = params["sigma_y0"]
+        ep_n = state_n["ep"]
+
+        sigma_y = sigma_y0 + H * ep_n
+        s_trial = dev(stress_trial)
+        sigma_vm_trial = vonmises(stress_trial)
+
+        # Closed-form plastic multiplier: Δλ = (σ_vm_trial - σ_y) / (3μ + H)
+        dlambda = (sigma_vm_trial - sigma_y) / (3.0 * mu + H)
+
+        # Radial return: σ_new = σ_trial − Δλ (C n) = σ_trial − (3μΔλ/σ_vm) s_trial
+        # because C n_voigt = 3μ s_trial / σ_vm_trial for all 6 components.
+        stress_new = stress_trial - (3.0 * mu * dlambda / sigma_vm_trial) * s_trial
+
+        state_new = {"ep": ep_n + dlambda}
+
+        return stress_new, state_new, jnp.asarray(dlambda)
+
+    def analytical_tangent(self, stress, state, dlambda, C, state_n, params):
+        """J2 algorithmic consistent tangent — closed-form.
+
+        Uses the well-known expression (de Souza Neto et al. 2008):
+
+            D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)
+
+        where θ = 1 − 3μΔλ/σ_vm_trial and β = 9μ²σ_y / ((3μ+H) σ_vm_trial³).
+
+        Parameters
+        ----------
+        stress : jnp.ndarray, shape (6,)
+            Converged stress σ_{n+1}.
+        state : dict
+            Converged state (unused here; ep is taken from ``state_n``).
+        dlambda : jnp.ndarray, scalar
+            Converged plastic multiplier increment Δλ.
+        C : jnp.ndarray, shape (6, 6)
+            Elastic stiffness.
+        state_n : dict with key ``ep``
+            State at the beginning of the increment.
+        params : dict with keys ``E``, ``nu``, ``sigma_y0``, ``H``
+
+        Returns
+        -------
+        jnp.ndarray, shape (6, 6)
+            Consistent tangent dσ_{n+1}/dΔε.
+        """
+        E = params["E"]
+        nu = params["nu"]
+        mu = E / (2.0 * (1.0 + nu))
+        H = params["H"]
+        sigma_y0 = params["sigma_y0"]
+        ep_n = state_n["ep"]
+
+        sigma_y = sigma_y0 + H * ep_n
+
+        # Reconstruct trial quantities from converged Δλ
+        sigma_vm_trial = sigma_y + (3.0 * mu + H) * dlambda
+        theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
+
+        # Deviatoric trial stress: dev(σ_new) = θ · s_trial → s_trial = dev(σ_new)/θ
+        s_trial = dev(stress) / theta
+
+        # Tangent: D^ep = A @ C  where A = I_vol + θ I_dev − coeff · s_trial ⊗ n_voigt
+        # and n_voigt @ C = C @ n_voigt = 3μ s_trial / σ_vm_trial
+        # → D^ep = I_vol @ C + θ I_dev @ C − (9μ²σ_y/((3μ+H)σ_vm³)) · s_trial ⊗ s_trial
+        beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + H) * sigma_vm_trial ** 3)
+
+        I_vol = I_vol_voigt()
+        I_dev = I_dev_voigt()
+
+        return I_vol @ C + theta * (I_dev @ C) - beta * jnp.outer(s_trial, s_trial)

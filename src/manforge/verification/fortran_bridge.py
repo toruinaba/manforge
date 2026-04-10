@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from manforge.core.return_mapping import return_mapping
+from manforge.verification.compare import compare_solvers
 
 
 @dataclass
@@ -157,56 +158,22 @@ def compare_with_fortran(
     """
     import jax.numpy as jnp
 
-    details = []
-    max_stress_err = 0.0
-    max_tangent_err = 0.0
-    n_passed = 0
-    denom_offset = 1.0  # MPa-scale offset to avoid division by near-zero
+    def _python_solver(strain_inc, stress_n, state_n, params):
+        return return_mapping(model, jnp.array(strain_inc), jnp.array(stress_n), state_n, params)
 
-    for idx, case in enumerate(test_cases):
-        strain_inc = jnp.array(case["strain_inc"])
-        stress_n   = jnp.array(case["stress_n"])
-        state_n    = case["state_n"]
-        params     = case["params"]
-
-        # Python reference
-        stress_py, state_py, ddsdde_py = return_mapping(
-            model, strain_inc, stress_n, state_n, params
-        )
-        stress_py  = np.array(stress_py)
-        ddsdde_py  = np.array(ddsdde_py)
-
-        # Fortran result
-        stress_f90, state_f90, ddsdde_f90 = fortran_umat.call(
-            strain_inc, stress_n, state_n, params
-        )
-
-        # Relative errors (with offset to avoid near-zero denominator)
-        s_denom  = np.abs(stress_py) + denom_offset
-        t_denom  = np.abs(ddsdde_py) + denom_offset
-
-        stress_rel_err  = float(np.max(np.abs(stress_f90  - stress_py)  / s_denom))
-        tangent_rel_err = float(np.max(np.abs(ddsdde_f90  - ddsdde_py)  / t_denom))
-
-        case_passed = (stress_rel_err <= stress_tol) and (tangent_rel_err <= tangent_tol)
-
-        details.append({
-            "case_index":      idx,
-            "stress_rel_err":  stress_rel_err,
-            "tangent_rel_err": tangent_rel_err,
-            "passed":          case_passed,
-        })
-
-        max_stress_err  = max(max_stress_err,  stress_rel_err)
-        max_tangent_err = max(max_tangent_err, tangent_rel_err)
-        if case_passed:
-            n_passed += 1
+    result = compare_solvers(
+        solver_a=_python_solver,
+        solver_b=fortran_umat.call,
+        test_cases=test_cases,
+        stress_tol=stress_tol,
+        tangent_tol=tangent_tol,
+    )
 
     return UMATComparisonResult(
-        passed=n_passed == len(test_cases),
-        n_cases=len(test_cases),
-        n_passed=n_passed,
-        max_stress_rel_err=max_stress_err,
-        max_tangent_rel_err=max_tangent_err,
-        details=details,
+        passed=result.passed,
+        n_cases=result.n_cases,
+        n_passed=result.n_passed,
+        max_stress_rel_err=result.max_stress_rel_err,
+        max_tangent_rel_err=result.max_tangent_rel_err,
+        details=result.details,
     )

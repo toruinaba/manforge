@@ -46,6 +46,7 @@ def _fd_tangent(
     state_n: dict,
     params: dict,
     eps: float = 1e-7,
+    method: str = "auto",
 ) -> jnp.ndarray:
     """Compute DDSDDE by central finite differences.
 
@@ -63,6 +64,9 @@ def _fd_tangent(
         Material parameters.
     eps : float
         Perturbation size for central differences.
+    method : str, optional
+        Passed to :func:`~manforge.core.return_mapping.return_mapping`
+        for the perturbed stress solves (default ``"auto"``).
 
     Returns
     -------
@@ -76,10 +80,10 @@ def _fd_tangent(
         e_j = jnp.zeros(ntens).at[j].set(1.0)
 
         s_fwd, _, _ = return_mapping(
-            model, strain_inc + eps * e_j, stress_n, state_n, params
+            model, strain_inc + eps * e_j, stress_n, state_n, params, method=method
         )
         s_bwd, _, _ = return_mapping(
-            model, strain_inc - eps * e_j, stress_n, state_n, params
+            model, strain_inc - eps * e_j, stress_n, state_n, params, method=method
         )
         col = (s_fwd - s_bwd) / (2.0 * eps)
         ddsdde_fd = ddsdde_fd.at[:, j].set(col)
@@ -96,6 +100,7 @@ def check_tangent(
     eps: float = 1e-7,
     tol: float = 1e-5,
     denom_offset: float = 1e-2,
+    method: str = "auto",
 ) -> TangentCheckResult:
     """Compare AD consistent tangent against central-difference approximation.
 
@@ -127,6 +132,11 @@ def check_tangent(
         Units match those of the stress/stiffness values.  Adjust when
         working with unit systems that produce very different magnitude
         stiffness entries (e.g. Pa instead of MPa).
+    method : str, optional
+        Passed to :func:`~manforge.core.return_mapping.return_mapping`
+        for both the direct tangent call and the FD stress solves
+        (default ``"auto"``).  Use ``"analytical"`` to verify a model's
+        closed-form tangent against finite differences.
 
     Returns
     -------
@@ -160,8 +170,8 @@ def check_tangent(
     >>> result.passed
     True
     """
-    _, _, ddsdde_ad = return_mapping(model, strain_inc, stress, state, params)
-    ddsdde_fd = _fd_tangent(model, strain_inc, stress, state, params, eps=eps)
+    _, _, ddsdde_ad = return_mapping(model, strain_inc, stress, state, params, method=method)
+    ddsdde_fd = _fd_tangent(model, strain_inc, stress, state, params, eps=eps, method=method)
 
     rel_err_matrix = jnp.abs(ddsdde_ad - ddsdde_fd) / (
         jnp.abs(ddsdde_fd) + denom_offset

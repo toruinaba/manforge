@@ -141,3 +141,80 @@ class MaterialModel(ABC):
             ``{name: jnp.array(0.0) for name in self.state_names}``
         """
         return {name: jnp.array(0.0) for name in self.state_names}
+
+    def plastic_corrector(
+        self,
+        stress_trial: jnp.ndarray,
+        C: jnp.ndarray,
+        state_n: dict,
+        params: dict,
+    ):
+        """Closed-form plastic correction (optional).
+
+        Override to provide an analytical return-mapping algorithm.
+        The default returns ``None``, causing
+        :func:`~manforge.core.return_mapping.return_mapping` to fall back
+        to the generic Newton-Raphson + autodiff path.
+
+        Parameters
+        ----------
+        stress_trial : jnp.ndarray, shape (ntens,)
+            Elastic trial stress σ_trial = σ_n + C Δε.
+        C : jnp.ndarray, shape (ntens, ntens)
+            Elastic stiffness tensor (already computed by the caller).
+        state_n : dict
+            Internal state at the beginning of the increment.
+        params : dict
+            Material parameters.
+
+        Returns
+        -------
+        None
+            Return ``None`` to signal that no analytical corrector is
+            available and the generic path should be used.
+        tuple[jnp.ndarray, dict, jnp.ndarray]
+            ``(stress_new, state_new, dlambda)`` — converged stress,
+            updated state dict, and plastic multiplier increment Δλ.
+        """
+        return None
+
+    def analytical_tangent(
+        self,
+        stress: jnp.ndarray,
+        state: dict,
+        dlambda: jnp.ndarray,
+        C: jnp.ndarray,
+        state_n: dict,
+        params: dict,
+    ):
+        """Closed-form consistent tangent (optional).
+
+        Override to provide an analytical expression for dσ_{n+1}/dΔε.
+        The default returns ``None``, causing
+        :func:`~manforge.core.return_mapping.return_mapping` to fall back
+        to the generic implicit-differentiation + autodiff path.
+
+        Parameters
+        ----------
+        stress : jnp.ndarray, shape (ntens,)
+            Converged stress σ_{n+1}.
+        state : dict
+            Converged internal state at step n+1.
+        dlambda : jnp.ndarray, scalar
+            Converged plastic multiplier increment Δλ.
+        C : jnp.ndarray, shape (ntens, ntens)
+            Elastic stiffness tensor (already computed by the caller).
+        state_n : dict
+            Internal state at the beginning of the increment.
+        params : dict
+            Material parameters.
+
+        Returns
+        -------
+        None
+            Return ``None`` to signal that no analytical tangent is
+            available and the generic path should be used.
+        jnp.ndarray, shape (ntens, ntens)
+            Consistent tangent dσ_{n+1}/dΔε.
+        """
+        return None
