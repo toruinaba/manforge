@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+examples = ["matplotlib"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manforge"]
