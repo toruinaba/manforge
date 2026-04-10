@@ -14,6 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest"]
 examples = ["matplotlib"]
+fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manforge"]
