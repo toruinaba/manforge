@@ -7,3 +7,10 @@ dist/
 .pytest_cache/
 *.so
 *.f90.tmp
+# Fortran compilation artifacts
+*.mod
+*.o
+*.a
+# f2py generated files
+*-f2pywrappers*.f90
+*module.c
