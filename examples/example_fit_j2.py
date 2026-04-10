@@ -16,7 +16,7 @@ import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2IsotropicHardening
-from manforge.fitting.driver import UniaxialDriver
+from manforge.simulation.driver import UniaxialDriver
 from manforge.fitting.optimizer import fit_params
 
 try:

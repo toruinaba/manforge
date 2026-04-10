@@ -55,7 +55,7 @@ make docker-build && make docker-test
 ```python
 import manforge  # JAX float64 モードを有効化
 from manforge.models.j2_isotropic import J2IsotropicHardening
-from manforge.fitting.driver import UniaxialDriver
+from manforge.simulation.driver import UniaxialDriver
 
 params = {
     "E": 210_000.0,    # Young's modulus [MPa]
