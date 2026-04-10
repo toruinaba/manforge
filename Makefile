@@ -11,13 +11,21 @@
 fortran-build:
 	cd fortran && uv run python -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
 
+## Compile UMAT sources (abaqus_stubs + umat_j2) into a Python extension via f2py
+fortran-build-umat:
+	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 umat_j2.f90 -m manforge_umat
+
 # ---------------------------------------------------------------------------
 # Test targets
 # ---------------------------------------------------------------------------
 
-## Run Fortran integration tests only
+## Run Fortran basic integration tests only
 fortran-test:
 	uv run pytest tests/test_fortran_basic.py -v
+
+## Run Fortran UMAT cross-validation tests only
+fortran-test-umat:
+	uv run pytest tests/test_fortran_umat.py -v
 
 ## Run full test suite (excluding slow fitting tests)
 test:

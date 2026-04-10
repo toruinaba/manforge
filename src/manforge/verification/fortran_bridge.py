@@ -3,14 +3,14 @@
 Provides :class:`FortranUMAT` for calling compiled Fortran UMAT subroutines
 and :func:`compare_with_fortran` for systematic comparison against the
 Python implementation.
-
-.. note::
-    This module is a skeleton.  The Fortran compilation environment
-    (Docker + gfortran + f2py) is set up in Steps 9-10 of the project.
-    All public entry points raise :class:`NotImplementedError` until then.
 """
 
+import importlib
 from dataclasses import dataclass, field
+
+import numpy as np
+
+from manforge.core.return_mapping import return_mapping
 
 
 @dataclass
@@ -46,46 +46,27 @@ class UMATComparisonResult:
 class FortranUMAT:
     """Bridge to a compiled Fortran UMAT subroutine via f2py.
 
-    Wraps an f2py-compiled module so that a Fortran UMAT can be called
-    with the same Python-level interface as
+    Wraps the f2py-compiled ``manforge_umat`` module so that the Fortran J2
+    UMAT can be called with the same Python-level interface as
     :func:`~manforge.core.return_mapping.return_mapping`.
 
-    The full ABAQUS UMAT Fortran interface is::
-
-        SUBROUTINE UMAT(
-            STRESS,   STATEV,  DDSDDE,  SSE,    SPD,     SCD,
-            RPL,      DDSDDT,  DRPLDE,  DRPLDT,
-            STRAN,    DSTRAN,  TIME,    DTIME,
-            TEMP,     DTEMP,   PREDEF,  DPRED,
-            CMNAME,   NDI,     NSHR,    NTENS,   NSTATV,
-            PROPS,    NPROPS,  COORDS,  DROT,    PNEWDT,
-            CELENT,   DFGRD0,  DFGRD1,
-            NOEL,     NPT,     LAYER,   KSPT,    JSTEP,  KINC)
-
-    This bridge handles array marshalling between Python dicts and the
-    flat Fortran arrays expected by UMAT (PROPS ← params values,
-    STATEV ← state values, etc.).
+    The module must expose ``umat_j2_run(E, nu, sigma_y0, H,
+    stress_in, ep_in, dstran)``.
 
     Parameters
     ----------
     module_name : str
-        Name of the f2py-compiled Python module (must be importable).
-    subroutine_name : str
-        Name of the UMAT subroutine within the module (default ``"umat"``).
-
-    Raises
-    ------
-    NotImplementedError
-        Always raised in the current version.  See Steps 9-10.
+        Name of the f2py-compiled Python module (must be importable from
+        ``fortran/`` after ``make fortran-build-umat``).
+    model : MaterialModel, optional
+        Model instance used to determine ``param_names`` and ``state_names``
+        ordering when marshalling dicts to flat arrays.
+        If *None*, the default ordering [E, nu, sigma_y0, H] / [ep] is used.
     """
 
-    def __init__(self, module_name: str, subroutine_name: str = "umat"):
-        raise NotImplementedError(
-            "FortranUMAT is not yet implemented.  "
-            "The Fortran compilation environment (Docker + gfortran + f2py) "
-            "is set up in Steps 9-10 of the project.  "
-            "See fortran/README.md for the planned build procedure."
-        )
+    def __init__(self, module_name: str = "manforge_umat", model=None):
+        self._mod = importlib.import_module(module_name)
+        self._model = model
 
     def call(
         self,
@@ -100,31 +81,42 @@ class FortranUMAT:
 
         Parameters
         ----------
-        strain_inc : array-like, shape (ntens,)
-            Strain increment (DSTRAN in UMAT notation).
-        stress_n : array-like, shape (ntens,)
-            Stress at the beginning of the increment (STRESS in).
+        strain_inc : array-like, shape (6,)
+            Strain increment Δε (engineering shear convention).
+        stress_n : array-like, shape (6,)
+            Stress at the beginning of the increment.
         state_n : dict
-            Internal state variables (mapped to STATEV).
+            Internal state variables.  Must contain key ``"ep"``.
         params : dict
-            Material parameters (mapped to PROPS in the order defined by
-            :attr:`~manforge.core.material.MaterialModel.param_names`).
+            Material parameters.  Must contain keys ``E``, ``nu``,
+            ``sigma_y0``, ``H``.
         dtime : float
-            Time increment (DTIME, default 1.0).
+            Unused (kept for interface symmetry with return_mapping).
 
         Returns
         -------
-        stress_new : jnp.ndarray, shape (ntens,)
+        stress_new : np.ndarray, shape (6,)
         state_new : dict
-        ddsdde : jnp.ndarray, shape (ntens, ntens)
-
-        Raises
-        ------
-        NotImplementedError
-            Always raised in the current version.
+        ddsdde : np.ndarray, shape (6, 6)
         """
-        raise NotImplementedError(
-            "FortranUMAT.call() is not yet implemented.  See Steps 9-10."
+        dstran   = np.asarray(strain_inc, dtype=np.float64)
+        stress_i = np.asarray(stress_n,   dtype=np.float64)
+        ep_i     = float(state_n["ep"])
+
+        E        = float(params["E"])
+        nu       = float(params["nu"])
+        sigma_y0 = float(params["sigma_y0"])
+        H        = float(params["H"])
+
+        stress_out, ep_out, ddsdde = self._mod.umat_j2_run(
+            E, nu, sigma_y0, H,
+            stress_i, ep_i, dstran,
+        )
+
+        return (
+            np.array(stress_out),
+            {"ep": float(ep_out)},
+            np.array(ddsdde),
         )
 
 
@@ -162,12 +154,59 @@ def compare_with_fortran(
     Returns
     -------
     UMATComparisonResult
-
-    Raises
-    ------
-    NotImplementedError
-        Always raised in the current version.  See Steps 9-10.
     """
-    raise NotImplementedError(
-        "compare_with_fortran() is not yet implemented.  See Steps 9-10."
+    import jax.numpy as jnp
+
+    details = []
+    max_stress_err = 0.0
+    max_tangent_err = 0.0
+    n_passed = 0
+    denom_offset = 1.0  # MPa-scale offset to avoid division by near-zero
+
+    for idx, case in enumerate(test_cases):
+        strain_inc = jnp.array(case["strain_inc"])
+        stress_n   = jnp.array(case["stress_n"])
+        state_n    = case["state_n"]
+        params     = case["params"]
+
+        # Python reference
+        stress_py, state_py, ddsdde_py = return_mapping(
+            model, strain_inc, stress_n, state_n, params
+        )
+        stress_py  = np.array(stress_py)
+        ddsdde_py  = np.array(ddsdde_py)
+
+        # Fortran result
+        stress_f90, state_f90, ddsdde_f90 = fortran_umat.call(
+            strain_inc, stress_n, state_n, params
+        )
+
+        # Relative errors (with offset to avoid near-zero denominator)
+        s_denom  = np.abs(stress_py) + denom_offset
+        t_denom  = np.abs(ddsdde_py) + denom_offset
+
+        stress_rel_err  = float(np.max(np.abs(stress_f90  - stress_py)  / s_denom))
+        tangent_rel_err = float(np.max(np.abs(ddsdde_f90  - ddsdde_py)  / t_denom))
+
+        case_passed = (stress_rel_err <= stress_tol) and (tangent_rel_err <= tangent_tol)
+
+        details.append({
+            "case_index":      idx,
+            "stress_rel_err":  stress_rel_err,
+            "tangent_rel_err": tangent_rel_err,
+            "passed":          case_passed,
+        })
+
+        max_stress_err  = max(max_stress_err,  stress_rel_err)
+        max_tangent_err = max(max_tangent_err, tangent_rel_err)
+        if case_passed:
+            n_passed += 1
+
+    return UMATComparisonResult(
+        passed=n_passed == len(test_cases),
+        n_cases=len(test_cases),
+        n_passed=n_passed,
+        max_stress_rel_err=max_stress_err,
+        max_tangent_rel_err=max_tangent_err,
+        details=details,
     )

@@ -102,13 +102,10 @@ def test_check_tangent_tight_tol_can_fail(model, steel_params):
 
 
 # ---------------------------------------------------------------------------
-# Fortran bridge skeleton — NotImplementedError
+# Fortran bridge -- error on bad module name
 # ---------------------------------------------------------------------------
 
-def test_fortran_umat_not_implemented(model, steel_params):
-    """FortranUMAT and compare_with_fortran raise NotImplementedError."""
-    with pytest.raises(NotImplementedError):
-        FortranUMAT("dummy_module")
-
-    with pytest.raises(NotImplementedError):
-        compare_with_fortran(model, None, [])
+def test_fortran_umat_bad_module(model, steel_params):
+    """FortranUMAT raises ModuleNotFoundError for an unknown module name."""
+    with pytest.raises(ModuleNotFoundError):
+        FortranUMAT("nonexistent_umat_module_xyz")
