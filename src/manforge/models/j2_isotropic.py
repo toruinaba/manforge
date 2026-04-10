@@ -26,6 +26,7 @@ import jax.numpy as jnp
 
 from manforge.autodiff.operators import dev, vonmises, I_dev_voigt, I_vol_voigt
 from manforge.core.material import MaterialModel
+from manforge.core.stress_state import SOLID_3D, StressState
 
 
 class J2IsotropicHardening(MaterialModel):
@@ -33,11 +34,16 @@ class J2IsotropicHardening(MaterialModel):
 
     Parameters
     ----------
-    (none at construction — all parameters are passed via ``params`` dicts)
+    stress_state : StressState, optional
+        Dimensionality descriptor.  Defaults to ``SOLID_3D`` (6-component 3D).
+        Pass ``PLANE_STRAIN`` or ``PLANE_STRESS`` etc. for other element types.
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
     state_names = ["ep"]  # equivalent plastic strain
+
+    def __init__(self, stress_state: StressState = SOLID_3D):
+        self.stress_state = stress_state
 
     def elastic_stiffness(self, params: dict) -> jnp.ndarray:
         """Isotropic elastic stiffness tensor.
@@ -81,7 +87,7 @@ class J2IsotropicHardening(MaterialModel):
         """
         ep = state["ep"]
         sigma_y = params["sigma_y0"] + params["H"] * ep
-        return vonmises(stress) - sigma_y
+        return vonmises(stress, self.stress_state) - sigma_y
 
     def hardening_increment(
         self,
@@ -145,8 +151,8 @@ class J2IsotropicHardening(MaterialModel):
         ep_n = state_n["ep"]
 
         sigma_y = sigma_y0 + H * ep_n
-        s_trial = dev(stress_trial)
-        sigma_vm_trial = vonmises(stress_trial)
+        s_trial = dev(stress_trial, self.stress_state)
+        sigma_vm_trial = vonmises(stress_trial, self.stress_state)
 
         # Closed-form plastic multiplier: Δλ = (σ_vm_trial - σ_y) / (3μ + H)
         dlambda = (sigma_vm_trial - sigma_y) / (3.0 * mu + H)
@@ -201,14 +207,15 @@ class J2IsotropicHardening(MaterialModel):
         theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
 
         # Deviatoric trial stress: dev(σ_new) = θ · s_trial → s_trial = dev(σ_new)/θ
-        s_trial = dev(stress) / theta
+        ss = self.stress_state
+        s_trial = dev(stress, ss) / theta
 
         # Tangent: D^ep = A @ C  where A = I_vol + θ I_dev − coeff · s_trial ⊗ n_voigt
         # and n_voigt @ C = C @ n_voigt = 3μ s_trial / σ_vm_trial
         # → D^ep = I_vol @ C + θ I_dev @ C − (9μ²σ_y/((3μ+H)σ_vm³)) · s_trial ⊗ s_trial
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + H) * sigma_vm_trial ** 3)
 
-        I_vol = I_vol_voigt()
-        I_dev = I_dev_voigt()
+        I_vol = I_vol_voigt(ss)
+        I_dev = I_dev_voigt(ss)
 
         return I_vol @ C + theta * (I_dev @ C) - beta * jnp.outer(s_trial, s_trial)

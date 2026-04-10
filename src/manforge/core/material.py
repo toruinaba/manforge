@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 
 from manforge.autodiff.operators import identity_voigt
+from manforge.core.stress_state import SOLID_3D, StressState
 
 
 class MaterialModel(ABC):
@@ -20,13 +21,20 @@ class MaterialModel(ABC):
         Names of material parameters (keys expected in ``params`` dicts).
     state_names : list[str]
         Names of internal state variables (keys in ``state`` dicts).
+    stress_state : StressState
+        Dimensionality descriptor (default: ``SOLID_3D``, 6-component 3D).
     ntens : int
-        Number of stress/strain components. Default 6 (3-D full).
+        Read-only property; returns ``self.stress_state.ntens``.
     """
 
     param_names: list[str]
     state_names: list[str]
-    ntens: int = 6
+    stress_state: StressState = SOLID_3D
+
+    @property
+    def ntens(self) -> int:
+        """Number of stress/strain components (derived from stress_state)."""
+        return self.stress_state.ntens
 
     # ------------------------------------------------------------------
     # Abstract interface — must be implemented by subclasses
@@ -109,13 +117,16 @@ class MaterialModel(ABC):
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """Build the isotropic elastic stiffness tensor.
 
-        Uses the engineering-shear Voigt convention (σ = C ε, where ε uses
-        engineering shear strains γ = 2ε_ij):
+        Builds the full 3D 6×6 stiffness first, then extracts/condenses to
+        the dimensionality specified by ``self.stress_state``:
 
-            C = λ δ⊗δ + μ diag([2, 2, 2, 1, 1, 1])
-
-        Normal–normal block: C[i,i] = λ + 2μ, C[i,j] = λ (i≠j, i,j<3)
-        Shear block        : C[k,k] = μ (k = 3,4,5)
+        * **3D solid (NTENS=6)**: returns the full 6×6 tensor.
+          C = λ δ⊗δ + μ diag([2, 2, 2, 1, 1, 1])
+        * **Plane strain / axisymmetric (NTENS=4)**: returns the 4×4
+          submatrix for components [11, 22, 33, 12].
+        * **Plane stress (NTENS=3)**: applies static condensation to enforce
+          σ33 = 0, returning a 3×3 matrix for [11, 22, 12].
+        * **1D truss (NTENS=1)**: returns [[E]] where E = μ(3λ+2μ)/(λ+μ).
 
         Parameters
         ----------
@@ -126,11 +137,47 @@ class MaterialModel(ABC):
 
         Returns
         -------
-        jnp.ndarray, shape (6, 6)
+        jnp.ndarray, shape (ntens, ntens)
         """
-        delta = identity_voigt()
-        scale = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
-        return lam * jnp.outer(delta, delta) + mu * jnp.diag(scale)
+        # Build the full 3D 6×6 tensor
+        delta_6 = identity_voigt()  # 6-component, no ss
+        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+
+        ss = self.stress_state
+
+        if ss.ntens == 6:
+            return C6
+
+        if ss.ntens == 4:
+            # Plane strain / axisymmetric: components [11,22,33,12]
+            idx = jnp.array([0, 1, 2, 3])
+            return C6[jnp.ix_(idx, idx)]
+
+        if ss.ntens == 3:
+            # Plane stress: condense out sigma_33 (index 2 of the 4×4 plane-
+            # strain submatrix) to enforce sigma_33 = 0.
+            # Retain indices [0,1,3] of the 6×6 → [s11, s22, s12].
+            # Step 1: 4×4 plane-strain sub-block
+            idx4 = jnp.array([0, 1, 2, 3])
+            C4 = C6[jnp.ix_(idx4, idx4)]
+            # Step 2: static condensation — eliminate row/col 2 (s33)
+            # D_ps = D_00 - D_02 * D_22^{-1} * D_20  (Schur complement)
+            # Retained dof within C4: [0, 1, 3] → mapped to [0, 1, 2]
+            retain = jnp.array([0, 1, 3])
+            C_rr = C4[jnp.ix_(retain, retain)]
+            C_rc = C4[retain, 2]          # shape (3,)
+            C_cc = C4[2, 2]               # scalar
+            return C_rr - jnp.outer(C_rc, C_rc) / C_cc
+
+        if ss.ntens == 1:
+            # 1D truss (uniaxial stress): C = [[E]]
+            E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
+            return jnp.array([[E]])
+
+        raise ValueError(
+            f"isotropic_C: unsupported ntens={ss.ntens} for stress_state '{ss.name}'"
+        )
 
     def initial_state(self) -> dict:
         """Return zero-initialised state dict.
