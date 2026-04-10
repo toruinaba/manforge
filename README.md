@@ -131,12 +131,48 @@ class MyModel(MaterialModel):
         # f(σ, q) <= 0 で弾性域
         return vonmises(stress) - (params["sigma_y0"] + ...)
 
-    def hardening_increment(self, dlambda, state, params):
-        # 状態変数の更新
+    def hardening_increment(self, dlambda, stress, state, params):
+        # 状態変数の更新。stress は現在の NR 反復点での応力テンソル。
+        # 等方硬化のみなら stress を無視してよい。
         return {"ep": state["ep"] + dlambda}
 ```
 
 参照実装: `src/manforge/models/j2_isotropic.py`
+
+### テンソル型状態変数 (移動硬化・backstress)
+
+backstress のような 6 成分テンソル状態変数も `state` dict に格納できる。
+`hardening_increment` が `stress` を受け取るため、flow direction `n = df/dσ` を内部で計算して
+Armstrong-Frederick 型の移動硬化則を記述可能。
+
+```python
+import jax
+from manforge.autodiff.operators import vonmises
+from manforge.core.material import MaterialModel
+import jax.numpy as jnp
+
+class J2KinematicHardening(MaterialModel):
+    param_names = ["E", "nu", "sigma_y0", "H_iso", "C_kin", "gamma"]
+    state_names = ["ep", "alpha"]
+
+    def initial_state(self):
+        return {"ep": jnp.array(0.0), "alpha": jnp.zeros(6)}  # テンソル型を明示
+
+    def yield_function(self, stress, state, params):
+        xi = stress - state["alpha"]  # 移動した応力
+        return vonmises(xi) - (params["sigma_y0"] + params["H_iso"] * state["ep"])
+
+    def hardening_increment(self, dlambda, stress, state, params):
+        # flow direction を JAX 自動微分で取得 (Mandel 重み付け自動適用)
+        n = jax.grad(lambda s: vonmises(s - state["alpha"]))(stress)
+        # Armstrong-Frederick: dα = (2/3)*C*Δλ*n − γ*Δλ*α
+        alpha_new = state["alpha"] + (2/3)*params["C_kin"]*dlambda*n \
+                    - params["gamma"]*dlambda*state["alpha"]
+        return {"ep": state["ep"] + dlambda, "alpha": alpha_new}
+```
+
+同様の構造で Chaboche (複数 backstress)、Yoshida-Uemori (二面モデル)、
+Lemaitre 損傷モデル等も記述可能。
 
 ---
 

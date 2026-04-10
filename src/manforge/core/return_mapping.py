@@ -95,14 +95,14 @@ def return_mapping(
 
     for iteration in range(max_iter):
         # Update state and flow direction
-        state_new = model.hardening_increment(dlambda, state_n, params)
+        state_new = model.hardening_increment(dlambda, stress, state_n, params)
         n = jax.grad(lambda s: model.yield_function(s, state_new, params))(stress)
 
         # Stress correction (radial return for fixed n)
         stress = stress_trial - dlambda * (C @ n)
 
         # Re-evaluate after stress update
-        state_new = model.hardening_increment(dlambda, state_n, params)
+        state_new = model.hardening_increment(dlambda, stress, state_n, params)
         f = model.yield_function(stress, state_new, params)
 
         if jnp.abs(f) < tol:
@@ -112,7 +112,7 @@ def return_mapping(
         #   = −n^T C n  +  h
         # where h = (∂f/∂state)(∂state/∂Δλ)  computed via jax.grad
         def _f_residual(dl, _stress=stress):
-            st = model.hardening_increment(dl, state_n, params)
+            st = model.hardening_increment(dl, _stress, state_n, params)
             nn = jax.grad(lambda s: model.yield_function(s, st, params))(_stress)
             s_upd = stress_trial - dl * (C @ nn)
             return model.yield_function(s_upd, st, params)

@@ -86,6 +86,7 @@ class J2IsotropicHardening(MaterialModel):
     def hardening_increment(
         self,
         dlambda: jnp.ndarray,
+        stress: jnp.ndarray,
         state: dict,
         params: dict,
     ) -> dict:
@@ -97,6 +98,8 @@ class J2IsotropicHardening(MaterialModel):
         ----------
         dlambda : jnp.ndarray, scalar
             Plastic multiplier increment.
+        stress : jnp.ndarray, shape (6,)
+            Current stress (unused for isotropic hardening).
         state : dict with key ``ep``
         params : dict (unused here, kept for interface consistency)
 

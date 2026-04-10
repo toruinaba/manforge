@@ -77,6 +77,7 @@ class MaterialModel(ABC):
     def hardening_increment(
         self,
         dlambda: jnp.ndarray,
+        stress: jnp.ndarray,
         state: dict,
         params: dict,
     ) -> dict:
@@ -86,6 +87,10 @@ class MaterialModel(ABC):
         ----------
         dlambda : jnp.ndarray, scalar
             Plastic multiplier increment Δλ ≥ 0.
+        stress : jnp.ndarray, shape (ntens,)
+            Current stress within the NR iteration (Voigt notation).
+            Models that depend only on dlambda (e.g. isotropic hardening)
+            may ignore this argument.
         state : dict
             State at the beginning of the increment.
         params : dict

@@ -2,22 +2,23 @@
 
 At the converged return-mapping point the residual system is
 
-    R1 = σ - σ_trial + Δλ C n(σ, state) = 0    (ntens equations)
-    R2 = f(σ, state(Δλ), params)         = 0    (1 equation)
+    R1 = σ - σ_trial + Δλ C n(σ, state(Δλ, σ)) = 0    (ntens equations)
+    R2 = f(σ, state(Δλ, σ), params)              = 0    (1 equation)
+
+where state may depend on both Δλ and σ (e.g. kinematic hardening with
+backstress updated via the flow direction).
 
 Differentiating implicitly with respect to Δε (where σ_trial = σ_n + C Δε):
 
     ∂R/∂x · dx/dε = −∂R/∂ε
-
-    ∂R/∂x = ┌ I + Δλ C ∂²f/∂σ²   C n ┐   (ntens+1, ntens+1)
-             └       n^T             h  ┘
 
     ∂R/∂ε = ┌ −C ┐   (ntens+1, ntens)
              └  0 ┘
 
     dσ/dε  = first ntens rows of  (∂R/∂x)^{−1} C
 
-where h = (∂f/∂state)·(∂state/∂Δλ)  (scalar hardening modulus derivative).
+The Jacobian ∂R/∂x is computed automatically by JAX, capturing all
+cross-coupling terms when state depends on σ (as in kinematic hardening).
 """
 
 import jax
@@ -44,7 +45,7 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
         Stress at step n (used only to identify σ_trial = σ_n + C Δε,
         not needed here — kept for API symmetry).
     state_n : dict
-        Internal state at step n (needed to evaluate ∂state/∂Δλ).
+        Internal state at step n (needed to evaluate ∂state/∂(Δλ, σ)).
     params : dict
         Material parameters.
 
@@ -56,33 +57,25 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
     ntens = model.ntens
     C = model.elastic_stiffness(params)
 
-    # --- Gradient quantities at the converged point ---
+    # Reconstruct σ_trial from converged quantities.
+    # At convergence R1 = 0  ⟹  σ_trial = σ + Δλ C n.
+    n_conv = jax.grad(lambda s: model.yield_function(s, state, params))(stress)
+    stress_trial = stress + dlambda * (C @ n_conv)
 
-    # n = ∂f/∂σ  (flow direction, shape ntens)
-    n = jax.grad(lambda s: model.yield_function(s, state, params))(stress)
+    # --- Full coupled residual as function of x = [σ (ntens), Δλ (1)] ---
+    def _residual_vec(x):
+        sig = x[:ntens]
+        dl = x[ntens]
+        st = model.hardening_increment(dl, sig, state_n, params)
+        nn = jax.grad(lambda s: model.yield_function(s, st, params))(sig)
+        R1 = sig - stress_trial + dl * (C @ nn)
+        R2 = model.yield_function(sig, st, params)
+        return jnp.concatenate([R1, R2.reshape(1)])
 
-    # ∂²f/∂σ²  (Hessian of yield function w.r.t. stress, shape ntens×ntens)
-    H_f = jax.hessian(lambda s: model.yield_function(s, state, params))(stress)
-
-    # h = d/dΔλ [ f(σ, state(Δλ), params) ]  (hardening stiffness, scalar)
-    # = (∂f/∂state) · (∂state/∂Δλ)
-    def _f_of_dl(dl):
-        st = model.hardening_increment(dl, state_n, params)
-        return model.yield_function(stress, st, params)
-
-    h = jax.grad(_f_of_dl)(dlambda)
-
-    # --- Assemble the 7×7 (ntens+1 × ntens+1) system ---
-    # ∂R/∂x
-    A_top_left = jnp.eye(ntens) + dlambda * C @ H_f   # (ntens, ntens)
-    A_top_right = (C @ n).reshape(ntens, 1)            # (ntens, 1)
-    A_bot_left = n.reshape(1, ntens)                    # (1, ntens)
-    A_bot_right = jnp.array([[h]])                      # (1, 1)
-
-    A = jnp.block([
-        [A_top_left, A_top_right],
-        [A_bot_left, A_bot_right],
-    ])  # (ntens+1, ntens+1)
+    # ∂R/∂x  — JAX computes all coupling terms automatically, including
+    # ∂(state)/∂σ that arises with stress-dependent hardening increments.
+    x_conv = jnp.concatenate([stress, dlambda.reshape(1)])
+    A = jax.jacobian(_residual_vec)(x_conv)  # (ntens+1, ntens+1)
 
     # ∂R/∂ε  →  right-hand side  (−∂R/∂ε = [C; 0])
     rhs = jnp.vstack([C, jnp.zeros((1, ntens))])  # (ntens+1, ntens)
