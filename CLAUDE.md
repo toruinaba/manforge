@@ -38,7 +38,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 **1. Material model layer** — `src/manforge/core/material.py`
 
 Users subclass `MaterialModel` and implement exactly 3 methods:
-- `elastic_stiffness(params)` → 6×6 Voigt stiffness tensor
+- `elastic_stiffness(params)` → (ntens, ntens) Voigt stiffness tensor
 - `yield_function(stress, state, params)` → scalar (≤0 = elastic)
 - `hardening_increment(dlambda, state, params)` → updated state dict
 
@@ -47,7 +47,7 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2 plasti
 **2. Solver layer** — `src/manforge/core/`
 
 - `return_mapping.py`: Elastic trial → yield check → scalar Newton-Raphson on plastic multiplier Δλ (max 50 iter, tol=1e-10)
-- `tangent.py`: Consistent tangent via implicit differentiation of the 7×7 return-mapping residual system (does NOT differentiate through the NR iterations)
+- `tangent.py`: Consistent tangent via implicit differentiation of the (ntens+1)×(ntens+1) return-mapping residual system (does NOT differentiate through the NR iterations)
 
 JAX autodiff computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 
@@ -58,9 +58,13 @@ JAX autodiff computes yield function gradients and the Hessian needed for the ta
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
 
+### StressState and dimensionality
+
+`StressState` (`src/manforge/core/stress_state.py`) is a frozen dataclass that encapsulates the element dimensionality (ABAQUS NTENS convention). Four pre-built instances: `SOLID_3D` (ntens=6), `PLANE_STRAIN` (ntens=4), `PLANE_STRESS` (ntens=3), `UNIAXIAL_1D` (ntens=1). The model's `stress_state` attribute drives the size of all stress/strain arrays and the condensation of the elastic stiffness.
+
 ### Voigt convention
 
-Stress/strain vectors are 6-component: `[11, 22, 33, 12, 13, 23]` with physical shear (not engineering shear). When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
+For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 13, 23]` with physical shear (not engineering shear). For other element types the component count is `ntens` per the associated `StressState`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
 
 ### State variables
 

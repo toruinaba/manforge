@@ -43,9 +43,12 @@ class StressState:
         Length ``ntens``.  Multiply a Voigt vector by these to obtain the
         Mandel representation (shear entries scaled by sqrt(2)).
     is_plane_stress : bool
-        True only for plane-stress states.  Signals to higher-level code
-        (e.g. PlaneStressWrapper) that sigma_33=0 must be enforced via an
-        outer iteration on eps_33.
+        True only for plane-stress states.  For J2 (von Mises) plasticity
+        with isotropic hardening, the reduced-space radial return preserves
+        sigma_33=0, so no outer iteration is required.  For pressure-dependent
+        models (e.g. Drucker-Prager, Gurson) a ``PlaneStressWrapper`` that
+        iterates on eps_33 would be necessary; such a wrapper is not yet
+        implemented.
     """
 
     name: str
@@ -122,6 +125,6 @@ UNIAXIAL_1D = StressState(
     ntens=1,
     ndi=1,
     nshr=0,
-    ndi_phys=1,
+    ndi_phys=3,
     mandel_factors=(1.0,),
 )

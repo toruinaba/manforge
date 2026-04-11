@@ -66,30 +66,30 @@ class UniaxialDriver:
 
 
 class GeneralDriver:
-    """General 6-component strain-driven loading.
+    """General multi-component strain-driven loading.
 
     Parameters
     ----------
     (none — stateless)
     """
 
-    def run(self, model, strain_history_6, params):
+    def run(self, model, strain_history, params):
         """Run a general strain history.
 
         Parameters
         ----------
         model : MaterialModel
-        strain_history_6 : array-like, shape (N, 6)
+        strain_history : array-like, shape (N, ntens)
             Cumulative strain tensor (Voigt, engineering shear) at each step.
         params : dict
 
         Returns
         -------
-        stress_history : np.ndarray, shape (N, 6)
+        stress_history : np.ndarray, shape (N, ntens)
             Full stress tensor at each step.
         """
-        strain_history_6 = np.asarray(strain_history_6, dtype=float)
-        N = strain_history_6.shape[0]
+        strain_history = np.asarray(strain_history, dtype=float)
+        N = strain_history.shape[0]
         ntens = model.ntens
 
         stress_n = jnp.zeros(ntens)
@@ -99,13 +99,13 @@ class GeneralDriver:
         stress_out = np.zeros((N, ntens))
 
         for i in range(N):
-            strain_inc = jnp.array(strain_history_6[i] - eps_prev)
+            strain_inc = jnp.array(strain_history[i] - eps_prev)
 
             stress_n, state_n, _ = return_mapping(
                 model, strain_inc, stress_n, state_n, params
             )
             stress_out[i] = np.array(stress_n)
-            eps_prev = strain_history_6[i]
+            eps_prev = strain_history[i]
 
         return stress_out
 
@@ -123,5 +123,5 @@ class BiaxialDriver:
     def run(self, model, strain_history, params):
         raise NotImplementedError(
             "BiaxialDriver is not yet implemented. "
-            "Use GeneralDriver with a (N, 6) history instead."
+            "Use GeneralDriver with a (N, ntens) history instead."
         )

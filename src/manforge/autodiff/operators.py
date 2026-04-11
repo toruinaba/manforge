@@ -121,6 +121,13 @@ def vonmises(stress: jnp.ndarray, ss=None) -> jnp.ndarray:
       s:s  = ‖s_mandel‖²
       σ_vm = √(3/2) · ‖s_mandel‖
 
+    For reduced stress states (PLANE_STRESS, UNIAXIAL_1D) where fewer direct
+    components are stored than exist physically, the unstored zero-stress
+    components each contribute a deviatoric value of ``-p`` to the full
+    tensor norm.  These are accounted for analytically:
+
+      ‖s‖² = ‖s_stored‖²_Mandel + (ndi_phys - ndi) · p²
+
     Parameters
     ----------
     stress : jnp.ndarray, shape (ntens,)
@@ -134,7 +141,13 @@ def vonmises(stress: jnp.ndarray, ss=None) -> jnp.ndarray:
         Von Mises equivalent stress.
     """
     s = dev(stress, ss)
-    return jnp.sqrt(1.5) * norm_mandel(s, ss)
+    p = hydrostatic(stress, ss)
+    ndi_phys = 3 if ss is None else ss.ndi_phys
+    ndi_stored = 3 if ss is None else ss.ndi
+    n_missing = ndi_phys - ndi_stored
+    s_m = to_mandel(s, ss)
+    sq_norm = jnp.dot(s_m, s_m) + n_missing * p ** 2
+    return jnp.sqrt(1.5 * sq_norm)
 
 
 def I_vol_voigt(ss=None) -> jnp.ndarray:

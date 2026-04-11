@@ -55,7 +55,7 @@ class J2IsotropicHardening(MaterialModel):
 
         Returns
         -------
-        jnp.ndarray, shape (6, 6)
+        jnp.ndarray, shape (ntens, ntens)
         """
         E = params["E"]
         nu = params["nu"]
@@ -77,7 +77,7 @@ class J2IsotropicHardening(MaterialModel):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (6,)
+        stress : jnp.ndarray, shape (ntens,)
         state : dict with key ``ep``
         params : dict with keys ``sigma_y0``, ``H``
 
@@ -104,7 +104,7 @@ class J2IsotropicHardening(MaterialModel):
         ----------
         dlambda : jnp.ndarray, scalar
             Plastic multiplier increment.
-        stress : jnp.ndarray, shape (6,)
+        stress : jnp.ndarray, shape (ntens,)
             Current stress (unused for isotropic hardening).
         state : dict with key ``ep``
         params : dict (unused here, kept for interface consistency)
@@ -130,9 +130,9 @@ class J2IsotropicHardening(MaterialModel):
 
         Parameters
         ----------
-        stress_trial : jnp.ndarray, shape (6,)
+        stress_trial : jnp.ndarray, shape (ntens,)
             Elastic trial stress.
-        C : jnp.ndarray, shape (6, 6)
+        C : jnp.ndarray, shape (ntens, ntens)
             Elastic stiffness (passed from return_mapping, not recomputed).
         state_n : dict with key ``ep``
             State at the beginning of the increment.
@@ -176,13 +176,13 @@ class J2IsotropicHardening(MaterialModel):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (6,)
+        stress : jnp.ndarray, shape (ntens,)
             Converged stress σ_{n+1}.
         state : dict
             Converged state (unused here; ep is taken from ``state_n``).
         dlambda : jnp.ndarray, scalar
             Converged plastic multiplier increment Δλ.
-        C : jnp.ndarray, shape (6, 6)
+        C : jnp.ndarray, shape (ntens, ntens)
             Elastic stiffness.
         state_n : dict with key ``ep``
             State at the beginning of the increment.
@@ -190,7 +190,7 @@ class J2IsotropicHardening(MaterialModel):
 
         Returns
         -------
-        jnp.ndarray, shape (6, 6)
+        jnp.ndarray, shape (ntens, ntens)
             Consistent tangent dσ_{n+1}/dΔε.
         """
         E = params["E"]

@@ -1,4 +1,4 @@
-"""Fourth-order tensor operations in Voigt (6×6 matrix) representation."""
+"""Fourth-order tensor operations in Voigt (ntens×ntens matrix) representation."""
 
 import jax.numpy as jnp
 
@@ -8,14 +8,14 @@ def ddot42(A: jnp.ndarray, b: jnp.ndarray) -> jnp.ndarray:
 
     Parameters
     ----------
-    A : jnp.ndarray, shape (6, 6)
+    A : jnp.ndarray, shape (ntens, ntens)
         Fourth-order tensor in Voigt notation.
-    b : jnp.ndarray, shape (6,)
+    b : jnp.ndarray, shape (ntens,)
         Second-order tensor in Voigt notation.
 
     Returns
     -------
-    jnp.ndarray, shape (6,)
+    jnp.ndarray, shape (ntens,)
         Result A : b in Voigt notation.
     """
     return A @ b
@@ -26,12 +26,12 @@ def ddot44(A: jnp.ndarray, B: jnp.ndarray) -> jnp.ndarray:
 
     Parameters
     ----------
-    A : jnp.ndarray, shape (6, 6)
-    B : jnp.ndarray, shape (6, 6)
+    A : jnp.ndarray, shape (ntens, ntens)
+    B : jnp.ndarray, shape (ntens, ntens)
 
     Returns
     -------
-    jnp.ndarray, shape (6, 6)
+    jnp.ndarray, shape (ntens, ntens)
         Result A : B in Voigt notation.
     """
     return A @ B
@@ -42,11 +42,11 @@ def symmetrize4(A: jnp.ndarray) -> jnp.ndarray:
 
     Parameters
     ----------
-    A : jnp.ndarray, shape (6, 6)
+    A : jnp.ndarray, shape (ntens, ntens)
 
     Returns
     -------
-    jnp.ndarray, shape (6, 6)
+    jnp.ndarray, shape (ntens, ntens)
         (A + A^T) / 2
     """
     return (A + A.T) * 0.5

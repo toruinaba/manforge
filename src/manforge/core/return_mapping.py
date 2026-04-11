@@ -17,8 +17,8 @@ Algorithm
 4. Consistent tangent — two paths depending on ``method``:
 
    *autodiff*  (generic, default fallback)
-     Implicit differentiation of the 7×7 residual via ``jax.jacobian``
-     (see :mod:`manforge.core.tangent`).
+     Implicit differentiation of the (ntens+1)×(ntens+1) residual via
+     ``jax.jacobian`` (see :mod:`manforge.core.tangent`).
 
    *analytical*  (closed-form, opt-in)
      Calls ``model.analytical_tangent(σ, state, Δλ, C, state_n, params)``

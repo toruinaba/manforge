@@ -141,8 +141,31 @@ def test_hydrostatic_plane_stress():
 
 
 def test_hydrostatic_1d():
+    # ndi_phys=3: uniaxial stress sigma_22=sigma_33=0, so p = sigma_11 / 3
     stress = jnp.array([90.0])
-    np.testing.assert_allclose(hydrostatic(stress, UNIAXIAL_1D), 90.0, atol=1e-10)
+    np.testing.assert_allclose(hydrostatic(stress, UNIAXIAL_1D), 30.0, atol=1e-10)
+
+
+def test_vonmises_uniaxial_1d():
+    """vonmises([sigma], UNIAXIAL_1D) == |sigma| for uniaxial stress.
+
+    With ndi_phys=3, two direct components are missing (sigma_22=sigma_33=0).
+    Each contributes deviatoric -p to the full Mandel norm.
+    """
+    sigma = 100.0
+    stress = jnp.array([sigma])
+    np.testing.assert_allclose(vonmises(stress, UNIAXIAL_1D), sigma, atol=1e-8)
+
+
+def test_vonmises_uniaxial_plane_stress():
+    """vonmises([sigma, 0, 0], PLANE_STRESS) == sigma for uniaxial loading.
+
+    With ndi_phys=3 and ndi=2, the unstored sigma_33=0 contributes deviatoric
+    -p.  Accounting for this extra component gives the correct 3D von Mises.
+    """
+    sigma = 100.0
+    stress = jnp.array([sigma, 0.0, 0.0])
+    np.testing.assert_allclose(vonmises(stress, PLANE_STRESS), sigma, atol=1e-8)
 
 
 # ---------------------------------------------------------------------------
