@@ -37,12 +37,19 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 **1. Material model layer** — `src/manforge/core/material.py`
 
-Users subclass `MaterialModel` and implement exactly 3 methods:
+`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement exactly 3 material-physics methods:
 - `elastic_stiffness(params)` → (ntens, ntens) Voigt stiffness tensor
 - `yield_function(stress, state, params)` → scalar (≤0 = elastic)
-- `hardening_increment(dlambda, state, params)` → updated state dict
+- `hardening_increment(dlambda, stress, state, params)` → updated state dict
 
-The reference implementation is `src/manforge/models/j2_isotropic.py` (J2 plasticity with linear isotropic hardening).
+Stress-state base classes (choose the appropriate one):
+- `MaterialModel3D` — SOLID_3D (ntens=6) and PLANE_STRAIN (ntens=4); requires `ndi == ndi_phys`
+- `MaterialModelPS` — PLANE_STRESS (ntens=3); applies Schur condensation in `isotropic_C`
+- `MaterialModel1D` — UNIAXIAL_1D (ntens=1); used for uniaxial fitting
+
+Each base provides branch-free operator methods (`_dev`, `_vonmises`, `isotropic_C`, `_I_vol`, `_I_dev`) tailored to its stress state. The `_vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
+
+The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotropic3D, J2IsotropicPS, J2Isotropic1D).
 
 **2. Solver layer** — `src/manforge/core/`
 

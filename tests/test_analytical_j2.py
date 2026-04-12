@@ -13,7 +13,7 @@ import pytest
 
 import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.core.material import MaterialModel
+from manforge.core.material import MaterialModel3D
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent
 
@@ -204,7 +204,7 @@ def test_analytical_tangent_fd_check_plastic(model, steel_params, strain_inc_vec
 def test_method_analytical_raises_if_no_hooks(steel_params):
     """method='analytical' raises NotImplementedError for a model without hooks."""
 
-    class MinimalModel(MaterialModel):
+    class MinimalModel(MaterialModel3D):
         param_names = ["E", "nu", "sigma_y0"]
         state_names = []
 
@@ -215,8 +215,7 @@ def test_method_analytical_raises_if_no_hooks(steel_params):
             return self.isotropic_C(lam, mu)
 
         def yield_function(self, stress, state, params):
-            from manforge.autodiff.operators import vonmises
-            return vonmises(stress) - params["sigma_y0"]
+            return self._vonmises(stress) - params["sigma_y0"]
 
         def hardening_increment(self, dlambda, stress, state, params):
             return {}
