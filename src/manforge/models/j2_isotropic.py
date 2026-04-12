@@ -24,8 +24,8 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 
 import jax.numpy as jnp
 
-from manforge.autodiff.operators import dev, vonmises, I_dev_voigt, I_vol_voigt
-from manforge.core.material import MaterialModel
+from manforge.autodiff.operators import vonmises
+from manforge.core.material import MaterialModel, MaterialModel3D
 from manforge.core.stress_state import SOLID_3D, StressState
 
 
@@ -116,51 +116,65 @@ class J2IsotropicHardening(MaterialModel):
         """
         return {"ep": state["ep"] + dlambda}
 
-class J2Isotropic3D(J2IsotropicHardening):
+class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
+    Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
+    (``_dev``, ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which
+    provide branch-free implementations valid when all direct stress components
+    are stored (``ndi == ndi_phys``).
+
     Provides closed-form ``plastic_corrector`` and ``analytical_tangent``
-    valid for stress states where ``ndi == ndi_phys`` (i.e. SOLID_3D and
-    PLANE_STRAIN).  For these states the isotropic elastic stiffness
-    preserves the deviatoric structure:
-
-        C @ n_dev = 2μ · n_dev
-
-    which makes the radial-return formula and the de Souza Neto algorithmic
-    tangent exact.
-
-    For stress states where this identity does not hold (PLANE_STRESS,
-    UNIAXIAL_1D), use the base :class:`J2IsotropicHardening` with
-    ``method="autodiff"`` instead.
+    using the identity ``C @ n_dev = 2μ · n_dev``, which holds exactly for
+    SOLID_3D and PLANE_STRAIN but not for statically condensed stress states
+    (PLANE_STRESS, UNIAXIAL_1D).  For those, use :class:`J2IsotropicHardening`
+    with ``method="autodiff"``.
 
     Parameters
     ----------
     stress_state : StressState, optional
         Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
-        Defaults to ``SOLID_3D``.
+        Defaults to ``SOLID_3D``.  The guard is enforced by the parent.
 
     Raises
     ------
     ValueError
-        If ``stress_state.ndi != stress_state.ndi_phys``.
+        If ``stress_state.ndi != stress_state.ndi_phys`` (raised by
+        :class:`~manforge.core.material.MaterialModel3D`).
     """
 
+    param_names = ["E", "nu", "sigma_y0", "H"]
+    state_names = ["ep"]
+
     def __init__(self, stress_state: StressState = SOLID_3D):
-        if stress_state.ndi != stress_state.ndi_phys:
-            raise ValueError(
-                f"J2Isotropic3D requires a stress state with ndi == ndi_phys "
-                f"(full-rank deviatoric structure, e.g. SOLID_3D or PLANE_STRAIN). "
-                f"Got '{stress_state.name}' with ndi={stress_state.ndi}, "
-                f"ndi_phys={stress_state.ndi_phys}.  "
-                f"Use J2IsotropicHardening with method='autodiff' instead."
-            )
         super().__init__(stress_state)
+
+    # ------------------------------------------------------------------
+    # Material physics — implement the three abstract methods
+    # ------------------------------------------------------------------
+
+    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+        """Isotropic elastic stiffness tensor."""
+        E, nu = params["E"], params["nu"]
+        mu = E / (2.0 * (1.0 + nu))
+        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+        return self.isotropic_C(lam, mu)
+
+    def yield_function(self, stress: jnp.ndarray, state: dict, params: dict) -> jnp.ndarray:
+        """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
+        sigma_y = params["sigma_y0"] + params["H"] * state["ep"]
+        return self._vonmises(stress) - sigma_y
+
+    def hardening_increment(self, dlambda, stress, state, params) -> dict:
+        """Δep = Δλ (von Mises associative flow)."""
+        return {"ep": state["ep"] + dlambda}
+
+    # ------------------------------------------------------------------
+    # Analytical solver hooks
+    # ------------------------------------------------------------------
 
     def plastic_corrector(self, stress_trial, C, state_n, params):
         """J2 radial return — closed-form plastic correction.
-
-        Computes the converged stress, updated state, and plastic multiplier
-        analytically without Newton-Raphson iteration.
 
         Notes
         -----
@@ -172,11 +186,8 @@ class J2Isotropic3D(J2IsotropicHardening):
         Parameters
         ----------
         stress_trial : jnp.ndarray, shape (ntens,)
-            Elastic trial stress.
         C : jnp.ndarray, shape (ntens, ntens)
-            Elastic stiffness (passed from return_mapping, not recomputed).
         state_n : dict with key ``ep``
-            State at the beginning of the increment.
         params : dict with keys ``E``, ``nu``, ``sigma_y0``, ``H``
 
         Returns
@@ -184,31 +195,24 @@ class J2Isotropic3D(J2IsotropicHardening):
         tuple[jnp.ndarray, dict, jnp.ndarray]
             ``(stress_new, state_new, dlambda)``
         """
-        E = params["E"]
-        nu = params["nu"]
+        E, nu = params["E"], params["nu"]
         mu = E / (2.0 * (1.0 + nu))
-        H = params["H"]
-        sigma_y0 = params["sigma_y0"]
-        ep_n = state_n["ep"]
+        H, sigma_y0, ep_n = params["H"], params["sigma_y0"], state_n["ep"]
 
         sigma_y = sigma_y0 + H * ep_n
-        s_trial = dev(stress_trial, self.stress_state)
-        sigma_vm_trial = vonmises(stress_trial, self.stress_state)
+        s_trial = self._dev(stress_trial)
+        sigma_vm_trial = self._vonmises(stress_trial)
 
-        # Closed-form plastic multiplier: Δλ = (σ_vm_trial - σ_y) / (3μ + H)
+        # Δλ = (σ_vm_trial − σ_y) / (3μ + H)
         dlambda = (sigma_vm_trial - sigma_y) / (3.0 * mu + H)
 
         # Radial return: σ_new = σ_trial − (3μΔλ/σ_vm) s_trial
         stress_new = stress_trial - (3.0 * mu * dlambda / sigma_vm_trial) * s_trial
 
-        state_new = {"ep": ep_n + dlambda}
-
-        return stress_new, state_new, jnp.asarray(dlambda)
+        return stress_new, {"ep": ep_n + dlambda}, jnp.asarray(dlambda)
 
     def analytical_tangent(self, stress, state, dlambda, C, state_n, params):
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
-
-        Uses the well-known expression (de Souza Neto et al. 2008):
 
             D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)
 
@@ -217,42 +221,29 @@ class J2Isotropic3D(J2IsotropicHardening):
         Parameters
         ----------
         stress : jnp.ndarray, shape (ntens,)
-            Converged stress σ_{n+1}.
-        state : dict
-            Converged state (unused here; ep is taken from ``state_n``).
+        state : dict  (unused; ep taken from state_n)
         dlambda : jnp.ndarray, scalar
-            Converged plastic multiplier increment Δλ.
         C : jnp.ndarray, shape (ntens, ntens)
-            Elastic stiffness.
         state_n : dict with key ``ep``
-            State at the beginning of the increment.
         params : dict with keys ``E``, ``nu``, ``sigma_y0``, ``H``
 
         Returns
         -------
         jnp.ndarray, shape (ntens, ntens)
-            Consistent tangent dσ_{n+1}/dΔε.
         """
-        E = params["E"]
-        nu = params["nu"]
+        E, nu = params["E"], params["nu"]
         mu = E / (2.0 * (1.0 + nu))
-        H = params["H"]
-        sigma_y0 = params["sigma_y0"]
-        ep_n = state_n["ep"]
+        H, sigma_y0, ep_n = params["H"], params["sigma_y0"], state_n["ep"]
 
         sigma_y = sigma_y0 + H * ep_n
-
-        # Reconstruct trial quantities from converged Δλ
         sigma_vm_trial = sigma_y + (3.0 * mu + H) * dlambda
         theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
 
-        # Deviatoric trial stress: dev(σ_new) = θ · s_trial → s_trial = dev(σ_new)/θ
-        ss = self.stress_state
-        s_trial = dev(stress, ss) / theta
-
+        # dev(σ_new) = θ · s_trial  →  s_trial = dev(σ_new) / θ
+        s_trial = self._dev(stress) / theta
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + H) * sigma_vm_trial ** 3)
 
-        I_vol = I_vol_voigt(ss)
-        I_dev = I_dev_voigt(ss)
+        I_vol = self._I_vol()
+        I_dev = self._I_dev()
 
         return I_vol @ C + theta * (I_dev @ C) - beta * jnp.outer(s_trial, s_trial)
