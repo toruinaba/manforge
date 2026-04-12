@@ -384,3 +384,49 @@ subroutine umat_j2(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     end do
 
 end subroutine umat_j2
+
+
+! -----------------------------------------------------------------------------
+! umat_j2_elastic_stiffness -- return the isotropic elastic stiffness C (6x6)
+!
+! Exposes the elastic stiffness calculation from umat_j2_run as a standalone
+! f2py-callable subroutine.  Useful for component-level cross-validation:
+! compare this output against J2Isotropic3D.elastic_stiffness(params) in Python
+! to confirm that the elastic part of the Fortran implementation is correct
+! before debugging the plastic return-mapping logic.
+!
+! Parameters
+! ----------
+! E      [in]  : Young's modulus
+! nu     [in]  : Poisson's ratio
+! C      [out] : 6x6 Voigt stiffness tensor (Fortran column-major order)
+! -----------------------------------------------------------------------------
+subroutine umat_j2_elastic_stiffness(E, nu, C)
+    implicit none
+    double precision, intent(in)  :: E, nu
+    double precision, intent(out) :: C(6,6)
+
+    double precision :: lam, mu
+    integer :: i, j
+
+    mu  = E / (2.0d0 * (1.0d0 + nu))
+    lam = E * nu / ((1.0d0 + nu) * (1.0d0 - 2.0d0 * nu))
+
+    do j = 1, 6
+        do i = 1, 6
+            C(i,j) = 0.0d0
+        end do
+    end do
+
+    do i = 1, 3
+        do j = 1, 3
+            C(i,j) = lam
+        end do
+        C(i,i) = lam + 2.0d0 * mu
+    end do
+
+    do i = 4, 6
+        C(i,i) = mu
+    end do
+
+end subroutine umat_j2_elastic_stiffness

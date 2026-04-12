@@ -8,7 +8,7 @@ Python `manforge` implementation.
 
 | File | Description |
 |------|-------------|
-| `umat_j2.f90` | Full J2 isotropic hardening UMAT (`umat_j2_run` + ABAQUS interface) |
+| `umat_j2.f90` | Full J2 isotropic hardening UMAT (`umat_j2_run` + ABAQUS interface + `umat_j2_elastic_stiffness` for component-level checks) |
 | `abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution; future UMATs may call them directly |
 | `test_basic.f90` | Simple elastic subroutine for f2py smoke test |
 
@@ -152,3 +152,58 @@ result = verifier.run(params, strain_history=strain)
 For lower-level access, `FortranUMAT.call` follows the standard solver
 protocol `(strain_inc, stress_n, state_n, params) -> (stress_new, state_new, ddsdde)`
 and can be used directly with `compare_solvers`.
+
+---
+
+## Component-level verification
+
+`UMATVerifier` is a black-box acceptance test — it compares `_run` inputs and
+outputs end-to-end.  When it reports a failure, the next step is to isolate
+*which sub-component* is wrong.
+
+### Pattern: expose internal subroutines for direct comparison
+
+Add a standalone f2py-callable subroutine for each component you want to
+inspect, recompile, then compare against the matching Python method.
+
+`umat_j2.f90` already includes `umat_j2_elastic_stiffness` as a reference
+example:
+
+```fortran
+! In umat_j2.f90 — already present
+subroutine umat_j2_elastic_stiffness(E, nu, C)
+    double precision, intent(in)  :: E, nu
+    double precision, intent(out) :: C(6,6)
+    ! ... identical to the C assembly inside umat_j2_run
+end subroutine
+```
+
+After recompiling (`make fortran-build-umat`), call it from Python:
+
+```python
+import numpy as np
+import manforge_umat
+import manforge  # enables JAX float64
+from manforge.models.j2_isotropic import J2Isotropic3D
+
+model  = J2Isotropic3D()
+params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
+
+# Fortran sub-component
+C_fortran = np.array(manforge_umat.umat_j2_elastic_stiffness(params["E"], params["nu"]))
+
+# Python reference
+C_python = np.array(model.elastic_stiffness(params))
+
+np.testing.assert_allclose(C_fortran, C_python, rtol=1e-12)
+```
+
+### Extending the pattern
+
+The same approach works for any internal quantity — yield function value, flow
+direction, consistent tangent sub-block, etc.  Add a subroutine that outputs
+the quantity of interest, recompile, and compare against the Python model's
+corresponding method (`yield_function`, `hardening_increment`, …).
+
+The elastic stiffness is the best first check because it is the simplest
+component and a mismatch here propagates into every downstream calculation.
