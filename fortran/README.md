@@ -112,7 +112,7 @@ docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
 
 ## Material parameters convention
 
-`PROPS` array order (must match `manforge.models.j2_isotropic.J2IsotropicHardening.param_names`):
+`PROPS` array order (must match `manforge.models.j2_isotropic.J2Isotropic3D.param_names`):
 
 | Index (1-based) | Name | Unit | Description |
 |-----------------|------|------|-------------|
@@ -148,10 +148,10 @@ After Step 10, use `manforge.verification.fortran_bridge.compare_with_fortran`
 to verify that the Fortran UMAT matches the Python return mapping:
 
 ```python
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
 
-model = J2IsotropicHardening()
+model = J2Isotropic3D()
 umat  = FortranUMAT("manforge_umat", subroutine_name="umat_j2")
 
 test_cases = [

@@ -156,9 +156,9 @@ def check_tangent(
     --------
     >>> import jax.numpy as jnp
     >>> import manforge
-    >>> from manforge.models.j2_isotropic import J2IsotropicHardening
+    >>> from manforge.models.j2_isotropic import J2Isotropic3D
     >>> from manforge.verification.fd_check import check_tangent
-    >>> model = J2IsotropicHardening()
+    >>> model = J2Isotropic3D()
     >>> params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
     >>> result = check_tangent(
     ...     model,

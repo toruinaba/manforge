@@ -1,7 +1,7 @@
 """Uniaxial tension simulation with J2 isotropic hardening.
 
 Demonstrates:
-- Defining material parameters for J2IsotropicHardening
+- Defining material parameters for J2Isotropic3D
 - Running a uniaxial strain history with UniaxialDriver
 - Verifying the consistent tangent with check_tangent
 - Plotting the stress-strain curve (saved as PNG)
@@ -14,7 +14,7 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import UniaxialDriver
 from manforge.verification.fd_check import check_tangent
 
@@ -41,7 +41,7 @@ params = {
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-model = J2IsotropicHardening()
+model = J2Isotropic3D()
 driver = UniaxialDriver()
 
 N = 100

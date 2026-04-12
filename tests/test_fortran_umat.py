@@ -28,7 +28,7 @@ mod = pytest.importorskip(
 
 import jax.numpy as jnp
 import manforge  # noqa: F401 -- enables JAX float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.return_mapping import return_mapping
 from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
 
@@ -44,7 +44,7 @@ def params():
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 @pytest.fixture

@@ -15,7 +15,7 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import UniaxialDriver
 from manforge.fitting.optimizer import fit_params
 
@@ -42,7 +42,7 @@ FIXED_PARAMS = {"E": TRUE_PARAMS["E"], "nu": TRUE_PARAMS["nu"]}
 # ---------------------------------------------------------------------------
 # Generate synthetic "experimental" data
 # ---------------------------------------------------------------------------
-model = J2IsotropicHardening()
+model = J2Isotropic3D()
 driver = UniaxialDriver()
 
 rng = np.random.default_rng(42)
