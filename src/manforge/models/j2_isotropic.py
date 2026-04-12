@@ -116,6 +116,46 @@ class J2IsotropicHardening(MaterialModel):
         """
         return {"ep": state["ep"] + dlambda}
 
+class J2Isotropic3D(J2IsotropicHardening):
+    """J2 plasticity with analytical radial return for full-rank stress states.
+
+    Provides closed-form ``plastic_corrector`` and ``analytical_tangent``
+    valid for stress states where ``ndi == ndi_phys`` (i.e. SOLID_3D and
+    PLANE_STRAIN).  For these states the isotropic elastic stiffness
+    preserves the deviatoric structure:
+
+        C @ n_dev = 2μ · n_dev
+
+    which makes the radial-return formula and the de Souza Neto algorithmic
+    tangent exact.
+
+    For stress states where this identity does not hold (PLANE_STRESS,
+    UNIAXIAL_1D), use the base :class:`J2IsotropicHardening` with
+    ``method="autodiff"`` instead.
+
+    Parameters
+    ----------
+    stress_state : StressState, optional
+        Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
+        Defaults to ``SOLID_3D``.
+
+    Raises
+    ------
+    ValueError
+        If ``stress_state.ndi != stress_state.ndi_phys``.
+    """
+
+    def __init__(self, stress_state: StressState = SOLID_3D):
+        if stress_state.ndi != stress_state.ndi_phys:
+            raise ValueError(
+                f"J2Isotropic3D requires a stress state with ndi == ndi_phys "
+                f"(full-rank deviatoric structure, e.g. SOLID_3D or PLANE_STRAIN). "
+                f"Got '{stress_state.name}' with ndi={stress_state.ndi}, "
+                f"ndi_phys={stress_state.ndi_phys}.  "
+                f"Use J2IsotropicHardening with method='autodiff' instead."
+            )
+        super().__init__(stress_state)
+
     def plastic_corrector(self, stress_trial, C, state_n, params):
         """J2 radial return — closed-form plastic correction.
 
@@ -127,6 +167,7 @@ class J2IsotropicHardening(MaterialModel):
         For isotropic J2 with linear hardening, ``C n_voigt = 3μ s_trial / σ_vm``
         for all Voigt components (the volumetric part of the gradient vanishes),
         so the radial return reduces to a single scalar equation in Δλ.
+        This identity holds when ``ndi == ndi_phys`` (SOLID_3D, PLANE_STRAIN).
 
         Parameters
         ----------
@@ -157,8 +198,7 @@ class J2IsotropicHardening(MaterialModel):
         # Closed-form plastic multiplier: Δλ = (σ_vm_trial - σ_y) / (3μ + H)
         dlambda = (sigma_vm_trial - sigma_y) / (3.0 * mu + H)
 
-        # Radial return: σ_new = σ_trial − Δλ (C n) = σ_trial − (3μΔλ/σ_vm) s_trial
-        # because C n_voigt = 3μ s_trial / σ_vm_trial for all 6 components.
+        # Radial return: σ_new = σ_trial − (3μΔλ/σ_vm) s_trial
         stress_new = stress_trial - (3.0 * mu * dlambda / sigma_vm_trial) * s_trial
 
         state_new = {"ep": ep_n + dlambda}
@@ -166,7 +206,7 @@ class J2IsotropicHardening(MaterialModel):
         return stress_new, state_new, jnp.asarray(dlambda)
 
     def analytical_tangent(self, stress, state, dlambda, C, state_n, params):
-        """J2 algorithmic consistent tangent — closed-form.
+        """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
 
         Uses the well-known expression (de Souza Neto et al. 2008):
 
@@ -210,9 +250,6 @@ class J2IsotropicHardening(MaterialModel):
         ss = self.stress_state
         s_trial = dev(stress, ss) / theta
 
-        # Tangent: D^ep = A @ C  where A = I_vol + θ I_dev − coeff · s_trial ⊗ n_voigt
-        # and n_voigt @ C = C @ n_voigt = 3μ s_trial / σ_vm_trial
-        # → D^ep = I_vol @ C + θ I_dev @ C − (9μ²σ_y/((3μ+H)σ_vm³)) · s_trial ⊗ s_trial
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + H) * sigma_vm_trial ** 3)
 
         I_vol = I_vol_voigt(ss)

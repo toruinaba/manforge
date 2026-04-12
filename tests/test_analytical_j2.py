@@ -14,13 +14,13 @@ import pytest
 import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.material import MaterialModel
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2IsotropicHardening, J2Isotropic3D
 from manforge.verification.fd_check import check_tangent
 
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 # ---------------------------------------------------------------------------
