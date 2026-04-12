@@ -1,4 +1,4 @@
-"""Test return mapping in the plastic domain for J2IsotropicHardening.
+"""Test return mapping in the plastic domain for J2Isotropic3D.
 
 Analytical solution for uniaxial tension with linear isotropic hardening:
 
@@ -14,12 +14,12 @@ import pytest
 
 import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 def _lame(params):

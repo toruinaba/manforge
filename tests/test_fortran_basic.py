@@ -1,7 +1,7 @@
 """Basic f2py integration test for the Fortran elastic_stress subroutine.
 
 Verifies that the Fortran implementation of isotropic elastic stress
-computation agrees with the Python reference (J2IsotropicHardening.elastic_stiffness)
+computation agrees with the Python reference (J2Isotropic3D.elastic_stiffness)
 to floating-point precision.
 
 The compiled module ``manforge_test_basic`` must be built before running:
@@ -29,7 +29,7 @@ mod = pytest.importorskip(
 )
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def params():
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 def _py_stress(model, params, dstran):

@@ -1,4 +1,4 @@
-"""Tests for the J2IsotropicHardening analytical return-mapping path.
+"""Tests for the J2Isotropic3D analytical return-mapping path.
 
 Covers:
 - plastic_corrector and analytical_tangent as standalone methods
@@ -14,7 +14,7 @@ import pytest
 import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.material import MaterialModel
-from manforge.models.j2_isotropic import J2IsotropicHardening, J2Isotropic3D
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent
 
 

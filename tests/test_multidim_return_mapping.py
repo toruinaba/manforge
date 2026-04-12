@@ -8,7 +8,8 @@ Covers:
 - PLANE_STRAIN analytical vs autodiff cross-check
 - Driver integration with 4-component arrays (UniaxialDriver, GeneralDriver)
 - Plane-strain signature: sigma_33 != 0 under axial loading
-- J2IsotropicHardening(PLANE_STRAIN) autodiff works; analytical raises
+- J2Isotropic3D(PLANE_STRAIN) autodiff path works correctly
+- J2IsotropicPS (no plastic_corrector) raises NotImplementedError for method='analytical'
 """
 
 import jax.numpy as jnp
@@ -18,7 +19,7 @@ import pytest
 import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models.j2_isotropic import J2IsotropicHardening, J2Isotropic3D
+from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
 from manforge.simulation.driver import UniaxialDriver, GeneralDriver
 from manforge.verification.fd_check import check_tangent
 
@@ -230,12 +231,12 @@ def test_plane_strain_sigma33_nonzero(pe_model, steel_params):
 
 
 # ---------------------------------------------------------------------------
-# Base class behavior with PLANE_STRAIN
+# Autodiff path and analytical-raises behavior
 # ---------------------------------------------------------------------------
 
-def test_base_class_autodiff_plane_strain(pe_state, steel_params):
-    """J2IsotropicHardening(PLANE_STRAIN) with method='autodiff' works correctly."""
-    model = J2IsotropicHardening(PLANE_STRAIN)
+def test_j2isotropic3d_autodiff_plane_strain(pe_state, steel_params):
+    """J2Isotropic3D(PLANE_STRAIN) with method='autodiff' works correctly."""
+    model = J2Isotropic3D(PLANE_STRAIN)
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
     stress, state, ddsdde = return_mapping(
         model, deps, jnp.zeros(4), pe_state, steel_params, method="autodiff"
@@ -247,11 +248,12 @@ def test_base_class_autodiff_plane_strain(pe_state, steel_params):
     assert abs(float(f)) < 1e-8
 
 
-def test_base_class_analytical_raises_plane_strain(pe_state, steel_params):
-    """J2IsotropicHardening(PLANE_STRAIN) with method='analytical' raises NotImplementedError."""
-    model = J2IsotropicHardening(PLANE_STRAIN)
-    deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
+def test_autodiff_only_model_analytical_raises(steel_params):
+    """J2IsotropicPS (no plastic_corrector) raises NotImplementedError for method='analytical'."""
+    model = J2IsotropicPS()
+    deps = jnp.array([2e-3, 0.0, 0.0])
+    state0 = model.initial_state()
     with pytest.raises(NotImplementedError):
         return_mapping(
-            model, deps, jnp.zeros(4), pe_state, steel_params, method="analytical"
+            model, deps, jnp.zeros(3), state0, steel_params, method="analytical"
         )

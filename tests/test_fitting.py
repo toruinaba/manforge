@@ -2,7 +2,7 @@
 
 Strategy
 --------
-1. Generate synthetic stress-strain data from J2IsotropicHardening with
+1. Generate synthetic stress-strain data from J2Isotropic3D with
    *known* parameters (``sigma_y0=250, H=1000``).
 2. Start optimisation from a perturbed initial point.
 3. Verify the recovered parameters are close to the true values (rtol=0.1).
@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import UniaxialDriver, GeneralDriver
 from manforge.fitting.optimizer import fit_params, FitResult
 
@@ -24,7 +24,7 @@ from manforge.fitting.optimizer import fit_params, FitResult
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 @pytest.fixture

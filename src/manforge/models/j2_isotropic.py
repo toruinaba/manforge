@@ -24,97 +24,9 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 
 import jax.numpy as jnp
 
-from manforge.autodiff.operators import vonmises
-from manforge.core.material import MaterialModel, MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
-
-class J2IsotropicHardening(MaterialModel):
-    """J2 plasticity model with linear isotropic hardening.
-
-    Parameters
-    ----------
-    stress_state : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D`` (6-component 3D).
-        Pass ``PLANE_STRAIN`` or ``PLANE_STRESS`` etc. for other element types.
-    """
-
-    param_names = ["E", "nu", "sigma_y0", "H"]
-    state_names = ["ep"]  # equivalent plastic strain
-
-    def __init__(self, stress_state: StressState = SOLID_3D):
-        self.stress_state = stress_state
-
-    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
-        """Isotropic elastic stiffness tensor.
-
-        Parameters
-        ----------
-        params : dict
-            Must contain keys ``E`` and ``nu``.
-
-        Returns
-        -------
-        jnp.ndarray, shape (ntens, ntens)
-        """
-        E = params["E"]
-        nu = params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
-        return self.isotropic_C(lam, mu)
-
-    def yield_function(
-        self,
-        stress: jnp.ndarray,
-        state: dict,
-        params: dict,
-    ) -> jnp.ndarray:
-        """J2 yield function.
-
-        f = σ_vm - (σ_y0 + H · ep)
-
-        Elastic domain: f ≤ 0.
-
-        Parameters
-        ----------
-        stress : jnp.ndarray, shape (ntens,)
-        state : dict with key ``ep``
-        params : dict with keys ``sigma_y0``, ``H``
-
-        Returns
-        -------
-        jnp.ndarray, scalar
-        """
-        ep = state["ep"]
-        sigma_y = params["sigma_y0"] + params["H"] * ep
-        return vonmises(stress, self.stress_state) - sigma_y
-
-    def hardening_increment(
-        self,
-        dlambda: jnp.ndarray,
-        stress: jnp.ndarray,
-        state: dict,
-        params: dict,
-    ) -> dict:
-        """Update equivalent plastic strain.
-
-        For J2 with associative flow, Δep = Δλ (von Mises consistency).
-
-        Parameters
-        ----------
-        dlambda : jnp.ndarray, scalar
-            Plastic multiplier increment.
-        stress : jnp.ndarray, shape (ntens,)
-            Current stress (unused for isotropic hardening).
-        state : dict with key ``ep``
-        params : dict (unused here, kept for interface consistency)
-
-        Returns
-        -------
-        dict
-            ``{"ep": ep + dlambda}``
-        """
-        return {"ep": state["ep"] + dlambda}
 
 class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
@@ -127,8 +39,8 @@ class J2Isotropic3D(MaterialModel3D):
     Provides closed-form ``plastic_corrector`` and ``analytical_tangent``
     using the identity ``C @ n_dev = 2μ · n_dev``, which holds exactly for
     SOLID_3D and PLANE_STRAIN but not for statically condensed stress states
-    (PLANE_STRESS, UNIAXIAL_1D).  For those, use :class:`J2IsotropicHardening`
-    with ``method="autodiff"``.
+    (PLANE_STRESS, UNIAXIAL_1D).  For those, use :class:`J2IsotropicPS` or
+    :class:`J2Isotropic1D` with the autodiff return-mapping path.
 
     Parameters
     ----------

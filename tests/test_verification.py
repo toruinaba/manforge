@@ -1,7 +1,7 @@
 """Tests for the verification module.
 
 Verifies that :func:`check_tangent` correctly identifies matching tangents
-for J2IsotropicHardening in elastic and plastic domains, that the
+for J2Isotropic3D in elastic and plastic domains, that the
 TangentCheckResult structure is correct, and that the Fortran bridge skeleton
 raises NotImplementedError as expected.
 """
@@ -10,14 +10,14 @@ import jax.numpy as jnp
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.models.j2_isotropic import J2IsotropicHardening
+from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
 from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
 
 
 @pytest.fixture
 def model():
-    return J2IsotropicHardening()
+    return J2Isotropic3D()
 
 
 # ---------------------------------------------------------------------------
