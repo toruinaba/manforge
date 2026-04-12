@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 
 from manforge.autodiff.operators import identity_voigt
-from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, StressState
+from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
 class MaterialModel(ABC):
@@ -480,3 +480,93 @@ class MaterialModelPS(MaterialModel):
     def _I_dev(self) -> jnp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return jnp.eye(self.ntens) - self._I_vol()
+
+
+class MaterialModel1D(MaterialModel):
+    """Stress-state base class for uniaxial (1D) elements (UNIAXIAL_1D).
+
+    Only σ11 is stored; σ22 = σ33 = 0 are enforced by the element
+    formulation.  The von Mises computation must account for two missing
+    deviatoric components (n_missing = 2).
+
+    Provides concrete implementations of the operator methods:
+
+    * :meth:`_hydrostatic` — p = σ11 / 3  (σ22 = σ33 = 0)
+    * :meth:`_dev`         — s = σ − p δ  (stored component only)
+    * :meth:`_vonmises`    — √(3/2 (s11² + 2p²)) = |σ11|
+    * :meth:`isotropic_C`  — [[E]] where E = μ(3λ + 2μ) / (λ + μ)
+    * :meth:`_I_vol`       — [[1/3]]
+    * :meth:`_I_dev`       — [[2/3]]
+
+    Parameters
+    ----------
+    stress_state : StressState, optional
+        Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
+
+    Raises
+    ------
+    ValueError
+        If ``stress_state.ntens != 1``.
+    """
+
+    def __init__(self, stress_state: StressState = UNIAXIAL_1D):
+        if stress_state.ntens != 1:
+            raise ValueError(
+                f"MaterialModel1D requires a 1D StressState (ntens=1). "
+                f"Got '{stress_state.name}' with ntens={stress_state.ntens}."
+            )
+        self.stress_state = stress_state
+
+    # ------------------------------------------------------------------
+    # Operator methods — concrete for UNIAXIAL_1D
+    # ------------------------------------------------------------------
+
+    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Mean normal stress p = σ11 / 3.
+
+        σ22 = σ33 = 0 are enforced externally; ndi_phys = 3 so we divide by 3.
+        """
+        return stress[0] / 3.0
+
+    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Deviatoric stress of the stored component, s = σ − p δ."""
+        p = self._hydrostatic(stress)
+        return stress - p * self.stress_state.identity_jnp  # δ = [1.0]
+
+    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Von Mises equivalent stress with two missing-component corrections.
+
+        The unstored σ22 = σ33 = 0 each contribute a deviatoric term s_ii = −p
+        to the full tensor norm:
+
+          ‖s‖² = s11² + 2p²  →  σ_vm = |σ11|
+        """
+        s = self._dev(stress)
+        p = self._hydrostatic(stress)
+        s_m = s * self.stress_state.mandel_factors_jnp
+        sq_norm = jnp.dot(s_m, s_m) + 2.0 * p ** 2  # n_missing = 2
+        return jnp.sqrt(1.5 * sq_norm)
+
+    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+        """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).
+
+        Parameters
+        ----------
+        lam : float
+        mu : float
+
+        Returns
+        -------
+        jnp.ndarray, shape (1, 1)
+        """
+        E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
+        return jnp.array([[E]])
+
+    def _I_vol(self) -> jnp.ndarray:
+        """Volumetric projection tensor [[1/3]] for ntens=1."""
+        delta = self.stress_state.identity_jnp  # [1.0]
+        return jnp.outer(delta, delta) / 3.0
+
+    def _I_dev(self) -> jnp.ndarray:
+        """Deviatoric projection tensor [[2/3]] for ntens=1."""
+        return jnp.eye(1) - self._I_vol()
