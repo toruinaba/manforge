@@ -18,19 +18,19 @@ this convention.
 
 Comparison workflow
 -------------------
-Use :func:`~manforge.verification.compare.compare_solvers` directly,
-passing :meth:`FortranUMAT.make_python_solver` as ``solver_a`` and
-:meth:`FortranUMAT.call` as ``solver_b``::
+For the typical use case (verifying a Fortran UMAT against a Python model),
+use :class:`~manforge.verification.umat_verifier.UMATVerifier`::
 
-    umat = FortranUMAT("manforge_umat", model)
-    result = compare_solvers(umat.make_python_solver(), umat.call, test_cases)
+    verifier = UMATVerifier(model, "manforge_umat")
+    result   = verifier.run(params)
+
+For lower-level access, use :func:`~manforge.verification.compare.compare_solvers`
+directly, passing :meth:`FortranUMAT.call` as one of the solvers.
 """
 
 import importlib
 
 import numpy as np
-
-from manforge.core.return_mapping import return_mapping
 
 
 class FortranUMAT:
@@ -122,24 +122,3 @@ class FortranUMAT:
 
         return stress_out, state_new, ddsdde
 
-    def make_python_solver(self):
-        """Return a solver callable backed by the Python return_mapping.
-
-        The returned callable has the standard solver signature::
-
-            solver(strain_inc, stress_n, state_n, params)
-                -> (stress_new, state_new, ddsdde)
-
-        Suitable for passing as ``solver_a`` to
-        :func:`~manforge.verification.compare.compare_solvers`.
-        """
-        import jax.numpy as jnp
-
-        model = self._model
-
-        def _solve(strain_inc, stress_n, state_n, params):
-            return return_mapping(
-                model, jnp.array(strain_inc), jnp.array(stress_n), state_n, params
-            )
-
-        return _solve

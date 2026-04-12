@@ -115,32 +115,40 @@ NTENS = 6 for 3D full stress state (NDI=3, NSHR=3).
 
 ## Cross-validation with Python
 
-Use `FortranUMAT` from `manforge.verification.fortran_bridge` to wrap the
-compiled module, then pass it to `compare_solvers`:
+Use `UMATVerifier` for the standard workflow — it auto-generates test cases
+and runs a multi-step strain history comparison:
+
+```python
+import manforge  # enables JAX float64
+from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.verification import UMATVerifier
+
+model  = J2Isotropic3D()
+params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
+
+verifier = UMATVerifier(model, "manforge_umat")
+result   = verifier.run(params)
+print(result.summary())
+```
+
+`run` performs two phases automatically:
+
+1. **Single-step** — estimates the yield strain from the model's yield
+   surface, generates 5 test cases (elastic, plastic uniaxial, multiaxial,
+   shear, pre-stressed), and compares with
+   :func:`~manforge.verification.compare.compare_solvers`.
+2. **Multi-step** — runs a tension-unload-compression cycle through both
+   Python and Fortran with independent state propagation, comparing stress,
+   tangent, and state at every step.
+
+For custom loading, pass your own strain history:
 
 ```python
 import numpy as np
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification.fortran_bridge import FortranUMAT
-from manforge.verification.compare import compare_solvers
-
-model = J2Isotropic3D()
-umat  = FortranUMAT("manforge_umat", model)
-
-params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
-test_cases = [
-    {
-        "strain_inc": np.array([2e-3, 0, 0, 0, 0, 0]),
-        "stress_n":   np.zeros(6),
-        "state_n":    {"ep": 0.0},
-        "params":     params,
-    },
-]
-
-result = compare_solvers(umat.make_python_solver(), umat.call, test_cases)
-print("All cases passed:", result.passed)
+strain = np.linspace(0.0, 5e-3, 100)          # shape (N,) uniaxial
+result = verifier.run(params, strain_history=strain)
 ```
 
-`FortranUMAT.call` follows the standard solver protocol
-`(strain_inc, stress_n, state_n, params) -> (stress_new, state_new, ddsdde)`,
-so it can be used anywhere a solver callable is expected.
+For lower-level access, `FortranUMAT.call` follows the standard solver
+protocol `(strain_inc, stress_n, state_n, params) -> (stress_new, state_new, ddsdde)`
+and can be used directly with `compare_solvers`.

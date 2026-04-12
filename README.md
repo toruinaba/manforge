@@ -267,14 +267,25 @@ print(result.params, result.residual)
 ## Fortran Cross-Validation
 
 ```python
-from manforge.verification.fortran_bridge import FortranUMAT
-from manforge.verification.compare import compare_solvers
+from manforge.verification import UMATVerifier
 
-umat = FortranUMAT("manforge_umat", model)
+verifier = UMATVerifier(model, "manforge_umat")
+result   = verifier.run(params)
+print(result.summary())
+```
 
-result = compare_solvers(umat.make_python_solver(), umat.call, test_cases)
-print(f"Passed: {result.passed}  ({result.n_passed}/{result.n_cases})")
-print(f"Max stress rel err: {result.max_stress_rel_err:.2e}")
+`run` は2フェーズを自動実行する:
+1. **単一ステップ比較** — 降伏ひずみを自動推定し、弾性・塑性・多軸・せん断の計5ケースを生成して `compare_solvers` で比較
+2. **多ステップ比較** — 引張→除荷→圧縮のサイクル履歴を両ソルバーで独立に走らせ、ステップごとに応力・状態変数・tangentを比較
+
+テストケース生成を単独で使うこともできる:
+
+```python
+from manforge.verification.test_cases import generate_single_step_cases
+from manforge.verification import compare_solvers
+
+cases  = generate_single_step_cases(model, params)
+result = compare_solvers(solver_a, solver_b, cases)
 ```
 
 ビルド:
