@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 
 from manforge.autodiff.operators import identity_voigt
-from manforge.core.stress_state import SOLID_3D, StressState
+from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, StressState
 
 
 class MaterialModel(ABC):
@@ -368,6 +368,113 @@ class MaterialModel3D(MaterialModel):
     def _I_vol(self) -> jnp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.stress_state.identity_jnp
+        return jnp.outer(delta, delta) / 3.0
+
+    def _I_dev(self) -> jnp.ndarray:
+        """Deviatoric projection tensor P_dev = I − P_vol."""
+        return jnp.eye(self.ntens) - self._I_vol()
+
+
+class MaterialModelPS(MaterialModel):
+    """Stress-state base class for plane-stress elements (PLANE_STRESS).
+
+    For plane stress, σ33 = 0 is enforced by static condensation of the
+    elastic stiffness.  Only two direct components (σ11, σ22) are stored,
+    so the von Mises computation must account for the physically-present
+    but unstored deviatoric contribution of σ33 = 0.
+
+    Provides concrete implementations of the operator methods:
+
+    * :meth:`_hydrostatic` — p = (σ11 + σ22) / 3  (σ33 = 0)
+    * :meth:`_dev`         — s = σ − p δ  (stored components only)
+    * :meth:`_vonmises`    — √(3/2 (s:s + p²))  (one missing-component correction)
+    * :meth:`isotropic_C`  — Schur complement (static condensation of σ33)
+    * :meth:`_I_vol`       — δ⊗δ / 3  (δ = [1, 1, 0] for ntens=3)
+    * :meth:`_I_dev`       — I − P_vol
+
+    Parameters
+    ----------
+    stress_state : StressState, optional
+        Must satisfy ``stress_state.is_plane_stress``.
+        Defaults to ``PLANE_STRESS``.
+
+    Raises
+    ------
+    ValueError
+        If ``stress_state.is_plane_stress`` is ``False``.
+    """
+
+    def __init__(self, stress_state: StressState = PLANE_STRESS):
+        if not stress_state.is_plane_stress:
+            raise ValueError(
+                f"MaterialModelPS requires a plane-stress StressState "
+                f"(is_plane_stress=True). "
+                f"Got '{stress_state.name}'."
+            )
+        self.stress_state = stress_state
+
+    # ------------------------------------------------------------------
+    # Operator methods — concrete for PLANE_STRESS
+    # ------------------------------------------------------------------
+
+    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Mean normal stress p = (σ11 + σ22) / 3.
+
+        σ33 = 0 is enforced externally; ndi_phys = 3 so we divide by 3.
+        """
+        return (stress[0] + stress[1]) / 3.0
+
+    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Deviatoric stress of the stored components, s = σ − p δ."""
+        p = self._hydrostatic(stress)
+        return stress - p * self.stress_state.identity_jnp  # δ = [1, 1, 0]
+
+    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Von Mises equivalent stress with one missing-component correction.
+
+        The unstored σ33 = 0 contributes a deviatoric term s33 = −p to the
+        full tensor norm:
+
+          ‖s‖² = ‖s_stored‖²_Mandel + p²
+        """
+        s = self._dev(stress)
+        p = self._hydrostatic(stress)
+        s_m = s * self.stress_state.mandel_factors_jnp
+        sq_norm = jnp.dot(s_m, s_m) + p ** 2  # n_missing = 1
+        return jnp.sqrt(1.5 * sq_norm)
+
+    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+        """Plane-stress isotropic stiffness via static condensation.
+
+        Starts from the 4×4 plane-strain submatrix and applies the Schur
+        complement to enforce σ33 = 0, yielding a 3×3 matrix for
+        components [11, 22, 12].
+
+        Parameters
+        ----------
+        lam : float
+        mu : float
+
+        Returns
+        -------
+        jnp.ndarray, shape (3, 3)
+        """
+        delta_6 = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+        # 4×4 plane-strain sub-block
+        idx4 = jnp.array([0, 1, 2, 3])
+        C4 = C6[jnp.ix_(idx4, idx4)]
+        # Schur complement: eliminate σ33 (index 2 of C4)
+        retain = jnp.array([0, 1, 3])
+        C_rr = C4[jnp.ix_(retain, retain)]
+        C_rc = C4[retain, 2]
+        C_cc = C4[2, 2]
+        return C_rr - jnp.outer(C_rc, C_rc) / C_cc
+
+    def _I_vol(self) -> jnp.ndarray:
+        """Volumetric projection tensor P_vol = δ⊗δ / 3."""
+        delta = self.stress_state.identity_jnp  # [1, 1, 0]
         return jnp.outer(delta, delta) / 3.0
 
     def _I_dev(self) -> jnp.ndarray:

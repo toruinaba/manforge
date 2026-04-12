@@ -1,4 +1,4 @@
-"""Tests for stress-state base classes (MaterialModel3D, ...).
+"""Tests for stress-state base classes (MaterialModel3D, MaterialModelPS).
 
 Covers:
 - Constructor validation (accepted / rejected StressStates)
@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel3D, MaterialModelPS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 
 
@@ -231,4 +231,180 @@ def test_I_dev_projects_to_deviatoric(ss):
     """P_dev @ σ must equal _dev(σ)."""
     m = _Stub3D(ss)
     stress = jnp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
+    assert jnp.allclose(m._I_dev() @ stress, m._dev(stress), atol=1e-10)
+
+
+# ===========================================================================
+# MaterialModelPS
+# ===========================================================================
+
+class _StubPS(MaterialModelPS):
+    """Concrete stub for MaterialModelPS operator tests."""
+    param_names = []
+    state_names = []
+
+    def elastic_stiffness(self, params):
+        raise NotImplementedError
+
+    def yield_function(self, stress, state, params):
+        raise NotImplementedError
+
+    def hardening_increment(self, dlambda, stress, state, params):
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Constructor validation
+# ---------------------------------------------------------------------------
+
+def test_materialmodelps_accepts_plane_stress():
+    m = _StubPS(PLANE_STRESS)
+    assert m.stress_state is PLANE_STRESS
+    assert m.ntens == 3
+
+
+def test_materialmodelps_rejects_solid_3d():
+    with pytest.raises(ValueError, match="is_plane_stress"):
+        _StubPS(SOLID_3D)
+
+
+def test_materialmodelps_rejects_plane_strain():
+    with pytest.raises(ValueError, match="is_plane_stress"):
+        _StubPS(PLANE_STRAIN)
+
+
+def test_materialmodelps_rejects_uniaxial_1d():
+    with pytest.raises(ValueError, match="is_plane_stress"):
+        _StubPS(UNIAXIAL_1D)
+
+
+# ---------------------------------------------------------------------------
+# _hydrostatic
+# ---------------------------------------------------------------------------
+
+def test_ps_hydrostatic_uniaxial():
+    """σ11 = σ, σ22 = σ12 = 0 → p = σ/3."""
+    m = _StubPS()
+    sigma = 300.0
+    stress = jnp.array([sigma, 0.0, 0.0])
+    assert jnp.allclose(m._hydrostatic(stress), sigma / 3.0)
+
+
+def test_ps_hydrostatic_equal_biaxial():
+    """σ11 = σ22 = σ → p = 2σ/3 (σ33 = 0 contributes nothing)."""
+    m = _StubPS()
+    sigma = 200.0
+    stress = jnp.array([sigma, sigma, 0.0])
+    assert jnp.allclose(m._hydrostatic(stress), 2.0 * sigma / 3.0)
+
+
+def test_ps_hydrostatic_shear_only():
+    """Pure shear contributes nothing to hydrostatic pressure."""
+    m = _StubPS()
+    stress = jnp.array([0.0, 0.0, 100.0])
+    assert jnp.allclose(m._hydrostatic(stress), 0.0)
+
+
+# ---------------------------------------------------------------------------
+# _dev
+# ---------------------------------------------------------------------------
+
+def test_ps_dev_trace_zero():
+    """Trace of stored deviatoric components must be zero (σ11+σ22 part)."""
+    m = _StubPS()
+    stress = jnp.array([100.0, -50.0, 20.0])
+    s = m._dev(stress)
+    # sum of direct stored components (indices 0,1) minus correction
+    # σ11 + σ22 - 2p = σ11 + σ22 - 2(σ11+σ22)/3 = (σ11+σ22)/3
+    # The full 3D trace s11+s22+s33 = 0; here we verify s11+s22 = -s33 = p
+    p = m._hydrostatic(stress)
+    assert jnp.allclose(s[0] + s[1], p, atol=1e-12)
+
+
+def test_ps_dev_shape():
+    m = _StubPS()
+    stress = jnp.ones(3)
+    assert m._dev(stress).shape == (3,)
+
+
+# ---------------------------------------------------------------------------
+# _vonmises
+# ---------------------------------------------------------------------------
+
+def test_ps_vonmises_uniaxial():
+    """Uniaxial σ11: von Mises = σ11 (same as full 3D)."""
+    m = _StubPS()
+    sigma = 300.0
+    stress = jnp.array([sigma, 0.0, 0.0])
+    assert jnp.allclose(m._vonmises(stress), sigma, rtol=1e-6)
+
+
+def test_ps_vonmises_equal_biaxial():
+    """Equal biaxial σ11 = σ22 = σ: von Mises = σ (same as full 3D)."""
+    m = _StubPS()
+    sigma = 200.0
+    stress = jnp.array([sigma, sigma, 0.0])
+    assert jnp.allclose(m._vonmises(stress), sigma, rtol=1e-6)
+
+
+def test_ps_vonmises_pure_shear():
+    """Pure shear σ12: von Mises = √3 · σ12."""
+    m = _StubPS()
+    tau = 100.0
+    stress = jnp.array([0.0, 0.0, tau])
+    assert jnp.allclose(m._vonmises(stress), jnp.sqrt(3.0) * tau, rtol=1e-6)
+
+
+def test_ps_vonmises_matches_3d_reference():
+    """PLANE_STRESS _vonmises must match the equivalent full 3D computation."""
+    m_ps = _StubPS()
+    m_3d = _Stub3D(SOLID_3D)
+    # A stress that is valid in both: [σ11, σ22, σ12] plane-stress = [σ11, σ22, 0, σ12, 0, 0]
+    sigma = jnp.array([200.0, -100.0, 50.0])
+    sigma_3d = jnp.array([200.0, -100.0, 0.0, 50.0, 0.0, 0.0])
+    assert jnp.allclose(m_ps._vonmises(sigma), m_3d._vonmises(sigma_3d), rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# isotropic_C
+# ---------------------------------------------------------------------------
+
+def test_ps_isotropic_C_shape():
+    m = _StubPS()
+    C = m.isotropic_C(lam=121153.8, mu=80769.2)
+    assert C.shape == (3, 3)
+
+
+def test_ps_isotropic_C_symmetry():
+    m = _StubPS()
+    C = m.isotropic_C(lam=121153.8, mu=80769.2)
+    assert jnp.allclose(C, C.T, atol=1e-10)
+
+
+def test_ps_isotropic_C_known_values(steel_params):
+    """C[0,0] = E/(1-nu²) and C[0,1] = E*nu/(1-nu²) for plane stress."""
+    E, nu = steel_params["E"], steel_params["nu"]
+    lam = E * nu / ((1 + nu) * (1 - 2 * nu))
+    mu = E / (2 * (1 + nu))
+    m = _StubPS()
+    C = m.isotropic_C(lam, mu)
+    expected_00 = E / (1 - nu ** 2)
+    expected_01 = E * nu / (1 - nu ** 2)
+    assert jnp.allclose(C[0, 0], expected_00, rtol=1e-6)
+    assert jnp.allclose(C[0, 1], expected_01, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# _I_vol and _I_dev
+# ---------------------------------------------------------------------------
+
+def test_ps_I_vol_plus_I_dev_equals_identity():
+    m = _StubPS()
+    assert jnp.allclose(m._I_vol() + m._I_dev(), jnp.eye(3), atol=1e-12)
+
+
+def test_ps_I_dev_projects_to_deviatoric():
+    """P_dev @ σ must equal _dev(σ) for plane stress."""
+    m = _StubPS()
+    stress = jnp.array([100.0, -50.0, 20.0])
     assert jnp.allclose(m._I_dev() @ stress, m._dev(stress), atol=1e-10)

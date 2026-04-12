@@ -25,8 +25,8 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import jax.numpy as jnp
 
 from manforge.autodiff.operators import vonmises
-from manforge.core.material import MaterialModel, MaterialModel3D
-from manforge.core.stress_state import SOLID_3D, StressState
+from manforge.core.material import MaterialModel, MaterialModel3D, MaterialModelPS
+from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, StressState
 
 
 class J2IsotropicHardening(MaterialModel):
@@ -247,3 +247,46 @@ class J2Isotropic3D(MaterialModel3D):
         I_dev = self._I_dev()
 
         return I_vol @ C + theta * (I_dev @ C) - beta * jnp.outer(s_trial, s_trial)
+
+
+class J2IsotropicPS(MaterialModelPS):
+    """J2 plasticity with isotropic hardening for plane-stress elements.
+
+    Inherits operator methods from
+    :class:`~manforge.core.material.MaterialModelPS` (``_dev``,
+    ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which implement
+    the static condensation and missing-component correction specific to
+    plane-stress kinematics.
+
+    Uses the autodiff return-mapping path (``method="autodiff"``).  A
+    closed-form plane-stress corrector (which requires an iterative σ33 = 0
+    enforcement loop) is not yet implemented.
+
+    Parameters
+    ----------
+    stress_state : StressState, optional
+        Must satisfy ``stress_state.is_plane_stress``.
+        Defaults to ``PLANE_STRESS``.
+    """
+
+    param_names = ["E", "nu", "sigma_y0", "H"]
+    state_names = ["ep"]
+
+    def __init__(self, stress_state: StressState = PLANE_STRESS):
+        super().__init__(stress_state)
+
+    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+        """Plane-stress isotropic stiffness (3×3 condensed)."""
+        E, nu = params["E"], params["nu"]
+        mu = E / (2.0 * (1.0 + nu))
+        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+        return self.isotropic_C(lam, mu)
+
+    def yield_function(self, stress: jnp.ndarray, state: dict, params: dict) -> jnp.ndarray:
+        """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
+        sigma_y = params["sigma_y0"] + params["H"] * state["ep"]
+        return self._vonmises(stress) - sigma_y
+
+    def hardening_increment(self, dlambda, stress, state, params) -> dict:
+        """Δep = Δλ (von Mises associative flow)."""
+        return {"ep": state["ep"] + dlambda}
