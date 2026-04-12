@@ -265,3 +265,111 @@ class MaterialModel(ABC):
             Consistent tangent dσ_{n+1}/dΔε.
         """
         return None
+
+
+class MaterialModel3D(MaterialModel):
+    """Stress-state base class for full-rank stress states (ndi == ndi_phys).
+
+    Valid for ``SOLID_3D`` (ntens=6) and ``PLANE_STRAIN`` (ntens=4), and any
+    future stress state that stores all direct components (e.g. axisymmetric).
+    For these states the three physical direct stresses σ11, σ22, σ33 are all
+    stored explicitly, so deviatoric and von Mises operators need no
+    missing-component corrections.
+
+    Provides concrete implementations of the operator methods used by concrete
+    material models:
+
+    * :meth:`_hydrostatic` — p = (σ11 + σ22 + σ33) / 3
+    * :meth:`_dev`         — s = σ − p δ
+    * :meth:`_vonmises`    — √(3/2 s:s)  (Mandel norm, no correction)
+    * :meth:`isotropic_C`  — submatrix extraction from the full 6×6 tensor
+    * :meth:`_I_vol`       — δ⊗δ / 3
+    * :meth:`_I_dev`       — I − P_vol
+
+    Subclasses still must implement the three abstract material methods:
+    :meth:`elastic_stiffness`, :meth:`yield_function`,
+    :meth:`hardening_increment`.
+
+    Parameters
+    ----------
+    stress_state : StressState, optional
+        Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
+        Defaults to ``SOLID_3D``.
+
+    Raises
+    ------
+    ValueError
+        If ``stress_state.ndi != stress_state.ndi_phys``.
+    """
+
+    def __init__(self, stress_state: StressState = SOLID_3D):
+        if stress_state.ndi != stress_state.ndi_phys:
+            raise ValueError(
+                f"MaterialModel3D requires ndi == ndi_phys "
+                f"(e.g. SOLID_3D or PLANE_STRAIN). "
+                f"Got '{stress_state.name}' with ndi={stress_state.ndi}, "
+                f"ndi_phys={stress_state.ndi_phys}."
+            )
+        self.stress_state = stress_state
+
+    # ------------------------------------------------------------------
+    # Operator methods — concrete for full-rank stress states
+    # ------------------------------------------------------------------
+
+    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Mean normal stress p = (σ11 + σ22 + σ33) / 3.
+
+        All three direct components are stored, so no correction is needed.
+        """
+        return (stress[0] + stress[1] + stress[2]) / 3.0
+
+    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Deviatoric stress s = σ − p δ."""
+        p = self._hydrostatic(stress)
+        return stress - p * self.stress_state.identity_jnp
+
+    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Von Mises equivalent stress √(3/2 s:s).
+
+        Uses Mandel scaling for the inner product.  No missing-component
+        correction is required because ndi == ndi_phys.
+        """
+        s = self._dev(stress)
+        s_m = s * self.stress_state.mandel_factors_jnp
+        return jnp.sqrt(1.5 * jnp.dot(s_m, s_m))
+
+    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+        """Isotropic elastic stiffness via submatrix extraction.
+
+        Builds the full 6×6 tensor, then extracts the ntens×ntens subblock
+        for components [11, 22, 33, 12, ...].  No condensation is required
+        because all direct stress components are free.
+
+        Parameters
+        ----------
+        lam : float
+            First Lamé constant λ.
+        mu : float
+            Shear modulus μ.
+
+        Returns
+        -------
+        jnp.ndarray, shape (ntens, ntens)
+        """
+        delta_6 = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+        if self.ntens == 6:
+            return C6
+        # PLANE_STRAIN / AXISYMMETRIC: components [11, 22, 33, 12]
+        idx = jnp.array([0, 1, 2, 3])
+        return C6[jnp.ix_(idx, idx)]
+
+    def _I_vol(self) -> jnp.ndarray:
+        """Volumetric projection tensor P_vol = δ⊗δ / 3."""
+        delta = self.stress_state.identity_jnp
+        return jnp.outer(delta, delta) / 3.0
+
+    def _I_dev(self) -> jnp.ndarray:
+        """Deviatoric projection tensor P_dev = I − P_vol."""
+        return jnp.eye(self.ntens) - self._I_vol()
