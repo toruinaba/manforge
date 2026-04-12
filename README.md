@@ -100,15 +100,14 @@ src/manforge/
 ├── verification/
 │   ├── compare.py         # compare_solvers() — 汎用ソルバ比較
 │   ├── fd_check.py        # FD vs AD/解析解 tangent 比較
-│   └── fortran_bridge.py  # FortranUMAT, compare_with_fortran()
+│   └── fortran_bridge.py  # FortranUMAT — f2py ブリッジ
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換 (StressState 対応)
     └── tensor.py          # 4 階テンソル操作
 
 fortran/
 ├── umat_j2.f90            # J2 UMAT 本体 (radial return + 7x7 tangent)
-├── abaqus_stubs.f90       # SINV, SPRINC, ROTSIG モック
-├── wrapper.f90            # ISO_C_BINDING ラッパーテンプレート
+├── abaqus_stubs.f90       # SINV, SPRINC, ROTSIG モック (リンカ解決用)
 ├── test_basic.f90         # f2py 動作確認用
 └── README.md              # ビルド手順
 ```
@@ -268,11 +267,12 @@ print(result.params, result.residual)
 ## Fortran Cross-Validation
 
 ```python
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+from manforge.verification.fortran_bridge import FortranUMAT
+from manforge.verification.compare import compare_solvers
 
-fortran_umat = FortranUMAT("manforge_umat", model)
+umat = FortranUMAT("manforge_umat", model)
 
-result = compare_with_fortran(model, fortran_umat, test_cases)
+result = compare_solvers(umat.make_python_solver(), umat.call, test_cases)
 print(f"Passed: {result.passed}  ({result.n_passed}/{result.n_cases})")
 print(f"Max stress rel err: {result.max_stress_rel_err:.2e}")
 ```

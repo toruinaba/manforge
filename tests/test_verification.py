@@ -12,7 +12,7 @@ import pytest
 import manforge  # noqa: F401 — enables float64
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+from manforge.verification.fortran_bridge import FortranUMAT
 
 
 @pytest.fixture
@@ -108,4 +108,4 @@ def test_check_tangent_tight_tol_can_fail(model, steel_params):
 def test_fortran_umat_bad_module(model, steel_params):
     """FortranUMAT raises ModuleNotFoundError for an unknown module name."""
     with pytest.raises(ModuleNotFoundError):
-        FortranUMAT("nonexistent_umat_module_xyz")
+        FortranUMAT("nonexistent_umat_module_xyz", model)

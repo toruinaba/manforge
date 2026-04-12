@@ -11,6 +11,12 @@
 !
 ! Convention: Voigt order [s11, s22, s33, s12, s13, s23]
 !             Engineering shear (gamma = 2*eps_shear)
+!
+! NOTE: These stubs are linked into the f2py module for symbol resolution
+!       (see Makefile target "fortran-build-umat").  The current umat_j2_run
+!       subroutine does NOT call them, but they satisfy the linker when
+!       compiling UMATs that reference ABAQUS utility functions.  Future
+!       UMAT implementations (e.g., Drucker-Prager) may call them directly.
 ! =============================================================================
 
 ! -----------------------------------------------------------------------------

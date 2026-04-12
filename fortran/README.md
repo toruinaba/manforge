@@ -1,4 +1,4 @@
-# fortran/ — Fortran UMAT templates and build guide
+# fortran/ — Fortran UMAT build guide
 
 This directory contains Fortran source files for implementing and validating
 ABAQUS UMAT constitutive subroutines that can be cross-validated against the
@@ -8,10 +8,9 @@ Python `manforge` implementation.
 
 | File | Description |
 |------|-------------|
-| `wrapper.f90` | UMAT skeleton + ISO_C_BINDING wrapper template |
-| `test_basic.f90` | *(Step 9)* Simple elastic subroutine for f2py smoke test |
-| `abaqus_stubs.f90` | *(Step 10)* Stubs for ABAQUS internal functions (SINV, SPRINC, …) |
-| `umat_j2.f90` | *(Step 10)* Full J2 isotropic hardening UMAT implementation |
+| `umat_j2.f90` | Full J2 isotropic hardening UMAT (`umat_j2_run` + ABAQUS interface) |
+| `abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution; future UMATs may call them directly |
+| `test_basic.f90` | Simple elastic subroutine for f2py smoke test |
 
 ---
 
@@ -32,71 +31,44 @@ python -m numpy.f2py --version
 
 ## Build with f2py
 
-### Compile `wrapper.f90` into a Python extension module
+### Compile the J2 UMAT into a Python extension module
 
 ```bash
 cd fortran/
-python -m numpy.f2py -c wrapper.f90 -m manforge_umat
+python -m numpy.f2py -c abaqus_stubs.f90 umat_j2.f90 -m manforge_umat
+```
+
+Or via the Makefile from the project root:
+
+```bash
+make fortran-build-umat
 ```
 
 This produces `manforge_umat.cpython-*.so` (Linux) or `.pyd` (Windows).
 
-### Import and call from Python
+### Call directly from Python
 
 ```python
 import numpy as np
 import manforge_umat   # the compiled module
 
-ntens  = 6
-nstatv = 1
-nprops = 4
-
-stress  = np.zeros(ntens)
-statev  = np.zeros(nstatv)
-stran   = np.zeros(ntens)
-dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-props   = np.array([210000.0, 0.3, 250.0, 1000.0])  # E, nu, sigma_y0, H
-dtime   = 1.0
-
-ddsdde = np.zeros((ntens, ntens))
-sse = spd = scd = 0.0
-
-manforge_umat.umat_j2_c(
-    stress, statev, ddsdde,
-    sse, spd, scd,
-    stran, dstran, dtime,
-    props, nprops, ntens, nstatv,
+stress_out, ep_out, ddsdde = manforge_umat.umat_j2_run(
+    210000.0, 0.3, 250.0, 1000.0,  # E, nu, sigma_y0, H
+    np.zeros(6),                    # stress_in
+    0.0,                            # ep_in
+    np.array([2e-3, 0, 0, 0, 0, 0], dtype=np.float64),  # dstran
 )
 
-print("sigma11 =", stress[0])
+print("sigma11 =", stress_out[0])
 print("DDSDDE[0,0] =", ddsdde[0, 0])
-```
-
----
-
-## Build with ctypes
-
-An alternative to f2py is to compile a shared library and call it via `ctypes`:
-
-```bash
-gfortran -shared -fPIC -O2 -o libmanforge_umat.so wrapper.f90
-```
-
-```python
-import ctypes
-import numpy as np
-
-lib = ctypes.CDLL("./libmanforge_umat.so")
-# (argument types must be declared manually — see fortran_bridge.py in Step 10)
 ```
 
 ---
 
 ## Docker build (recommended)
 
-A reproducible gfortran + Python 3.12 environment will be set up in **Step 9**.
-
-Once `Dockerfile` is available at the project root:
+A reproducible gfortran + Python 3.12 environment is provided via `Dockerfile`
+at the project root:
 
 ```bash
 # Build the image
@@ -104,15 +76,14 @@ docker build -t manforge-fortran .
 
 # Compile and run Fortran tests inside the container
 docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
-    bash -c "cd fortran && python -m numpy.f2py -c wrapper.f90 -m manforge_umat \
-             && python -m pytest tests/test_fortran_basic.py -v"
+    bash -c "make fortran-build-umat && make fortran-test-umat"
 ```
 
 ---
 
 ## Material parameters convention
 
-`PROPS` array order (must match `manforge.models.j2_isotropic.J2Isotropic3D.param_names`):
+`PROPS` array order (matches `J2Isotropic3D.param_names`):
 
 | Index (1-based) | Name | Unit | Description |
 |-----------------|------|------|-------------|
@@ -144,20 +115,32 @@ NTENS = 6 for 3D full stress state (NDI=3, NSHR=3).
 
 ## Cross-validation with Python
 
-After Step 10, use `manforge.verification.fortran_bridge.compare_with_fortran`
-to verify that the Fortran UMAT matches the Python return mapping:
+Use `FortranUMAT` from `manforge.verification.fortran_bridge` to wrap the
+compiled module, then pass it to `compare_solvers`:
 
 ```python
+import numpy as np
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+from manforge.verification.fortran_bridge import FortranUMAT
+from manforge.verification.compare import compare_solvers
 
 model = J2Isotropic3D()
-umat  = FortranUMAT("manforge_umat", subroutine_name="umat_j2")
+umat  = FortranUMAT("manforge_umat", model)
 
+params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
 test_cases = [
-    {"strain_inc": [2e-3, 0, 0, 0, 0, 0], "stress_n": [0]*6,
-     "state_n": {"ep": 0.0}, "params": {...}},
+    {
+        "strain_inc": np.array([2e-3, 0, 0, 0, 0, 0]),
+        "stress_n":   np.zeros(6),
+        "state_n":    {"ep": 0.0},
+        "params":     params,
+    },
 ]
-result = compare_with_fortran(model, umat, test_cases)
+
+result = compare_solvers(umat.make_python_solver(), umat.call, test_cases)
 print("All cases passed:", result.passed)
 ```
+
+`FortranUMAT.call` follows the standard solver protocol
+`(strain_inc, stress_n, state_n, params) -> (stress_new, state_new, ddsdde)`,
+so it can be used anywhere a solver callable is expected.
