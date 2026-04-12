@@ -122,15 +122,13 @@ return mapping / consistent tangent / fitting / verification はすべて自動�
 
 ```python
 from manforge.core.material import MaterialModel3D  # または MaterialModelPS / MaterialModel1D
-from manforge.core.stress_state import SOLID_3D, StressState
 import jax.numpy as jnp
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "K"]
     state_names = ["ep"]
-
-    def __init__(self, stress_state: StressState = SOLID_3D):
-        super().__init__(stress_state)  # ndi == ndi_phys を検証し self.stress_state を設定
+    # __init__ 不要 — MaterialModel3D.__init__(SOLID_3D) が MRO 経由で呼ばれる
+    # PLANE_STRAIN で使いたい場合は MyModel(PLANE_STRAIN) と渡せばよい
 
     def elastic_stiffness(self, params):
         E, nu = params["E"], params["nu"]
@@ -213,15 +211,12 @@ Armstrong-Frederick 型の移動硬化則を記述可能。
 ```python
 import jax
 from manforge.core.material import MaterialModel3D
-from manforge.core.stress_state import SOLID_3D, StressState
 import jax.numpy as jnp
 
 class J2KinematicHardening(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "H_iso", "C_kin", "gamma"]
     state_names = ["ep", "alpha"]
-
-    def __init__(self, stress_state: StressState = SOLID_3D):
-        super().__init__(stress_state)
+    # __init__ 不要 — MaterialModel3D.__init__(SOLID_3D) が MRO 経由で呼ばれる
 
     def initial_state(self):
         ntens = self.stress_state.ntens

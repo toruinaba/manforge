@@ -25,7 +25,6 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
 class J2Isotropic3D(MaterialModel3D):
@@ -57,9 +56,6 @@ class J2Isotropic3D(MaterialModel3D):
 
     param_names = ["E", "nu", "sigma_y0", "H"]
     state_names = ["ep"]
-
-    def __init__(self, stress_state: StressState = SOLID_3D):
-        super().__init__(stress_state)
 
     # ------------------------------------------------------------------
     # Material physics — implement the three abstract methods
@@ -184,9 +180,6 @@ class J2IsotropicPS(MaterialModelPS):
     param_names = ["E", "nu", "sigma_y0", "H"]
     state_names = ["ep"]
 
-    def __init__(self, stress_state: StressState = PLANE_STRESS):
-        super().__init__(stress_state)
-
     def elastic_stiffness(self, params: dict) -> jnp.ndarray:
         """Plane-stress isotropic stiffness (3×3 condensed)."""
         E, nu = params["E"], params["nu"]
@@ -221,9 +214,6 @@ class J2Isotropic1D(MaterialModel1D):
 
     param_names = ["E", "nu", "sigma_y0", "H"]
     state_names = ["ep"]
-
-    def __init__(self, stress_state: StressState = UNIAXIAL_1D):
-        super().__init__(stress_state)
 
     # ------------------------------------------------------------------
     # Material physics — implement the three abstract methods
