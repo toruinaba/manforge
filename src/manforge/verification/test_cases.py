@@ -135,7 +135,7 @@ def generate_single_step_cases(model, params, eps_y=None) -> list[dict]:
     ntens = model.ntens
     ndi   = model.stress_state.ndi
     nshr  = model.stress_state.nshr
-    state_0 = {k: float(v) for k, v in model.initial_state().items()}
+    state_0 = dict(model.initial_state())
     zero_stress = np.zeros(ntens)
 
     cases = []
@@ -199,7 +199,7 @@ def generate_single_step_cases(model, params, eps_y=None) -> list[dict]:
     cases.append({
         "strain_inc": de2,
         "stress_n":   np.array(stress_pre),
-        "state_n":    {k: float(v) for k, v in state_pre.items()},
+        "state_n":    {k: np.asarray(v) for k, v in state_pre.items()},
         "params":     params,
     })
 
