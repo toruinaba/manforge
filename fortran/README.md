@@ -1,4 +1,4 @@
-# fortran/ — Fortran UMAT templates and build guide
+# fortran/ — Fortran UMAT build guide
 
 This directory contains Fortran source files for implementing and validating
 ABAQUS UMAT constitutive subroutines that can be cross-validated against the
@@ -8,10 +8,9 @@ Python `manforge` implementation.
 
 | File | Description |
 |------|-------------|
-| `wrapper.f90` | UMAT skeleton + ISO_C_BINDING wrapper template |
-| `test_basic.f90` | *(Step 9)* Simple elastic subroutine for f2py smoke test |
-| `abaqus_stubs.f90` | *(Step 10)* Stubs for ABAQUS internal functions (SINV, SPRINC, …) |
-| `umat_j2.f90` | *(Step 10)* Full J2 isotropic hardening UMAT implementation |
+| `j2_isotropic_3d.f90` | J2 isotropic hardening UMAT — contains `j2_isotropic_3d` (f2py interface), `umat` (ABAQUS entry point), and `j2_isotropic_3d_elastic_stiffness` (component check) |
+| `abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution; future UMATs may call them directly |
+| `test_basic.f90` | Simple elastic subroutine for f2py smoke test |
 
 ---
 
@@ -32,71 +31,38 @@ python -m numpy.f2py --version
 
 ## Build with f2py
 
-### Compile `wrapper.f90` into a Python extension module
+### Compile the J2 UMAT into a Python extension module
 
 ```bash
 cd fortran/
-python -m numpy.f2py -c wrapper.f90 -m manforge_umat
+python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
 ```
 
-This produces `manforge_umat.cpython-*.so` (Linux) or `.pyd` (Windows).
-
-### Import and call from Python
-
-```python
-import numpy as np
-import manforge_umat   # the compiled module
-
-ntens  = 6
-nstatv = 1
-nprops = 4
-
-stress  = np.zeros(ntens)
-statev  = np.zeros(nstatv)
-stran   = np.zeros(ntens)
-dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-props   = np.array([210000.0, 0.3, 250.0, 1000.0])  # E, nu, sigma_y0, H
-dtime   = 1.0
-
-ddsdde = np.zeros((ntens, ntens))
-sse = spd = scd = 0.0
-
-manforge_umat.umat_j2_c(
-    stress, statev, ddsdde,
-    sse, spd, scd,
-    stran, dstran, dtime,
-    props, nprops, ntens, nstatv,
-)
-
-print("sigma11 =", stress[0])
-print("DDSDDE[0,0] =", ddsdde[0, 0])
-```
-
----
-
-## Build with ctypes
-
-An alternative to f2py is to compile a shared library and call it via `ctypes`:
+Or via the Makefile from the project root:
 
 ```bash
-gfortran -shared -fPIC -O2 -o libmanforge_umat.so wrapper.f90
+make fortran-build-umat
 ```
 
-```python
-import ctypes
-import numpy as np
+This produces `j2_isotropic_3d.cpython-*.so` (Linux) or `.pyd` (Windows).
 
-lib = ctypes.CDLL("./libmanforge_umat.so")
-# (argument types must be declared manually — see fortran_bridge.py in Step 10)
-```
+### Subroutine naming convention
+
+| Subroutine | Description |
+|------------|-------------|
+| `j2_isotropic_3d` | Core logic — matches Python `J2Isotropic3D` class |
+| `umat` | ABAQUS entry point — required name for ABAQUS solver integration |
+| `j2_isotropic_3d_elastic_stiffness` | Standalone elastic stiffness for component checks |
+
+f2py module name = Python model name: `j2_isotropic_3d`. This pattern extends
+naturally to future models: `FortranUMAT("j2_kinematic_3d")`, etc.
 
 ---
 
 ## Docker build (recommended)
 
-A reproducible gfortran + Python 3.12 environment will be set up in **Step 9**.
-
-Once `Dockerfile` is available at the project root:
+A reproducible gfortran + Python 3.12 environment is provided via `Dockerfile`
+at the project root:
 
 ```bash
 # Build the image
@@ -104,15 +70,14 @@ docker build -t manforge-fortran .
 
 # Compile and run Fortran tests inside the container
 docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
-    bash -c "cd fortran && python -m numpy.f2py -c wrapper.f90 -m manforge_umat \
-             && python -m pytest tests/test_fortran_basic.py -v"
+    bash -c "make fortran-build-umat && make fortran-test-umat"
 ```
 
 ---
 
 ## Material parameters convention
 
-`PROPS` array order (must match `manforge.models.j2_isotropic.J2Isotropic3D.param_names`):
+`PROPS` array order (matches `J2Isotropic3D.param_names`):
 
 | Index (1-based) | Name | Unit | Description |
 |-----------------|------|------|-------------|
@@ -144,20 +109,78 @@ NTENS = 6 for 3D full stress state (NDI=3, NSHR=3).
 
 ## Cross-validation with Python
 
-After Step 10, use `manforge.verification.fortran_bridge.compare_with_fortran`
-to verify that the Fortran UMAT matches the Python return mapping:
+`FortranUMAT` wraps the f2py module with automatic float64 conversion.
+All subroutines — the full routine and any sub-component — are called through
+the same `call(name, *args)` pattern.
 
 ```python
+import numpy as np
+import jax.numpy as jnp
+import manforge  # enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+from manforge.core.return_mapping import return_mapping
+from manforge.verification import FortranUMAT
 
-model = J2Isotropic3D()
-umat  = FortranUMAT("manforge_umat", subroutine_name="umat_j2")
+model  = J2Isotropic3D()
+params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
 
-test_cases = [
-    {"strain_inc": [2e-3, 0, 0, 0, 0, 0], "stress_n": [0]*6,
-     "state_n": {"ep": 0.0}, "params": {...}},
-]
-result = compare_with_fortran(model, umat, test_cases)
-print("All cases passed:", result.passed)
+fortran = FortranUMAT("j2_isotropic_3d")
 ```
+
+### Full routine comparison
+
+```python
+dstran = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+# Fortran
+stress_f, ep_f, ddsdde_f = fortran.call(
+    "j2_isotropic_3d",
+    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    np.zeros(6), 0.0,   # stress_in, ep_in
+    dstran,
+)
+
+# Python
+stress_py, state_py, ddsdde_py = return_mapping(
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+)
+
+# Compare
+np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
+```
+
+### Component-level comparison
+
+When the full routine results differ, isolate the faulty sub-component.
+`j2_isotropic_3d.f90` already includes `j2_isotropic_3d_elastic_stiffness`
+as a reference example:
+
+```fortran
+! In j2_isotropic_3d.f90 — already present
+subroutine j2_isotropic_3d_elastic_stiffness(E, nu, C)
+    double precision, intent(in)  :: E, nu
+    double precision, intent(out) :: C(6,6)
+    ! ... identical to the C assembly inside j2_isotropic_3d
+end subroutine
+```
+
+After compiling (`make fortran-build-umat`), the call pattern is identical:
+
+```python
+# Fortran sub-component
+C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", params["E"], params["nu"])
+
+# Python reference
+C_py = model.elastic_stiffness(params)
+
+np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
+```
+
+The same pattern applies to any internal quantity — yield function, flow
+direction, tangent sub-block, etc.  The elastic stiffness is the best first
+check because a mismatch here propagates into every downstream calculation.
+
+To add a new component check: write a standalone subroutine in the `.f90` file,
+recompile, then call it via `fortran.call("subroutine_name", *args)` and compare
+with the corresponding Python calculation using `np.testing.assert_allclose`.

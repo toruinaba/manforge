@@ -11,9 +11,9 @@
 fortran-build:
 	cd fortran && uv run python -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
 
-## Compile UMAT sources (abaqus_stubs + umat_j2) into a Python extension via f2py
+## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
-	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 umat_j2.f90 -m manforge_umat
+	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
 
 # ---------------------------------------------------------------------------
 # Test targets

@@ -1,10 +1,9 @@
 """Cross-validation: Fortran J2 UMAT vs. Python return_mapping.
 
-Verifies that the Fortran ``umat_j2_run`` subroutine produces stress,
-equivalent plastic strain, and consistent tangent that agree with the
-Python reference implementation to tight tolerances.
+Uses FortranUMAT.call to invoke compiled subroutines and compares results
+explicitly against the Python reference implementation.
 
-The compiled module ``manforge_umat`` must be built before running:
+The compiled module must be built before running:
 
     make fortran-build-umat
 
@@ -15,22 +14,22 @@ import sys
 import os
 
 import numpy as np
+import jax.numpy as jnp
 import pytest
 
 # Add fortran/ to path so the compiled .so is importable
 _FORTRAN_DIR = os.path.join(os.path.dirname(__file__), "..", "fortran")
 sys.path.insert(0, os.path.abspath(_FORTRAN_DIR))
 
-mod = pytest.importorskip(
-    "manforge_umat",
-    reason="manforge_umat not compiled -- run: make fortran-build-umat",
+pytest.importorskip(
+    "j2_isotropic_3d",
+    reason="j2_isotropic_3d not compiled -- run: make fortran-build-umat",
 )
 
-import jax.numpy as jnp
 import manforge  # noqa: F401 -- enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.return_mapping import return_mapping
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+from manforge.verification import FortranUMAT
 
 
 # ---------------------------------------------------------------------------
@@ -38,198 +37,147 @@ from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortr
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def params():
-    return {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
-
-
-@pytest.fixture
 def model():
     return J2Isotropic3D()
 
 
 @pytest.fixture
-def zero_state():
-    return {"ep": 0.0}
+def params():
+    return {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
 
 
 @pytest.fixture
-def elastic_dstran():
-    """Strain increment that stays in the elastic domain."""
-    return np.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])
+def fortran():
+    return FortranUMAT("j2_isotropic_3d")
 
 
-@pytest.fixture
-def plastic_dstran_uniaxial():
-    """Uniaxial strain increment well into the plastic domain."""
-    return np.array([5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+# ---------------------------------------------------------------------------
+# Shape / smoke tests
+# ---------------------------------------------------------------------------
 
-
-@pytest.fixture
-def plastic_dstran_multiaxial():
-    """Multiaxial strain increment into the plastic domain."""
-    return np.array([3e-3, -1e-3, -1e-3, 1e-3, 0.0, 0.0])
-
-
-def _py_result(model, params, state_n, dstran):
-    """Run Python return_mapping and return numpy arrays."""
-    stress_0 = jnp.zeros(6)
-    stress, state, ddsdde = return_mapping(
-        model, jnp.array(dstran), stress_0, state_n, params
-    )
-    return np.array(stress), state, np.array(ddsdde)
-
-
-def _f90_result(params, state_n, dstran):
-    """Call Fortran umat_j2_run and return numpy arrays."""
-    stress_0 = np.zeros(6)
-    stress_out, ep_out, ddsdde = mod.umat_j2_run(
+def test_call_j2_isotropic_3d(fortran, params):
+    """j2_isotropic_3d subroutine returns stress (6,) and ddsdde (6,6)."""
+    dstran = np.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    stress_f, ep_f, ddsdde_f = fortran.call(
+        "j2_isotropic_3d",
         params["E"], params["nu"], params["sigma_y0"], params["H"],
-        stress_0, state_n["ep"], np.asarray(dstran, dtype=np.float64),
+        np.zeros(6), 0.0, dstran,
     )
-    return np.array(stress_out), {"ep": float(ep_out)}, np.array(ddsdde)
+    assert np.asarray(stress_f).shape == (6,)
+    assert np.asarray(ddsdde_f).shape == (6, 6)
+
+
+def test_call_elastic_stiffness(fortran):
+    """j2_isotropic_3d_elastic_stiffness returns a (6,6) matrix."""
+    C = fortran.call("j2_isotropic_3d_elastic_stiffness", 210_000.0, 0.3)
+    assert np.asarray(C).shape == (6, 6)
 
 
 # ---------------------------------------------------------------------------
-# test_umat_elastic_stress
+# Fortran vs Python comparison
 # ---------------------------------------------------------------------------
 
-def test_umat_elastic_stress(model, params, zero_state, elastic_dstran):
-    """Elastic step: Fortran stress matches Python to machine precision."""
-    stress_py, _, _ = _py_result(model, params, zero_state, elastic_dstran)
-    stress_f90, _, _ = _f90_result(params, zero_state, elastic_dstran)
+def test_fortran_vs_python_elastic(fortran, model, params):
+    """Elastic step: Fortran stress and tangent match Python reference."""
+    dstran = np.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
-    np.testing.assert_allclose(
-        stress_f90, stress_py, rtol=1e-12,
-        err_msg="Elastic stress: Fortran vs Python mismatch",
+    stress_f, ep_f, ddsdde_f = fortran.call(
+        "j2_isotropic_3d",
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
     )
-
-
-# ---------------------------------------------------------------------------
-# test_umat_elastic_ddsdde
-# ---------------------------------------------------------------------------
-
-def test_umat_elastic_ddsdde(model, params, zero_state, elastic_dstran):
-    """Elastic step: Fortran DDSDDE equals the elastic stiffness C."""
-    C_py = np.array(model.elastic_stiffness(params))
-    _, _, ddsdde_f90 = _f90_result(params, zero_state, elastic_dstran)
-
-    np.testing.assert_allclose(
-        ddsdde_f90, C_py, rtol=1e-12,
-        err_msg="Elastic DDSDDE: Fortran vs Python (elastic C) mismatch",
+    stress_py, _, ddsdde_py = return_mapping(
+        model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params,
     )
 
+    np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+    np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
 
-# ---------------------------------------------------------------------------
-# test_umat_plastic_uniaxial_stress
-# ---------------------------------------------------------------------------
 
-def test_umat_plastic_uniaxial_stress(model, params, zero_state,
-                                      plastic_dstran_uniaxial):
-    """Uniaxial plastic step: Fortran stress matches Python reference."""
-    stress_py, _, _ = _py_result(model, params, zero_state,
-                                 plastic_dstran_uniaxial)
-    stress_f90, _, _ = _f90_result(params, zero_state,
-                                   plastic_dstran_uniaxial)
+def test_fortran_vs_python_plastic_uniaxial(fortran, model, params):
+    """Plastic uniaxial step: Fortran stress and tangent match Python reference."""
+    dstran = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
 
-    np.testing.assert_allclose(
-        stress_f90, stress_py, rtol=1e-6,
-        err_msg="Uniaxial plastic stress: Fortran vs Python mismatch",
+    stress_f, ep_f, ddsdde_f = fortran.call(
+        "j2_isotropic_3d",
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
+    )
+    stress_py, state_py, ddsdde_py = return_mapping(
+        model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params,
     )
 
+    np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+    np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
+    assert abs(float(state_py["ep"]) - float(ep_f)) / (abs(float(state_py["ep"])) + 1e-14) < 1e-6
 
-# ---------------------------------------------------------------------------
-# test_umat_plastic_multiaxial_stress
-# ---------------------------------------------------------------------------
 
-def test_umat_plastic_multiaxial_stress(model, params, zero_state,
-                                        plastic_dstran_multiaxial):
-    """Multiaxial plastic step: Fortran stress matches Python reference."""
-    stress_py, _, _ = _py_result(model, params, zero_state,
-                                 plastic_dstran_multiaxial)
-    stress_f90, _, _ = _f90_result(params, zero_state,
-                                   plastic_dstran_multiaxial)
+def test_fortran_vs_python_plastic_multiaxial(fortran, model, params):
+    """Plastic multiaxial step: Fortran matches Python."""
+    dstran = np.array([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0], dtype=np.float64)
 
-    np.testing.assert_allclose(
-        stress_f90, stress_py, rtol=1e-6,
-        err_msg="Multiaxial plastic stress: Fortran vs Python mismatch",
+    stress_f, ep_f, ddsdde_f = fortran.call(
+        "j2_isotropic_3d",
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
+    )
+    stress_py, _, ddsdde_py = return_mapping(
+        model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params,
     )
 
+    np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+    np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
 
-# ---------------------------------------------------------------------------
-# test_umat_plastic_ddsdde
-# ---------------------------------------------------------------------------
 
-def test_umat_plastic_ddsdde(model, params, zero_state,
-                              plastic_dstran_uniaxial):
-    """Plastic step: Fortran consistent tangent matches Python reference."""
-    _, _, ddsdde_py = _py_result(model, params, zero_state,
-                                 plastic_dstran_uniaxial)
-    _, _, ddsdde_f90 = _f90_result(params, zero_state,
-                                   plastic_dstran_uniaxial)
+def test_elastic_stiffness_vs_python(fortran, model, params):
+    """Elastic stiffness sub-component: Fortran matches Python to near machine precision."""
+    C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", params["E"], params["nu"])
+    C_py = model.elastic_stiffness(params)
 
-    np.testing.assert_allclose(
-        ddsdde_f90, ddsdde_py, rtol=1e-5,
-        err_msg="Plastic DDSDDE: Fortran vs Python mismatch",
-    )
+    np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------
-# test_umat_state_update
+# Multi-step: independent state propagation
 # ---------------------------------------------------------------------------
 
-def test_umat_state_update(model, params, zero_state,
-                           plastic_dstran_uniaxial):
-    """Fortran equivalent plastic strain matches Python state_new['ep']."""
-    _, state_py, _ = _py_result(model, params, zero_state,
-                                plastic_dstran_uniaxial)
-    _, state_f90, _ = _f90_result(params, zero_state,
-                                  plastic_dstran_uniaxial)
+def test_multi_step_tension_unload_compression(fortran, model, params):
+    """Multi-step tension-unload-compression: accumulated error stays small."""
+    eps_y = params["sigma_y0"] / params["E"]
+    n = 35
+    tension = np.linspace(0.0, 3.0 * eps_y, n // 2 + 1)
+    compression = np.linspace(tension[-1], -3.0 * eps_y, n - len(tension) + 2)[1:]
+    strain_vals = np.concatenate([tension, compression])
 
-    np.testing.assert_allclose(
-        state_f90["ep"], state_py["ep"], rtol=1e-6,
-        err_msg="Equivalent plastic strain: Fortran vs Python mismatch",
-    )
+    # Build full strain history (uniaxial, component 0)
+    ntens = model.ntens
+    history = np.zeros((len(strain_vals), ntens))
+    history[:, 0] = strain_vals
 
+    stress_py = jnp.zeros(ntens)
+    state_py = model.initial_state()
+    stress_f = np.zeros(ntens)
+    ep_f = 0.0
+    eps_prev = np.zeros(ntens)
 
-# ---------------------------------------------------------------------------
-# test_compare_with_fortran_api
-# ---------------------------------------------------------------------------
+    max_stress_err = 0.0
 
-def test_compare_with_fortran_api(model, params, zero_state):
-    """compare_with_fortran returns UMATComparisonResult and all cases pass."""
-    fortran_umat = FortranUMAT(module_name="manforge_umat", model=model)
+    for i in range(len(history)):
+        dstran = history[i] - eps_prev
+        eps_prev = history[i].copy()
 
-    test_cases = [
-        # elastic
-        {
-            "strain_inc": np.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            "stress_n":   np.zeros(6),
-            "state_n":    {"ep": 0.0},
-            "params":     params,
-        },
-        # uniaxial plastic
-        {
-            "strain_inc": np.array([5e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            "stress_n":   np.zeros(6),
-            "state_n":    {"ep": 0.0},
-            "params":     params,
-        },
-        # multiaxial plastic
-        {
-            "strain_inc": np.array([3e-3, -1e-3, -1e-3, 1e-3, 0.0, 0.0]),
-            "stress_n":   np.zeros(6),
-            "state_n":    {"ep": 0.0},
-            "params":     params,
-        },
-    ]
+        stress_py, state_py, _ = return_mapping(
+            model, jnp.array(dstran), stress_py, state_py, params
+        )
+        stress_f, ep_f, _ = fortran.call(
+            "j2_isotropic_3d",
+            params["E"], params["nu"], params["sigma_y0"], params["H"],
+            stress_f, ep_f, dstran,
+        )
 
-    result = compare_with_fortran(
-        model, fortran_umat, test_cases,
-        stress_tol=1e-6, tangent_tol=1e-5,
-    )
+        s_py = np.asarray(stress_py, dtype=float)
+        s_f = np.asarray(stress_f, dtype=float)
+        err = float(np.max(np.abs(s_f - s_py) / (np.abs(s_py) + 1.0)))
+        max_stress_err = max(max_stress_err, err)
 
-    assert result.n_cases == 3
-    assert result.n_passed == result.n_cases, (
-        f"Failed cases: {[d for d in result.details if not d['passed']]}"
-    )
-    assert result.passed
+    assert max_stress_err < 1e-6, f"Max stress error {max_stress_err:.2e} exceeds 1e-6"

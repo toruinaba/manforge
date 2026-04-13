@@ -100,15 +100,15 @@ src/manforge/
 ├── verification/
 │   ├── compare.py         # compare_solvers() — 汎用ソルバ比較
 │   ├── fd_check.py        # FD vs AD/解析解 tangent 比較
-│   └── fortran_bridge.py  # FortranUMAT, compare_with_fortran()
+│   ├── fortran_bridge.py  # FortranUMAT — f2py 薄ラッパー（型変換のみ）
+│   └── test_cases.py      # テストケース生成（estimate_yield_strain, generate_*）
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換 (StressState 対応)
     └── tensor.py          # 4 階テンソル操作
 
 fortran/
-├── umat_j2.f90            # J2 UMAT 本体 (radial return + 7x7 tangent)
-├── abaqus_stubs.f90       # SINV, SPRINC, ROTSIG モック
-├── wrapper.f90            # ISO_C_BINDING ラッパーテンプレート
+├── j2_isotropic_3d.f90    # J2 UMAT 本体 (radial return + 7x7 tangent)
+├── abaqus_stubs.f90       # SINV, SPRINC, ROTSIG モック (リンカ解決用)
 ├── test_basic.f90         # f2py 動作確認用
 └── README.md              # ビルド手順
 ```
@@ -267,14 +267,42 @@ print(result.params, result.residual)
 
 ## Fortran Cross-Validation
 
+`FortranUMAT` は f2py モジュールへの薄いラッパーで、型変換（float64）だけを担当する。
+ルーチン全体もコンポーネントも同じ `call(name, *args)` パターンで呼べる:
+
 ```python
-from manforge.verification.fortran_bridge import FortranUMAT, compare_with_fortran
+import numpy as np
+import jax.numpy as jnp
+import manforge
+from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.core.return_mapping import return_mapping
+from manforge.verification import FortranUMAT
 
-fortran_umat = FortranUMAT("manforge_umat", model)
+model   = J2Isotropic3D()
+params  = {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
+dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+fortran = FortranUMAT("j2_isotropic_3d")
 
-result = compare_with_fortran(model, fortran_umat, test_cases)
-print(f"Passed: {result.passed}  ({result.n_passed}/{result.n_cases})")
-print(f"Max stress rel err: {result.max_stress_rel_err:.2e}")
+# Fortran ルーチンを呼ぶ
+stress_f, ep_f, ddsdde_f = fortran.call(
+    "j2_isotropic_3d",
+    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    np.zeros(6), 0.0, dstran,
+)
+
+# Python 側と明示的に比較
+stress_py, _, ddsdde_py = return_mapping(
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+)
+np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+```
+
+コンポーネント単位での比較も同じパターン（詳細: `fortran/README.md`）:
+
+```python
+C_f  = fortran.call("j2_isotropic_3d_elastic_stiffness", params["E"], params["nu"])
+C_py = model.elastic_stiffness(params)
+np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 ```
 
 ビルド:
