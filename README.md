@@ -42,8 +42,9 @@ uv sync --extra dev
 # matplotlib 含む
 uv sync --extra examples
 
-# Fortran モジュールのビルド
-make fortran-build-umat
+# Fortran モジュールのビルド (gfortran 必須)
+uv sync --extra fortran           # meson/ninja のインストール
+uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 
 # Docker 内でフルビルド + テスト
 make docker-build && make docker-test
@@ -308,6 +309,11 @@ np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 ビルド:
 
 ```bash
+# CLI (推奨)
+uv sync --extra fortran
+uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+
+# Makefile
 make fortran-build-umat   # ホスト環境 (gfortran 必須)
 make docker-test          # Docker 環境でビルド + テスト
 ```
