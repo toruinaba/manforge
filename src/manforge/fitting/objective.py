@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from manforge.simulation.types import FieldHistory, FieldType
+
 
 def residual_sum_of_squares(stress_computed, stress_experiment, weights=None):
     """Weighted sum of squared residuals.
@@ -41,14 +43,18 @@ def build_objective(model, driver, exp_data, fixed_params=None):
     Parameters
     ----------
     model : MaterialModel
-    driver : UniaxialDriver or GeneralDriver
-        Pre-configured driver instance.
+    driver : DriverBase
+        Pre-configured driver instance (StrainDriver, StressDriver, …).
     exp_data : dict
         Must contain:
-        - ``"strain"`` : array, shape (N,) for UniaxialDriver or (N, 6) for
-          GeneralDriver.
-        - ``"stress"`` : array, matching shape of driver output.
-        Optionally ``"weights"`` : array, shape (N,).
+
+        - ``"strain"`` : array, shape ``(N,)`` for uniaxial or ``(N, ntens)``
+          for general loading.
+        - ``"stress"`` : array, matching shape of experimental stress.
+          Use ``(N,)`` for uniaxial (compared against σ11 only) or
+          ``(N, ntens)`` for full-tensor comparison.
+
+        Optionally ``"weights"`` : array, shape ``(N,)``.
     fixed_params : dict or None
         Parameters held constant during optimisation.  These are merged
         with the optimised parameters before each model evaluation.
@@ -64,13 +70,19 @@ def build_objective(model, driver, exp_data, fixed_params=None):
         calling it standalone.
     """
     fixed = dict(fixed_params) if fixed_params else {}
-    strain = exp_data["strain"]
+    load = FieldHistory(
+        FieldType.STRAIN, "Strain", np.asarray(exp_data["strain"], dtype=float)
+    )
     stress_exp = np.asarray(exp_data["stress"], dtype=float)
     weights = exp_data.get("weights", None)
 
     def objective(free_params: dict) -> float:
         params = {**fixed, **free_params}
-        stress_comp = driver.run(model, strain, params)
+        result = driver.run(model, load, params)
+        stress_comp = result.stress
+        # Uniaxial experiment: compare σ11 only
+        if stress_exp.ndim == 1:
+            stress_comp = stress_comp[:, 0]
         return residual_sum_of_squares(stress_comp, stress_exp, weights)
 
     return objective

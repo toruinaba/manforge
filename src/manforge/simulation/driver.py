@@ -1,127 +1,181 @@
-"""Strain-driven and stress-driven loading drivers.
+"""Simulation drivers: strain-controlled and stress-controlled loading.
 
-Strain-driven drivers loop over a prescribed strain history, call
-``return_mapping`` at each step, and accumulate the resulting stress history.
+All drivers share the same interface via :class:`DriverBase`:
 
-Stress-driven drivers prescribe a target stress history and solve for the
-corresponding strain increments using Newton-Raphson iteration with the
-consistent tangent (ddsdde).
+* Input  — :class:`~manforge.simulation.types.FieldHistory` containing the
+  prescribed loading history (strain or stress).
+* Output — :class:`~manforge.simulation.types.DriverResult` containing
+  stress, strain, and all model state variables at every step.
 
 Conventions
 -----------
-- All strain/stress arrays use the engineering-shear Voigt convention:
-    ε, σ = [11, 22, 33, 12, 13, 23]
+- Stress and strain arrays use the engineering-shear Voigt convention:
+    σ, ε = [11, 22, 33, 12, 13, 23]
 - *Cumulative* quantities are the input; increments are computed internally.
+
+Backward-compatibility aliases
+-------------------------------
+``UniaxialDriver`` and ``GeneralDriver`` are aliases for :class:`StrainDriver`.
 """
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 
 import numpy as np
 import jax.numpy as jnp
 
 from manforge.core.return_mapping import return_mapping
+from manforge.simulation.types import DriverResult, FieldHistory, FieldType
 
 
-class UniaxialDriver:
-    """Uniaxial strain-driven loading (ε11 prescribed, lateral strains zero).
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    Parameters
-    ----------
-    (none — stateless, all inputs passed to :meth:`run`)
+def _collect_state(state_n: dict) -> dict[str, np.ndarray]:
+    """Convert a model state dict to a dict of 1-D-or-2-D numpy arrays."""
+    out = {}
+    for k, v in state_n.items():
+        arr = np.array(v)
+        if arr.ndim == 0:
+            arr = arr.reshape(1)   # scalar → (1,)
+        out[k] = arr
+    return out
+
+
+def _finalise_state_fields(state_accum: dict[str, list]) -> dict[str, FieldHistory]:
+    """Stack per-step state lists into FieldHistory objects."""
+    fields = {}
+    for k, rows in state_accum.items():
+        stacked = np.stack(rows, axis=0)          # (N,) or (N, ntens)
+        if stacked.ndim == 2 and stacked.shape[1] == 1:
+            stacked = stacked[:, 0]               # (N, 1) → (N,)
+        fields[k] = FieldHistory(FieldType.SCALAR, k, stacked)
+    return fields
+
+
+# ---------------------------------------------------------------------------
+# Base class
+# ---------------------------------------------------------------------------
+
+class DriverBase(ABC):
+    """Abstract base for all simulation drivers.
+
+    Subclasses implement :meth:`run` and must accept a
+    :class:`~manforge.simulation.types.FieldHistory` as the loading
+    specification and return a :class:`~manforge.simulation.types.DriverResult`.
     """
 
-    def run(self, model, strain_history, params):
-        """Run the uniaxial loading history.
+    @abstractmethod
+    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
+        """Run the loading simulation.
 
         Parameters
         ----------
         model : MaterialModel
-            Constitutive model instance.
-        strain_history : array-like, shape (N,)
-            Cumulative axial strain ε11 at each step.
-            Increments are computed as Δε_i = ε_i − ε_{i-1}  (ε_0 = 0).
+        load : FieldHistory
+            Loading history.  The ``type`` and shape of ``load.data`` must
+            match the driver's expectations (see subclass documentation).
         params : dict
             Material parameters.
 
         Returns
         -------
-        stress_history : np.ndarray, shape (N,)
-            Axial stress σ11 at each step.
+        DriverResult
         """
-        strain_history = np.asarray(strain_history, dtype=float)
-        N = len(strain_history)
-        ntens = model.ntens
-
-        stress_n = jnp.zeros(ntens)
-        state_n = model.initial_state()
-        eps_prev = 0.0
-
-        stress_out = np.zeros(N)
-
-        for i, eps_i in enumerate(strain_history):
-            deps11 = eps_i - eps_prev
-            strain_inc = jnp.zeros(ntens).at[0].set(deps11)
-
-            stress_n, state_n, _ = return_mapping(
-                model, strain_inc, stress_n, state_n, params
-            )
-            stress_out[i] = float(stress_n[0])
-            eps_prev = eps_i
-
-        return stress_out
 
 
-class GeneralDriver:
-    """General multi-component strain-driven loading.
+# ---------------------------------------------------------------------------
+# Strain-driven driver
+# ---------------------------------------------------------------------------
+
+class StrainDriver(DriverBase):
+    """Strain-controlled loading driver.
+
+    Accepts both uniaxial (1-D) and general multi-component (2-D) strain
+    histories in a single class.
 
     Parameters
     ----------
-    (none — stateless)
+    (none — stateless, all inputs passed to :meth:`run`)
+
+    Notes
+    -----
+    ``UniaxialDriver`` and ``GeneralDriver`` are aliases for this class.
     """
 
-    def run(self, model, strain_history, params):
-        """Run a general strain history.
+    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
+        """Run the strain-controlled loading history.
 
         Parameters
         ----------
         model : MaterialModel
-        strain_history : array-like, shape (N, ntens)
-            Cumulative strain tensor (Voigt, engineering shear) at each step.
+            Constitutive model instance.
+        load : FieldHistory
+            Must have ``type = FieldType.STRAIN``.  ``load.data`` shape:
+
+            * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
+            * ``(N, ntens)`` — general: all components prescribed.
+
         params : dict
+            Material parameters.
 
         Returns
         -------
-        stress_history : np.ndarray, shape (N, ntens)
-            Full stress tensor at each step.
+        DriverResult
+            Fields: ``"Stress"`` (N, ntens), ``"Strain"`` (N, ntens), plus
+            one ``FieldType.SCALAR`` field per model state variable.
         """
-        strain_history = np.asarray(strain_history, dtype=float)
-        N = strain_history.shape[0]
+        data = np.asarray(load.data, dtype=float)
+        uniaxial = data.ndim == 1
         ntens = model.ntens
+        N = len(data)
 
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
-        eps_prev = np.zeros(ntens)
+        state_accum: dict[str, list] = {k: [] for k in state_n}
 
         stress_out = np.zeros((N, ntens))
+        strain_out = np.zeros((N, ntens))
 
         for i in range(N):
-            strain_inc = jnp.array(strain_history[i] - eps_prev)
+            if uniaxial:
+                deps11 = data[i] - (data[i - 1] if i > 0 else 0.0)
+                strain_inc = jnp.zeros(ntens).at[0].set(deps11)
+                strain_out[i, 0] = data[i]
+            else:
+                prev = data[i - 1] if i > 0 else np.zeros(ntens)
+                strain_inc = jnp.array(data[i] - prev)
+                strain_out[i] = data[i]
 
             stress_n, state_n, _ = return_mapping(
                 model, strain_inc, stress_n, state_n, params
             )
             stress_out[i] = np.array(stress_n)
-            eps_prev = strain_history[i]
+            for k, row in _collect_state(state_n).items():
+                state_accum[k].append(row)
 
-        return stress_out
+        fields: dict[str, FieldHistory] = {
+            "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
+            "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
+        }
+        fields.update(_finalise_state_fields(state_accum))
+        return DriverResult(fields=fields)
 
 
-class StressDriver:
+# ---------------------------------------------------------------------------
+# Stress-driven driver
+# ---------------------------------------------------------------------------
+
+class StressDriver(DriverBase):
     """Stress-controlled loading driver.
 
-    Prescribes a target stress history and solves for the corresponding strain
-    increments using Newton-Raphson iteration with the consistent tangent
-    (ddsdde).  Useful for simulating uniaxial stress loading in a multi-axial
-    model (e.g., σ11 ramping, all other components zero) where the lateral
-    strains adjust freely.
+    Prescribes a target stress history and solves for the corresponding
+    strain increments using Newton-Raphson iteration with the consistent
+    tangent (ddsdde).  Useful for simulating uniaxial stress loading in a
+    multi-axial model (e.g. σ11 ramping, all other components zero) where
+    the lateral strains adjust freely.
 
     Parameters
     ----------
@@ -136,24 +190,25 @@ class StressDriver:
         self.max_iter = max_iter
         self.tol = tol
 
-    def run(self, model, stress_history, params):
+    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
         """Run the stress-controlled loading history.
 
         Parameters
         ----------
         model : MaterialModel
             Constitutive model instance.
-        stress_history : array-like, shape (N, ntens)
-            Cumulative target stress tensor (Voigt) at each step.
+        load : FieldHistory
+            Must have ``type = FieldType.STRESS`` and
+            ``load.data`` shape ``(N, ntens)`` — cumulative target stress
+            tensor (Voigt) at each step.
         params : dict
             Material parameters.
 
         Returns
         -------
-        dict with keys:
-
-        * ``"stress"`` : np.ndarray, shape (N, ntens) — converged stress.
-        * ``"strain"`` : np.ndarray, shape (N, ntens) — accumulated strain.
+        DriverResult
+            Fields: ``"Stress"`` (N, ntens), ``"Strain"`` (N, ntens), plus
+            one ``FieldType.SCALAR`` field per model state variable.
 
         Raises
         ------
@@ -161,13 +216,14 @@ class StressDriver:
             If Newton-Raphson does not converge within ``max_iter`` iterations
             at any step.
         """
-        stress_history = np.asarray(stress_history, dtype=float)
+        stress_history = np.asarray(load.data, dtype=float)
         N = stress_history.shape[0]
         ntens = model.ntens
 
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
         eps_total = np.zeros(ntens)
+        state_accum: dict[str, list] = {k: [] for k in state_n}
 
         # Elastic compliance for the initial strain-increment guess
         C = model.elastic_stiffness(params)
@@ -206,22 +262,23 @@ class StressDriver:
             eps_total = eps_total + np.array(deps)
             stress_out[i] = np.array(stress_new)
             strain_out[i] = eps_total.copy()
+            for k, row in _collect_state(state_n).items():
+                state_accum[k].append(row)
 
-        return {"stress": stress_out, "strain": strain_out}
+        fields: dict[str, FieldHistory] = {
+            "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
+            "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
+        }
+        fields.update(_finalise_state_fields(state_accum))
+        return DriverResult(fields=fields)
 
 
-class BiaxialDriver:
-    """Biaxial loading (placeholder).
+# ---------------------------------------------------------------------------
+# Backward-compatibility aliases
+# ---------------------------------------------------------------------------
 
-    .. note::
-        Not yet implemented.  For stress-controlled or mixed boundary
-        conditions, use :class:`StressDriver` (pure stress control) or
-        :class:`GeneralDriver` (full strain prescription) instead.
-    """
+#: Alias for :class:`StrainDriver` (formerly separate uniaxial driver).
+UniaxialDriver = StrainDriver
 
-    def run(self, model, strain_history, params):
-        raise NotImplementedError(
-            "BiaxialDriver is not yet implemented. "
-            "Use StressDriver for stress-controlled loading or "
-            "GeneralDriver for full strain prescription instead."
-        )
+#: Alias for :class:`StrainDriver` (formerly separate general driver).
+GeneralDriver = StrainDriver

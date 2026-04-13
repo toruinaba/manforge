@@ -15,7 +15,8 @@ import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.driver import UniaxialDriver
+from manforge.simulation.driver import StrainDriver
+from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification.fd_check import check_tangent
 
 try:
@@ -42,11 +43,13 @@ params = {
 # Simulation
 # ---------------------------------------------------------------------------
 model = J2Isotropic3D()
-driver = UniaxialDriver()
+driver = StrainDriver()
 
 N = 100
 strain_history = np.linspace(0.0, 5e-3, N)   # cumulative ε11
-stress_history = driver.run(model, strain_history, params)
+load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
+result = driver.run(model, load, params)
+stress_history = result.stress[:, 0]   # σ11
 
 # ---------------------------------------------------------------------------
 # Console output
