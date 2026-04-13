@@ -118,7 +118,7 @@ class StrainDriver(DriverBase):
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.  Example::
 
-                collect_state={"ep": FieldType.SCALAR}
+                collect_state={"ep": FieldType.STRAIN}
 
         Returns
         -------
@@ -217,7 +217,7 @@ class StressDriver(DriverBase):
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.  Example::
 
-                collect_state={"ep": FieldType.SCALAR}
+                collect_state={"ep": FieldType.STRAIN}
 
         Returns
         -------

@@ -145,13 +145,13 @@ def test_state_ep_collected_when_requested(model_3d, steel_params):
         model_3d,
         stress_load(stress_history),
         steel_params,
-        collect_state={"ep": FieldType.SCALAR},
+        collect_state={"ep": FieldType.STRAIN},
     )
 
     assert "ep" in result.fields
     ep = result.fields["ep"].data
     assert ep.shape == (N,)
-    assert result.fields["ep"].type == FieldType.SCALAR
+    assert result.fields["ep"].type == FieldType.STRAIN
     assert np.all(ep >= 0.0)
     assert ep[-1] > 0.0, "ep should be positive after plastic loading"
 
@@ -168,7 +168,7 @@ def test_strain_driver_collect_state(model_3d, steel_params):
         model_3d,
         FieldHistory(FieldType.STRAIN, "Strain", strain_history),
         steel_params,
-        collect_state={"ep": FieldType.SCALAR},
+        collect_state={"ep": FieldType.STRAIN},
     )
 
     assert "ep" in result.fields

@@ -2,11 +2,13 @@
 
 All physical quantities in a driver simulation are represented as
 :class:`FieldHistory` instances tagged with a :class:`FieldType`.  The
-three types correspond to the physical space of the quantity:
+two types correspond to the physical space of the quantity:
 
-* ``STRESS`` — stress-space tensor  (shape ``(N, ntens)``)
-* ``STRAIN`` — strain-space tensor  (shape ``(N, ntens)``)
-* ``SCALAR`` — scalar quantity       (shape ``(N,)``)
+* ``STRESS`` — stress-space quantity  (e.g. Cauchy stress, back stress, yield stress)
+* ``STRAIN`` — strain-space quantity  (e.g. total strain, plastic strain, equivalent plastic strain)
+
+Whether a quantity is a full tensor (shape ``(N, ntens)``) or a scalar
+(shape ``(N,)``) is conveyed by ``data.shape``, not by ``FieldType``.
 
 :class:`DriverResult` collects all output fields from a driver run.
 Its ``stress`` and ``strain`` properties provide shortcut access to the
@@ -23,16 +25,24 @@ import numpy as np
 
 
 class FieldType(Enum):
-    """Physical classification of a :class:`FieldHistory`."""
+    """Physical space of a :class:`FieldHistory`.
+
+    Classifies whether a quantity lives in stress space or strain space.
+    The tensorial rank (full tensor vs scalar) is inferred from
+    ``data.shape``: ``(N, ntens)`` for tensors, ``(N,)`` for scalars.
+    """
 
     STRESS = "stress"
-    """Stress-space quantity (Cauchy stress, yield stress, back stress, …)."""
+    """Stress-space quantity.
+
+    Examples: Cauchy stress σ, back stress α (ntens,), yield stress σ_y (scalar).
+    """
 
     STRAIN = "strain"
-    """Strain-space quantity (total strain, plastic strain, …)."""
+    """Strain-space quantity.
 
-    SCALAR = "scalar"
-    """Dimensionless or mixed-space scalar (equivalent plastic strain, …)."""
+    Examples: total strain ε, plastic strain εp (ntens,), equivalent plastic strain ep (scalar).
+    """
 
 
 @dataclass
@@ -42,7 +52,7 @@ class FieldHistory:
     Parameters
     ----------
     type : FieldType
-        Physical space of the quantity.
+        Physical space of the quantity (STRESS or STRAIN).
     name : str
         Identifier (e.g. ``"Stress"``, ``"Strain"``, ``"ep"``).
     data : np.ndarray
@@ -64,7 +74,7 @@ class DriverResult:
     fields : dict[str, FieldHistory]
         All output fields keyed by name.  At minimum contains ``"Stress"``
         and ``"Strain"``.  State variables (e.g. ``"ep"``) are included
-        automatically for each state key returned by the model.
+        when ``collect_state`` is passed to the driver's ``run()`` method.
 
     Examples
     --------
@@ -76,8 +86,8 @@ class DriverResult:
 
     Access state-variable history directly::
 
-        result.fields["ep"].data          # np.ndarray (N,)
-        result.fields["ep"].type          # FieldType.SCALAR
+        result.fields["ep"].data          # np.ndarray (N,)  — scalar, strain-space
+        result.fields["ep"].type          # FieldType.STRAIN
     """
 
     fields: dict[str, FieldHistory]
