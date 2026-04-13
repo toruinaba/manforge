@@ -1,13 +1,17 @@
-"""Strain-driven loading drivers.
+"""Strain-driven and stress-driven loading drivers.
 
-A driver loops over a prescribed strain history, calls ``return_mapping`` at
-each step, and accumulates the resulting stress (and state) history.
+Strain-driven drivers loop over a prescribed strain history, call
+``return_mapping`` at each step, and accumulate the resulting stress history.
+
+Stress-driven drivers prescribe a target stress history and solve for the
+corresponding strain increments using Newton-Raphson iteration with the
+consistent tangent (ddsdde).
 
 Conventions
 -----------
-- All strain arrays use the engineering-shear Voigt convention:
-    ε = [ε11, ε22, ε33, γ12, γ13, γ23]
-- *Cumulative* total strain is the input; increments are computed internally.
+- All strain/stress arrays use the engineering-shear Voigt convention:
+    ε, σ = [11, 22, 33, 12, 13, 23]
+- *Cumulative* quantities are the input; increments are computed internally.
 """
 
 import numpy as np
@@ -110,18 +114,114 @@ class GeneralDriver:
         return stress_out
 
 
+class StressDriver:
+    """Stress-controlled loading driver.
+
+    Prescribes a target stress history and solves for the corresponding strain
+    increments using Newton-Raphson iteration with the consistent tangent
+    (ddsdde).  Useful for simulating uniaxial stress loading in a multi-axial
+    model (e.g., σ11 ramping, all other components zero) where the lateral
+    strains adjust freely.
+
+    Parameters
+    ----------
+    max_iter : int, optional
+        Maximum Newton-Raphson iterations per step (default 20).
+    tol : float, optional
+        Convergence tolerance on the infinity norm of the stress residual
+        (default 1e-8).
+    """
+
+    def __init__(self, max_iter: int = 20, tol: float = 1e-8):
+        self.max_iter = max_iter
+        self.tol = tol
+
+    def run(self, model, stress_history, params):
+        """Run the stress-controlled loading history.
+
+        Parameters
+        ----------
+        model : MaterialModel
+            Constitutive model instance.
+        stress_history : array-like, shape (N, ntens)
+            Cumulative target stress tensor (Voigt) at each step.
+        params : dict
+            Material parameters.
+
+        Returns
+        -------
+        dict with keys:
+
+        * ``"stress"`` : np.ndarray, shape (N, ntens) — converged stress.
+        * ``"strain"`` : np.ndarray, shape (N, ntens) — accumulated strain.
+
+        Raises
+        ------
+        RuntimeError
+            If Newton-Raphson does not converge within ``max_iter`` iterations
+            at any step.
+        """
+        stress_history = np.asarray(stress_history, dtype=float)
+        N = stress_history.shape[0]
+        ntens = model.ntens
+
+        stress_n = jnp.zeros(ntens)
+        state_n = model.initial_state()
+        eps_total = np.zeros(ntens)
+
+        # Elastic compliance for the initial strain-increment guess
+        C = model.elastic_stiffness(params)
+        S = jnp.linalg.inv(C)
+
+        stress_out = np.zeros((N, ntens))
+        strain_out = np.zeros((N, ntens))
+
+        for i in range(N):
+            sigma_target = jnp.array(stress_history[i])
+
+            # Initial guess: elastic compliance applied to stress increment
+            deps = S @ (sigma_target - stress_n)
+
+            converged = False
+            residual = jnp.full(ntens, jnp.inf)
+            for _ in range(self.max_iter):
+                stress_new, state_new, ddsdde = return_mapping(
+                    model, deps, stress_n, state_n, params
+                )
+                residual = sigma_target - stress_new
+                if float(jnp.max(jnp.abs(residual))) < self.tol:
+                    converged = True
+                    break
+                deps = deps + jnp.linalg.solve(ddsdde, residual)
+
+            if not converged:
+                raise RuntimeError(
+                    f"StressDriver: NR did not converge at step {i} "
+                    f"(||residual||_inf = {float(jnp.max(jnp.abs(residual))):.3e}, "
+                    f"tol = {self.tol:.3e})"
+                )
+
+            stress_n = stress_new
+            state_n = state_new
+            eps_total = eps_total + np.array(deps)
+            stress_out[i] = np.array(stress_new)
+            strain_out[i] = eps_total.copy()
+
+        return {"stress": stress_out, "strain": strain_out}
+
+
 class BiaxialDriver:
-    """Biaxial strain-driven loading (placeholder).
+    """Biaxial loading (placeholder).
 
     .. note::
-        Not yet implemented.  Biaxial loading requires specifying which
-        components are strain-driven and which are stress-controlled
-        (mixed boundary conditions).  Use :class:`GeneralDriver` for full
-        6-component prescriptions in the meantime.
+        Not yet implemented.  For stress-controlled or mixed boundary
+        conditions, use :class:`StressDriver` (pure stress control) or
+        :class:`GeneralDriver` (full strain prescription) instead.
     """
 
     def run(self, model, strain_history, params):
         raise NotImplementedError(
             "BiaxialDriver is not yet implemented. "
-            "Use GeneralDriver with a (N, ntens) history instead."
+            "Use StressDriver for stress-controlled loading or "
+            "GeneralDriver for full strain prescription instead."
         )
