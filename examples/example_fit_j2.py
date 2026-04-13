@@ -16,7 +16,8 @@ import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.driver import UniaxialDriver
+from manforge.simulation.driver import StrainDriver
+from manforge.simulation.types import FieldHistory, FieldType
 from manforge.fitting.optimizer import fit_params
 
 try:
@@ -43,12 +44,13 @@ FIXED_PARAMS = {"E": TRUE_PARAMS["E"], "nu": TRUE_PARAMS["nu"]}
 # Generate synthetic "experimental" data
 # ---------------------------------------------------------------------------
 model = J2Isotropic3D()
-driver = UniaxialDriver()
+driver = StrainDriver()
 
 rng = np.random.default_rng(42)
 N = 50
 strain_exp = np.linspace(0.0, 5e-3, N)
-stress_clean = driver.run(model, strain_exp, TRUE_PARAMS)
+load = FieldHistory(FieldType.STRAIN, "Strain", strain_exp)
+stress_clean = driver.run(model, load, TRUE_PARAMS).stress[:, 0]
 
 # Add small Gaussian noise (~0.5 MPa std) to simulate measurement scatter
 noise_std = 0.5
@@ -100,7 +102,7 @@ print()
 # Plot
 # ---------------------------------------------------------------------------
 if HAS_MATPLOTLIB:
-    stress_fitted = driver.run(model, strain_exp, result.params)
+    stress_fitted = driver.run(model, load, result.params).stress[:, 0]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 

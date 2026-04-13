@@ -20,7 +20,8 @@ import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
-from manforge.simulation.driver import UniaxialDriver, GeneralDriver
+from manforge.simulation.driver import StrainDriver
+from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification.fd_check import check_tangent
 
 
@@ -203,31 +204,34 @@ def test_analytical_tangent_matches_autodiff(pe_model, pe_state, steel_params, s
 # ---------------------------------------------------------------------------
 
 def test_uniaxial_driver_plane_strain(pe_model, steel_params):
-    """UniaxialDriver works with a PLANE_STRAIN model."""
+    """StrainDriver (uniaxial) works with a PLANE_STRAIN model."""
     eps_history = np.linspace(0, 5e-3, 20)
-    sigma_history = UniaxialDriver().run(pe_model, eps_history, steel_params)
-    assert sigma_history.shape == (20,)
-    # Stress must increase monotonically for hardening material
-    assert np.all(np.diff(sigma_history) >= 0)
+    load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
+    result = StrainDriver().run(pe_model, load, steel_params)
+    assert result.stress.shape == (20, 4)
+    # σ11 must increase monotonically for hardening material
+    assert np.all(np.diff(result.stress[:, 0]) >= 0)
 
 
 def test_general_driver_plane_strain_shapes(pe_model, steel_params):
-    """GeneralDriver produces (N, 4) output for PLANE_STRAIN model."""
+    """StrainDriver (general) produces (N, 4) stress output for PLANE_STRAIN model."""
     N = 15
     strain_history = np.zeros((N, 4))
     strain_history[:, 0] = np.linspace(0, 5e-3, N)  # ramp eps_11
-    stress_history = GeneralDriver().run(pe_model, strain_history, steel_params)
-    assert stress_history.shape == (N, 4)
+    load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
+    result = StrainDriver().run(pe_model, load, steel_params)
+    assert result.stress.shape == (N, 4)
 
 
 def test_plane_strain_sigma33_nonzero(pe_model, steel_params):
     """Plane-strain constraint produces non-zero sigma_33 under axial loading."""
     eps_history = np.zeros((10, 4))
     eps_history[:, 0] = np.linspace(0, 5e-3, 10)  # ramp eps_11 only
-    stress_history = GeneralDriver().run(pe_model, eps_history, steel_params)
+    load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
+    result = StrainDriver().run(pe_model, load, steel_params)
     # sigma_33 (index 2) must be non-zero due to plane-strain lateral constraint
-    assert np.any(np.abs(stress_history[:, 2]) > 1.0), \
-        f"sigma_33 unexpectedly near zero: {stress_history[:, 2]}"
+    assert np.any(np.abs(result.stress[:, 2]) > 1.0), \
+        f"sigma_33 unexpectedly near zero: {result.stress[:, 2]}"
 
 
 # ---------------------------------------------------------------------------

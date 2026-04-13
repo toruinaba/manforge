@@ -14,7 +14,8 @@ import pytest
 
 import manforge  # noqa: F401 — enables float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.driver import UniaxialDriver, GeneralDriver
+from manforge.simulation.driver import StrainDriver
+from manforge.simulation.types import FieldHistory, FieldType
 from manforge.fitting.optimizer import fit_params, FitResult
 
 
@@ -29,7 +30,7 @@ def model():
 
 @pytest.fixture
 def driver():
-    return UniaxialDriver()
+    return StrainDriver()
 
 
 @pytest.fixture
@@ -39,10 +40,11 @@ def true_params():
 
 @pytest.fixture
 def synthetic_data(model, driver, true_params):
-    """Uniaxial strain history and synthetic stress response."""
+    """Uniaxial strain history and synthetic stress response (σ11 only)."""
     strain = np.linspace(0.0, 5e-3, 40)
-    stress = driver.run(model, strain, true_params)
-    return {"strain": strain, "stress": stress}
+    load = FieldHistory(FieldType.STRAIN, "Strain", strain)
+    result = driver.run(model, load, true_params)
+    return {"strain": strain, "stress": result.stress[:, 0]}
 
 
 # ---------------------------------------------------------------------------
@@ -136,14 +138,14 @@ def test_fit_history_populated(model, driver, synthetic_data, true_params):
 # ---------------------------------------------------------------------------
 
 def test_general_driver_runs(model, true_params):
-    """GeneralDriver produces (N, 6) stress output without errors."""
-    gdriver = GeneralDriver()
+    """StrainDriver (general) produces (N, 6) stress output without errors."""
     N = 20
     strain6 = np.zeros((N, 6))
     strain6[:, 0] = np.linspace(0.0, 5e-3, N)  # uniaxial ε11
+    load = FieldHistory(FieldType.STRAIN, "Strain", strain6)
 
-    stress = gdriver.run(model, strain6, true_params)
+    result = StrainDriver().run(model, load, true_params)
 
-    assert stress.shape == (N, 6)
+    assert result.stress.shape == (N, 6)
     # σ11 should be non-trivial (plastic hardening)
-    assert stress[-1, 0] > true_params["sigma_y0"]
+    assert result.stress[-1, 0] > true_params["sigma_y0"]
