@@ -9,31 +9,18 @@ Analytical solution for uniaxial tension with linear isotropic hardening:
 where σ_y = σ_y0 + H ep_n.
 """
 
+import numpy as np
 import jax.numpy as jnp
 import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.models.j2_isotropic import J2Isotropic3D
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
-
-
-def _lame(params):
-    E, nu = params["E"], params["nu"]
-    mu = E / (2.0 * (1.0 + nu))
-    lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
-    return lam, mu
 
 
 # ---------------------------------------------------------------------------
 # Uniaxial plastic step from virgin state
 # ---------------------------------------------------------------------------
 
-def test_plastic_stress_uniaxial(model, steel_params):
+def test_plastic_stress_uniaxial(model, steel_params, lame_constants):
     """Plastic uniaxial strain step: σ11_new matches analytic correction.
 
     Note: strain_inc = [deps11, 0, 0, ...] is a *uniaxial strain* increment,
@@ -44,7 +31,7 @@ def test_plastic_stress_uniaxial(model, steel_params):
     The analytic σ11 after return mapping is:
         σ11_new = (λ+2μ)deps11 - 2μ·Δλ
     """
-    lam, mu = _lame(steel_params)
+    lam, mu = lame_constants
     sigma_y0 = steel_params["sigma_y0"]
     H = steel_params["H"]
 
@@ -67,9 +54,10 @@ def test_plastic_stress_uniaxial(model, steel_params):
     sigma11_analytic = float((lam + 2.0 * mu) * deps11 - 2.0 * mu * dlambda_analytic)
 
     assert dlambda_analytic > 0, "should be in plastic domain"
-    assert jnp.allclose(
-        float(stress_new[0]), sigma11_analytic, rtol=1e-6
-    ), f"Expected σ11 ≈ {sigma11_analytic:.4f}, got {float(stress_new[0]):.4f}"
+    np.testing.assert_allclose(
+        float(stress_new[0]), sigma11_analytic, rtol=1e-6,
+        err_msg=f"Expected σ11 ≈ {sigma11_analytic:.4f}, got {float(stress_new[0]):.4f}",
+    )
 
 
 def test_plastic_ep_updated(model, steel_params):
@@ -85,13 +73,13 @@ def test_plastic_ep_updated(model, steel_params):
     assert float(state_new["ep"]) > 0.0
 
 
-def test_plastic_ep_matches_dlambda(model, steel_params):
+def test_plastic_ep_matches_dlambda(model, steel_params, lame_constants):
     """ep_new = Δλ for J2 (Δep = Δλ from consistency condition).
 
     σ_vm_trial must be computed via vonmises(σ_trial), not σ_trial[0],
     because a uniaxial strain increment produces a triaxial stress state.
     """
-    lam, mu = _lame(steel_params)
+    lam, mu = lame_constants
     sigma_y0 = steel_params["sigma_y0"]
     H = steel_params["H"]
 
@@ -107,7 +95,7 @@ def test_plastic_ep_matches_dlambda(model, steel_params):
         model, strain_inc, jnp.zeros(6), state_n, steel_params
     )
 
-    assert jnp.allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
+    np.testing.assert_allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
 
 
 def test_plastic_yield_consistency(model, steel_params):
@@ -134,5 +122,5 @@ def test_plastic_ddsdde_differs_from_C(model, steel_params):
         model, strain_inc, jnp.zeros(6), model.initial_state(), steel_params
     )
 
-    assert not jnp.allclose(ddsdde, C, atol=1.0), \
+    assert not np.allclose(np.asarray(ddsdde), np.asarray(C), atol=1.0), \
         "Plastic tangent should differ from elastic stiffness"

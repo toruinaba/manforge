@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
 from manforge.core.stress_state import SOLID_3D, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2Isotropic1D
 from manforge.simulation.driver import StressDriver, StrainDriver

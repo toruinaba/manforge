@@ -8,19 +8,13 @@ Covers:
 - method="analytical" raises NotImplementedError on a model without hooks
 """
 
+import numpy as np
 import jax.numpy as jnp
 import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.material import MaterialModel3D
-from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
 
 
 # ---------------------------------------------------------------------------
@@ -42,17 +36,12 @@ def test_plastic_corrector_elastic_path_not_called(model, steel_params):
         model, strain_inc, stress_n, state_n, steel_params, method="analytical"
     )
     C = model.elastic_stiffness(steel_params)
-    assert jnp.allclose(stress_new, C @ strain_inc, rtol=1e-10)
-    assert jnp.allclose(ddsdde, C, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
 
 def test_plastic_corrector_standalone_plastic(model, steel_params):
     """plastic_corrector returns correct (stress, state, dlambda) for a plastic step."""
-    E, nu = steel_params["E"], steel_params["nu"]
-    mu = E / (2.0 * (1.0 + nu))
-    H = steel_params["H"]
-    sigma_y0 = steel_params["sigma_y0"]
-
     C = model.elastic_stiffness(steel_params)
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -103,8 +92,10 @@ def test_analytical_stress_matches_autodiff(model, steel_params, strain_inc_vec)
     s_ad, st_ad, _ = return_mapping(model, strain_inc, stress_n, state_n, steel_params, method="autodiff")
     s_an, st_an, _ = return_mapping(model, strain_inc, stress_n, state_n, steel_params, method="analytical")
 
-    assert jnp.allclose(s_an, s_ad, atol=1e-6), \
-        f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}"
+    np.testing.assert_allclose(
+        np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
+        err_msg=f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}",
+    )
     assert abs(float(st_an["ep"]) - float(st_ad["ep"])) < 1e-10
 
 
@@ -119,7 +110,7 @@ def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model, steel_
     s_ad, _, _ = return_mapping(model, strain_inc2, s1, st1, steel_params, method="autodiff")
     s_an, _, _ = return_mapping(model, strain_inc2, s1, st1, steel_params, method="analytical")
 
-    assert jnp.allclose(s_an, s_ad, atol=1e-6)
+    np.testing.assert_allclose(np.asarray(s_an), np.asarray(s_ad), atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +149,10 @@ def test_method_auto_uses_analytical(model, steel_params):
     s_auto, _, D_auto = return_mapping(model, strain_inc, stress_n, state_n, steel_params, method="auto")
     s_an,   _, D_an   = return_mapping(model, strain_inc, stress_n, state_n, steel_params, method="analytical")
 
-    assert jnp.allclose(s_auto, s_an, atol=1e-12), "auto should match analytical path"
-    assert jnp.allclose(D_auto, D_an, atol=1e-12), "auto should match analytical tangent"
+    np.testing.assert_allclose(np.asarray(s_auto), np.asarray(s_an), atol=1e-12,
+                               err_msg="auto should match analytical path")
+    np.testing.assert_allclose(np.asarray(D_auto), np.asarray(D_an), atol=1e-12,
+                               err_msg="auto should match analytical tangent")
 
 
 # ---------------------------------------------------------------------------

@@ -9,15 +9,8 @@ raises NotImplementedError as expected.
 import jax.numpy as jnp
 import pytest
 
-import manforge  # noqa: F401 — enables float64
-from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
 from manforge.verification.fortran_bridge import FortranUMAT
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
 
 
 # ---------------------------------------------------------------------------
