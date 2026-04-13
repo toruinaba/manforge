@@ -28,7 +28,7 @@ mod = pytest.importorskip(
 
 import manforge  # noqa: F401 -- enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification import UMATVerifier
+from manforge.verification import UMATVerifier, FortranUMAT
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +48,45 @@ def params():
 @pytest.fixture
 def verifier(model):
     return UMATVerifier(model, module_name="manforge_umat")
+
+
+# ---------------------------------------------------------------------------
+# FortranUMAT direct interface (primary usage pattern)
+# ---------------------------------------------------------------------------
+
+def test_fortran_umat_run(params):
+    """FortranUMAT.run calls _run with positional args and returns numpy arrays."""
+    fortran = FortranUMAT("manforge_umat")
+    dstran = np.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    stress_f, ep_f, ddsdde_f = fortran.run(
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
+    )
+    assert np.asarray(stress_f).shape == (6,)
+    assert np.asarray(ddsdde_f).shape == (6, 6)
+
+
+def test_fortran_umat_call_component():
+    """FortranUMAT.call invokes a named sub-component subroutine."""
+    fortran = FortranUMAT("manforge_umat")
+    C = fortran.call("umat_j2_elastic_stiffness", 210_000.0, 0.3)
+    assert np.asarray(C).shape == (6, 6)
+
+
+def test_fortran_umat_run_matches_module_smoke(params):
+    """FortranUMAT.run and the raw f2py module give identical results."""
+    fortran = FortranUMAT("manforge_umat")
+    dstran = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    stress_f, ep_f, ddsdde_f = fortran.run(
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
+    )
+    stress_raw, ep_raw, ddsdde_raw = mod.umat_j2_run(
+        params["E"], params["nu"], params["sigma_y0"], params["H"],
+        np.zeros(6), 0.0, dstran,
+    )
+    np.testing.assert_array_equal(stress_f, stress_raw)
+    np.testing.assert_array_equal(ddsdde_f, ddsdde_raw)
 
 
 # ---------------------------------------------------------------------------

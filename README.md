@@ -100,7 +100,9 @@ src/manforge/
 ├── verification/
 │   ├── compare.py         # compare_solvers() — 汎用ソルバ比較
 │   ├── fd_check.py        # FD vs AD/解析解 tangent 比較
-│   └── fortran_bridge.py  # FortranUMAT — f2py ブリッジ
+│   ├── fortran_bridge.py  # FortranUMAT — f2py 薄ラッパー（型変換のみ）
+│   ├── test_cases.py      # テストケース生成（estimate_yield_strain, generate_*）
+│   └── umat_verifier.py   # UMATVerifier — 一括検証の便利ユーティリティ
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換 (StressState 対応)
     └── tensor.py          # 4 階テンソル操作
@@ -266,26 +268,49 @@ print(result.params, result.residual)
 
 ## Fortran Cross-Validation
 
-```python
-from manforge.verification import UMATVerifier
+`FortranUMAT` は f2py モジュールへの薄いラッパーで、型変換（float64）だけを担当する。
+`_run` サブルーチンとコンポーネントサブルーチンを同じパターンで呼べる:
 
-verifier = UMATVerifier(model, "manforge_umat")
-result   = verifier.run(params)
-print(result.summary())
+```python
+import numpy as np
+import jax.numpy as jnp
+import manforge
+from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.core.return_mapping import return_mapping
+from manforge.verification import FortranUMAT
+
+model   = J2Isotropic3D()
+params  = {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
+dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+fortran = FortranUMAT("manforge_umat")
+
+# Fortran _run を直接呼ぶ
+stress_f, ep_f, ddsdde_f = fortran.run(
+    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    np.zeros(6), 0.0, dstran,
+)
+
+# Python 側と明示的に比較
+stress_py, _, ddsdde_py = return_mapping(
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+)
+np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
 ```
 
-`run` は2フェーズを自動実行する:
-1. **単一ステップ比較** — 降伏ひずみを自動推定し、弾性・塑性・多軸・せん断の計5ケースを生成して `compare_solvers` で比較
-2. **多ステップ比較** — 引張→除荷→圧縮のサイクル履歴を両ソルバーで独立に走らせ、ステップごとに応力・状態変数・tangentを比較
-
-テストケース生成を単独で使うこともできる:
+コンポーネント単位での比較も同じパターン（詳細: `fortran/README.md`）:
 
 ```python
-from manforge.verification.test_cases import generate_single_step_cases
-from manforge.verification import compare_solvers
+C_f  = fortran.call("umat_j2_elastic_stiffness", params["E"], params["nu"])
+C_py = model.elastic_stiffness(params)
+np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
+```
 
-cases  = generate_single_step_cases(model, params)
-result = compare_solvers(solver_a, solver_b, cases)
+一括テスト（多数のテストケースを自動生成して一気に走らせたい場合）:
+
+```python
+from manforge.verification import UMATVerifier
+result = UMATVerifier(model, "manforge_umat").run(params)
+print(result.summary())
 ```
 
 ビルド:

@@ -164,11 +164,15 @@ class VerificationResult:
 
 
 class UMATVerifier:
-    """Verifier for Fortran UMAT subroutines.
+    """Convenience utility: auto-generates test cases and runs batch comparison.
 
-    Compares a compiled Fortran UMAT against the Python
-    :func:`~manforge.core.return_mapping.return_mapping` reference using
-    auto-generated single-step test cases and a multi-step strain history.
+    For a single-routine check or component-level debugging, use
+    :class:`~manforge.verification.fortran_bridge.FortranUMAT` directly with
+    explicit ``np.testing.assert_allclose`` calls — that approach is more
+    transparent and easier to trust.
+
+    This class is useful when you want to run a comprehensive set of
+    auto-generated single-step and multi-step cases in one call.
 
     Parameters
     ----------
@@ -184,7 +188,7 @@ class UMATVerifier:
 
     def __init__(self, model, module_name: str, subroutine: str | None = None):
         self._model   = model
-        self._fortran = FortranUMAT(module_name, model, subroutine)
+        self._fortran = FortranUMAT(module_name, subroutine)
 
     def run(
         self,
@@ -237,7 +241,7 @@ class UMATVerifier:
         py_solver    = self._make_python_solver()
         single_result = compare_solvers(
             py_solver,
-            self._fortran.call,
+            self._call_fortran,
             test_cases,
             stress_tol=stress_tol,
             tangent_tol=tangent_tol,
@@ -278,6 +282,28 @@ class UMATVerifier:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _call_fortran(self, strain_inc, stress_n, state_n: dict, params: dict):
+        """Marshal Python dicts to Fortran positional args and call _run.
+
+        This is the only place in UMATVerifier that knows about param_names
+        and state_names.  FortranUMAT itself has no model knowledge.
+        """
+        param_args = [float(params[n]) for n in self._model.param_names]
+        stress_i   = np.asarray(stress_n,   dtype=np.float64)
+        state_args = [float(state_n[n]) for n in self._model.state_names]
+        dstran     = np.asarray(strain_inc, dtype=np.float64)
+
+        result = self._fortran.run(*param_args, stress_i, *state_args, dstran)
+
+        stress_out = np.array(result[0])
+        n_states   = len(self._model.state_names)
+        state_new  = {
+            name: float(result[1 + i])
+            for i, name in enumerate(self._model.state_names)
+        }
+        ddsdde = np.array(result[1 + n_states])
+        return stress_out, state_new, ddsdde
 
     def _make_python_solver(self):
         """Return a solver callable backed by Python return_mapping."""
@@ -337,7 +363,7 @@ class UMATVerifier:
             )
 
             # Fortran increment
-            stress_f90, state_f90, ddsdde_f90 = self._fortran.call(
+            stress_f90, state_f90, ddsdde_f90 = self._call_fortran(
                 strain_inc, stress_f90, state_f90, params
             )
 

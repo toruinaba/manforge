@@ -115,59 +115,53 @@ NTENS = 6 for 3D full stress state (NDI=3, NSHR=3).
 
 ## Cross-validation with Python
 
-Use `UMATVerifier` for the standard workflow — it auto-generates test cases
-and runs a multi-step strain history comparison:
+The primary workflow uses `FortranUMAT` to call Fortran subroutines with
+automatic float64 conversion, then compares results explicitly against the
+Python reference.  This approach works identically for `_run` and for any
+individual sub-component.
 
 ```python
+import numpy as np
+import jax.numpy as jnp
 import manforge  # enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification import UMATVerifier
+from manforge.core.return_mapping import return_mapping
+from manforge.verification import FortranUMAT
 
 model  = J2Isotropic3D()
 params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
 
-verifier = UMATVerifier(model, "manforge_umat")
-result   = verifier.run(params)
-print(result.summary())
+fortran = FortranUMAT("manforge_umat")
 ```
 
-`run` performs two phases automatically:
-
-1. **Single-step** — estimates the yield strain from the model's yield
-   surface, generates 5 test cases (elastic, plastic uniaxial, multiaxial,
-   shear, pre-stressed), and compares with
-   :func:`~manforge.verification.compare.compare_solvers`.
-2. **Multi-step** — runs a tension-unload-compression cycle through both
-   Python and Fortran with independent state propagation, comparing stress,
-   tangent, and state at every step.
-
-For custom loading, pass your own strain history:
+### Full routine comparison (`_run`)
 
 ```python
-import numpy as np
-strain = np.linspace(0.0, 5e-3, 100)          # shape (N,) uniaxial
-result = verifier.run(params, strain_history=strain)
+dstran = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+# Fortran
+stress_f, ep_f, ddsdde_f = fortran.run(
+    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    np.zeros(6), 0.0,   # stress_in, ep_in
+    dstran,
+)
+
+# Python
+stress_py, state_py, ddsdde_py = return_mapping(
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+)
+
+# Compare
+np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
 ```
 
-For lower-level access, `FortranUMAT.call` follows the standard solver
-protocol `(strain_inc, stress_n, state_n, params) -> (stress_new, state_new, ddsdde)`
-and can be used directly with `compare_solvers`.
+### Component-level comparison
 
----
-
-## Component-level verification
-
-`UMATVerifier` is a black-box acceptance test — it compares `_run` inputs and
-outputs end-to-end.  When it reports a failure, the next step is to isolate
-*which sub-component* is wrong.
-
-### Pattern: expose internal subroutines for direct comparison
-
-Add a standalone f2py-callable subroutine for each component you want to
-inspect, recompile, then compare against the matching Python method.
-
-`umat_j2.f90` already includes `umat_j2_elastic_stiffness` as a reference
-example:
+When `_run` results differ, narrow down which sub-component is wrong.
+Add a standalone subroutine to the `.f90` file, recompile, and compare using
+the same pattern.  `umat_j2.f90` already includes `umat_j2_elastic_stiffness`
+as a reference example:
 
 ```fortran
 ! In umat_j2.f90 — already present
@@ -178,32 +172,43 @@ subroutine umat_j2_elastic_stiffness(E, nu, C)
 end subroutine
 ```
 
-After recompiling (`make fortran-build-umat`), call it from Python:
+After recompiling (`make fortran-build-umat`), the call pattern is identical:
+
+```python
+# Fortran sub-component
+C_f = fortran.call("umat_j2_elastic_stiffness", params["E"], params["nu"])
+
+# Python reference
+C_py = model.elastic_stiffness(params)
+
+np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
+```
+
+The same pattern applies to any internal quantity — yield function, flow
+direction, tangent sub-block, etc.  The elastic stiffness is the best first
+check because a mismatch here propagates into every downstream calculation.
+
+---
+
+## Batch verification (convenience utility)
+
+`UMATVerifier` auto-generates 5 single-step test cases and a 35-step
+tension-unload-compression history, then runs all comparisons at once.
+Useful for a quick overall pass/fail check, but the comparison logic is
+opaque — prefer the explicit `FortranUMAT` approach when debugging.
+
+```python
+from manforge.verification import UMATVerifier
+
+verifier = UMATVerifier(model, "manforge_umat")
+result   = verifier.run(params)
+print(result.summary())
+```
+
+For a custom strain history:
 
 ```python
 import numpy as np
-import manforge_umat
-import manforge  # enables JAX float64
-from manforge.models.j2_isotropic import J2Isotropic3D
-
-model  = J2Isotropic3D()
-params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
-
-# Fortran sub-component
-C_fortran = np.array(manforge_umat.umat_j2_elastic_stiffness(params["E"], params["nu"]))
-
-# Python reference
-C_python = np.array(model.elastic_stiffness(params))
-
-np.testing.assert_allclose(C_fortran, C_python, rtol=1e-12)
+strain = np.linspace(0.0, 5e-3, 100)   # shape (N,) uniaxial
+result = verifier.run(params, strain_history=strain)
 ```
-
-### Extending the pattern
-
-The same approach works for any internal quantity — yield function value, flow
-direction, consistent tangent sub-block, etc.  Add a subroutine that outputs
-the quantity of interest, recompile, and compare against the Python model's
-corresponding method (`yield_function`, `hardening_increment`, …).
-
-The elastic stiffness is the best first check because it is the simplest
-component and a mismatch here propagates into every downstream calculation.

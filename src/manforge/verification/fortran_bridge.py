@@ -1,31 +1,52 @@
 """Fortran UMAT bridge for cross-validation.
 
-Provides :class:`FortranUMAT` for calling compiled Fortran UMAT subroutines
-with the same Python-level interface as
-:func:`~manforge.core.return_mapping.return_mapping`.
+Provides :class:`FortranUMAT`, a thin Pythonic wrapper around an f2py-compiled
+Fortran module.  Its sole responsibility is type conversion and subroutine
+discovery — it has no knowledge of the Python-side ``MaterialModel``.
 
-Calling convention for Fortran ``_run`` subroutines
------------------------------------------------------
+Primary interface
+-----------------
+Call any Fortran subroutine with automatic float64 conversion::
+
+    from manforge.verification import FortranUMAT
+    import numpy as np
+
+    fortran = FortranUMAT("manforge_umat")
+
+    # Call the auto-detected *_run subroutine
+    stress_f, ep_f, ddsdde_f = fortran.run(
+        210_000.0, 0.3, 250.0, 1_000.0,          # E, nu, sigma_y0, H
+        np.zeros(6), 0.0,                          # stress_in, ep_in
+        np.array([2e-3, 0, 0, 0, 0, 0]),           # dstran
+    )
+
+    # Call any other subroutine by name (same pattern)
+    C_f = fortran.call("umat_j2_elastic_stiffness", 210_000.0, 0.3)
+
+Compare results explicitly against the Python reference::
+
+    from manforge.core.return_mapping import return_mapping
+    import jax.numpy as jnp
+
+    stress_py, state_py, ddsdde_py = return_mapping(
+        model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+    )
+    np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+
+Calling convention for ``*_run`` subroutines
+---------------------------------------------
 Each compiled ``*_run`` subroutine must follow::
 
     fn(*params, stress_in, *states, dstran)
         -> (stress_out, *state_scalars, ddsdde)
 
-where parameters and state variables are ordered according to
-``model.param_names`` and ``model.state_names`` respectively.
-``umat_j2_run(E, nu, sigma_y0, H, stress_in, ep_in, dstran)`` conforms to
-this convention.
+where parameter and state ordering matches the model's ``param_names`` and
+``state_names``.  ``umat_j2_run(E, nu, sigma_y0, H, stress_in, ep_in, dstran)``
+conforms to this convention.
 
-Comparison workflow
--------------------
-For the typical use case (verifying a Fortran UMAT against a Python model),
-use :class:`~manforge.verification.umat_verifier.UMATVerifier`::
-
-    verifier = UMATVerifier(model, "manforge_umat")
-    result   = verifier.run(params)
-
-For lower-level access, use :func:`~manforge.verification.compare.compare_solvers`
-directly, passing :meth:`FortranUMAT.call` as one of the solvers.
+For automated multi-case comparison, use
+:class:`~manforge.verification.umat_verifier.UMATVerifier` as a convenience
+utility.
 """
 
 import importlib
@@ -33,36 +54,37 @@ import importlib
 import numpy as np
 
 
+def _ensure_float64(args):
+    """Convert args to float64: scalars to float, arrays to np.float64."""
+    out = []
+    for a in args:
+        if hasattr(a, "__len__") or isinstance(a, np.ndarray):
+            out.append(np.asarray(a, dtype=np.float64))
+        else:
+            out.append(float(a))
+    return out
+
+
 class FortranUMAT:
-    """Bridge to a compiled Fortran UMAT subroutine via f2py.
+    """Thin Pythonic wrapper around an f2py-compiled Fortran UMAT module.
 
-    Wraps an f2py-compiled module so that the Fortran UMAT can be called
-    with the same Python-level interface as
-    :func:`~manforge.core.return_mapping.return_mapping`.
-
-    Parameter and state variable ordering is derived automatically from
-    ``model.param_names`` and ``model.state_names``, so the bridge works
-    with any model whose Fortran ``_run`` subroutine follows the calling
-    convention described in the module docstring.
+    Handles float64 type conversion and auto-detects the ``*_run`` subroutine.
+    Has no knowledge of the Python-side ``MaterialModel``.
 
     Parameters
     ----------
     module_name : str
         Name of the f2py-compiled Python module (must be importable, e.g.
         after ``make fortran-build-umat``).
-    model : MaterialModel
-        Model instance that provides ``param_names`` and ``state_names``
-        for dict-to-positional-argument marshalling.
     subroutine : str, optional
-        Name of the Fortran subroutine to call.  If *None* (default), the
-        module is scanned for subroutines whose names end with ``"_run"``.
-        Exactly one such subroutine must exist; otherwise pass this argument
-        explicitly.
+        Name of the Fortran ``*_run`` subroutine used by :meth:`run`.
+        If *None* (default), the module is scanned for subroutines whose
+        names end with ``"_run"``.  Exactly one such subroutine must exist;
+        otherwise pass this argument explicitly.
     """
 
-    def __init__(self, module_name: str, model, subroutine: str | None = None):
+    def __init__(self, module_name: str, subroutine: str | None = None):
         self._mod = importlib.import_module(module_name)
-        self._model = model
         if subroutine is None:
             candidates = [n for n in dir(self._mod) if n.endswith("_run")]
             if len(candidates) == 1:
@@ -74,51 +96,52 @@ class FortranUMAT:
                 )
         self._fn = getattr(self._mod, subroutine)
 
-    def call(
-        self,
-        strain_inc,
-        stress_n,
-        state_n: dict,
-        params: dict,
-        *,
-        dtime: float = 1.0,
-    ):
-        """Call the Fortran UMAT with Python-compatible arguments.
+    @property
+    def module(self):
+        """The raw f2py module.
+
+        Provides direct access to every subroutine in the compiled module::
+
+            C = fortran.module.umat_j2_elastic_stiffness(210_000.0, 0.3)
+        """
+        return self._mod
+
+    def run(self, *args):
+        """Call the auto-detected ``*_run`` subroutine.
+
+        Arguments are passed in Fortran order (same as the f2py function).
+        Scalars are converted to ``float``, arrays to ``np.float64``.
+        Returns the raw f2py output tuple (numpy arrays).
+
+        Example
+        -------
+        ::
+
+            stress_f, ep_f, ddsdde_f = fortran.run(
+                E, nu, sigma_y0, H,       # material params
+                stress_in, ep_in,         # state
+                dstran,                   # strain increment
+            )
+        """
+        return self._fn(*_ensure_float64(args))
+
+    def call(self, name: str, *args):
+        """Call any subroutine in the module by name.
+
+        Applies the same float64 conversion as :meth:`run`.
 
         Parameters
         ----------
-        strain_inc : array-like, shape (ntens,)
-            Strain increment Δε.
-        stress_n : array-like, shape (ntens,)
-            Stress at the beginning of the increment.
-        state_n : dict
-            Internal state variables, keyed by ``model.state_names``.
-        params : dict
-            Material parameters, keyed by ``model.param_names``.
-        dtime : float
-            Unused; kept for interface symmetry with return_mapping.
+        name : str
+            Exact subroutine name as it appears in the f2py module.
+        *args
+            Positional arguments forwarded to the subroutine.
 
-        Returns
+        Example
         -------
-        stress_new : np.ndarray, shape (ntens,)
-        state_new : dict
-        ddsdde : np.ndarray, shape (ntens, ntens)
+        ::
+
+            C = fortran.call("umat_j2_elastic_stiffness", E, nu)
         """
-        dstran   = np.asarray(strain_inc, dtype=np.float64)
-        stress_i = np.asarray(stress_n,   dtype=np.float64)
-
-        param_args = [float(params[name]) for name in self._model.param_names]
-        state_args = [float(state_n[name]) for name in self._model.state_names]
-
-        result = self._fn(*param_args, stress_i, *state_args, dstran)
-
-        stress_out = np.array(result[0])
-        n_states = len(self._model.state_names)
-        state_new = {
-            name: float(result[1 + i])
-            for i, name in enumerate(self._model.state_names)
-        }
-        ddsdde = np.array(result[1 + n_states])
-
-        return stress_out, state_new, ddsdde
-
+        fn = getattr(self._mod, name)
+        return fn(*_ensure_float64(args))
