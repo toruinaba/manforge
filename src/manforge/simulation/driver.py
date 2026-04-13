@@ -5,7 +5,8 @@ All drivers share the same interface via :class:`DriverBase`:
 * Input  — :class:`~manforge.simulation.types.FieldHistory` containing the
   prescribed loading history (strain or stress).
 * Output — :class:`~manforge.simulation.types.DriverResult` containing
-  stress, strain, and all model state variables at every step.
+  stress and strain at every step, plus any explicitly requested state
+  variables.
 
 Conventions
 -----------
@@ -30,32 +31,6 @@ from manforge.simulation.types import DriverResult, FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _collect_state(state_n: dict) -> dict[str, np.ndarray]:
-    """Convert a model state dict to a dict of 1-D-or-2-D numpy arrays."""
-    out = {}
-    for k, v in state_n.items():
-        arr = np.array(v)
-        if arr.ndim == 0:
-            arr = arr.reshape(1)   # scalar → (1,)
-        out[k] = arr
-    return out
-
-
-def _finalise_state_fields(state_accum: dict[str, list]) -> dict[str, FieldHistory]:
-    """Stack per-step state lists into FieldHistory objects."""
-    fields = {}
-    for k, rows in state_accum.items():
-        stacked = np.stack(rows, axis=0)          # (N,) or (N, ntens)
-        if stacked.ndim == 2 and stacked.shape[1] == 1:
-            stacked = stacked[:, 0]               # (N, 1) → (N,)
-        fields[k] = FieldHistory(FieldType.SCALAR, k, stacked)
-    return fields
-
-
-# ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
 
@@ -68,7 +43,13 @@ class DriverBase(ABC):
     """
 
     @abstractmethod
-    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
+    def run(
+        self,
+        model,
+        load: FieldHistory,
+        params: dict,
+        collect_state: dict[str, FieldType] | None = None,
+    ) -> DriverResult:
         """Run the loading simulation.
 
         Parameters
@@ -79,6 +60,14 @@ class DriverBase(ABC):
             match the driver's expectations (see subclass documentation).
         params : dict
             Material parameters.
+        collect_state : dict[str, FieldType] or None, optional
+            Explicitly request state-variable histories to be included in the
+            result.  Keys are model state keys (e.g. ``"ep"``); values specify
+            the :class:`~manforge.simulation.types.FieldType` to assign to the
+            resulting :class:`~manforge.simulation.types.FieldHistory`.
+
+            If ``None`` (default), no state variables are collected and
+            ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
 
         Returns
         -------
@@ -105,7 +94,13 @@ class StrainDriver(DriverBase):
     ``UniaxialDriver`` and ``GeneralDriver`` are aliases for this class.
     """
 
-    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
+    def run(
+        self,
+        model,
+        load: FieldHistory,
+        params: dict,
+        collect_state: dict[str, FieldType] | None = None,
+    ) -> DriverResult:
         """Run the strain-controlled loading history.
 
         Parameters
@@ -120,12 +115,17 @@ class StrainDriver(DriverBase):
 
         params : dict
             Material parameters.
+        collect_state : dict[str, FieldType] or None, optional
+            State variables to include in the result.  Example::
+
+                collect_state={"ep": FieldType.SCALAR}
 
         Returns
         -------
         DriverResult
-            Fields: ``"Stress"`` (N, ntens), ``"Strain"`` (N, ntens), plus
-            one ``FieldType.SCALAR`` field per model state variable.
+            Always contains ``"Stress"`` (N, ntens) and ``"Strain"``
+            (N, ntens).  State-variable fields are added when
+            ``collect_state`` is provided.
         """
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
@@ -134,7 +134,9 @@ class StrainDriver(DriverBase):
 
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
-        state_accum: dict[str, list] = {k: [] for k in state_n}
+        state_accum: dict[str, list] = (
+            {k: [] for k in collect_state} if collect_state else {}
+        )
 
         stress_out = np.zeros((N, ntens))
         strain_out = np.zeros((N, ntens))
@@ -153,14 +155,17 @@ class StrainDriver(DriverBase):
                 model, strain_inc, stress_n, state_n, params
             )
             stress_out[i] = np.array(stress_n)
-            for k, row in _collect_state(state_n).items():
-                state_accum[k].append(row)
+            if collect_state:
+                for k in collect_state:
+                    state_accum[k].append(np.asarray(state_n[k]))
 
         fields: dict[str, FieldHistory] = {
             "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
             "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
         }
-        fields.update(_finalise_state_fields(state_accum))
+        if collect_state:
+            for k, ft in collect_state.items():
+                fields[k] = FieldHistory(ft, k, np.stack(state_accum[k]))
         return DriverResult(fields=fields)
 
 
@@ -190,7 +195,13 @@ class StressDriver(DriverBase):
         self.max_iter = max_iter
         self.tol = tol
 
-    def run(self, model, load: FieldHistory, params: dict) -> DriverResult:
+    def run(
+        self,
+        model,
+        load: FieldHistory,
+        params: dict,
+        collect_state: dict[str, FieldType] | None = None,
+    ) -> DriverResult:
         """Run the stress-controlled loading history.
 
         Parameters
@@ -203,12 +214,17 @@ class StressDriver(DriverBase):
             tensor (Voigt) at each step.
         params : dict
             Material parameters.
+        collect_state : dict[str, FieldType] or None, optional
+            State variables to include in the result.  Example::
+
+                collect_state={"ep": FieldType.SCALAR}
 
         Returns
         -------
         DriverResult
-            Fields: ``"Stress"`` (N, ntens), ``"Strain"`` (N, ntens), plus
-            one ``FieldType.SCALAR`` field per model state variable.
+            Always contains ``"Stress"`` (N, ntens) and ``"Strain"``
+            (N, ntens).  State-variable fields are added when
+            ``collect_state`` is provided.
 
         Raises
         ------
@@ -223,7 +239,9 @@ class StressDriver(DriverBase):
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
         eps_total = np.zeros(ntens)
-        state_accum: dict[str, list] = {k: [] for k in state_n}
+        state_accum: dict[str, list] = (
+            {k: [] for k in collect_state} if collect_state else {}
+        )
 
         # Elastic compliance for the initial strain-increment guess
         C = model.elastic_stiffness(params)
@@ -262,14 +280,17 @@ class StressDriver(DriverBase):
             eps_total = eps_total + np.array(deps)
             stress_out[i] = np.array(stress_new)
             strain_out[i] = eps_total.copy()
-            for k, row in _collect_state(state_n).items():
-                state_accum[k].append(row)
+            if collect_state:
+                for k in collect_state:
+                    state_accum[k].append(np.asarray(state_n[k]))
 
         fields: dict[str, FieldHistory] = {
             "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
             "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
         }
-        fields.update(_finalise_state_fields(state_accum))
+        if collect_state:
+            for k, ft in collect_state.items():
+                fields[k] = FieldHistory(ft, k, np.stack(state_accum[k]))
         return DriverResult(fields=fields)
 
 

@@ -1,6 +1,5 @@
 """Tests for StressDriver (stress-controlled simulation driver)."""
 
-import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -125,22 +124,56 @@ def test_output_shapes(model_3d, steel_params):
 # State variable output
 # ---------------------------------------------------------------------------
 
-def test_state_ep_in_result(model_3d, steel_params):
-    """DriverResult must contain 'ep' state variable history after plastic loading."""
+def test_state_not_collected_by_default(model_3d, steel_params):
+    """Without collect_state, DriverResult contains only Stress and Strain."""
+    stress_history = np.zeros((5, 6))
+    stress_history[:, 0] = np.linspace(0, 200.0, 5)
+
+    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+
+    assert set(result.fields.keys()) == {"Stress", "Strain"}
+
+
+def test_state_ep_collected_when_requested(model_3d, steel_params):
+    """With collect_state, DriverResult contains the requested state field."""
     sigma_y0 = steel_params["sigma_y0"]
     N = 20
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(
+        model_3d,
+        stress_load(stress_history),
+        steel_params,
+        collect_state={"ep": FieldType.SCALAR},
+    )
 
     assert "ep" in result.fields
     ep = result.fields["ep"].data
     assert ep.shape == (N,)
     assert result.fields["ep"].type == FieldType.SCALAR
-    # ep must be non-negative and increasing in the plastic regime
     assert np.all(ep >= 0.0)
     assert ep[-1] > 0.0, "ep should be positive after plastic loading"
+
+
+def test_strain_driver_collect_state(model_3d, steel_params):
+    """StrainDriver also collects state when collect_state is provided."""
+    sigma_y0 = steel_params["sigma_y0"]
+    E = steel_params["E"]
+    N = 20
+    strain_history = np.zeros((N, 6))
+    strain_history[:, 0] = np.linspace(0.0, 3 * sigma_y0 / E, N)
+
+    result = StrainDriver().run(
+        model_3d,
+        FieldHistory(FieldType.STRAIN, "Strain", strain_history),
+        steel_params,
+        collect_state={"ep": FieldType.SCALAR},
+    )
+
+    assert "ep" in result.fields
+    assert result.fields["ep"].data.shape == (N,)
+    assert result.fields["ep"].data[-1] > 0.0
 
 
 # ---------------------------------------------------------------------------
