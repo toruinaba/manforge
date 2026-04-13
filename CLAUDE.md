@@ -15,6 +15,14 @@ make test-all                # Full suite including slow fitting tests
 uv run pytest tests/test_j2_elastic.py -v  # Single test file
 
 # Fortran compilation (requires gfortran)
+# Option A: CLI (recommended for Python users)
+uv run manforge build fortran/test_basic.f90 --name manforge_test_basic
+uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run manforge list              # List compiled modules
+uv run manforge clean             # Remove compiled artifacts
+uv run manforge clean --dry-run   # Preview what would be removed
+
+# Option B: Makefile (lower-level)
 make fortran-build           # Compile test_basic.f90 via f2py
 make fortran-build-umat      # Compile abaqus_stubs.f90 + j2_isotropic_3d.f90 via f2py → j2_isotropic_3d module
 make fortran-test            # Run Fortran basic tests

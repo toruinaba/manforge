@@ -16,6 +16,9 @@ dev = ["pytest"]
 examples = ["matplotlib"]
 fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 
+[project.scripts]
+manforge = "manforge.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/manforge"]
 

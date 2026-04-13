@@ -18,6 +18,7 @@ Python `manforge` implementation.
 
 - **gfortran** ≥ 9
 - **Python** ≥ 3.10 with numpy (f2py is bundled with numpy)
+- **meson** + **ninja** — required by f2py on Python 3.12+ (`uv sync --extra fortran`)
 - **Docker** (recommended for a reproducible environment — see below)
 
 Check availability:
@@ -29,22 +30,42 @@ python -m numpy.f2py --version
 
 ---
 
-## Build with f2py
+## Build
 
-### Compile the J2 UMAT into a Python extension module
+### Option A: `manforge build` CLI (recommended)
+
+```bash
+# Install build tools (meson/ninja) if not yet done
+uv sync --extra fortran
+
+# Compile the J2 UMAT
+uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+
+# Smoke-test module only
+uv run manforge build fortran/test_basic.f90 --name manforge_test_basic
+
+# List compiled modules
+uv run manforge list
+
+# Remove compiled artifacts
+uv run manforge clean
+```
+
+### Option B: Makefile
+
+```bash
+make fortran-build-umat   # J2 UMAT
+make fortran-build        # smoke-test module
+```
+
+### Option C: f2py directly
 
 ```bash
 cd fortran/
 python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
 ```
 
-Or via the Makefile from the project root:
-
-```bash
-make fortran-build-umat
-```
-
-This produces `j2_isotropic_3d.cpython-*.so` (Linux) or `.pyd` (Windows).
+All three options produce `j2_isotropic_3d.cpython-*.so` (Linux) or `.pyd` (Windows) in the `fortran/` directory.
 
 ### Subroutine naming convention
 
@@ -165,7 +186,7 @@ subroutine j2_isotropic_3d_elastic_stiffness(E, nu, C)
 end subroutine
 ```
 
-After compiling (`make fortran-build-umat`), the call pattern is identical:
+After compiling (`manforge build` or `make fortran-build-umat`), the call pattern is identical:
 
 ```python
 # Fortran sub-component
