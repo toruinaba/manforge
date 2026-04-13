@@ -6,6 +6,11 @@
 !   - return_mapping  (src/manforge/core/return_mapping.py)
 !   - consistent_tangent (src/manforge/core/tangent.py)
 !
+! Subroutines:
+!   j2_isotropic_3d            -- f2py-callable core logic (matches J2Isotropic3D)
+!   umat                       -- full ABAQUS UMAT entry point (delegates to above)
+!   j2_isotropic_3d_elastic_stiffness -- elastic stiffness sub-component
+!
 ! Material properties (PROPS):
 !   PROPS(1) = E        Young's modulus
 !   PROPS(2) = nu       Poisson's ratio
@@ -28,7 +33,7 @@
 !   [ n^T            -H  ] [ddl/de    ] = [0]
 !
 ! Build with f2py (meson backend, no external LAPACK needed):
-!   python -m numpy.f2py -c abaqus_stubs.f90 umat_j2.f90 -m manforge_umat
+!   python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
 ! =============================================================================
 
 
@@ -116,9 +121,10 @@ end subroutine solve7
 
 
 ! -----------------------------------------------------------------------------
-! umat_j2_run -- f2py-callable wrapper for the J2 UMAT
+! j2_isotropic_3d -- f2py-callable core subroutine for J2 isotropic hardening
 !
 ! Simplified interface (no ABAQUS boilerplate) designed for f2py and testing.
+! Matches the Python J2Isotropic3D class.
 !
 ! Parameters
 ! ----------
@@ -130,9 +136,9 @@ end subroutine solve7
 ! ep_out             [out] : updated equivalent plastic strain
 ! ddsdde(6,6)        [out] : consistent algorithmic tangent
 ! -----------------------------------------------------------------------------
-subroutine umat_j2_run(E, nu, sigma_y0, H, &
-                        stress_in, ep_in, dstran, &
-                        stress_out, ep_out, ddsdde)
+subroutine j2_isotropic_3d(E, nu, sigma_y0, H, &
+                            stress_in, ep_in, dstran, &
+                            stress_out, ep_out, ddsdde)
     implicit none
     double precision, intent(in)  :: E, nu, sigma_y0, H
     double precision, intent(in)  :: stress_in(6), ep_in, dstran(6)
@@ -331,22 +337,22 @@ subroutine umat_j2_run(E, nu, sigma_y0, H, &
 
     end if
 
-end subroutine umat_j2_run
+end subroutine j2_isotropic_3d
 
 
 ! -----------------------------------------------------------------------------
-! umat_j2 -- full ABAQUS UMAT interface
+! umat -- full ABAQUS UMAT entry point
 !
-! Delegates all logic to umat_j2_run; implements the standard ABAQUS signature
-! for reference and potential solver integration.
+! Delegates all logic to j2_isotropic_3d; implements the standard ABAQUS
+! UMAT signature required by the ABAQUS solver.
 ! -----------------------------------------------------------------------------
-subroutine umat_j2(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
-                   RPL, DDSDDT, DRPLDE, DRPLDT, &
-                   STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP, &
-                   PREDEF, DPRED, CMNAME, NDI, NSHR, NTENS, &
-                   NSTATV, PROPS, NPROPS, COORDS, DROT, PNEWDT, &
-                   CELENT, DFGRD0, DFGRD1, NOEL, NPT, LAYER, &
-                   KSPT, KSTEP, KINC)
+subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
+                RPL, DDSDDT, DRPLDE, DRPLDT, &
+                STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP, &
+                PREDEF, DPRED, CMNAME, NDI, NSHR, NTENS, &
+                NSTATV, PROPS, NPROPS, COORDS, DROT, PNEWDT, &
+                CELENT, DFGRD0, DFGRD1, NOEL, NPT, LAYER, &
+                KSPT, KSTEP, KINC)
     implicit none
     character(len=80),    intent(in)    :: CMNAME
     integer,              intent(in)    :: NDI, NSHR, NTENS, NSTATV, NPROPS
@@ -367,9 +373,9 @@ subroutine umat_j2(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: stress_out(6), ep_out
     integer          :: i
 
-    call umat_j2_run(PROPS(1), PROPS(2), PROPS(3), PROPS(4), &
-                     STRESS, STATEV(1), DSTRAN, &
-                     stress_out, ep_out, DDSDDE)
+    call j2_isotropic_3d(PROPS(1), PROPS(2), PROPS(3), PROPS(4), &
+                         STRESS, STATEV(1), DSTRAN, &
+                         stress_out, ep_out, DDSDDE)
 
     do i = 1, NTENS
         STRESS(i) = stress_out(i)
@@ -383,17 +389,17 @@ subroutine umat_j2(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         DRPLDE(i) = 0.0d0
     end do
 
-end subroutine umat_j2
+end subroutine umat
 
 
 ! -----------------------------------------------------------------------------
-! umat_j2_elastic_stiffness -- return the isotropic elastic stiffness C (6x6)
+! j2_isotropic_3d_elastic_stiffness -- return the isotropic elastic stiffness
 !
-! Exposes the elastic stiffness calculation from umat_j2_run as a standalone
-! f2py-callable subroutine.  Useful for component-level cross-validation:
-! compare this output against J2Isotropic3D.elastic_stiffness(params) in Python
-! to confirm that the elastic part of the Fortran implementation is correct
-! before debugging the plastic return-mapping logic.
+! Exposes the elastic stiffness calculation as a standalone f2py-callable
+! subroutine.  Useful for component-level cross-validation: compare this
+! output against J2Isotropic3D.elastic_stiffness(params) in Python to confirm
+! that the elastic part of the Fortran implementation is correct before
+! debugging the plastic return-mapping logic.
 !
 ! Parameters
 ! ----------
@@ -401,7 +407,7 @@ end subroutine umat_j2
 ! nu     [in]  : Poisson's ratio
 ! C      [out] : 6x6 Voigt stiffness tensor (Fortran column-major order)
 ! -----------------------------------------------------------------------------
-subroutine umat_j2_elastic_stiffness(E, nu, C)
+subroutine j2_isotropic_3d_elastic_stiffness(E, nu, C)
     implicit none
     double precision, intent(in)  :: E, nu
     double precision, intent(out) :: C(6,6)
@@ -429,4 +435,4 @@ subroutine umat_j2_elastic_stiffness(E, nu, C)
         C(i,i) = mu
     end do
 
-end subroutine umat_j2_elastic_stiffness
+end subroutine j2_isotropic_3d_elastic_stiffness

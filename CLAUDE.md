@@ -16,7 +16,7 @@ uv run pytest tests/test_j2_elastic.py -v  # Single test file
 
 # Fortran compilation (requires gfortran)
 make fortran-build           # Compile test_basic.f90 via f2py
-make fortran-build-umat      # Compile abaqus_stubs.f90 + umat_j2.f90 via f2py
+make fortran-build-umat      # Compile abaqus_stubs.f90 + j2_isotropic_3d.f90 via f2py → j2_isotropic_3d module
 make fortran-test            # Run Fortran basic tests
 make fortran-test-umat       # Run Fortran UMAT cross-validation tests
 
@@ -79,4 +79,6 @@ State is `dict[str, jnp.ndarray]`, e.g. `{"ep": 0.05}` for equivalent plastic st
 
 ### Fortran UMAT
 
-`fortran/umat_j2.f90` implements the same J2 algorithm as the Python reference. It uses the full ABAQUS UMAT signature; `fortran/abaqus_stubs.f90` provides mock implementations of ABAQUS internals (SINV, SPRINC, ROTSIG) for standalone compilation. Compiled via f2py to `.so` files in `fortran/`. The `Dockerfile` provides a reproducible gfortran + Python 3.12 environment for Fortran builds.
+`fortran/j2_isotropic_3d.f90` implements the same J2 algorithm as the Python reference. Subroutine names match Python class names: `j2_isotropic_3d` (core logic, f2py callable), `umat` (ABAQUS entry point), `j2_isotropic_3d_elastic_stiffness` (component check). `fortran/abaqus_stubs.f90` provides mock implementations of ABAQUS internals (SINV, SPRINC, ROTSIG) for standalone compilation. Compiled via f2py into the `j2_isotropic_3d` module. The `Dockerfile` provides a reproducible gfortran + Python 3.12 environment for Fortran builds.
+
+`FortranUMAT` (`verification/fortran_bridge.py`) is a thin f2py wrapper whose only job is float64 type conversion. All subroutines are called via `fortran.call(name, *args)` — the same pattern for the full routine and for sub-components.

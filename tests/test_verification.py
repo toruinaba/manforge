@@ -109,3 +109,4 @@ def test_fortran_umat_bad_module():
     """FortranUMAT raises ModuleNotFoundError for an unknown module name."""
     with pytest.raises(ModuleNotFoundError):
         FortranUMAT("nonexistent_umat_module_xyz")
+

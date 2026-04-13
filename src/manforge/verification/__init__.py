@@ -8,7 +8,6 @@ from manforge.verification.test_cases import (
     generate_single_step_cases,
     generate_strain_history,
 )
-from manforge.verification.umat_verifier import UMATVerifier, VerificationResult, StepResult
 
 __all__ = [
     "compare_solvers",
@@ -19,7 +18,4 @@ __all__ = [
     "estimate_yield_strain",
     "generate_single_step_cases",
     "generate_strain_history",
-    "UMATVerifier",
-    "VerificationResult",
-    "StepResult",
 ]
