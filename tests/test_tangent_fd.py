@@ -8,17 +8,10 @@ For each test case, DDSDDE is computed two ways:
 The two must agree to rtol = 1e-5.
 """
 
+import numpy as np
 import jax.numpy as jnp
-import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.models.j2_isotropic import J2Isotropic3D
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
 
 
 def _fd_tangent(model, strain_inc, stress_n, state_n, params, h=1e-7):
@@ -56,8 +49,9 @@ def test_tangent_fd_elastic(model, steel_params):
     )
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n, steel_params)
 
-    assert jnp.allclose(ddsdde_ad, ddsdde_fd, rtol=1e-5, atol=1e-3), (
-        f"Max rel err: {float(jnp.max(jnp.abs(ddsdde_ad - ddsdde_fd) / (jnp.abs(ddsdde_fd) + 1e-12))):.3e}"
+    np.testing.assert_allclose(
+        np.asarray(ddsdde_ad), np.asarray(ddsdde_fd), rtol=1e-5, atol=1e-3,
+        err_msg=f"Max rel err: {float(jnp.max(jnp.abs(ddsdde_ad - ddsdde_fd) / (jnp.abs(ddsdde_fd) + 1e-12))):.3e}",
     )
 
 

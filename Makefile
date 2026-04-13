@@ -29,7 +29,7 @@ fortran-test-umat:
 
 ## Run full test suite (excluding slow fitting tests)
 test:
-	uv run pytest tests/ --ignore=tests/test_fitting.py -v
+	uv run pytest tests/ -m "not slow" -v
 
 ## Run complete test suite (slow — includes fitting tests)
 test-all:

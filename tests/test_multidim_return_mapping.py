@@ -16,7 +16,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
@@ -86,7 +85,7 @@ def test_elastic_step_stress_equals_C_deps(pe_model, pe_state, steel_params):
     stress, _, _ = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, steel_params
     )
-    assert jnp.allclose(stress, C @ deps, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(stress), np.asarray(C @ deps), rtol=1e-10)
 
 
 def test_elastic_step_tangent_equals_C(pe_model, pe_state, steel_params):
@@ -96,7 +95,7 @@ def test_elastic_step_tangent_equals_C(pe_model, pe_state, steel_params):
     _, _, ddsdde = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, steel_params
     )
-    assert jnp.allclose(ddsdde, C, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +175,10 @@ def test_analytical_stress_matches_autodiff(pe_model, pe_state, steel_params, st
     s_an, _, _ = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, steel_params, method="analytical"
     )
-    assert jnp.allclose(s_an, s_ad, atol=1e-6), \
-        f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}"
+    np.testing.assert_allclose(
+        np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
+        err_msg=f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}",
+    )
 
 
 @pytest.mark.parametrize("strain_inc_vec", [

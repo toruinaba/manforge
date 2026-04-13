@@ -11,15 +11,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.verification.compare import compare_solvers, SolverComparisonResult
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
 
 
 def _make_solver(model, method):

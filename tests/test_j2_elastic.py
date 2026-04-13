@@ -1,21 +1,9 @@
 """Test return mapping in the elastic domain for J2Isotropic3D."""
 
+import numpy as np
 import jax.numpy as jnp
-import pytest
 
-import manforge  # noqa: F401
 from manforge.core.return_mapping import return_mapping
-from manforge.models.j2_isotropic import J2Isotropic3D
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D()
-
-
-@pytest.fixture
-def initial_state(model):
-    return model.initial_state()
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +20,7 @@ def test_elastic_stress_update(model, steel_params, initial_state):
     )
 
     expected_stress = C @ strain_inc
-    assert jnp.allclose(stress_new, expected_stress, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(stress_new), np.asarray(expected_stress), rtol=1e-10)
 
 
 def test_elastic_tangent_equals_C(model, steel_params, initial_state):
@@ -44,7 +32,7 @@ def test_elastic_tangent_equals_C(model, steel_params, initial_state):
         model, strain_inc, jnp.zeros(6), initial_state, steel_params
     )
 
-    assert jnp.allclose(ddsdde, C, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
 
 def test_elastic_state_unchanged(model, steel_params, initial_state):
@@ -55,7 +43,7 @@ def test_elastic_state_unchanged(model, steel_params, initial_state):
         model, strain_inc, jnp.zeros(6), initial_state, steel_params
     )
 
-    assert jnp.allclose(state_new["ep"], initial_state["ep"])
+    np.testing.assert_allclose(np.asarray(state_new["ep"]), np.asarray(initial_state["ep"]))
 
 
 def test_elastic_multiaxial(model, steel_params, initial_state):
@@ -67,8 +55,8 @@ def test_elastic_multiaxial(model, steel_params, initial_state):
         model, strain_inc, jnp.zeros(6), initial_state, steel_params
     )
 
-    assert jnp.allclose(stress_new, C @ strain_inc, rtol=1e-10)
-    assert jnp.allclose(ddsdde, C, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
 
 def test_elastic_from_prestress(model, steel_params):
@@ -84,5 +72,5 @@ def test_elastic_from_prestress(model, steel_params):
         model, strain_inc, stress_n, state_n, steel_params
     )
 
-    assert jnp.allclose(stress_new, stress_n + C @ strain_inc, rtol=1e-10)
-    assert jnp.allclose(ddsdde, C, rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(stress_new), np.asarray(stress_n + C @ strain_inc), rtol=1e-10)
+    np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
