@@ -110,6 +110,60 @@ class MaterialModel(ABC):
             Updated state ``state_{n+1}``.
         """
 
+    def hardening_residual(
+        self,
+        state_new: dict,
+        dlambda: jnp.ndarray,
+        stress: jnp.ndarray,
+        state_n: dict,
+        params: dict,
+    ) -> dict:
+        """Residual of the hardening evolution equations (optional override).
+
+        Defines R_h(q_{n+1}, Δλ, σ, q_n, params) = 0 for use in the
+        augmented residual system where state variables are independent
+        unknowns.
+
+        Default implementation derives from ``hardening_increment``::
+
+            R_h = q_{n+1} - hardening_increment(Δλ, σ, q_n, params)
+
+        Override this method to define implicit hardening laws where
+        ``state_new`` cannot be expressed in closed form as a function of
+        ``(dlambda, stress, state_n, params)``.
+
+        Parameters
+        ----------
+        state_new : dict
+            Proposed state at step n+1 (independent unknown).
+        dlambda : jnp.ndarray, scalar
+            Plastic multiplier increment Δλ.
+        stress : jnp.ndarray, shape (ntens,)
+            Current stress σ_{n+1}.
+        state_n : dict
+            State at the beginning of the increment.
+        params : dict
+            Material parameters.
+
+        Returns
+        -------
+        dict
+            Residual dict with same keys and shapes as ``state_new``.
+            Zero at convergence.
+        """
+        state_explicit = self.hardening_increment(dlambda, stress, state_n, params)
+        return {k: state_new[k] - state_explicit[k] for k in state_new}
+
+    @property
+    def uses_implicit_state(self) -> bool:
+        """True if the model overrides ``hardening_residual``.
+
+        When True, ``return_mapping`` uses the augmented (ntens+1+n_state)
+        residual system.  When False (default), the current scalar NR path
+        is used unchanged.
+        """
+        return type(self).hardening_residual is not MaterialModel.hardening_residual
+
     # ------------------------------------------------------------------
     # Default helpers provided by the framework
     # ------------------------------------------------------------------
