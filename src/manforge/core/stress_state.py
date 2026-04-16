@@ -76,6 +76,17 @@ class StressState:
             )
 
     @property
+    def n_missing(self) -> int:
+        """Number of unstored direct stress components (ndi_phys − ndi).
+
+        Used by ``_vonmises`` to correct for physically-present but unstored
+        direct components (e.g. σ33=0 in plane stress, σ22=σ33=0 in 1D).
+
+        Values: SOLID_3D=0, PLANE_STRAIN=0, PLANE_STRESS=1, UNIAXIAL_1D=2.
+        """
+        return self.ndi_phys - self.ndi
+
+    @property
     def mandel_factors_jnp(self) -> jnp.ndarray:
         """Mandel scaling factors as a JAX array, shape (ntens,)."""
         return jnp.array(self.mandel_factors)

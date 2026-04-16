@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 from manforge.autodiff.operators import identity_voigt
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
+from manforge.utils.smooth import smooth_sqrt
 
 
 class MaterialModel(ABC):
@@ -30,6 +31,34 @@ class MaterialModel(ABC):
     param_names: list[str]
     state_names: list[str]
     stress_state: StressState = SOLID_3D
+    hardening_type: str = "explicit"  # "explicit" or "implicit"
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Skip intermediate abstract classes (MaterialModel3D, MaterialModelPS, etc.)
+        # that have not yet implemented elastic_stiffness and yield_function.
+        # Note: __abstractmethods__ is set by ABCMeta *after* __init_subclass__ runs,
+        # so we cannot rely on it here. Instead we check whether the two genuinely
+        # abstract methods are still unimplemented.
+        if (cls.elastic_stiffness is MaterialModel.elastic_stiffness or
+                cls.yield_function is MaterialModel.yield_function):
+            return
+        ht = cls.hardening_type
+        if ht not in ("explicit", "implicit"):
+            raise TypeError(
+                f"{cls.__name__}: hardening_type must be 'explicit' or 'implicit', "
+                f"got {ht!r}"
+            )
+        if ht == "explicit" and cls.hardening_increment is MaterialModel.hardening_increment:
+            raise TypeError(
+                f"{cls.__name__}: explicit hardening models must implement "
+                "hardening_increment()"
+            )
+        if ht == "implicit" and cls.hardening_residual is MaterialModel.hardening_residual:
+            raise TypeError(
+                f"{cls.__name__}: implicit hardening models must implement "
+                "hardening_residual()"
+            )
 
     @property
     def ntens(self) -> int:
@@ -81,7 +110,6 @@ class MaterialModel(ABC):
             Yield function value.
         """
 
-    @abstractmethod
     def hardening_increment(
         self,
         dlambda: jnp.ndarray,
@@ -90,6 +118,10 @@ class MaterialModel(ABC):
         params: dict,
     ) -> dict:
         """Return updated state variables after a plastic increment.
+
+        Required for explicit hardening models (``hardening_type='explicit'``).
+        Optional for implicit models (``hardening_type='implicit'``) — may be
+        implemented as an initial-guess seed for the augmented NR solver.
 
         Parameters
         ----------
@@ -108,7 +140,60 @@ class MaterialModel(ABC):
         -------
         dict
             Updated state ``state_{n+1}``.
+
+        Raises
+        ------
+        NotImplementedError
+            If not overridden on an explicit model.
         """
+        raise NotImplementedError(
+            f"{type(self).__name__}.hardening_increment() is not implemented. "
+            "Explicit models (hardening_type='explicit') must override this method."
+        )
+
+    def hardening_residual(
+        self,
+        state_new: dict,
+        dlambda: jnp.ndarray,
+        stress: jnp.ndarray,
+        state_n: dict,
+        params: dict,
+    ) -> dict:
+        """Residual of the hardening evolution equations (optional override).
+
+        Defines R_h(q_{n+1}, Δλ, σ, q_n, params) = 0 for use in the
+        augmented residual system where state variables are independent
+        unknowns.
+
+        Default implementation derives from ``hardening_increment``::
+
+            R_h = q_{n+1} - hardening_increment(Δλ, σ, q_n, params)
+
+        Override this method to define implicit hardening laws where
+        ``state_new`` cannot be expressed in closed form as a function of
+        ``(dlambda, stress, state_n, params)``.
+
+        Parameters
+        ----------
+        state_new : dict
+            Proposed state at step n+1 (independent unknown).
+        dlambda : jnp.ndarray, scalar
+            Plastic multiplier increment Δλ.
+        stress : jnp.ndarray, shape (ntens,)
+            Current stress σ_{n+1}.
+        state_n : dict
+            State at the beginning of the increment.
+        params : dict
+            Material parameters.
+
+        Returns
+        -------
+        dict
+            Residual dict with same keys and shapes as ``state_new``.
+            Zero at convergence.
+        """
+        state_explicit = self.hardening_increment(dlambda, stress, state_n, params)
+        return {k: state_new[k] - state_explicit[k] for k in state_new}
 
     # ------------------------------------------------------------------
     # Default helpers provided by the framework
@@ -188,6 +273,37 @@ class MaterialModel(ABC):
             ``{name: jnp.array(0.0) for name in self.state_names}``
         """
         return {name: jnp.array(0.0) for name in self.state_names}
+
+    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Von Mises equivalent stress with missing-component correction.
+
+        Computes √(3/2 · (‖s_m‖² + n_missing · p²)) using ``smooth_sqrt``
+        so that JAX gradients are well-defined at zero stress.
+
+        ``n_missing = ndi_phys − ndi`` counts the unstored direct stress
+        components that are physically zero but contribute −p each to the
+        deviatoric norm:
+
+        * ``SOLID_3D``, ``PLANE_STRAIN``: n_missing=0 → √(3/2 s:s)
+        * ``PLANE_STRESS``:              n_missing=1 → √(3/2 (s:s + p²))
+        * ``UNIAXIAL_1D``:               n_missing=2 → |σ11|
+
+        Uses :meth:`_dev` and :meth:`_hydrostatic` as defined by the
+        stress-state base class.
+
+        Parameters
+        ----------
+        stress : jnp.ndarray, shape (ntens,)
+
+        Returns
+        -------
+        jnp.ndarray, scalar
+        """
+        s = self._dev(stress)
+        p = self._hydrostatic(stress)
+        s_m = s * self.stress_state.mandel_factors_jnp
+        sq_norm = jnp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
+        return smooth_sqrt(1.5 * sq_norm)
 
     def plastic_corrector(
         self,
@@ -281,10 +397,12 @@ class MaterialModel3D(MaterialModel):
 
     * :meth:`_hydrostatic` — p = (σ11 + σ22 + σ33) / 3
     * :meth:`_dev`         — s = σ − p δ
-    * :meth:`_vonmises`    — √(3/2 s:s)  (Mandel norm, no correction)
     * :meth:`isotropic_C`  — submatrix extraction from the full 6×6 tensor
     * :meth:`_I_vol`       — δ⊗δ / 3
     * :meth:`_I_dev`       — I − P_vol
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=0, equivalent to √(3/2 s:s)).
 
     Subclasses still must implement the three abstract material methods:
     :meth:`elastic_stiffness`, :meth:`yield_function`,
@@ -327,16 +445,6 @@ class MaterialModel3D(MaterialModel):
         """Deviatoric stress s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress √(3/2 s:s).
-
-        Uses Mandel scaling for the inner product.  No missing-component
-        correction is required because ndi == ndi_phys.
-        """
-        s = self._dev(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        return jnp.sqrt(1.5 * jnp.dot(s_m, s_m))
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """Isotropic elastic stiffness via submatrix extraction.
@@ -387,10 +495,12 @@ class MaterialModelPS(MaterialModel):
 
     * :meth:`_hydrostatic` — p = (σ11 + σ22) / 3  (σ33 = 0)
     * :meth:`_dev`         — s = σ − p δ  (stored components only)
-    * :meth:`_vonmises`    — √(3/2 (s:s + p²))  (one missing-component correction)
     * :meth:`isotropic_C`  — Schur complement (static condensation of σ33)
     * :meth:`_I_vol`       — δ⊗δ / 3  (δ = [1, 1, 0] for ntens=3)
     * :meth:`_I_dev`       — I − P_vol
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=1, giving √(3/2 (s:s + p²))).
 
     Parameters
     ----------
@@ -428,20 +538,6 @@ class MaterialModelPS(MaterialModel):
         """Deviatoric stress of the stored components, s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp  # δ = [1, 1, 0]
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress with one missing-component correction.
-
-        The unstored σ33 = 0 contributes a deviatoric term s33 = −p to the
-        full tensor norm:
-
-          ‖s‖² = ‖s_stored‖²_Mandel + p²
-        """
-        s = self._dev(stress)
-        p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        sq_norm = jnp.dot(s_m, s_m) + p ** 2  # n_missing = 1
-        return jnp.sqrt(1.5 * sq_norm)
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """Plane-stress isotropic stiffness via static condensation.
@@ -493,10 +589,12 @@ class MaterialModel1D(MaterialModel):
 
     * :meth:`_hydrostatic` — p = σ11 / 3  (σ22 = σ33 = 0)
     * :meth:`_dev`         — s = σ − p δ  (stored component only)
-    * :meth:`_vonmises`    — √(3/2 (s11² + 2p²)) = |σ11|
     * :meth:`isotropic_C`  — [[E]] where E = μ(3λ + 2μ) / (λ + μ)
     * :meth:`_I_vol`       — [[1/3]]
     * :meth:`_I_dev`       — [[2/3]]
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=2, giving √(3/2 (s11² + 2p²)) ≈ |σ11|).
 
     Parameters
     ----------
@@ -532,20 +630,6 @@ class MaterialModel1D(MaterialModel):
         """Deviatoric stress of the stored component, s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp  # δ = [1.0]
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress with two missing-component corrections.
-
-        The unstored σ22 = σ33 = 0 each contribute a deviatoric term s_ii = −p
-        to the full tensor norm:
-
-          ‖s‖² = s11² + 2p²  →  σ_vm = |σ11|
-        """
-        s = self._dev(stress)
-        p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        sq_norm = jnp.dot(s_m, s_m) + 2.0 * p ** 2  # n_missing = 2
-        return jnp.sqrt(1.5 * sq_norm)
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).

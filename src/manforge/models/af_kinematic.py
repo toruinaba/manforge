@@ -47,13 +47,13 @@ Notes
 import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.utils.smooth import smooth_abs
 
 
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`.
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` which
+    solves the backward-Euler AF equation in closed form.
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
     Parameters
@@ -95,7 +95,7 @@ class AFKinematic3D(MaterialModel3D):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
@@ -104,11 +104,13 @@ class AFKinematic3D(MaterialModel3D):
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    closed-form backward-Euler AF update.
+    Uses the generic NR + autodiff return-mapping path.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModelPS` (including the
     missing-component correction in ``_vonmises``).
-
-    Uses the generic NR + autodiff return-mapping path.
 
     Parameters
     ----------
@@ -144,7 +146,7 @@ class AFKinematicPS(MaterialModelPS):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
@@ -153,10 +155,12 @@ class AFKinematicPS(MaterialModelPS):
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    closed-form backward-Euler AF update.
+    Uses the generic NR + autodiff return-mapping path.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
-
-    Uses the generic NR + autodiff return-mapping path.
 
     Parameters
     ----------
@@ -191,7 +195,7 @@ class AFKinematic1D(MaterialModel1D):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}

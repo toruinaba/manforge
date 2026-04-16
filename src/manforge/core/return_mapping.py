@@ -41,8 +41,59 @@ Notes
 
 import jax
 import jax.numpy as jnp
+from jax.flatten_util import ravel_pytree
 
-from manforge.core.tangent import consistent_tangent
+from manforge.core.tangent import augmented_consistent_tangent, consistent_tangent
+
+
+def _augmented_nr(model, stress_trial, C, state_n, params, max_iter, tol):
+    """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
+
+    Used when ``model.hardening_type == 'implicit'``.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    stress_trial : jnp.ndarray, shape (ntens,)
+    C : jnp.ndarray, shape (ntens, ntens)
+    state_n : dict
+    params : dict
+    max_iter : int
+    tol : float
+
+    Returns
+    -------
+    stress : jnp.ndarray, shape (ntens,)
+    state_new : dict
+    dlambda : jnp.ndarray, scalar
+    """
+    from manforge.core.residual import make_augmented_residual
+
+    ntens = model.ntens
+    residual_fn, n_state, unflatten_fn = make_augmented_residual(
+        model, stress_trial, C, state_n, params
+    )
+
+    flat_state_n, _ = ravel_pytree(state_n)
+    x = jnp.concatenate([stress_trial, jnp.array([0.0]), flat_state_n])
+
+    for _iteration in range(max_iter):
+        R = residual_fn(x)
+        if jnp.max(jnp.abs(R)) < tol:
+            break
+        J = jax.jacobian(residual_fn)(x)
+        dx = jnp.linalg.solve(J, R)
+        x = x - dx
+    else:
+        raise RuntimeError(
+            f"_augmented_nr: NR did not converge in {max_iter} iterations "
+            f"(||R||_inf = {float(jnp.max(jnp.abs(R))):.3e}, tol = {tol:.3e})"
+        )
+
+    stress = x[:ntens]
+    dlambda = jnp.asarray(x[ntens])
+    state_new = unflatten_fn(x[ntens + 1 :])
+    return stress, state_new, dlambda
 
 
 def return_mapping(
@@ -140,44 +191,54 @@ def return_mapping(
             )
 
     if not _plastic_done:
-        # Generic NR + autodiff path (unchanged from original)
-        dlambda = jnp.array(0.0)
-        stress = stress_trial
-        state_new = state_n
-
-        for _iteration in range(max_iter):
-            # Update state and flow direction
-            state_new = model.hardening_increment(dlambda, stress, state_n, params)
-            n = jax.grad(lambda s: model.yield_function(s, state_new, params))(stress)
-
-            # Stress correction (radial return for fixed n)
-            stress = stress_trial - dlambda * (C @ n)
-
-            # Re-evaluate after stress update
-            state_new = model.hardening_increment(dlambda, stress, state_n, params)
-            f = model.yield_function(stress, state_new, params)
-
-            if jnp.abs(f) < tol:
-                break
-
-            # df/dΔλ  (total derivative, freezing n direction at current stress)
-            #   = −n^T C n  +  h
-            # where h = (∂f/∂state)(∂state/∂Δλ)  computed via jax.grad
-            def _f_residual(dl, _stress=stress):
-                st = model.hardening_increment(dl, _stress, state_n, params)
-                nn = jax.grad(lambda s: model.yield_function(s, st, params))(_stress)
-                s_upd = stress_trial - dl * (C @ nn)
-                return model.yield_function(s_upd, st, params)
-
-            dfddl = jax.grad(_f_residual)(dlambda)
-
-            dlambda = dlambda - f / dfddl
-
-        else:
-            raise RuntimeError(
-                f"return_mapping: NR did not converge in {max_iter} iterations "
-                f"(|f| = {float(jnp.abs(f)):.3e}, tol = {tol:.3e})"
+        if model.hardening_type == "implicit":
+            # Augmented vector NR — state variables are independent unknowns
+            stress, state_new, dlambda = _augmented_nr(
+                model, stress_trial, C, state_n, params, max_iter, tol
             )
+        else:
+            # Generic NR + autodiff path (unchanged from original)
+            dlambda = jnp.array(0.0)
+            stress = stress_trial
+            state_new = state_n
+
+            for _iteration in range(max_iter):
+                # Update state and flow direction
+                state_new = model.hardening_increment(dlambda, stress, state_n, params)
+                n = jax.grad(lambda s: model.yield_function(s, state_new, params))(
+                    stress
+                )
+
+                # Stress correction (radial return for fixed n)
+                stress = stress_trial - dlambda * (C @ n)
+
+                # Re-evaluate after stress update
+                state_new = model.hardening_increment(dlambda, stress, state_n, params)
+                f = model.yield_function(stress, state_new, params)
+
+                if jnp.abs(f) < tol:
+                    break
+
+                # df/dΔλ  (total derivative, freezing n direction at current stress)
+                #   = −n^T C n  +  h
+                # where h = (∂f/∂state)(∂state/∂Δλ)  computed via jax.grad
+                def _f_residual(dl, _stress=stress):
+                    st = model.hardening_increment(dl, _stress, state_n, params)
+                    nn = jax.grad(lambda s: model.yield_function(s, st, params))(
+                        _stress
+                    )
+                    s_upd = stress_trial - dl * (C @ nn)
+                    return model.yield_function(s_upd, st, params)
+
+                dfddl = jax.grad(_f_residual)(dlambda)
+
+                dlambda = dlambda - f / dfddl
+
+            else:
+                raise RuntimeError(
+                    f"return_mapping: NR did not converge in {max_iter} iterations "
+                    f"(|f| = {float(jnp.abs(f)):.3e}, tol = {tol:.3e})"
+                )
 
     # ------------------------------------------------------------------
     # Step 4 — consistent tangent
@@ -194,9 +255,14 @@ def return_mapping(
                 "cannot use method='analytical'."
             )
 
-    # Generic autodiff tangent (unchanged from original)
-    ddsdde = consistent_tangent(
-        model, stress, state_new, dlambda, stress_n, state_n, params
-    )
+    # Autodiff tangent — augmented system for implicit hardening models, else standard
+    if model.hardening_type == "implicit":
+        ddsdde = augmented_consistent_tangent(
+            model, stress, state_new, dlambda, stress_n, state_n, params
+        )
+    else:
+        ddsdde = consistent_tangent(
+            model, stress, state_new, dlambda, stress_n, state_n, params
+        )
 
     return stress, state_new, ddsdde

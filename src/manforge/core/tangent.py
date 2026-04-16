@@ -23,6 +23,7 @@ cross-coupling terms when state depends on σ (as in kinematic hardening).
 
 import jax
 import jax.numpy as jnp
+from jax.flatten_util import ravel_pytree
 
 
 def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params):
@@ -82,6 +83,68 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
 
     # Solve:  dx/dε = A^{-1} rhs
     dxde = jnp.linalg.solve(A, rhs)  # (ntens+1, ntens)
+
+    # Extract dσ/dε (top ntens rows)
+    return dxde[:ntens, :]
+
+
+def augmented_consistent_tangent(
+    model, stress, state, dlambda, stress_n, state_n, params
+):
+    """Consistent tangent for implicit-state models (augmented residual system).
+
+    The residual system is (ntens+1+n_state) equations in
+    (ntens+1+n_state) unknowns x = [σ, Δλ, q_flat].  Implicit
+    differentiation at the converged point gives dσ/dε.
+
+    Parameters
+    ----------
+    model : MaterialModel
+        Model with ``hardening_type == 'implicit'``.
+    stress : jnp.ndarray, shape (ntens,)
+        Converged stress σ_{n+1}.
+    state : dict
+        Converged internal state at step n+1.
+    dlambda : jnp.ndarray, scalar
+        Converged plastic multiplier increment Δλ.
+    stress_n : jnp.ndarray, shape (ntens,)
+        Stress at step n (used only to reconstruct σ_trial).
+    state_n : dict
+        Internal state at step n.
+    params : dict
+        Material parameters.
+
+    Returns
+    -------
+    jnp.ndarray, shape (ntens, ntens)
+        Consistent tangent dσ_{n+1}/dΔε.
+    """
+    from manforge.core.residual import make_augmented_residual
+
+    ntens = model.ntens
+    C = model.elastic_stiffness(params)
+
+    # Reconstruct σ_trial from converged quantities (R1 = 0 at convergence).
+    n_conv = jax.grad(lambda s: model.yield_function(s, state, params))(stress)
+    stress_trial = stress + dlambda * (C @ n_conv)
+
+    residual_fn, n_state, _ = make_augmented_residual(
+        model, stress_trial, C, state_n, params
+    )
+
+    # Converged augmented unknown vector
+    flat_state, _ = ravel_pytree(state)
+    x_conv = jnp.concatenate([stress, dlambda.reshape(1), flat_state])
+
+    # ∂R/∂x — full (ntens+1+n_state) × (ntens+1+n_state) Jacobian
+    A = jax.jacobian(residual_fn)(x_conv)
+
+    # ∂R/∂ε → RHS = [C; 0]  (shape: ntens+1+n_state, ntens)
+    total = ntens + 1 + n_state
+    rhs = jnp.vstack([C, jnp.zeros((1 + n_state, ntens))])  # (total, ntens)
+
+    # Solve: dx/dε = A^{-1} rhs
+    dxde = jnp.linalg.solve(A, rhs)  # (total, ntens)
 
     # Extract dσ/dε (top ntens rows)
     return dxde[:ntens, :]
