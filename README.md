@@ -221,7 +221,7 @@ class MyModel(MaterialModel3D):
         return self.isotropic_C(lam, mu)  # MaterialModel3D が提供する分岐なし実装
 
     def yield_function(self, stress, state, params):
-        # self._vonmises() は MaterialModel3D が正しい実装を提供
+        # self._vonmises() は MaterialModel ABC が smooth_sqrt ベースの実装を提供
         return self._vonmises(stress) - (params["sigma_y0"] + ...)
 
     def hardening_increment(self, dlambda, stress, state, params):
@@ -418,7 +418,6 @@ consistent tangent も `augmented_consistent_tangent()` で計算される。
 
 ```python
 from manforge.core.material import MaterialModel3D
-from manforge.utils.smooth import smooth_abs
 import jax.numpy as jnp
 
 class MyKinematic(MaterialModel3D):
@@ -436,8 +435,9 @@ class MyKinematic(MaterialModel3D):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        # smooth_abs を使って von Mises がゼロになる点でも微分可能に
-        vm_safe = smooth_abs(self._vonmises(xi))
+        # _vonmises は smooth_sqrt ベースで実装されているため、
+        # ゼロ点でも微分可能 — smooth_abs でラップ不要
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
@@ -465,16 +465,17 @@ Lemaitre 損傷モデル等も記述可能。
 デフォルト `eps = 1e-30`。float64 では `√(1e-30) ≈ 3e-16` なので MPa オーダーの計算に影響しない。
 
 **なぜ `jnp.maximum(vm, eps)` ではないか**: `jnp.maximum` はクランプ境界でキンクを持つため、
-`jax.jacobian` などの高次微分時に不連続な勾配を与える。`smooth_abs` は C∞ なのでこの問題がない。
+`jax.jacobian` などの高次微分時に不連続な勾配を与える。`smooth_sqrt` は C∞ なのでこの問題がない。
+`_vonmises` は内部で `smooth_sqrt` を使用しているため、呼び出し側で `smooth_abs` を重ねる必要はない。
 
 ```python
-from manforge.utils.smooth import smooth_abs, smooth_norm, smooth_direction
+from manforge.utils.smooth import smooth_norm, smooth_direction
 
 # ゼロベクトルでも安全な単位法線の計算
 n_hat = smooth_direction(deviatoric_stress)
 
-# スカラーのスムーズ絶対値 (von Mises の除算の安全化)
-vm_safe = smooth_abs(von_mises_value)
+# 任意ベクトルのスムーズノルム
+norm_val = smooth_norm(some_vector)
 ```
 
 ---
