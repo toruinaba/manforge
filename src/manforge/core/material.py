@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 from manforge.autodiff.operators import identity_voigt
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
+from manforge.utils.smooth import smooth_sqrt
 
 
 class MaterialModel(ABC):
@@ -273,6 +274,37 @@ class MaterialModel(ABC):
         """
         return {name: jnp.array(0.0) for name in self.state_names}
 
+    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+        """Von Mises equivalent stress with missing-component correction.
+
+        Computes √(3/2 · (‖s_m‖² + n_missing · p²)) using ``smooth_sqrt``
+        so that JAX gradients are well-defined at zero stress.
+
+        ``n_missing = ndi_phys − ndi`` counts the unstored direct stress
+        components that are physically zero but contribute −p each to the
+        deviatoric norm:
+
+        * ``SOLID_3D``, ``PLANE_STRAIN``: n_missing=0 → √(3/2 s:s)
+        * ``PLANE_STRESS``:              n_missing=1 → √(3/2 (s:s + p²))
+        * ``UNIAXIAL_1D``:               n_missing=2 → |σ11|
+
+        Uses :meth:`_dev` and :meth:`_hydrostatic` as defined by the
+        stress-state base class.
+
+        Parameters
+        ----------
+        stress : jnp.ndarray, shape (ntens,)
+
+        Returns
+        -------
+        jnp.ndarray, scalar
+        """
+        s = self._dev(stress)
+        p = self._hydrostatic(stress)
+        s_m = s * self.stress_state.mandel_factors_jnp
+        sq_norm = jnp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
+        return smooth_sqrt(1.5 * sq_norm)
+
     def plastic_corrector(
         self,
         stress_trial: jnp.ndarray,
@@ -365,10 +397,12 @@ class MaterialModel3D(MaterialModel):
 
     * :meth:`_hydrostatic` — p = (σ11 + σ22 + σ33) / 3
     * :meth:`_dev`         — s = σ − p δ
-    * :meth:`_vonmises`    — √(3/2 s:s)  (Mandel norm, no correction)
     * :meth:`isotropic_C`  — submatrix extraction from the full 6×6 tensor
     * :meth:`_I_vol`       — δ⊗δ / 3
     * :meth:`_I_dev`       — I − P_vol
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=0, equivalent to √(3/2 s:s)).
 
     Subclasses still must implement the three abstract material methods:
     :meth:`elastic_stiffness`, :meth:`yield_function`,
@@ -411,16 +445,6 @@ class MaterialModel3D(MaterialModel):
         """Deviatoric stress s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress √(3/2 s:s).
-
-        Uses Mandel scaling for the inner product.  No missing-component
-        correction is required because ndi == ndi_phys.
-        """
-        s = self._dev(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        return jnp.sqrt(1.5 * jnp.dot(s_m, s_m))
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """Isotropic elastic stiffness via submatrix extraction.
@@ -471,10 +495,12 @@ class MaterialModelPS(MaterialModel):
 
     * :meth:`_hydrostatic` — p = (σ11 + σ22) / 3  (σ33 = 0)
     * :meth:`_dev`         — s = σ − p δ  (stored components only)
-    * :meth:`_vonmises`    — √(3/2 (s:s + p²))  (one missing-component correction)
     * :meth:`isotropic_C`  — Schur complement (static condensation of σ33)
     * :meth:`_I_vol`       — δ⊗δ / 3  (δ = [1, 1, 0] for ntens=3)
     * :meth:`_I_dev`       — I − P_vol
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=1, giving √(3/2 (s:s + p²))).
 
     Parameters
     ----------
@@ -512,20 +538,6 @@ class MaterialModelPS(MaterialModel):
         """Deviatoric stress of the stored components, s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp  # δ = [1, 1, 0]
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress with one missing-component correction.
-
-        The unstored σ33 = 0 contributes a deviatoric term s33 = −p to the
-        full tensor norm:
-
-          ‖s‖² = ‖s_stored‖²_Mandel + p²
-        """
-        s = self._dev(stress)
-        p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        sq_norm = jnp.dot(s_m, s_m) + p ** 2  # n_missing = 1
-        return jnp.sqrt(1.5 * sq_norm)
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """Plane-stress isotropic stiffness via static condensation.
@@ -577,10 +589,12 @@ class MaterialModel1D(MaterialModel):
 
     * :meth:`_hydrostatic` — p = σ11 / 3  (σ22 = σ33 = 0)
     * :meth:`_dev`         — s = σ − p δ  (stored component only)
-    * :meth:`_vonmises`    — √(3/2 (s11² + 2p²)) = |σ11|
     * :meth:`isotropic_C`  — [[E]] where E = μ(3λ + 2μ) / (λ + μ)
     * :meth:`_I_vol`       — [[1/3]]
     * :meth:`_I_dev`       — [[2/3]]
+
+    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    ``smooth_sqrt`` with n_missing=2, giving √(3/2 (s11² + 2p²)) ≈ |σ11|).
 
     Parameters
     ----------
@@ -616,20 +630,6 @@ class MaterialModel1D(MaterialModel):
         """Deviatoric stress of the stored component, s = σ − p δ."""
         p = self._hydrostatic(stress)
         return stress - p * self.stress_state.identity_jnp  # δ = [1.0]
-
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
-        """Von Mises equivalent stress with two missing-component corrections.
-
-        The unstored σ22 = σ33 = 0 each contribute a deviatoric term s_ii = −p
-        to the full tensor norm:
-
-          ‖s‖² = s11² + 2p²  →  σ_vm = |σ11|
-        """
-        s = self._dev(stress)
-        p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        sq_norm = jnp.dot(s_m, s_m) + 2.0 * p ** 2  # n_missing = 2
-        return jnp.sqrt(1.5 * sq_norm)
 
     def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
         """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).

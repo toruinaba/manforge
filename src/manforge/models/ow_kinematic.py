@@ -80,7 +80,6 @@ Notes
 import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel1D, MaterialModel3D, MaterialModelPS
-from manforge.utils.smooth import smooth_abs, smooth_norm
 
 
 class OWKinematic3D(MaterialModel3D):
@@ -121,17 +120,6 @@ class OWKinematic3D(MaterialModel3D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
 
-    def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
-        """Safe von Mises norm of a deviatoric backstress tensor.
-
-        Computes √(3/2) · smooth_norm(α ⊙ m) where m are the Mandel scaling
-        factors.  Unlike ``smooth_abs(self._vonmises(α))``, this avoids a
-        double square-root singularity at α = 0 and has well-defined JAX
-        gradients at the origin.
-        """
-        s_m = alpha * self.stress_state.mandel_factors_jnp
-        return jnp.sqrt(1.5) * smooth_norm(s_m)
-
     def hardening_residual(self, state_new, dlambda, stress, state_n, params) -> dict:
         """Ohno-Wang implicit backstress residual.
 
@@ -150,11 +138,10 @@ class OWKinematic3D(MaterialModel3D):
         # Flow direction from new relative stress (fully implicit backward-Euler)
         xi = stress - alpha_new
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
-        # ‖α_{n+1}‖_vm — uses _alpha_vm_norm to avoid NaN gradient at α=0
-        alpha_vm = self._alpha_vm_norm(alpha_new)
+        alpha_vm = self._vonmises(alpha_new)
 
         R_alpha = (
             alpha_new
@@ -205,19 +192,14 @@ class OWKinematicPS(MaterialModelPS):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
 
-    def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
-        """Safe von Mises norm of a deviatoric backstress (plane-stress variant)."""
-        s_m = alpha * self.stress_state.mandel_factors_jnp
-        return jnp.sqrt(1.5) * smooth_norm(s_m)
-
     def hardening_residual(self, state_new, dlambda, stress, state_n, params) -> dict:
         """Ohno-Wang implicit backstress residual (plane stress)."""
         alpha_new = state_new["alpha"]
         xi = stress - alpha_new
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_vm = self._alpha_vm_norm(alpha_new)
+        alpha_vm = self._vonmises(alpha_new)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -265,19 +247,14 @@ class OWKinematic1D(MaterialModel1D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
 
-    def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
-        """Safe von Mises norm of a deviatoric backstress (1D variant)."""
-        s_m = alpha * self.stress_state.mandel_factors_jnp
-        return jnp.sqrt(1.5) * smooth_norm(s_m)
-
     def hardening_residual(self, state_new, dlambda, stress, state_n, params) -> dict:
         """Ohno-Wang implicit backstress residual (1D)."""
         alpha_new = state_new["alpha"]
         xi = stress - alpha_new
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_vm = self._alpha_vm_norm(alpha_new)
+        alpha_vm = self._vonmises(alpha_new)
         R_alpha = (
             alpha_new
             - state_n["alpha"]

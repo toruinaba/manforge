@@ -47,7 +47,6 @@ Notes
 import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.utils.smooth import smooth_abs
 
 
 class AFKinematic3D(MaterialModel3D):
@@ -96,7 +95,7 @@ class AFKinematic3D(MaterialModel3D):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
@@ -147,7 +146,7 @@ class AFKinematicPS(MaterialModelPS):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
@@ -196,7 +195,7 @@ class AFKinematic1D(MaterialModel1D):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}

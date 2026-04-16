@@ -24,7 +24,6 @@ from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.return_mapping import return_mapping
 from manforge.core.stress_state import PLANE_STRAIN, PLANE_STRESS
-from manforge.utils.smooth import smooth_abs
 from manforge.verification.fd_check import check_tangent
 
 
@@ -55,7 +54,7 @@ class _AFKinematicImplicit3D(AFKinematic3D):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + params["gamma"] * dlambda
@@ -73,7 +72,7 @@ class _AFKinematicImplicitPS(AFKinematicPS):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + params["gamma"] * dlambda
@@ -363,7 +362,7 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
+        vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + params["gamma"] * dlambda
