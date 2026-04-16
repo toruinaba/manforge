@@ -552,3 +552,76 @@ def test_1d_I_dev_projects_to_deviatoric():
     m = _Stub1D()
     stress = jnp.array([300.0])
     np.testing.assert_allclose(np.asarray(m._I_dev() @ stress), np.asarray(m._dev(stress)), atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# __init_subclass__ validation
+# ---------------------------------------------------------------------------
+
+def test_explicit_without_hardening_increment_raises():
+    """Explicit model that does not implement hardening_increment must raise TypeError."""
+    with pytest.raises(TypeError, match="hardening_increment"):
+        class Bad(MaterialModel3D):
+            param_names = []
+            state_names = []
+
+            def elastic_stiffness(self, params):
+                pass
+
+            def yield_function(self, stress, state, params):
+                pass
+
+
+def test_implicit_without_hardening_residual_raises():
+    """Implicit model that does not implement hardening_residual must raise TypeError."""
+    with pytest.raises(TypeError, match="hardening_residual"):
+        class Bad(MaterialModel3D):
+            hardening_type = "implicit"
+            param_names = []
+            state_names = []
+
+            def elastic_stiffness(self, params):
+                pass
+
+            def yield_function(self, stress, state, params):
+                pass
+
+
+def test_invalid_hardening_type_raises():
+    """Unknown hardening_type value must raise TypeError."""
+    with pytest.raises(TypeError, match="hardening_type"):
+        class Bad(MaterialModel3D):
+            hardening_type = "mixed"
+            param_names = []
+            state_names = []
+
+            def elastic_stiffness(self, params):
+                pass
+
+            def yield_function(self, stress, state, params):
+                pass
+
+            def hardening_increment(self, dlambda, stress, state, params):
+                return {}
+
+
+def test_implicit_with_both_methods_allowed():
+    """Implicit model may optionally define hardening_increment (seed)."""
+    class OKImplicit(MaterialModel3D):
+        hardening_type = "implicit"
+        param_names = []
+        state_names = []
+
+        def elastic_stiffness(self, params):
+            pass
+
+        def yield_function(self, stress, state, params):
+            pass
+
+        def hardening_increment(self, dlambda, stress, state, params):
+            return {}
+
+        def hardening_residual(self, state_new, dlambda, stress, state_n, params):
+            return {}
+
+    assert OKImplicit().hardening_type == "implicit"

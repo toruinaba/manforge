@@ -49,7 +49,7 @@ from manforge.core.tangent import augmented_consistent_tangent, consistent_tange
 def _augmented_nr(model, stress_trial, C, state_n, params, max_iter, tol):
     """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
 
-    Used when ``model.uses_implicit_state`` is True.
+    Used when ``model.hardening_type == 'implicit'``.
 
     Parameters
     ----------
@@ -191,7 +191,7 @@ def return_mapping(
             )
 
     if not _plastic_done:
-        if model.uses_implicit_state:
+        if model.hardening_type == "implicit":
             # Augmented vector NR — state variables are independent unknowns
             stress, state_new, dlambda = _augmented_nr(
                 model, stress_trial, C, state_n, params, max_iter, tol
@@ -255,8 +255,8 @@ def return_mapping(
                 "cannot use method='analytical'."
             )
 
-    # Autodiff tangent — augmented system for implicit-state models, else standard
-    if model.uses_implicit_state:
+    # Autodiff tangent — augmented system for implicit hardening models, else standard
+    if model.hardening_type == "implicit":
         ddsdde = augmented_consistent_tangent(
             model, stress, state_new, dlambda, stress_n, state_n, params
         )

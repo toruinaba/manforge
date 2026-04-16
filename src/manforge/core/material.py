@@ -30,6 +30,34 @@ class MaterialModel(ABC):
     param_names: list[str]
     state_names: list[str]
     stress_state: StressState = SOLID_3D
+    hardening_type: str = "explicit"  # "explicit" or "implicit"
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Skip intermediate abstract classes (MaterialModel3D, MaterialModelPS, etc.)
+        # that have not yet implemented elastic_stiffness and yield_function.
+        # Note: __abstractmethods__ is set by ABCMeta *after* __init_subclass__ runs,
+        # so we cannot rely on it here. Instead we check whether the two genuinely
+        # abstract methods are still unimplemented.
+        if (cls.elastic_stiffness is MaterialModel.elastic_stiffness or
+                cls.yield_function is MaterialModel.yield_function):
+            return
+        ht = cls.hardening_type
+        if ht not in ("explicit", "implicit"):
+            raise TypeError(
+                f"{cls.__name__}: hardening_type must be 'explicit' or 'implicit', "
+                f"got {ht!r}"
+            )
+        if ht == "explicit" and cls.hardening_increment is MaterialModel.hardening_increment:
+            raise TypeError(
+                f"{cls.__name__}: explicit hardening models must implement "
+                "hardening_increment()"
+            )
+        if ht == "implicit" and cls.hardening_residual is MaterialModel.hardening_residual:
+            raise TypeError(
+                f"{cls.__name__}: implicit hardening models must implement "
+                "hardening_residual()"
+            )
 
     @property
     def ntens(self) -> int:
@@ -81,7 +109,6 @@ class MaterialModel(ABC):
             Yield function value.
         """
 
-    @abstractmethod
     def hardening_increment(
         self,
         dlambda: jnp.ndarray,
@@ -90,6 +117,10 @@ class MaterialModel(ABC):
         params: dict,
     ) -> dict:
         """Return updated state variables after a plastic increment.
+
+        Required for explicit hardening models (``hardening_type='explicit'``).
+        Optional for implicit models (``hardening_type='implicit'``) — may be
+        implemented as an initial-guess seed for the augmented NR solver.
 
         Parameters
         ----------
@@ -108,7 +139,16 @@ class MaterialModel(ABC):
         -------
         dict
             Updated state ``state_{n+1}``.
+
+        Raises
+        ------
+        NotImplementedError
+            If not overridden on an explicit model.
         """
+        raise NotImplementedError(
+            f"{type(self).__name__}.hardening_increment() is not implemented. "
+            "Explicit models (hardening_type='explicit') must override this method."
+        )
 
     def hardening_residual(
         self,
@@ -153,16 +193,6 @@ class MaterialModel(ABC):
         """
         state_explicit = self.hardening_increment(dlambda, stress, state_n, params)
         return {k: state_new[k] - state_explicit[k] for k in state_new}
-
-    @property
-    def uses_implicit_state(self) -> bool:
-        """True if the model overrides ``hardening_residual``.
-
-        When True, ``return_mapping`` uses the augmented (ntens+1+n_state)
-        residual system.  When False (default), the current scalar NR path
-        is used unchanged.
-        """
-        return type(self).hardening_residual is not MaterialModel.hardening_residual
 
     # ------------------------------------------------------------------
     # Default helpers provided by the framework

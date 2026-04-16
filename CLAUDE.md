@@ -45,10 +45,13 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 **1. Material model layer** — `src/manforge/core/material.py`
 
-`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement exactly 3 material-physics methods:
-- `elastic_stiffness(params)` → (ntens, ntens) Voigt stiffness tensor
-- `yield_function(stress, state, params)` → scalar (≤0 = elastic)
-- `hardening_increment(dlambda, stress, state, params)` → updated state dict
+`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods based on `hardening_type`:
+- `elastic_stiffness(params)` → (ntens, ntens) Voigt stiffness tensor (always required)
+- `yield_function(stress, state, params)` → scalar (≤0 = elastic) (always required)
+- For **explicit** hardening (`hardening_type = "explicit"`, default): `hardening_increment(dlambda, stress, state, params)` → updated state dict
+- For **implicit** hardening (`hardening_type = "implicit"`): `hardening_residual(state_new, dlambda, stress, state_n, params)` → residual dict (zero at convergence)
+
+`__init_subclass__` validates the required method is implemented at class definition time.
 
 Stress-state base classes (choose the appropriate one):
 - `MaterialModel3D` — SOLID_3D (ntens=6) and PLANE_STRAIN (ntens=4); requires `ndi == ndi_phys`
@@ -61,8 +64,9 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 
 **2. Solver layer** — `src/manforge/core/`
 
-- `return_mapping.py`: Elastic trial → yield check → scalar Newton-Raphson on plastic multiplier Δλ (max 50 iter, tol=1e-10)
-- `tangent.py`: Consistent tangent via implicit differentiation of the (ntens+1)×(ntens+1) return-mapping residual system (does NOT differentiate through the NR iterations)
+- `return_mapping.py`: Elastic trial → yield check → dispatches on `model.hardening_type`: explicit → scalar NR on Δλ; implicit → augmented (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10)
+- `tangent.py`: Consistent tangent via implicit differentiation — explicit models use (ntens+1)×(ntens+1) system; implicit models use augmented (ntens+1+n_state) system (does NOT differentiate through NR iterations)
+- `residual.py`: Shared augmented residual builder used by both NR solver and tangent for implicit models
 
 JAX autodiff computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 

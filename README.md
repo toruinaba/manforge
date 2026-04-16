@@ -280,18 +280,18 @@ class MyModel(MaterialModel3D):
 ### 暗黙的硬化則 (implicit hardening)
 
 `hardening_increment` が closed-form で解けない場合（後方 Euler 離散化に状態変数が非線形に現れる場合）、
-`hardening_residual` をオーバーライドすると **augmented residual system** が自動的に有効になる。
+`hardening_type = "implicit"` を宣言し `hardening_residual` を実装すると **augmented residual system** が自動的に有効になる。
 
-`uses_implicit_state` プロパティは `hardening_residual` がオーバーライドされているかを実行時に検出する。
-`True` の場合、`return_mapping` は (ntens+1+n_state) の拡張残差系を Newton-Raphson で解き、
+`hardening_type == "implicit"` の場合、`return_mapping` は (ntens+1+n_state) の拡張残差系を Newton-Raphson で解き、
 consistent tangent も `augmented_consistent_tangent()` で計算される。
-**既存モデル (`J2Isotropic`, `AFKinematic`) は変更不要**（デフォルト実装が `hardening_increment` から自動導出される）。
+**既存モデル (`J2Isotropic`, `AFKinematic`) は変更不要**（デフォルト `hardening_type = "explicit"` で動作する）。
 
 ```python
 from manforge.core.material import MaterialModel3D
 import jax.numpy as jnp
 
 class MyImplicitModel(MaterialModel3D):
+    hardening_type = "implicit"  # augmented NR パスを有効にする
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
@@ -308,15 +308,12 @@ class MyImplicitModel(MaterialModel3D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
 
-    def hardening_increment(self, dlambda, stress, state, params):
-        # 初期値シードとして使われる（ABC 要件を満たすだけでよい）
-        # 例: lagged-norm 近似など
-        return {"alpha": state["alpha"], "ep": state["ep"] + dlambda}
+    # hardening_increment は任意 — 初期値シードとして定義できる
+    # def hardening_increment(self, dlambda, stress, state, params):
+    #     return {"alpha": state["alpha"], "ep": state["ep"] + dlambda}
 
     def hardening_residual(self, state_new, dlambda, stress, state_n, params):
-        """後方 Euler 残差を返す。これをオーバーライドすると uses_implicit_state=True になる。
-
-        R_q(q_{n+1}, Δλ, σ, q_n, params) = 0 を定義する。
+        """後方 Euler 残差。R_q(q_{n+1}, Δλ, σ, q_n, params) = 0 を定義する。
         zero at convergence.
         """
         alpha_new = state_new["alpha"]
@@ -390,8 +387,7 @@ params = {
 result = StrainDriver().run(model, load, params)
 ```
 
-Ohno-Wang モデルは `hardening_residual` をオーバーライドしており、
-`uses_implicit_state = True` になる。
+Ohno-Wang モデルは `hardening_type = "implicit"` を宣言しており、
 return mapping は自動的に (ntens+1+n_state) 拡張 NR を使用し、
 consistent tangent も `augmented_consistent_tangent()` で計算される。
 

@@ -45,7 +45,7 @@ Rearranged as a residual (the form used by ``hardening_residual``):
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
 Because ‖α_{n+1}‖ appears nonlinearly, this cannot be solved for α_{n+1} in
-closed form.  ``uses_implicit_state`` returns True, activating the augmented
+closed form.  Setting ``hardening_type = 'implicit'`` activates the augmented
 Newton-Raphson path and the augmented consistent tangent automatically.
 
 Saturation backstress
@@ -88,7 +88,7 @@ class OWKinematic3D(MaterialModel3D):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`.
-    Uses the augmented residual path (``uses_implicit_state = True``) because the
+    Uses the augmented residual path (``hardening_type = 'implicit'``) because the
     backward-Euler discretisation of the Ohno-Wang evolution equation is genuinely
     implicit.
 
@@ -99,6 +99,7 @@ class OWKinematic3D(MaterialModel3D):
         Defaults to ``SOLID_3D``.
     """
 
+    hardening_type = "implicit"
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
@@ -163,9 +164,9 @@ class OWKinematic3D(MaterialModel3D):
         ``σ − α_{n+1}`` for full backward-Euler consistency with the flow
         direction used in the stress residual equation.
 
-        Overriding this method sets ``uses_implicit_state = True``, which
-        activates the augmented (ntens+1+n_state) Newton-Raphson solver and
-        the augmented consistent tangent automatically.
+        Required because ``hardening_type = 'implicit'``, which activates the
+        augmented (ntens+1+n_state) Newton-Raphson solver and the augmented
+        consistent tangent automatically.
         """
         alpha_new = state_new["alpha"]
 
@@ -195,7 +196,7 @@ class OWKinematicPS(MaterialModelPS):
     :class:`~manforge.core.material.MaterialModelPS` (including the
     missing-component correction in ``_vonmises``).
 
-    Uses the augmented residual path (``uses_implicit_state = True``).
+    Uses the augmented residual path (``hardening_type = 'implicit'``).
 
     Parameters
     ----------
@@ -204,6 +205,7 @@ class OWKinematicPS(MaterialModelPS):
         Defaults to ``PLANE_STRESS``.
     """
 
+    hardening_type = "implicit"
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
@@ -268,7 +270,7 @@ class OWKinematic1D(MaterialModel1D):
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
 
-    Uses the augmented residual path (``uses_implicit_state = True``).
+    Uses the augmented residual path (``hardening_type = 'implicit'``).
 
     Parameters
     ----------
@@ -276,6 +278,7 @@ class OWKinematic1D(MaterialModel1D):
         Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
     """
 
+    hardening_type = "implicit"
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 

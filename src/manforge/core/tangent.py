@@ -100,7 +100,7 @@ def augmented_consistent_tangent(
     Parameters
     ----------
     model : MaterialModel
-        Model with ``uses_implicit_state == True``.
+        Model with ``hardening_type == 'implicit'``.
     stress : jnp.ndarray, shape (ntens,)
         Converged stress σ_{n+1}.
     state : dict

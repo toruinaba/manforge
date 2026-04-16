@@ -1,7 +1,7 @@
 """Augmented residual system for implicit hardening laws.
 
-When a model overrides ``hardening_residual`` (i.e. ``uses_implicit_state``
-is True), the return-mapping residual is extended from (ntens+1) to
+When a model has ``hardening_type == 'implicit'``, the return-mapping
+residual is extended from (ntens+1) to
 (ntens+1+n_state) equations by treating the state variables as independent
 unknowns:
 
@@ -34,7 +34,7 @@ def make_augmented_residual(model, stress_trial, C, state_n, params):
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model with ``uses_implicit_state == True``.
+        Constitutive model with ``hardening_type == 'implicit'``.
     stress_trial : jnp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
     C : jnp.ndarray, shape (ntens, ntens)

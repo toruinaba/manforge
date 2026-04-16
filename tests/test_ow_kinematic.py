@@ -7,11 +7,11 @@ the Ohno-Wang evolution equation:
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
 cannot be solved in closed form, so the model uses the augmented residual path
-(uses_implicit_state = True).
+(hardening_type = 'implicit').
 
 Key verifications
 -----------------
-- uses_implicit_state is True for all OW variants
+- hardening_type is 'implicit' for all OW variants
 - Elastic domain: tangent = C, state unchanged
 - Yield surface consistency after plastic steps
 - FD tangent vs AD tangent agreement (core correctness test)
@@ -63,19 +63,19 @@ def state0(model):
 
 
 # ---------------------------------------------------------------------------
-# uses_implicit_state detection
+# hardening_type detection
 # ---------------------------------------------------------------------------
 
-def test_uses_implicit_state_ow3d():
-    assert OWKinematic3D().uses_implicit_state is True
+def test_hardening_type_ow3d():
+    assert OWKinematic3D().hardening_type == "implicit"
 
 
-def test_uses_implicit_state_owps():
-    assert OWKinematicPS().uses_implicit_state is True
+def test_hardening_type_owps():
+    assert OWKinematicPS().hardening_type == "implicit"
 
 
-def test_uses_implicit_state_ow1d():
-    assert OWKinematic1D().uses_implicit_state is True
+def test_hardening_type_ow1d():
+    assert OWKinematic1D().hardening_type == "implicit"
 
 
 # ---------------------------------------------------------------------------

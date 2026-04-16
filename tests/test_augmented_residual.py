@@ -6,7 +6,7 @@ closed form as a function of (dlambda, stress, state_n, params).
 
 Key verifications
 -----------------
-- uses_implicit_state detection via MRO
+- hardening_type detection via class variable
 - Augmented NR produces the same converged solution as the explicit NR path
   (validated by recasting the AF model as an implicit model whose residual
   equations are algebraically identical to the explicit update)
@@ -49,6 +49,8 @@ class _AFKinematicImplicit3D(AFKinematic3D):
     validate the augmented residual machinery without introducing model error.
     """
 
+    hardening_type = "implicit"
+
     def hardening_residual(self, state_new, dlambda, stress, state_n, params):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
@@ -64,6 +66,8 @@ class _AFKinematicImplicit3D(AFKinematic3D):
 
 class _AFKinematicImplicitPS(AFKinematicPS):
     """Plane-stress variant of the implicit AF model."""
+
+    hardening_type = "implicit"
 
     def hardening_residual(self, state_new, dlambda, stress, state_n, params):
         alpha_n = state_n["alpha"]
@@ -94,23 +98,23 @@ def params():
 
 
 # ---------------------------------------------------------------------------
-# uses_implicit_state detection
+# hardening_type detection
 # ---------------------------------------------------------------------------
 
-def test_uses_implicit_state_j2_is_false():
-    assert J2Isotropic3D().uses_implicit_state is False
+def test_hardening_type_j2_is_explicit():
+    assert J2Isotropic3D().hardening_type == "explicit"
 
 
-def test_uses_implicit_state_af_is_false():
-    assert AFKinematic3D().uses_implicit_state is False
+def test_hardening_type_af_is_explicit():
+    assert AFKinematic3D().hardening_type == "explicit"
 
 
-def test_uses_implicit_state_implicit_af_is_true():
-    assert _AFKinematicImplicit3D().uses_implicit_state is True
+def test_hardening_type_implicit_af_is_implicit():
+    assert _AFKinematicImplicit3D().hardening_type == "implicit"
 
 
-def test_uses_implicit_state_implicit_ps_is_true():
-    assert _AFKinematicImplicitPS().uses_implicit_state is True
+def test_hardening_type_implicit_ps_is_implicit():
+    assert _AFKinematicImplicitPS().hardening_type == "implicit"
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +354,8 @@ def params_pe():
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
+    hardening_type = "implicit"
+
     def __init__(self):
         super().__init__(stress_state=PLANE_STRAIN)
 
@@ -366,8 +372,8 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         return {"alpha": R_alpha, "ep": R_ep}
 
 
-def test_uses_implicit_state_implicit_pe_is_true():
-    assert _AFKinematicImplicitPE().uses_implicit_state is True
+def test_hardening_type_implicit_pe_is_implicit():
+    assert _AFKinematicImplicitPE().hardening_type == "implicit"
 
 
 def test_implicit_yield_consistency_plane_strain(params_pe):
