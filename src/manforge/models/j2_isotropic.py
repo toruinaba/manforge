@@ -30,6 +30,9 @@ from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialMod
 class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` which
+    returns the updated state directly in closed form (Δep = Δλ).
+
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
     (``_dev``, ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which
     provide branch-free implementations valid when all direct stress components
@@ -58,7 +61,7 @@ class J2Isotropic3D(MaterialModel3D):
     state_names = ["ep"]
 
     # ------------------------------------------------------------------
-    # Material physics — implement the three abstract methods
+    # Material physics — explicit hardening (hardening_type = "explicit")
     # ------------------------------------------------------------------
 
     def elastic_stiffness(self, params: dict) -> jnp.ndarray:
@@ -160,15 +163,16 @@ class J2Isotropic3D(MaterialModel3D):
 class J2IsotropicPS(MaterialModelPS):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment``
+    (Δep = Δλ). Uses the autodiff return-mapping path (``method="autodiff"``).
+    A closed-form plane-stress corrector (which requires an iterative σ33 = 0
+    enforcement loop) is not yet implemented.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModelPS` (``_dev``,
     ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which implement
     the static condensation and missing-component correction specific to
     plane-stress kinematics.
-
-    Uses the autodiff return-mapping path (``method="autodiff"``).  A
-    closed-form plane-stress corrector (which requires an iterative σ33 = 0
-    enforcement loop) is not yet implemented.
 
     Parameters
     ----------
@@ -200,11 +204,12 @@ class J2IsotropicPS(MaterialModelPS):
 class J2Isotropic1D(MaterialModel1D):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment``
+    (Δep = Δλ). Provides closed-form ``plastic_corrector`` and
+    ``analytical_tangent`` using the 1D radial return mapping.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
-
-    Provides a closed-form ``plastic_corrector`` and ``analytical_tangent``
-    using the 1D radial return mapping.
 
     Parameters
     ----------
@@ -216,7 +221,7 @@ class J2Isotropic1D(MaterialModel1D):
     state_names = ["ep"]
 
     # ------------------------------------------------------------------
-    # Material physics — implement the three abstract methods
+    # Material physics — explicit hardening (hardening_type = "explicit")
     # ------------------------------------------------------------------
 
     def elastic_stiffness(self, params: dict) -> jnp.ndarray:

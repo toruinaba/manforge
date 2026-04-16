@@ -72,10 +72,9 @@ Notes
 -----
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k
   (same limit as standard AF).
-* ``hardening_increment`` provides a semi-implicit (lagged-norm) closed-form
-  approximation.  This satisfies the ABC requirement and gives a reasonable
-  initial-guess seed, but the actual plastic increment is always solved via
-  the augmented NR using ``hardening_residual``.
+* The plastic increment is always solved via the augmented NR using
+  ``hardening_residual``.  No ``hardening_increment`` is defined because
+  ``hardening_type = 'implicit'`` does not require one.
 """
 
 import jax.numpy as jnp
@@ -121,28 +120,6 @@ class OWKinematic3D(MaterialModel3D):
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
-
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
-        """Semi-implicit (lagged-norm) closed-form backstress approximation.
-
-        Satisfies the ABC requirement.  Treats ``‖α‖`` at the old value to
-        obtain a closed-form update:
-
-            α_{n+1} ≈ (α_n + C_k Δλ n̂) / (1 + γ Δλ ‖α_n‖_vm)
-
-        This is **not** used for the actual plastic solve: the augmented NR
-        uses ``hardening_residual`` instead.
-        """
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
-        n_hat = s_xi / vm_safe
-        alpha_vm_n = self._alpha_vm_norm(alpha_n)
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (
-            1.0 + params["gamma"] * dlambda * alpha_vm_n
-        )
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
 
     def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
         """Safe von Mises norm of a deviatoric backstress tensor.
@@ -228,19 +205,6 @@ class OWKinematicPS(MaterialModelPS):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
 
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
-        """Semi-implicit (lagged-norm) closed-form backstress approximation."""
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
-        n_hat = s_xi / vm_safe
-        alpha_vm_n = self._alpha_vm_norm(alpha_n)
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (
-            1.0 + params["gamma"] * dlambda * alpha_vm_n
-        )
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
-
     def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
         """Safe von Mises norm of a deviatoric backstress (plane-stress variant)."""
         s_m = alpha * self.stress_state.mandel_factors_jnp
@@ -300,19 +264,6 @@ class OWKinematic1D(MaterialModel1D):
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
         return self._vonmises(xi) - params["sigma_y0"]
-
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
-        """Semi-implicit (lagged-norm) closed-form backstress approximation."""
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = smooth_abs(self._vonmises(xi))
-        n_hat = s_xi / vm_safe
-        alpha_vm_n = self._alpha_vm_norm(alpha_n)
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (
-            1.0 + params["gamma"] * dlambda * alpha_vm_n
-        )
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
 
     def _alpha_vm_norm(self, alpha: jnp.ndarray) -> jnp.ndarray:
         """Safe von Mises norm of a deviatoric backstress (1D variant)."""

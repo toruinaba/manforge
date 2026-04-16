@@ -53,7 +53,8 @@ from manforge.utils.smooth import smooth_abs
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`.
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` which
+    solves the backward-Euler AF equation in closed form.
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
     Parameters
@@ -104,11 +105,13 @@ class AFKinematic3D(MaterialModel3D):
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    closed-form backward-Euler AF update.
+    Uses the generic NR + autodiff return-mapping path.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModelPS` (including the
     missing-component correction in ``_vonmises``).
-
-    Uses the generic NR + autodiff return-mapping path.
 
     Parameters
     ----------
@@ -153,10 +156,12 @@ class AFKinematicPS(MaterialModelPS):
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
+    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    closed-form backward-Euler AF update.
+    Uses the generic NR + autodiff return-mapping path.
+
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
-
-    Uses the generic NR + autodiff return-mapping path.
 
     Parameters
     ----------
