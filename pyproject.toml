@@ -5,9 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "manforge"
 version = "0.1.0"
+description = "Framework for validating Fortran UMAT constitutive models with JAX autodiff"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Toru Inaba"},
+]
 requires-python = ">=3.10"
 dependencies = [
     "jax[cpu]>=0.4.20",
+    "numpy",
     "scipy",
 ]
 
@@ -15,6 +22,10 @@ dependencies = [
 dev = ["pytest"]
 examples = ["matplotlib"]
 fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
+
+[project.urls]
+Homepage = "https://github.com/toruinaba/manforge"
+Repository = "https://github.com/toruinaba/manforge"
 
 [project.scripts]
 manforge = "manforge.cli:main"
