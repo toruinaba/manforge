@@ -1,7 +1,7 @@
 """Uniaxial tension simulation with J2 isotropic hardening.
 
 Demonstrates:
-- Defining material parameters for J2Isotropic3D
+- Defining material parameters for J2Isotropic1D
 - Running a uniaxial strain history with UniaxialDriver
 - Verifying the consistent tangent with check_tangent
 - Plotting the stress-strain curve (saved as PNG)
@@ -14,7 +14,7 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification.fd_check import check_tangent
@@ -42,7 +42,7 @@ params = {
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-model = J2Isotropic3D()
+model = J2Isotropic1D()
 driver = StrainDriver()
 
 N = 100
@@ -76,10 +76,10 @@ print()
 print("Tangent check — elastic domain:")
 result_e = check_tangent(
     model,
-    jnp.zeros(6),
+    jnp.zeros(1),
     model.initial_state(),
     params,
-    jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    jnp.array([1e-5]),
 )
 status = "PASS" if result_e.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
@@ -87,10 +87,10 @@ print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
 print("Tangent check — plastic domain (uniaxial):")
 result_p = check_tangent(
     model,
-    jnp.zeros(6),
+    jnp.zeros(1),
     model.initial_state(),
     params,
-    jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    jnp.array([2e-3]),
 )
 status = "PASS" if result_p.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_p.max_rel_err:.2e}")
