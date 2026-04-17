@@ -1,7 +1,7 @@
 """Parameter fitting example for J2 isotropic hardening.
 
 Demonstrates:
-- Generating synthetic stress-strain data from known parameters
+- Generating synthetic uniaxial stress-strain data from known parameters
 - Adding measurement noise to simulate experimental data
 - Fitting sigma_y0 and H using fit_params (L-BFGS-B)
 - Comparing true vs fitted parameters
@@ -15,7 +15,7 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.fitting.optimizer import fit_params
@@ -43,7 +43,7 @@ FIXED_PARAMS = {"E": TRUE_PARAMS["E"], "nu": TRUE_PARAMS["nu"]}
 # ---------------------------------------------------------------------------
 # Generate synthetic "experimental" data
 # ---------------------------------------------------------------------------
-model = J2Isotropic3D()
+model = J2Isotropic1D()
 driver = StrainDriver()
 
 rng = np.random.default_rng(42)
