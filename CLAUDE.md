@@ -46,10 +46,12 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 **1. Material model layer** — `src/manforge/core/material.py`
 
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods based on `hardening_type`:
-- `elastic_stiffness(params)` → (ntens, ntens) Voigt stiffness tensor (always required)
-- `yield_function(stress, state, params)` → scalar (≤0 = elastic) (always required)
-- For **explicit** hardening (`hardening_type = "explicit"`, default): `hardening_increment(dlambda, stress, state, params)` → updated state dict
-- For **implicit** hardening (`hardening_type = "implicit"`): `hardening_residual(state_new, dlambda, stress, state_n, params)` → residual dict (zero at convergence)
+- `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
+- `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
+- For **explicit** hardening (`hardening_type = "explicit"`, default): `hardening_increment(dlambda, stress, state)` → updated state dict
+- For **implicit** hardening (`hardening_type = "implicit"`): `hardening_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence)
+
+Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
 `__init_subclass__` validates the required method is implemented at class definition time.
 
