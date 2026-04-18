@@ -85,19 +85,17 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
 
-params = {
-    "E": 210_000.0,    # Young's modulus [MPa]
-    "nu": 0.3,         # Poisson's ratio
-    "sigma_y0": 250.0, # Initial yield stress [MPa]
-    "H": 1_000.0,      # Linear isotropic hardening modulus [MPa]
-}
-
-model = J2Isotropic3D()
+model = J2Isotropic3D(
+    E=210_000.0,    # Young's modulus [MPa]
+    nu=0.3,         # Poisson's ratio
+    sigma_y0=250.0, # Initial yield stress [MPa]
+    H=1_000.0,      # Linear isotropic hardening modulus [MPa]
+)
 driver = StrainDriver()
 
 strain_history = np.linspace(0.0, 5e-3, 100)       # cumulative ε11
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = driver.run(model, load, params)
+result = driver.run(model, load)
 
 print(f"Final stress: {result.stress[-1, 0]:.1f} MPa")  # σ11
 ```
@@ -169,7 +167,7 @@ import numpy as np
 
 # 単軸 (load.data.ndim == 1 → ε11 のみ処理、横方向は自動でゼロ)
 load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0, 5e-3, 100))
-result = StrainDriver().run(model, load, params)
+result = StrainDriver().run(model, load)
 result.stress          # np.ndarray (N, ntens)
 result.strain          # np.ndarray (N, ntens)
 
@@ -177,7 +175,7 @@ result.strain          # np.ndarray (N, ntens)
 strain_6d = np.zeros((100, 6))
 strain_6d[:, 0] = np.linspace(0, 5e-3, 100)   # ε11 のみ変化
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_6d)
-result = StrainDriver().run(model, load, params)
+result = StrainDriver().run(model, load)
 ```
 
 `UniaxialDriver` / `GeneralDriver` は `StrainDriver` への後方互換エイリアス。
@@ -192,7 +190,7 @@ from manforge.simulation.driver import StressDriver
 stress_target = np.zeros((100, 6))
 stress_target[:, 0] = np.linspace(0, 300.0, 100)  # σ11 を 300 MPa まで増加
 load = FieldHistory(FieldType.STRESS, "Stress", stress_target)
-result = StressDriver().run(model, load, params)
+result = StressDriver().run(model, load)
 result.stress   # (N, ntens) — 収束後の応力 (目標値に一致)
 result.strain   # (N, ntens) — 対応するひずみ
 ```
@@ -201,7 +199,7 @@ result.strain   # (N, ntens) — 対応するひずみ
 
 ```python
 result = StrainDriver().run(
-    model, load, params,
+    model, load,
     collect_state={"ep": FieldType.STRAIN}
 )
 result.fields["ep"].data   # np.ndarray (N,) — 等価塑性ひずみ履歴
@@ -230,20 +228,22 @@ import jax.numpy as jnp
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "K"]
     state_names = ["ep"]
-    # __init__ 不要 — MaterialModel3D.__init__(SOLID_3D) が MRO 経由で呼ばれる
-    # PLANE_STRAIN で使いたい場合は MyModel(PLANE_STRAIN) と渡せばよい
 
-    def elastic_stiffness(self, params):
-        E, nu = params["E"], params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    def __init__(self, stress_state=None, *, E, nu, sigma_y0, K):
+        from manforge.core.stress_state import SOLID_3D
+        super().__init__(stress_state or SOLID_3D)
+        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.K = K
+
+    def elastic_stiffness(self):
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)  # MaterialModel3D が提供する分岐なし実装
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         # self._vonmises() は MaterialModel ABC が smooth_sqrt ベースの実装を提供
-        return self._vonmises(stress) - (params["sigma_y0"] + ...)
+        return self._vonmises(stress) - (self.sigma_y0 + ...)
 
-    def hardening_increment(self, dlambda, stress, state, params):
+    def hardening_increment(self, dlambda, stress, state):
         # 状態変数の更新。stress は現在の NR 反復点での応力テンソル。
         # 等方硬化のみなら stress を無視してよい。
         return {"ep": state["ep"] + dlambda}
@@ -258,11 +258,11 @@ from manforge.core.stress_state import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 
 # 平面ひずみ / 軸対称 (NTENS=4) — full-rank, 解析解あり
-model_pe = J2Isotropic3D(PLANE_STRAIN)
+model_pe = J2Isotropic3D(PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 # 平面応力 (NTENS=3) — Schur 縮約済み剛性, autodiff
-model_ps = J2IsotropicPS()
+model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 # 単軸 (NTENS=1) — フィッティング用, 解析解あり
-model_1d = J2Isotropic1D()
+model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 ```
 
 利用可能なプリセット:
@@ -283,13 +283,13 @@ model_1d = J2Isotropic1D()
 class MyModel(MaterialModel3D):
     # ... 必須メソッド (elastic_stiffness, yield_function, hardening_increment) は省略 ...
 
-    def plastic_corrector(self, stress_trial, C, state_n, params):
+    def plastic_corrector(self, stress_trial, C, state_n):
         """塑性補正の閉形式。None を返すと汎用 NR+autodiff にフォールバック。"""
         # stress_trial, C は return_mapping が計算済みで渡される
         # ...閉形式で stress_new, state_new, dlambda を計算...
         return stress_new, state_new, dlambda
 
-    def analytical_tangent(self, stress, state, dlambda, C, state_n, params):
+    def analytical_tangent(self, stress, state, dlambda, C, state_n):
         """Consistent tangent の閉形式。None を返すと autodiff にフォールバック。"""
         # ...閉形式で ddsdde を計算...
         return ddsdde
@@ -328,25 +328,30 @@ class MyImplicitModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
+    def __init__(self, stress_state=None, *, E, nu, sigma_y0, C_k, gamma):
+        from manforge.core.stress_state import SOLID_3D
+        super().__init__(stress_state or SOLID_3D)
+        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
+        self.C_k = C_k; self.gamma = gamma
+
     def initial_state(self):
         return {"alpha": jnp.zeros(self.ntens), "ep": jnp.array(0.0)}
 
-    def elastic_stiffness(self, params):
-        E, nu = params["E"], params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    def elastic_stiffness(self):
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         xi = stress - state["alpha"]
-        return self._vonmises(xi) - params["sigma_y0"]
+        return self._vonmises(xi) - self.sigma_y0
 
     # hardening_increment は任意 — 初期値シードとして定義できる
-    # def hardening_increment(self, dlambda, stress, state, params):
+    # def hardening_increment(self, dlambda, stress, state):
     #     return {"alpha": state["alpha"], "ep": state["ep"] + dlambda}
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n, params):
-        """後方 Euler 残差。R_q(q_{n+1}, Δλ, σ, q_n, params) = 0 を定義する。
+    def hardening_residual(self, state_new, dlambda, stress, state_n):
+        """後方 Euler 残差。R_q(q_{n+1}, Δλ, σ, q_n) = 0 を定義する。
         zero at convergence.
         """
         alpha_new = state_new["alpha"]
@@ -364,7 +369,6 @@ class MyImplicitModel(MaterialModel3D):
 | `dlambda` | 塑性乗数増分 Δλ |
 | `stress` | 現在の応力 σ_{n+1} |
 | `state_n` | ステップ n 開始時の状態 |
-| `params` | 材料パラメータ dict |
 
 戻り値は `state_new` と同じキー・形状を持つ残差 dict（収束時にゼロ）。
 
@@ -384,19 +388,18 @@ from manforge.models import AFKinematic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
 
-model = AFKinematic3D()
-params = {
-    "E": 210_000.0,    # Young's modulus [MPa]
-    "nu": 0.3,
-    "sigma_y0": 250.0, # Initial yield stress [MPa]
-    "C_k": 8_000.0,    # Kinematic hardening modulus [MPa]
-    "gamma": 80.0,     # Dynamic recovery (gamma=0 → Prager linear rule)
-}
+model = AFKinematic3D(
+    E=210_000.0,    # Young's modulus [MPa]
+    nu=0.3,
+    sigma_y0=250.0, # Initial yield stress [MPa]
+    C_k=8_000.0,    # Kinematic hardening modulus [MPa]
+    gamma=80.0,     # Dynamic recovery (gamma=0 → Prager linear rule)
+)
 
 # 単軸引張-圧縮サイクル
 strain_history = np.concatenate([np.linspace(0, 1e-2, 50), np.linspace(1e-2, -1e-2, 100)])
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = StrainDriver().run(model, load, params)
+result = StrainDriver().run(model, load)
 ```
 
 飽和 backstress は `C_k / gamma`。`gamma=0` は Prager 線形移動硬化則と等価。
@@ -408,16 +411,15 @@ AF モデルは汎用 NR + JAX autodiff パス (解析フックなし) を使う
 ```python
 from manforge.models import OWKinematic3D
 
-model = OWKinematic3D()
-params = {
-    "E": 210_000.0,
-    "nu": 0.3,
-    "sigma_y0": 250.0,
-    "C_k": 8_000.0,
-    "gamma": 0.05,      # OW: γ ‖α‖ α (単位: 1/MPa)
-}
+model = OWKinematic3D(
+    E=210_000.0,
+    nu=0.3,
+    sigma_y0=250.0,
+    C_k=8_000.0,
+    gamma=0.05,      # OW: γ ‖α‖ α (単位: 1/MPa)
+)
 
-result = StrainDriver().run(model, load, params)
+result = StrainDriver().run(model, load)
 ```
 
 Ohno-Wang モデルは `hardening_type = "implicit"` を宣言しており、
@@ -443,14 +445,20 @@ class MyKinematic(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
+    def __init__(self, stress_state=None, *, E, nu, sigma_y0, C_k, gamma):
+        from manforge.core.stress_state import SOLID_3D
+        super().__init__(stress_state or SOLID_3D)
+        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
+        self.C_k = C_k; self.gamma = gamma
+
     def initial_state(self):
         return {"alpha": jnp.zeros(self.ntens), "ep": jnp.array(0.0)}
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         xi = stress - state["alpha"]
-        return self._vonmises(xi) - params["sigma_y0"]
+        return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state, params):
+    def hardening_increment(self, dlambda, stress, state):
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
@@ -458,7 +466,7 @@ class MyKinematic(MaterialModel3D):
         # ゼロ点でも微分可能 — smooth_abs でラップ不要
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
+        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
 ```
 
@@ -542,21 +550,20 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.return_mapping import return_mapping
 from manforge.verification import FortranUMAT
 
-model   = J2Isotropic3D()
-params  = {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
+model   = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 fortran = FortranUMAT("j2_isotropic_3d")
 
 # Fortran ルーチンを呼ぶ
 stress_f, ep_f, ddsdde_f = fortran.call(
     "j2_isotropic_3d",
-    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    model.E, model.nu, model.sigma_y0, model.H,
     np.zeros(6), 0.0, dstran,
 )
 
 # Python 側と明示的に比較
 stress_py, _, ddsdde_py = return_mapping(
-    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
 )
 np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
 ```
@@ -564,8 +571,8 @@ np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
 コンポーネント単位での比較も同じパターン（詳細: `fortran/README.md`）:
 
 ```python
-C_f  = fortran.call("j2_isotropic_3d_elastic_stiffness", params["E"], params["nu"])
-C_py = model.elastic_stiffness(params)
+C_f  = fortran.call("j2_isotropic_3d_elastic_stiffness", model.E, model.nu)
+C_py = model.elastic_stiffness()
 np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 ```
 
@@ -596,14 +603,13 @@ from manforge.core.return_mapping import return_mapping
 from manforge.models.j2_isotropic import J2Isotropic3D
 import jax.numpy as jnp
 
-model = J2Isotropic3D()
-params = {"E": 210_000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1_000.0}
+model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 s_ad, _, D_ad = return_mapping(model, strain_inc, jnp.zeros(6),
-                               model.initial_state(), params, method="autodiff")
+                               model.initial_state(), method="autodiff")
 s_an, _, D_an = return_mapping(model, strain_inc, jnp.zeros(6),
-                               model.initial_state(), params, method="analytical")
+                               model.initial_state(), method="analytical")
 ```
 
 ### 複数ケースを体系的に比較
@@ -612,9 +618,9 @@ s_an, _, D_an = return_mapping(model, strain_inc, jnp.zeros(6),
 from manforge.verification.compare import compare_solvers
 
 def make_solver(method):
-    def _solve(strain_inc, stress_n, state_n, params):
+    def _solve(strain_inc, stress_n, state_n):
         return return_mapping(model, jnp.asarray(strain_inc),
-                              jnp.asarray(stress_n), state_n, params, method=method)
+                              jnp.asarray(stress_n), state_n, method=method)
     return _solve
 
 result = compare_solvers(
@@ -623,8 +629,7 @@ result = compare_solvers(
     test_cases=[
         {"strain_inc": jnp.array([2e-3, 0, 0, 0, 0, 0]),
          "stress_n": jnp.zeros(6),
-         "state_n": {"ep": jnp.array(0.0)},
-         "params": params},
+         "state_n": {"ep": jnp.array(0.0)}},
     ],
 )
 print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}")
@@ -636,7 +641,7 @@ print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}"
 from manforge.verification.fd_check import check_tangent
 
 result = check_tangent(
-    model, jnp.zeros(6), model.initial_state(), params,
+    model, jnp.zeros(6), model.initial_state(),
     jnp.array([2e-3, 0, 0, 0, 0, 0]),
     method="analytical",
 )

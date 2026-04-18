@@ -13,20 +13,9 @@ sys.path.insert(0, os.path.abspath(_FORTRAN_DIR))
 
 
 @pytest.fixture
-def steel_params():
-    """Typical steel material parameters (SI-consistent units: MPa, -)."""
-    return {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "H": 1000.0,
-    }
-
-
-@pytest.fixture
 def model():
-    """Default J2Isotropic3D model instance (SOLID_3D)."""
-    return J2Isotropic3D()
+    """Default J2Isotropic3D model instance with typical steel parameters."""
+    return J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture
@@ -36,9 +25,9 @@ def initial_state(model):
 
 
 @pytest.fixture
-def lame_constants(steel_params):
-    """Lame constants (lambda, mu) derived from steel_params."""
-    E, nu = steel_params["E"], steel_params["nu"]
+def lame_constants(model):
+    """Lame constants (lambda, mu) derived from model parameters."""
+    E, nu = model.E, model.nu
     mu = E / (2.0 * (1.0 + nu))
     lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
     return lam, mu

@@ -17,11 +17,11 @@ from manforge.verification.fortran_bridge import FortranUMAT
 # Elastic domain
 # ---------------------------------------------------------------------------
 
-def test_check_tangent_elastic_passes(model, steel_params):
+def test_check_tangent_elastic_passes(model):
     """Elastic domain: AD tangent matches FD tangent within tolerance."""
     strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), steel_params, strain_inc
+        model, jnp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed
@@ -34,11 +34,11 @@ def test_check_tangent_elastic_passes(model, steel_params):
 # Plastic domain — uniaxial
 # ---------------------------------------------------------------------------
 
-def test_check_tangent_plastic_uniaxial_passes(model, steel_params):
+def test_check_tangent_plastic_uniaxial_passes(model):
     """Plastic uniaxial domain: AD tangent matches FD tangent."""
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), steel_params, strain_inc
+        model, jnp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
@@ -48,11 +48,11 @@ def test_check_tangent_plastic_uniaxial_passes(model, steel_params):
 # Plastic domain — multiaxial
 # ---------------------------------------------------------------------------
 
-def test_check_tangent_plastic_multiaxial_passes(model, steel_params):
+def test_check_tangent_plastic_multiaxial_passes(model):
     """Plastic multiaxial domain: AD tangent matches FD tangent."""
     strain_inc = jnp.array([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), steel_params, strain_inc
+        model, jnp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
@@ -62,11 +62,11 @@ def test_check_tangent_plastic_multiaxial_passes(model, steel_params):
 # Result structure
 # ---------------------------------------------------------------------------
 
-def test_check_tangent_result_structure(model, steel_params):
+def test_check_tangent_result_structure(model):
     """TangentCheckResult has correct types for all fields."""
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), steel_params, strain_inc
+        model, jnp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert isinstance(result, TangentCheckResult)
@@ -81,11 +81,11 @@ def test_check_tangent_result_structure(model, steel_params):
 # Verify check can actually fail (FD truncation error at machine precision tol)
 # ---------------------------------------------------------------------------
 
-def test_check_tangent_tight_tol_can_fail(model, steel_params):
+def test_check_tangent_tight_tol_can_fail(model):
     """Using tol=1e-15 triggers failure due to FD truncation error."""
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), steel_params, strain_inc,
+        model, jnp.zeros(6), model.initial_state(), strain_inc,
         tol=1e-15,
     )
 
@@ -102,4 +102,3 @@ def test_fortran_umat_bad_module():
     """FortranUMAT raises ModuleNotFoundError for an unknown module name."""
     with pytest.raises(ModuleNotFoundError):
         FortranUMAT("nonexistent_umat_module_xyz")
-

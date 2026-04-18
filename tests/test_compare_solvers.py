@@ -17,50 +17,45 @@ from manforge.verification.compare import compare_solvers, SolverComparisonResul
 
 def _make_solver(model, method):
     """Return a SolverFn bound to the given model and method."""
-    def _solve(strain_inc, stress_n, state_n, params):
+    def _solve(strain_inc, stress_n, state_n):
         return return_mapping(
             model,
             jnp.asarray(strain_inc),
             jnp.asarray(stress_n),
             state_n,
-            params,
             method=method,
         )
     return _solve
 
 
 @pytest.fixture
-def test_cases(steel_params):
+def test_cases(model):
     """A small set of elastic and plastic test cases."""
-    state_n = {"ep": jnp.array(0.0)}
+    state_n = model.initial_state()
     return [
         # elastic step
         {
             "strain_inc": jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
             "stress_n":   jnp.zeros(6),
             "state_n":    state_n,
-            "params":     steel_params,
         },
         # plastic uniaxial
         {
             "strain_inc": jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
             "stress_n":   jnp.zeros(6),
             "state_n":    state_n,
-            "params":     steel_params,
         },
         # plastic shear
         {
             "strain_inc": jnp.array([0.0, 0.0, 0.0, 3e-3, 0.0, 0.0]),
             "stress_n":   jnp.zeros(6),
             "state_n":    state_n,
-            "params":     steel_params,
         },
         # plastic mixed
         {
             "strain_inc": jnp.array([1e-3, -5e-4, -5e-4, 1e-3, 0.0, 0.0]),
             "stress_n":   jnp.zeros(6),
             "state_n":    state_n,
-            "params":     steel_params,
         },
     ]
 
@@ -69,7 +64,7 @@ def test_cases(steel_params):
 # Identical solver → zero error, always passes
 # ---------------------------------------------------------------------------
 
-def test_identical_solvers_pass(model, test_cases, steel_params):
+def test_identical_solvers_pass(model, test_cases):
     """Comparing a solver to itself gives zero error and passes."""
     solver = _make_solver(model, "autodiff")
     result = compare_solvers(solver, solver, test_cases)
@@ -110,10 +105,10 @@ def test_wrong_solver_fails(model, test_cases):
     """A solver that returns wrong stress must be flagged as failed."""
     solver_ad = _make_solver(model, "autodiff")
 
-    def bad_solver(strain_inc, stress_n, state_n, params):
+    def bad_solver(strain_inc, stress_n, state_n):
         stress, state, ddsdde = return_mapping(
             model, jnp.asarray(strain_inc), jnp.asarray(stress_n),
-            state_n, params, method="autodiff"
+            state_n, method="autodiff"
         )
         return stress * 1.1, state, ddsdde  # 10% error in stress
 

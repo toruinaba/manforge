@@ -11,7 +11,7 @@ Algorithm
      Scalar NR on Δλ using ``jax.grad`` for flow direction and linearisation.
 
    *analytical*  (closed-form, opt-in)
-     Calls ``model.plastic_corrector(σ_trial, C, state_n, params)`` if
+     Calls ``model.plastic_corrector(σ_trial, C, state_n)`` if
      the model provides one.
 
 4. Consistent tangent — two paths depending on ``method``:
@@ -21,7 +21,7 @@ Algorithm
      ``jax.jacobian`` (see :mod:`manforge.core.tangent`).
 
    *analytical*  (closed-form, opt-in)
-     Calls ``model.analytical_tangent(σ, state, Δλ, C, state_n, params)``
+     Calls ``model.analytical_tangent(σ, state, Δλ, C, state_n)``
      if the model provides one.
 
 The ``method`` parameter controls which paths are attempted:
@@ -46,7 +46,7 @@ from jax.flatten_util import ravel_pytree
 from manforge.core.tangent import augmented_consistent_tangent, consistent_tangent
 
 
-def _augmented_nr(model, stress_trial, C, state_n, params, max_iter, tol):
+def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
 
     Used when ``model.hardening_type == 'implicit'``.
@@ -57,7 +57,6 @@ def _augmented_nr(model, stress_trial, C, state_n, params, max_iter, tol):
     stress_trial : jnp.ndarray, shape (ntens,)
     C : jnp.ndarray, shape (ntens, ntens)
     state_n : dict
-    params : dict
     max_iter : int
     tol : float
 
@@ -71,7 +70,7 @@ def _augmented_nr(model, stress_trial, C, state_n, params, max_iter, tol):
 
     ntens = model.ntens
     residual_fn, n_state, unflatten_fn = make_augmented_residual(
-        model, stress_trial, C, state_n, params
+        model, stress_trial, C, state_n
     )
 
     flat_state_n, _ = ravel_pytree(state_n)
@@ -101,7 +100,6 @@ def return_mapping(
     strain_inc: jnp.ndarray,
     stress_n: jnp.ndarray,
     state_n: dict,
-    params: dict,
     method: str = "auto",
     max_iter: int = 50,
     tol: float = 1e-10,
@@ -118,8 +116,6 @@ def return_mapping(
         Stress at the beginning of the increment.
     state_n : dict
         Internal state at the beginning of the increment.
-    params : dict
-        Material parameters.
     method : {"auto", "autodiff", "analytical"}, optional
         Selects which plastic-correction and tangent path to use.
 
@@ -162,14 +158,14 @@ def return_mapping(
     # ------------------------------------------------------------------
     # Step 1 — elastic stiffness and trial stress
     # ------------------------------------------------------------------
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
     stress_trial = stress_n + C @ strain_inc
 
     # ------------------------------------------------------------------
     # Step 2 — elastic check
     # TODO: replace Python if with jax.lax.cond for jit compatibility
     # ------------------------------------------------------------------
-    f_trial = model.yield_function(stress_trial, state_n, params)
+    f_trial = model.yield_function(stress_trial, state_n)
 
     if f_trial <= 0.0:
         return stress_trial, state_n, C
@@ -180,7 +176,7 @@ def return_mapping(
     _plastic_done = False
 
     if method != "autodiff":
-        _result = model.plastic_corrector(stress_trial, C, state_n, params)
+        _result = model.plastic_corrector(stress_trial, C, state_n)
         if _result is not None:
             stress, state_new, dlambda = _result
             _plastic_done = True
@@ -194,7 +190,7 @@ def return_mapping(
         if model.hardening_type == "implicit":
             # Augmented vector NR — state variables are independent unknowns
             stress, state_new, dlambda = _augmented_nr(
-                model, stress_trial, C, state_n, params, max_iter, tol
+                model, stress_trial, C, state_n, max_iter, tol
             )
         else:
             # Generic NR + autodiff path (unchanged from original)
@@ -204,31 +200,25 @@ def return_mapping(
 
             for _iteration in range(max_iter):
                 # Update state and flow direction
-                state_new = model.hardening_increment(dlambda, stress, state_n, params)
-                n = jax.grad(lambda s: model.yield_function(s, state_new, params))(
-                    stress
-                )
+                state_new = model.hardening_increment(dlambda, stress, state_n)
+                n = jax.grad(lambda s: model.yield_function(s, state_new))(stress)
 
                 # Stress correction (radial return for fixed n)
                 stress = stress_trial - dlambda * (C @ n)
 
                 # Re-evaluate after stress update
-                state_new = model.hardening_increment(dlambda, stress, state_n, params)
-                f = model.yield_function(stress, state_new, params)
+                state_new = model.hardening_increment(dlambda, stress, state_n)
+                f = model.yield_function(stress, state_new)
 
                 if jnp.abs(f) < tol:
                     break
 
                 # df/dΔλ  (total derivative, freezing n direction at current stress)
-                #   = −n^T C n  +  h
-                # where h = (∂f/∂state)(∂state/∂Δλ)  computed via jax.grad
                 def _f_residual(dl, _stress=stress):
-                    st = model.hardening_increment(dl, _stress, state_n, params)
-                    nn = jax.grad(lambda s: model.yield_function(s, st, params))(
-                        _stress
-                    )
+                    st = model.hardening_increment(dl, _stress, state_n)
+                    nn = jax.grad(lambda s: model.yield_function(s, st))(_stress)
                     s_upd = stress_trial - dl * (C @ nn)
-                    return model.yield_function(s_upd, st, params)
+                    return model.yield_function(s_upd, st)
 
                 dfddl = jax.grad(_f_residual)(dlambda)
 
@@ -244,9 +234,7 @@ def return_mapping(
     # Step 4 — consistent tangent
     # ------------------------------------------------------------------
     if method != "autodiff":
-        _ddsdde = model.analytical_tangent(
-            stress, state_new, dlambda, C, state_n, params
-        )
+        _ddsdde = model.analytical_tangent(stress, state_new, dlambda, C, state_n)
         if _ddsdde is not None:
             return stress, state_new, _ddsdde
         elif method == "analytical":
@@ -258,11 +246,11 @@ def return_mapping(
     # Autodiff tangent — augmented system for implicit hardening models, else standard
     if model.hardening_type == "implicit":
         ddsdde = augmented_consistent_tangent(
-            model, stress, state_new, dlambda, stress_n, state_n, params
+            model, stress, state_new, dlambda, stress_n, state_n
         )
     else:
         ddsdde = consistent_tangent(
-            model, stress, state_new, dlambda, stress_n, state_n, params
+            model, stress, state_new, dlambda, stress_n, state_n
         )
 
     return stress, state_new, ddsdde

@@ -20,7 +20,7 @@ from manforge.core.return_mapping import return_mapping
 # Uniaxial plastic step from virgin state
 # ---------------------------------------------------------------------------
 
-def test_plastic_stress_uniaxial(model, steel_params, lame_constants):
+def test_plastic_stress_uniaxial(model, lame_constants):
     """Plastic uniaxial strain step: σ11_new matches analytic correction.
 
     Note: strain_inc = [deps11, 0, 0, ...] is a *uniaxial strain* increment,
@@ -32,8 +32,8 @@ def test_plastic_stress_uniaxial(model, steel_params, lame_constants):
         σ11_new = (λ+2μ)deps11 - 2μ·Δλ
     """
     lam, mu = lame_constants
-    sigma_y0 = steel_params["sigma_y0"]
-    H = steel_params["H"]
+    sigma_y0 = model.sigma_y0
+    H = model.H
 
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -41,11 +41,11 @@ def test_plastic_stress_uniaxial(model, steel_params, lame_constants):
     state_n = model.initial_state()
 
     stress_new, state_new, _ = return_mapping(
-        model, strain_inc, stress_n, state_n, steel_params
+        model, strain_inc, stress_n, state_n
     )
 
     # Correct analytic Δλ: use vonmises of the triaxial trial stress
-    C = model.elastic_stiffness(steel_params)
+    C = model.elastic_stiffness()
     stress_trial = C @ strain_inc
     sigma_vm_trial = float(2.0 * mu * deps11)  # = vonmises(stress_trial)
 
@@ -60,28 +60,28 @@ def test_plastic_stress_uniaxial(model, steel_params, lame_constants):
     )
 
 
-def test_plastic_ep_updated(model, steel_params):
+def test_plastic_ep_updated(model):
     """Equivalent plastic strain must increase after plastic step."""
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
     _, state_new, _ = return_mapping(
-        model, strain_inc, jnp.zeros(6), state_n, steel_params
+        model, strain_inc, jnp.zeros(6), state_n
     )
 
     assert float(state_new["ep"]) > 0.0
 
 
-def test_plastic_ep_matches_dlambda(model, steel_params, lame_constants):
+def test_plastic_ep_matches_dlambda(model, lame_constants):
     """ep_new = Δλ for J2 (Δep = Δλ from consistency condition).
 
     σ_vm_trial must be computed via vonmises(σ_trial), not σ_trial[0],
     because a uniaxial strain increment produces a triaxial stress state.
     """
     lam, mu = lame_constants
-    sigma_y0 = steel_params["sigma_y0"]
-    H = steel_params["H"]
+    sigma_y0 = model.sigma_y0
+    H = model.H
 
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -92,34 +92,34 @@ def test_plastic_ep_matches_dlambda(model, steel_params, lame_constants):
     dlambda_analytic = (sigma_vm_trial - sigma_y0) / (3.0 * mu + H)
 
     _, state_new, _ = return_mapping(
-        model, strain_inc, jnp.zeros(6), state_n, steel_params
+        model, strain_inc, jnp.zeros(6), state_n
     )
 
     np.testing.assert_allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
 
 
-def test_plastic_yield_consistency(model, steel_params):
+def test_plastic_yield_consistency(model):
     """After plastic step, updated stress should lie on the yield surface."""
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
     stress_new, state_new, _ = return_mapping(
-        model, strain_inc, jnp.zeros(6), state_n, steel_params
+        model, strain_inc, jnp.zeros(6), state_n
     )
 
-    f_final = model.yield_function(stress_new, state_new, steel_params)
+    f_final = model.yield_function(stress_new, state_new)
     assert jnp.abs(f_final) < 1e-8, f"|f| = {float(jnp.abs(f_final)):.3e}"
 
 
-def test_plastic_ddsdde_differs_from_C(model, steel_params):
+def test_plastic_ddsdde_differs_from_C(model):
     """In plastic domain, DDSDDE must differ from elastic stiffness."""
-    C = model.elastic_stiffness(steel_params)
+    C = model.elastic_stiffness()
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     _, _, ddsdde = return_mapping(
-        model, strain_inc, jnp.zeros(6), model.initial_state(), steel_params
+        model, strain_inc, jnp.zeros(6), model.initial_state()
     )
 
     assert not np.allclose(np.asarray(ddsdde), np.asarray(C), atol=1.0), \

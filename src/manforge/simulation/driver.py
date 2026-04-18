@@ -47,7 +47,6 @@ class DriverBase(ABC):
         self,
         model,
         load: FieldHistory,
-        params: dict,
         collect_state: dict[str, FieldType] | None = None,
     ) -> DriverResult:
         """Run the loading simulation.
@@ -58,8 +57,6 @@ class DriverBase(ABC):
         load : FieldHistory
             Loading history.  The ``type`` and shape of ``load.data`` must
             match the driver's expectations (see subclass documentation).
-        params : dict
-            Material parameters.
         collect_state : dict[str, FieldType] or None, optional
             Explicitly request state-variable histories to be included in the
             result.  Keys are model state keys (e.g. ``"ep"``); values specify
@@ -98,7 +95,6 @@ class StrainDriver(DriverBase):
         self,
         model,
         load: FieldHistory,
-        params: dict,
         collect_state: dict[str, FieldType] | None = None,
     ) -> DriverResult:
         """Run the strain-controlled loading history.
@@ -113,8 +109,6 @@ class StrainDriver(DriverBase):
             * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
             * ``(N, ntens)`` — general: all components prescribed.
 
-        params : dict
-            Material parameters.
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.  Example::
 
@@ -151,9 +145,7 @@ class StrainDriver(DriverBase):
                 strain_inc = jnp.array(data[i] - prev)
                 strain_out[i] = data[i]
 
-            stress_n, state_n, _ = return_mapping(
-                model, strain_inc, stress_n, state_n, params
-            )
+            stress_n, state_n, _ = return_mapping(model, strain_inc, stress_n, state_n)
             stress_out[i] = np.array(stress_n)
             if collect_state:
                 for k in collect_state:
@@ -199,7 +191,6 @@ class StressDriver(DriverBase):
         self,
         model,
         load: FieldHistory,
-        params: dict,
         collect_state: dict[str, FieldType] | None = None,
     ) -> DriverResult:
         """Run the stress-controlled loading history.
@@ -212,8 +203,6 @@ class StressDriver(DriverBase):
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
             tensor (Voigt) at each step.
-        params : dict
-            Material parameters.
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.  Example::
 
@@ -244,7 +233,7 @@ class StressDriver(DriverBase):
         )
 
         # Elastic compliance for the initial strain-increment guess
-        C = model.elastic_stiffness(params)
+        C = model.elastic_stiffness()
         S = jnp.linalg.inv(C)
 
         stress_out = np.zeros((N, ntens))
@@ -260,7 +249,7 @@ class StressDriver(DriverBase):
             residual = jnp.full(ntens, jnp.inf)
             for _ in range(self.max_iter):
                 stress_new, state_new, ddsdde = return_mapping(
-                    model, deps, stress_n, state_n, params
+                    model, deps, stress_n, state_n
                 )
                 residual = sigma_target - stress_new
                 if float(jnp.max(jnp.abs(residual))) < self.tol:

@@ -2,7 +2,7 @@
 
 The augmented system treats state variables as independent unknowns, enabling
 models with implicit hardening laws where state_new cannot be expressed in
-closed form as a function of (dlambda, stress, state_n, params).
+closed form as a function of (dlambda, stress, state_n).
 
 Key verifications
 -----------------
@@ -50,15 +50,15 @@ class _AFKinematicImplicit3D(AFKinematic3D):
 
     hardening_type = "implicit"
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n, params):
+    def hardening_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
-        scale = 1.0 + params["gamma"] * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - params["C_k"] * dlambda * n_hat
+        scale = 1.0 + self.gamma * dlambda
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return {"alpha": R_alpha, "ep": R_ep}
 
@@ -68,15 +68,15 @@ class _AFKinematicImplicitPS(AFKinematicPS):
 
     hardening_type = "implicit"
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n, params):
+    def hardening_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
-        scale = 1.0 + params["gamma"] * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - params["C_k"] * dlambda * n_hat
+        scale = 1.0 + self.gamma * dlambda
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return {"alpha": R_alpha, "ep": R_ep}
 
@@ -86,14 +86,18 @@ class _AFKinematicImplicitPS(AFKinematicPS):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def params():
-    return {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 100.0,
-    }
+def af_model():
+    return AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
+
+
+@pytest.fixture
+def implicit_model():
+    return _AFKinematicImplicit3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
+
+
+@pytest.fixture
+def implicit_ps_model():
+    return _AFKinematicImplicitPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
 
 # ---------------------------------------------------------------------------
@@ -101,19 +105,19 @@ def params():
 # ---------------------------------------------------------------------------
 
 def test_hardening_type_j2_is_explicit():
-    assert J2Isotropic3D().hardening_type == "explicit"
+    assert J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0).hardening_type == "explicit"
 
 
 def test_hardening_type_af_is_explicit():
-    assert AFKinematic3D().hardening_type == "explicit"
+    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "explicit"
 
 
-def test_hardening_type_implicit_af_is_implicit():
-    assert _AFKinematicImplicit3D().hardening_type == "implicit"
+def test_hardening_type_implicit_af_is_implicit(implicit_model):
+    assert implicit_model.hardening_type == "implicit"
 
 
-def test_hardening_type_implicit_ps_is_implicit():
-    assert _AFKinematicImplicitPS().hardening_type == "implicit"
+def test_hardening_type_implicit_ps_is_implicit(implicit_ps_model):
+    assert implicit_ps_model.hardening_type == "implicit"
 
 
 # ---------------------------------------------------------------------------
@@ -126,17 +130,14 @@ def test_hardening_type_implicit_ps_is_implicit():
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_implicit_matches_explicit_stress_3d(params, deps_vec):
+def test_implicit_matches_explicit_stress_3d(af_model, implicit_model, deps_vec):
     """Implicit AF path must produce the same stress as the explicit AF path."""
     deps = jnp.array(deps_vec)
     stress0 = jnp.zeros(6)
+    state0 = af_model.initial_state()
 
-    explicit_model = AFKinematic3D()
-    implicit_model = _AFKinematicImplicit3D()
-    state0 = explicit_model.initial_state()
-
-    stress_exp, _, _ = return_mapping(explicit_model, deps, stress0, state0, params)
-    stress_imp, _, _ = return_mapping(implicit_model, deps, stress0, state0, params)
+    stress_exp, _, _ = return_mapping(af_model, deps, stress0, state0)
+    stress_imp, _, _ = return_mapping(implicit_model, deps, stress0, state0)
 
     np.testing.assert_allclose(
         np.array(stress_imp), np.array(stress_exp), atol=1e-7,
@@ -149,17 +150,14 @@ def test_implicit_matches_explicit_stress_3d(params, deps_vec):
     [2e-3, -1e-3, -1e-3, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_implicit_matches_explicit_state_3d(params, deps_vec):
+def test_implicit_matches_explicit_state_3d(af_model, implicit_model, deps_vec):
     """Implicit AF path must produce the same state as the explicit AF path."""
     deps = jnp.array(deps_vec)
     stress0 = jnp.zeros(6)
+    state0 = af_model.initial_state()
 
-    explicit_model = AFKinematic3D()
-    implicit_model = _AFKinematicImplicit3D()
-    state0 = explicit_model.initial_state()
-
-    _, state_exp, _ = return_mapping(explicit_model, deps, stress0, state0, params)
-    _, state_imp, _ = return_mapping(implicit_model, deps, stress0, state0, params)
+    _, state_exp, _ = return_mapping(af_model, deps, stress0, state0)
+    _, state_imp, _ = return_mapping(implicit_model, deps, stress0, state0)
 
     np.testing.assert_allclose(
         np.array(state_imp["alpha"]), np.array(state_exp["alpha"]), atol=1e-7,
@@ -181,14 +179,13 @@ def test_implicit_matches_explicit_state_3d(params, deps_vec):
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_implicit_yield_consistency_3d(params, deps_vec):
+def test_implicit_yield_consistency_3d(implicit_model, deps_vec):
     """After a plastic step via the implicit path, stress must lie on the yield surface."""
-    model = _AFKinematicImplicit3D()
-    state0 = model.initial_state()
+    state0 = implicit_model.initial_state()
     deps = jnp.array(deps_vec)
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0, params)
-    f = model.yield_function(stress_new, state_new, params)
+    stress_new, state_new, _ = return_mapping(implicit_model, deps, jnp.zeros(6), state0)
+    f = implicit_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
 
 
@@ -202,15 +199,13 @@ def test_implicit_yield_consistency_3d(params, deps_vec):
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_implicit_fd_tangent_virgin_3d(params, deps_vec):
+def test_implicit_fd_tangent_virgin_3d(implicit_model, deps_vec):
     """Augmented consistent tangent must match FD for the implicit AF model."""
-    model = _AFKinematicImplicit3D()
-    state0 = model.initial_state()
+    state0 = implicit_model.initial_state()
     result = check_tangent(
-        model,
+        implicit_model,
         jnp.zeros(6),
         state0,
-        params,
         jnp.array(deps_vec),
     )
     assert result.passed, (
@@ -220,18 +215,17 @@ def test_implicit_fd_tangent_virgin_3d(params, deps_vec):
     )
 
 
-def test_implicit_fd_tangent_prestressed_3d(params):
+def test_implicit_fd_tangent_prestressed_3d(implicit_model):
     """FD tangent from a pre-strained state via the implicit AF path."""
-    model = _AFKinematicImplicit3D()
-    state0 = model.initial_state()
+    state0 = implicit_model.initial_state()
 
     # First step: push into plasticity
     deps1 = jnp.zeros(6).at[0].set(3e-3)
-    stress1, state1, _ = return_mapping(model, deps1, jnp.zeros(6), state0, params)
+    stress1, state1, _ = return_mapping(implicit_model, deps1, jnp.zeros(6), state0)
 
     # Second step: verify FD tangent
     deps2 = jnp.zeros(6).at[0].set(1e-3)
-    result = check_tangent(model, stress1, state1, params, deps2)
+    result = check_tangent(implicit_model, stress1, state1, deps2)
     assert result.passed, f"Pre-stressed FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -239,50 +233,36 @@ def test_implicit_fd_tangent_prestressed_3d(params):
 # Plane-stress stress state
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def params_ps():
-    return {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 100.0,
-    }
-
-
-def test_implicit_yield_consistency_plane_stress(params_ps):
+def test_implicit_yield_consistency_plane_stress(implicit_ps_model):
     """Implicit AF plane-stress model: yield surface consistency."""
-    model = _AFKinematicImplicitPS()
-    state0 = model.initial_state()
+    state0 = implicit_ps_model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0])
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(3), state0, params_ps)
-    f = model.yield_function(stress_new, state_new, params_ps)
+    stress_new, state_new, _ = return_mapping(implicit_ps_model, deps, jnp.zeros(3), state0)
+    f = implicit_ps_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
 
 
-def test_implicit_fd_tangent_plane_stress(params_ps):
+def test_implicit_fd_tangent_plane_stress(implicit_ps_model):
     """Augmented consistent tangent must match FD for plane-stress implicit AF."""
-    model = _AFKinematicImplicitPS()
-    state0 = model.initial_state()
+    state0 = implicit_ps_model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0])
 
-    result = check_tangent(model, jnp.zeros(3), state0, params_ps, deps)
+    result = check_tangent(implicit_ps_model, jnp.zeros(3), state0, deps)
     assert result.passed, (
         f"PS FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )
 
 
-def test_implicit_matches_explicit_stress_plane_stress(params_ps):
+def test_implicit_matches_explicit_stress_plane_stress(implicit_ps_model):
     """Implicit AF PS path must produce the same stress as the explicit AF PS path."""
     deps = jnp.array([2e-3, -1e-3, 0.0])
 
-    explicit_model = AFKinematicPS()
-    implicit_model = _AFKinematicImplicitPS()
+    explicit_model = AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     state0 = explicit_model.initial_state()
 
-    stress_exp, _, _ = return_mapping(explicit_model, deps, jnp.zeros(3), state0, params_ps)
-    stress_imp, _, _ = return_mapping(implicit_model, deps, jnp.zeros(3), state0, params_ps)
+    stress_exp, _, _ = return_mapping(explicit_model, deps, jnp.zeros(3), state0)
+    stress_imp, _, _ = return_mapping(implicit_ps_model, deps, jnp.zeros(3), state0)
 
     np.testing.assert_allclose(
         np.array(stress_imp), np.array(stress_exp), atol=1e-7,
@@ -293,14 +273,13 @@ def test_implicit_matches_explicit_stress_plane_stress(params_ps):
 # Elastic step: implicit path falls through to elastic tangent = C
 # ---------------------------------------------------------------------------
 
-def test_implicit_elastic_step_3d(params):
+def test_implicit_elastic_step_3d(implicit_model):
     """Elastic step via implicit-state model returns C as tangent, state unchanged."""
-    model = _AFKinematicImplicit3D()
-    state0 = model.initial_state()
-    C = model.elastic_stiffness(params)
+    state0 = implicit_model.initial_state()
+    C = implicit_model.elastic_stiffness()
     deps = jnp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    stress_new, state_new, ddsdde = return_mapping(model, deps, jnp.zeros(6), state0, params)
+    stress_new, state_new, ddsdde = return_mapping(implicit_model, deps, jnp.zeros(6), state0)
 
     np.testing.assert_allclose(np.array(stress_new), np.array(C @ deps), rtol=1e-10)
     np.testing.assert_allclose(np.array(ddsdde), np.array(C), rtol=1e-10)
@@ -317,17 +296,14 @@ def test_implicit_elastic_step_3d(params):
     [2e-3, -1e-3, -1e-3, 0.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_implicit_tangent_matches_explicit_3d(params, deps_vec):
+def test_implicit_tangent_matches_explicit_3d(af_model, implicit_model, deps_vec):
     """Consistent tangent from the augmented system must match the explicit path tangent."""
     deps = jnp.array(deps_vec)
     stress0 = jnp.zeros(6)
+    state0 = af_model.initial_state()
 
-    explicit_model = AFKinematic3D()
-    implicit_model = _AFKinematicImplicit3D()
-    state0 = explicit_model.initial_state()
-
-    _, _, ddsdde_exp = return_mapping(explicit_model, deps, stress0, state0, params)
-    _, _, ddsdde_imp = return_mapping(implicit_model, deps, stress0, state0, params)
+    _, _, ddsdde_exp = return_mapping(af_model, deps, stress0, state0)
+    _, _, ddsdde_imp = return_mapping(implicit_model, deps, stress0, state0)
 
     np.testing.assert_allclose(
         np.array(ddsdde_imp), np.array(ddsdde_exp), atol=1e-6,
@@ -339,34 +315,24 @@ def test_implicit_tangent_matches_explicit_3d(params, deps_vec):
 # PLANE_STRAIN stress state
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def params_pe():
-    return {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 100.0,
-    }
-
-
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
     hardening_type = "implicit"
 
     def __init__(self):
-        super().__init__(stress_state=PLANE_STRAIN)
+        super().__init__(stress_state=PLANE_STRAIN,
+                         E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n, params):
+    def hardening_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
 
-        scale = 1.0 + params["gamma"] * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - params["C_k"] * dlambda * n_hat
+        scale = 1.0 + self.gamma * dlambda
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return {"alpha": R_alpha, "ep": R_ep}
 
@@ -375,42 +341,43 @@ def test_hardening_type_implicit_pe_is_implicit():
     assert _AFKinematicImplicitPE().hardening_type == "implicit"
 
 
-def test_implicit_yield_consistency_plane_strain(params_pe):
+def test_implicit_yield_consistency_plane_strain():
     """Implicit AF plane-strain model: yield surface consistency."""
     model = _AFKinematicImplicitPE()
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(4), state0, params_pe)
-    f = model.yield_function(stress_new, state_new, params_pe)
+    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(4), state0)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
 
 
-def test_implicit_fd_tangent_plane_strain(params_pe):
+def test_implicit_fd_tangent_plane_strain():
     """Augmented consistent tangent must match FD for plane-strain implicit AF."""
     model = _AFKinematicImplicitPE()
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
 
-    result = check_tangent(model, jnp.zeros(4), state0, params_pe, deps)
+    result = check_tangent(model, jnp.zeros(4), state0, deps)
     assert result.passed, (
         f"PE FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )
 
 
-def test_implicit_matches_explicit_plane_strain(params_pe):
+def test_implicit_matches_explicit_plane_strain():
     """Implicit AF plane-strain path must produce the same stress as the explicit path."""
     deps = jnp.array([2e-3, -1e-3, 0.0, 1e-3])
 
-    explicit_model = AFKinematic3D(stress_state=PLANE_STRAIN)
+    explicit_model = AFKinematic3D(stress_state=PLANE_STRAIN,
+                                   E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     implicit_model = _AFKinematicImplicitPE()
     state0 = explicit_model.initial_state()
 
     stress_exp, _, ddsdde_exp = return_mapping(
-        explicit_model, deps, jnp.zeros(4), state0, params_pe
+        explicit_model, deps, jnp.zeros(4), state0
     )
     stress_imp, _, ddsdde_imp = return_mapping(
-        implicit_model, deps, jnp.zeros(4), state0, params_pe
+        implicit_model, deps, jnp.zeros(4), state0
     )
 
     np.testing.assert_allclose(

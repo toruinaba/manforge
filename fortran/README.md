@@ -142,9 +142,7 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.return_mapping import return_mapping
 from manforge.verification import FortranUMAT
 
-model  = J2Isotropic3D()
-params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0}
-
+model   = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 fortran = FortranUMAT("j2_isotropic_3d")
 ```
 
@@ -156,14 +154,14 @@ dstran = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 # Fortran
 stress_f, ep_f, ddsdde_f = fortran.call(
     "j2_isotropic_3d",
-    params["E"], params["nu"], params["sigma_y0"], params["H"],
+    model.E, model.nu, model.sigma_y0, model.H,
     np.zeros(6), 0.0,   # stress_in, ep_in
     dstran,
 )
 
 # Python
 stress_py, state_py, ddsdde_py = return_mapping(
-    model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+    model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
 )
 
 # Compare
@@ -190,10 +188,10 @@ After compiling (`manforge build` or `make fortran-build-umat`), the call patter
 
 ```python
 # Fortran sub-component
-C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", params["E"], params["nu"])
+C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", model.E, model.nu)
 
 # Python reference
-C_py = model.elastic_stiffness(params)
+C_py = model.elastic_stiffness()
 
 np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 ```

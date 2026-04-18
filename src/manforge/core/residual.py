@@ -14,8 +14,8 @@ unknowns:
 where
 
     R_stress = σ - σ_trial + Δλ C n(σ, q)
-    R_yield  = f(σ, q, params)
-    R_state  = flatten(model.hardening_residual(q, Δλ, σ, q_n, params))
+    R_yield  = f(σ, q)
+    R_state  = flatten(model.hardening_residual(q, Δλ, σ, q_n))
 
 This module provides a factory function that builds the residual callable.
 The same callable is used by both the Newton-Raphson solver
@@ -28,7 +28,7 @@ import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
 
-def make_augmented_residual(model, stress_trial, C, state_n, params):
+def make_augmented_residual(model, stress_trial, C, state_n):
     """Build the augmented residual function for implicit-state models.
 
     Parameters
@@ -41,8 +41,6 @@ def make_augmented_residual(model, stress_trial, C, state_n, params):
         Elastic stiffness tensor.
     state_n : dict
         Internal state at the beginning of the increment.
-    params : dict
-        Material parameters.
 
     Returns
     -------
@@ -68,18 +66,16 @@ def make_augmented_residual(model, stress_trial, C, state_n, params):
         state_new = unflatten_fn(q_flat)
 
         # Flow direction n = ∂f/∂σ at (σ, q)
-        n = jax.grad(lambda s: model.yield_function(s, state_new, params))(sig)
+        n = jax.grad(lambda s: model.yield_function(s, state_new))(sig)
 
         # Stress residual: R1 = σ - σ_trial + Δλ C n
         R_stress = sig - stress_trial + dlambda * (C @ n)
 
         # Yield residual: R2 = f(σ, q)
-        R_yield = model.yield_function(sig, state_new, params)
+        R_yield = model.yield_function(sig, state_new)
 
-        # State residual: R_h = hardening_residual(q_{n+1}, Δλ, σ, q_n, params)
-        R_state_dict = model.hardening_residual(
-            state_new, dlambda, sig, state_n, params
-        )
+        # State residual: R_h = hardening_residual(q_{n+1}, Δλ, σ, q_n)
+        R_state_dict = model.hardening_residual(state_new, dlambda, sig, state_n)
         R_state_flat, _ = ravel_pytree(R_state_dict)
 
         return jnp.concatenate([R_stress, R_yield.reshape(1), R_state_flat])

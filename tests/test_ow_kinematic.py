@@ -42,19 +42,8 @@ from manforge.verification.fd_check import check_tangent
 
 @pytest.fixture
 def model():
-    return OWKinematic3D()
-
-
-@pytest.fixture
-def params():
     # C_k=10000, gamma=1.0 → saturation ‖α‖_vm = √(10000/1.0) = 100 MPa
-    return {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 1.0,
-    }
+    return OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
 
 
 @pytest.fixture
@@ -67,15 +56,15 @@ def state0(model):
 # ---------------------------------------------------------------------------
 
 def test_hardening_type_ow3d():
-    assert OWKinematic3D().hardening_type == "implicit"
+    assert OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
 
 
 def test_hardening_type_owps():
-    assert OWKinematicPS().hardening_type == "implicit"
+    assert OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
 
 
 def test_hardening_type_ow1d():
-    assert OWKinematic1D().hardening_type == "implicit"
+    assert OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
 
 
 # ---------------------------------------------------------------------------
@@ -98,11 +87,11 @@ def test_initial_state_zeros(model):
 # Elastic domain
 # ---------------------------------------------------------------------------
 
-def test_elastic_stress_is_trial(model, params, state0):
+def test_elastic_stress_is_trial(model, state0):
     """Elastic step: stress = C @ deps, tangent = C, state unchanged."""
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
     deps = jnp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    stress_new, state_new, ddsdde = return_mapping(model, deps, jnp.zeros(6), state0, params)
+    stress_new, state_new, ddsdde = return_mapping(model, deps, jnp.zeros(6), state0)
 
     np.testing.assert_allclose(np.array(stress_new), np.array(C @ deps), rtol=1e-10)
     np.testing.assert_allclose(np.array(ddsdde), np.array(C), rtol=1e-10)
@@ -120,11 +109,11 @@ def test_elastic_stress_is_trial(model, params, state0):
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_yield_consistency_plastic(model, params, state0, deps_vec):
+def test_yield_consistency_plastic(model, state0, deps_vec):
     """After a plastic step, stress must lie on the yield surface."""
     deps = jnp.array(deps_vec)
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0, params)
-    f = model.yield_function(stress_new, state_new, params)
+    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
 
 
@@ -138,13 +127,12 @@ def test_yield_consistency_plastic(model, params, state0, deps_vec):
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_tangent_fd_plastic_virgin(model, params, state0, deps_vec):
+def test_tangent_fd_plastic_virgin(model, state0, deps_vec):
     """AD consistent tangent must match FD for the OW model."""
     result = check_tangent(
         model,
         jnp.zeros(6),
         state0,
-        params,
         jnp.array(deps_vec),
     )
     assert result.passed, (
@@ -154,20 +142,20 @@ def test_tangent_fd_plastic_virgin(model, params, state0, deps_vec):
     )
 
 
-def test_tangent_fd_elastic(model, params, state0):
+def test_tangent_fd_elastic(model, state0):
     """Elastic step: FD and AD tangents agree (both equal C)."""
     deps = jnp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = check_tangent(model, jnp.zeros(6), state0, params, deps)
+    result = check_tangent(model, jnp.zeros(6), state0, deps)
     assert result.passed, f"Elastic FD tangent failed: {result.max_rel_err:.3e}"
 
 
-def test_tangent_fd_prestressed(model, params, state0):
+def test_tangent_fd_prestressed(model, state0):
     """FD tangent from a non-virgin (plastically pre-strained) state."""
     deps1 = jnp.zeros(6).at[0].set(3e-3)
-    stress1, state1, _ = return_mapping(model, deps1, jnp.zeros(6), state0, params)
+    stress1, state1, _ = return_mapping(model, deps1, jnp.zeros(6), state0)
 
     deps2 = jnp.zeros(6).at[0].set(1e-3)
-    result = check_tangent(model, stress1, state1, params, deps2)
+    result = check_tangent(model, stress1, state1, deps2)
     assert result.passed, f"Pre-stressed FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -175,29 +163,29 @@ def test_tangent_fd_prestressed(model, params, state0):
 # Backstress properties
 # ---------------------------------------------------------------------------
 
-def test_backstress_is_nonzero_after_plastic_step(model, params, state0):
+def test_backstress_is_nonzero_after_plastic_step(model, state0):
     """Backstress must become nonzero after a plastic step."""
     deps = jnp.zeros(6).at[0].set(3e-3)
-    _, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0, params)
+    _, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0)
     assert jnp.linalg.norm(state_new["alpha"]) > 1e-3
 
 
-def test_backstress_is_deviatoric(model, params, state0):
+def test_backstress_is_deviatoric(model, state0):
     """Backstress must remain deviatoric (trace of direct components ≈ 0)."""
     deps = jnp.zeros(6).at[0].set(3e-3)
-    _, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0, params)
+    _, state_new, _ = return_mapping(model, deps, jnp.zeros(6), state0)
     trace = float(state_new["alpha"][0] + state_new["alpha"][1] + state_new["alpha"][2])
     assert abs(trace) < 1e-8, f"Backstress not deviatoric: trace = {trace:.3e}"
 
 
-def test_ep_increases_with_plastic_loading(model, params, state0):
+def test_ep_increases_with_plastic_loading(model, state0):
     """Equivalent plastic strain must increase monotonically under plastic loading."""
     eps_values = []
     stress_n = jnp.zeros(6)
     state_n = state0
     for _ in range(5):
         deps = jnp.zeros(6).at[0].set(1e-3)
-        stress_n, state_n, _ = return_mapping(model, deps, stress_n, state_n, params)
+        stress_n, state_n, _ = return_mapping(model, deps, stress_n, state_n)
         eps_values.append(float(state_n["ep"]))
     assert all(b > a for a, b in zip(eps_values, eps_values[1:]))
 
@@ -206,16 +194,16 @@ def test_ep_increases_with_plastic_loading(model, params, state0):
 # Saturation: ‖α‖_vm → √(C_k / γ) under monotonic loading
 # ---------------------------------------------------------------------------
 
-def test_backstress_saturation(model, params, state0):
+def test_backstress_saturation(model, state0):
     """Under many small plastic increments, ‖α‖_vm should converge to √(C_k/γ)."""
     import math
-    alpha_sat_expected = math.sqrt(params["C_k"] / params["gamma"])  # 100 MPa
+    alpha_sat_expected = math.sqrt(model.C_k / model.gamma)  # 100 MPa
 
     stress_n = jnp.zeros(6)
     state_n = state0
     for _ in range(200):
         deps = jnp.zeros(6).at[0].set(5e-4)
-        stress_n, state_n, _ = return_mapping(model, deps, stress_n, state_n, params)
+        stress_n, state_n, _ = return_mapping(model, deps, stress_n, state_n)
 
     # Compute VM norm of backstress (alpha is already deviatoric)
     alpha = state_n["alpha"]
@@ -233,40 +221,26 @@ def test_backstress_saturation(model, params, state0):
 
 def test_gamma0_gives_linear_kinematic():
     """With gamma=0, OW reduces to Prager linear kinematic hardening."""
-    model = OWKinematic3D()
-    params_linear = {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 0.0,
-    }
+    model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=0.0)
     state0 = model.initial_state()
     deps = jnp.zeros(6).at[0].set(3e-3)
 
     stress_new, state_new, _ = return_mapping(
-        model, deps, jnp.zeros(6), state0, params_linear
+        model, deps, jnp.zeros(6), state0
     )
 
     # Yield must be satisfied
-    f = model.yield_function(stress_new, state_new, params_linear)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"gamma=0 yield not satisfied: f = {float(f):.3e}"
 
 
 def test_gamma0_fd_tangent():
     """FD tangent must pass for the gamma=0 linear limit."""
-    model = OWKinematic3D()
-    params_linear = {
-        "E": 210000.0,
-        "nu": 0.3,
-        "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma": 0.0,
-    }
+    model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=0.0)
     state0 = model.initial_state()
     deps = jnp.zeros(6).at[0].set(2e-3)
 
-    result = check_tangent(model, jnp.zeros(6), state0, params_linear, deps)
+    result = check_tangent(model, jnp.zeros(6), state0, deps)
     assert result.passed, f"gamma=0 FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -274,7 +248,7 @@ def test_gamma0_fd_tangent():
 # Bauschinger effect
 # ---------------------------------------------------------------------------
 
-def test_bauschinger_effect(model, params, state0):
+def test_bauschinger_effect(model, state0):
     """Kinematic hardening must produce the Bauschinger effect.
 
     After forward plastic loading, the initial reverse yield stress should be
@@ -282,18 +256,18 @@ def test_bauschinger_effect(model, params, state0):
     """
     # Step 1: forward plastic loading
     deps_fwd = jnp.zeros(6).at[0].set(5e-3)
-    stress1, state1, _ = return_mapping(model, deps_fwd, jnp.zeros(6), state0, params)
+    stress1, state1, _ = return_mapping(model, deps_fwd, jnp.zeros(6), state0)
     assert jnp.linalg.norm(state1["alpha"]) > 1e-3  # backstress built up
 
     # Step 2: elastic unloading to approximately zero stress
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
     deps_unload = jnp.linalg.solve(C, -stress1)
-    stress2, state2, _ = return_mapping(model, deps_unload, stress1, state1, params)
+    stress2, state2, _ = return_mapping(model, deps_unload, stress1, state1)
 
     # Step 3: compressive reload — must yield in compression (Bauschinger).
     # Use a sufficiently large compressive increment to trigger reverse yielding.
     deps_rev = jnp.zeros(6).at[0].set(-3e-3)
-    stress3, state3, _ = return_mapping(model, deps_rev, stress2, state2, params)
+    stress3, state3, _ = return_mapping(model, deps_rev, stress2, state2)
 
     # ep must increase during the reverse step (reverse yielding occurred)
     assert float(state3["ep"]) > float(state2["ep"]), "No reverse yielding detected"
@@ -303,7 +277,7 @@ def test_bauschinger_effect(model, params, state0):
 # Cyclic driver test
 # ---------------------------------------------------------------------------
 
-def test_cyclic_loading_driver(model, params):
+def test_cyclic_loading_driver(model):
     """StrainDriver must run cyclic tension-compression without error."""
     driver = StrainDriver()
     history = np.zeros((20, 6))
@@ -312,7 +286,7 @@ def test_cyclic_loading_driver(model, params):
 
     load = FieldHistory(type=FieldType.STRAIN, name="Strain", data=history)
     result = driver.run(
-        model, load, params,
+        model, load,
         collect_state={"alpha": FieldType.STRESS, "ep": FieldType.STRAIN},
     )
 
@@ -338,21 +312,12 @@ def test_ow_approaches_af_for_small_alpha():
     from manforge.models.af_kinematic import AFKinematic3D
 
     # Use a very small strain increment so ‖α‖ stays small
-    params_common = {
-        "E": 210000.0, "nu": 0.3, "sigma_y0": 250.0,
-        "C_k": 10000.0,
-        "gamma_ow": 1.0,   # OW: ‖α_sat‖ = 100
-        "gamma_af": 100.0, # AF: ‖α_sat‖ = 100
-    }
-    params_ow = {**params_common, "gamma": params_common["gamma_ow"]}
-    params_af = {**params_common, "gamma": params_common["gamma_af"]}
-
-    ow_model = OWKinematic3D()
-    af_model = AFKinematic3D()
+    ow_model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
+    af_model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     deps = jnp.zeros(6).at[0].set(3e-4)  # very small step — near linear regime
 
-    stress_ow, _, _ = return_mapping(ow_model, deps, jnp.zeros(6), ow_model.initial_state(), params_ow)
-    stress_af, _, _ = return_mapping(af_model, deps, jnp.zeros(6), af_model.initial_state(), params_af)
+    stress_ow, _, _ = return_mapping(ow_model, deps, jnp.zeros(6), ow_model.initial_state())
+    stress_af, _, _ = return_mapping(af_model, deps, jnp.zeros(6), af_model.initial_state())
 
     # Should be within ~10% for a small step near the yield surface
     np.testing.assert_allclose(
@@ -365,24 +330,24 @@ def test_ow_approaches_af_for_small_alpha():
 # PLANE_STRAIN
 # ---------------------------------------------------------------------------
 
-def test_ow_plane_strain_yield_consistency(params):
+def test_ow_plane_strain_yield_consistency():
     """OW model with PLANE_STRAIN: yield surface consistency."""
-    model = OWKinematic3D(stress_state=PLANE_STRAIN)
+    model = OWKinematic3D(stress_state=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(4), state0, params)
-    f = model.yield_function(stress_new, state_new, params)
+    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(4), state0)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
 
 
-def test_ow_plane_strain_fd_tangent(params):
+def test_ow_plane_strain_fd_tangent():
     """Augmented consistent tangent must match FD for OW in plane strain."""
-    model = OWKinematic3D(stress_state=PLANE_STRAIN)
+    model = OWKinematic3D(stress_state=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
 
-    result = check_tangent(model, jnp.zeros(4), state0, params, deps)
+    result = check_tangent(model, jnp.zeros(4), state0, deps)
     assert result.passed, f"PE FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -392,30 +357,30 @@ def test_ow_plane_strain_fd_tangent(params):
 
 def test_ow_plane_stress_initial_state():
     """OWKinematicPS: initial alpha has shape (3,)."""
-    model = OWKinematicPS()
+    model = OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state = model.initial_state()
     assert state["alpha"].shape == (3,)
     assert state["ep"].shape == ()
 
 
-def test_ow_plane_stress_yield_consistency(params):
+def test_ow_plane_stress_yield_consistency():
     """OW plane-stress model: yield surface consistency."""
-    model = OWKinematicPS()
+    model = OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0])
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(3), state0, params)
-    f = model.yield_function(stress_new, state_new, params)
+    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(3), state0)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
 
 
-def test_ow_plane_stress_fd_tangent(params):
+def test_ow_plane_stress_fd_tangent():
     """Augmented consistent tangent must match FD for OW in plane stress."""
-    model = OWKinematicPS()
+    model = OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0])
 
-    result = check_tangent(model, jnp.zeros(3), state0, params, deps)
+    result = check_tangent(model, jnp.zeros(3), state0, deps)
     assert result.passed, f"PS FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -425,46 +390,46 @@ def test_ow_plane_stress_fd_tangent(params):
 
 def test_ow_1d_initial_state():
     """OWKinematic1D: initial alpha has shape (1,)."""
-    model = OWKinematic1D()
+    model = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state = model.initial_state()
     assert state["alpha"].shape == (1,)
     assert state["ep"].shape == ()
 
 
-def test_ow_1d_yield_consistency(params):
+def test_ow_1d_yield_consistency():
     """OW 1D model: yield surface consistency."""
-    model = OWKinematic1D()
+    model = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3])
 
-    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(1), state0, params)
-    f = model.yield_function(stress_new, state_new, params)
+    stress_new, state_new, _ = return_mapping(model, deps, jnp.zeros(1), state0)
+    f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"1D yield not satisfied: f = {float(f):.3e}"
 
 
-def test_ow_1d_fd_tangent(params):
+def test_ow_1d_fd_tangent():
     """Augmented consistent tangent must match FD for OW 1D model."""
-    model = OWKinematic1D()
+    model = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
     deps = jnp.array([2e-3])
 
-    result = check_tangent(model, jnp.zeros(1), state0, params, deps)
+    result = check_tangent(model, jnp.zeros(1), state0, deps)
     assert result.passed, f"1D FD tangent failed: {result.max_rel_err:.3e}"
 
 
-def test_ow_1d_bauschinger(params):
+def test_ow_1d_bauschinger():
     """OW 1D model: Bauschinger effect under tension then compression."""
-    model = OWKinematic1D()
+    model = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     state0 = model.initial_state()
 
     deps_fwd = jnp.array([5e-3])
-    stress1, state1, _ = return_mapping(model, deps_fwd, jnp.zeros(1), state0, params)
+    stress1, state1, _ = return_mapping(model, deps_fwd, jnp.zeros(1), state0)
 
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
     deps_unload = jnp.linalg.solve(C, -stress1)
-    stress2, state2, _ = return_mapping(model, deps_unload, stress1, state1, params)
+    stress2, state2, _ = return_mapping(model, deps_unload, stress1, state1)
 
     deps_rev = jnp.array([-3e-3])
-    _, state3, _ = return_mapping(model, deps_rev, stress2, state2, params)
+    _, state3, _ = return_mapping(model, deps_rev, stress2, state2)
 
     assert float(state3["ep"]) > float(state2["ep"]), "No 1D reverse yielding"
