@@ -156,7 +156,7 @@ fortran/
 |----|------|
 | `FieldType.STRESS` / `FieldType.STRAIN` | 物理空間（応力空間 / ひずみ空間）の分類 |
 | `FieldHistory(type, name, data)` | 任意の物理量の時系列。`data` の shape は `(N, ntens)` (テンソル) または `(N,)` (スカラー) |
-| `DriverResult` | `fields: dict[str, FieldHistory]` に全出力フィールドを保持。`.stress` / `.strain` プロパティで主要出力に直接アクセス |
+| `DriverResult` | `step_results: list[ReturnMappingResult]` に全ステップの収束結果を保持。`.stress` / `.strain` / `.fields` プロパティで主要出力に直接アクセス。`step_results[i].dlambda` 等で各ステップの詳細も取得可能 |
 
 ### StrainDriver — ひずみ制御
 
@@ -562,10 +562,10 @@ stress_f, ep_f, ddsdde_f = fortran.call(
 )
 
 # Python 側と明示的に比較
-stress_py, _, ddsdde_py = return_mapping(
+result_py = return_mapping(
     model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
 )
-np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
+np.testing.assert_allclose(np.array(result_py.stress), stress_f, rtol=1e-6)
 ```
 
 コンポーネント単位での比較も同じパターン（詳細: `fortran/README.md`）:
@@ -592,6 +592,42 @@ make docker-test          # Docker 環境でビルド + テスト
 
 ---
 
+## 収束点の詳細取得 (ReturnMappingResult / JacobianBlocks)
+
+`return_mapping()` は `ReturnMappingResult` dataclass を返す。収束後の `dlambda`・`stress_trial`・`is_plastic` に直接アクセスできる。
+
+```python
+from manforge.core.return_mapping import return_mapping
+from manforge.core.jacobian import ad_jacobian_blocks
+import numpy.testing as npt
+
+result = return_mapping(model, deps, stress_n, state_n)
+print(result.dlambda)      # 塑性乗数 Δλ
+print(result.stress_trial) # 試行応力 σ_trial
+print(result.is_plastic)   # 塑性ステップか
+
+# ADヤコビアンを変数名キーで分解（解析式の逐次検証に使用）
+jac = ad_jacobian_blocks(model, result, state_n)
+print(jac.dyield_dsigma)    # フロー方向 n = ∂f/∂σ
+print(jac.dstress_dsigma)   # ∂R_stress/∂σ (ntens×ntens)
+# implicitモデルでは state 変数名キーのblockも取得可能
+# jac.dstate_dsigma["alpha"], jac.dstate_dstate["alpha"]["ep"], ...
+
+# 自分の解析式と比較
+my_n = ...
+npt.assert_allclose(jac.dyield_dsigma, my_n, rtol=1e-8)
+```
+
+Driverの特定ステップも同様に取り出せる:
+
+```python
+driver_result = StrainDriver().run(model, load)
+rm = driver_result.step_results[15]          # 15番目のステップ
+jac = ad_jacobian_blocks(model, rm, driver_result.step_results[14].state)
+```
+
+---
+
 ## Analytical vs Autodiff Comparison (Python-to-Python)
 
 Fortran UMAT がなくても、解析解と自動微分解をコード内で直接比較できる。
@@ -606,10 +642,12 @@ import jax.numpy as jnp
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-s_ad, _, D_ad = return_mapping(model, strain_inc, jnp.zeros(6),
-                               model.initial_state(), method="autodiff")
-s_an, _, D_an = return_mapping(model, strain_inc, jnp.zeros(6),
-                               model.initial_state(), method="analytical")
+r_ad = return_mapping(model, strain_inc, jnp.zeros(6),
+                      model.initial_state(), method="autodiff")
+r_an = return_mapping(model, strain_inc, jnp.zeros(6),
+                      model.initial_state(), method="analytical")
+s_ad, D_ad = r_ad.stress, r_ad.ddsdde
+s_an, D_an = r_an.stress, r_an.ddsdde
 ```
 
 ### 複数ケースを体系的に比較
@@ -619,8 +657,9 @@ from manforge.verification.compare import compare_solvers
 
 def make_solver(method):
     def _solve(strain_inc, stress_n, state_n):
-        return return_mapping(model, jnp.asarray(strain_inc),
-                              jnp.asarray(stress_n), state_n, method=method)
+        r = return_mapping(model, jnp.asarray(strain_inc),
+                           jnp.asarray(stress_n), state_n, method=method)
+        return r.stress, r.state, r.ddsdde
     return _solve
 
 result = compare_solvers(
