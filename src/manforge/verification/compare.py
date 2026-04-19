@@ -6,12 +6,8 @@ relative errors in stress and tangent.
 
 A *solver* is any callable with the signature::
 
-    solver(strain_inc, stress_n, state_n, params)
+    solver(strain_inc, stress_n, state_n)
         -> (stress_new, state_new, ddsdde)
-
-This covers the autodiff path (``return_mapping(model, ...)``, partially
-applied), the analytical path (``return_mapping(model, ..., method='analytical')``,
-partially applied), and the Fortran UMAT bridge (:class:`~manforge.verification.fortran_bridge.FortranUMAT`).
 """
 
 from dataclasses import dataclass, field
@@ -58,14 +54,10 @@ def compare_solvers(
 ) -> SolverComparisonResult:
     """Compare two solvers for a set of test cases.
 
-    Calls both solvers with identical inputs for each test case and
-    reports element-wise relative errors in stress (σ) and tangent (DDSDDE).
-    Solver *a* is treated as the reference.
-
     Parameters
     ----------
     solver_a : callable
-        Reference solver: ``(strain_inc, stress_n, state_n, params)``
+        Reference solver: ``(strain_inc, stress_n, state_n)``
         → ``(stress, state, ddsdde)``.
     solver_b : callable
         Candidate solver with the same signature.
@@ -75,15 +67,12 @@ def compare_solvers(
         - ``"strain_inc"`` : array-like, shape (ntens,)
         - ``"stress_n"``   : array-like, shape (ntens,)
         - ``"state_n"``    : dict
-        - ``"params"``     : dict
     stress_tol : float, optional
         Per-case pass threshold for relative stress error (default 1e-6).
     tangent_tol : float, optional
         Per-case pass threshold for relative tangent error (default 1e-5).
     denom_offset : float, optional
-        Small additive offset in the denominator to avoid division by near
-        zero on low-magnitude entries.  Should match the stress unit scale
-        (default 1.0, suitable for MPa).
+        Small additive offset in the denominator (default 1.0, suitable for MPa).
 
     Returns
     -------
@@ -98,10 +87,9 @@ def compare_solvers(
         strain_inc = case["strain_inc"]
         stress_n   = case["stress_n"]
         state_n    = case["state_n"]
-        params     = case["params"]
 
-        stress_a, _state_a, ddsdde_a = solver_a(strain_inc, stress_n, state_n, params)
-        stress_b, _state_b, ddsdde_b = solver_b(strain_inc, stress_n, state_n, params)
+        stress_a, _state_a, ddsdde_a = solver_a(strain_inc, stress_n, state_n)
+        stress_b, _state_b, ddsdde_b = solver_b(strain_inc, stress_n, state_n)
 
         stress_a  = np.asarray(stress_a,  dtype=float)
         stress_b  = np.asarray(stress_b,  dtype=float)

@@ -29,25 +29,25 @@ from manforge.verification.fd_check import check_tangent
 # ---------------------------------------------------------------------------
 
 def test_j2isotropic3d_accepts_solid_3d():
-    model = J2Isotropic3D(SOLID_3D)
+    model = J2Isotropic3D(SOLID_3D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     assert model.stress_state is SOLID_3D
     assert model.ntens == 6
 
 
 def test_j2isotropic3d_accepts_plane_strain():
-    model = J2Isotropic3D(PLANE_STRAIN)
+    model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     assert model.stress_state is PLANE_STRAIN
     assert model.ntens == 4
 
 
 def test_j2isotropic3d_rejects_plane_stress():
     with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        J2Isotropic3D(PLANE_STRESS)
+        J2Isotropic3D(PLANE_STRESS, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 def test_j2isotropic3d_rejects_uniaxial_1d():
     with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        J2Isotropic3D(UNIAXIAL_1D)
+        J2Isotropic3D(UNIAXIAL_1D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ def test_j2isotropic3d_rejects_uniaxial_1d():
 
 @pytest.fixture
 def pe_model():
-    return J2Isotropic3D(PLANE_STRAIN)
+    return J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture
@@ -68,32 +68,32 @@ def pe_state(pe_model):
 # Elastic step — shape and value
 # ---------------------------------------------------------------------------
 
-def test_elastic_step_shapes(pe_model, pe_state, steel_params):
+def test_elastic_step_shapes(pe_model, pe_state):
     """Elastic step produces stress (4,) and tangent (4, 4)."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
     stress, state, ddsdde = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params
+        pe_model, deps, jnp.zeros(4), pe_state
     )
     assert stress.shape == (4,)
     assert ddsdde.shape == (4, 4)
 
 
-def test_elastic_step_stress_equals_C_deps(pe_model, pe_state, steel_params):
+def test_elastic_step_stress_equals_C_deps(pe_model, pe_state):
     """Elastic stress must equal C @ deps."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
-    C = pe_model.elastic_stiffness(steel_params)
+    C = pe_model.elastic_stiffness()
     stress, _, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params
+        pe_model, deps, jnp.zeros(4), pe_state
     )
     np.testing.assert_allclose(np.asarray(stress), np.asarray(C @ deps), rtol=1e-10)
 
 
-def test_elastic_step_tangent_equals_C(pe_model, pe_state, steel_params):
+def test_elastic_step_tangent_equals_C(pe_model, pe_state):
     """Elastic tangent must equal the elastic stiffness C."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
-    C = pe_model.elastic_stiffness(steel_params)
+    C = pe_model.elastic_stiffness()
     _, _, ddsdde = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params
+        pe_model, deps, jnp.zeros(4), pe_state
     )
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
@@ -108,13 +108,13 @@ def test_elastic_step_tangent_equals_C(pe_model, pe_state, steel_params):
     [0.0, 0.0, 0.0, 2e-3],
     [2e-3, 1e-3, 4e-4, 2e-3],    # mixed ×2 — vm≈360 MPa > sigma_y0
 ])
-def test_plastic_yield_consistency(pe_model, pe_state, steel_params, strain_inc_vec):
+def test_plastic_yield_consistency(pe_model, pe_state, strain_inc_vec):
     """Plastic step: yield function ≈ 0 at converged state."""
     deps = jnp.array(strain_inc_vec)
     stress, state, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params
+        pe_model, deps, jnp.zeros(4), pe_state
     )
-    f = pe_model.yield_function(stress, state, steel_params)
+    f = pe_model.yield_function(stress, state)
     assert abs(float(f)) < 1e-8, f"|f| = {abs(float(f)):.3e}"
 
 
@@ -124,11 +124,11 @@ def test_plastic_yield_consistency(pe_model, pe_state, steel_params, strain_inc_
     [0.0, 0.0, 0.0, 2e-3],
     [2e-3, 1e-3, 4e-4, 2e-3],    # mixed ×2 — vm≈360 MPa > sigma_y0
 ])
-def test_plastic_ep_positive(pe_model, pe_state, steel_params, strain_inc_vec):
+def test_plastic_ep_positive(pe_model, pe_state, strain_inc_vec):
     """Plastic step: equivalent plastic strain must increase."""
     deps = jnp.array(strain_inc_vec)
     _, state, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params
+        pe_model, deps, jnp.zeros(4), pe_state
     )
     assert float(state["ep"]) > 0.0
 
@@ -143,13 +143,12 @@ def test_plastic_ep_positive(pe_model, pe_state, steel_params, strain_inc_vec):
     [0.0, 0.0, 0.0, 2e-3],
     [1e-3, 5e-4, 2e-4, 1e-3],
 ])
-def test_analytical_tangent_fd_check(pe_model, pe_state, steel_params, strain_inc_vec):
+def test_analytical_tangent_fd_check(pe_model, pe_state, strain_inc_vec):
     """Plane-strain analytical tangent passes finite-difference check."""
     result = check_tangent(
         pe_model,
         jnp.zeros(4),
         pe_state,
-        steel_params,
         jnp.array(strain_inc_vec),
         method="analytical",
     )
@@ -166,14 +165,14 @@ def test_analytical_tangent_fd_check(pe_model, pe_state, steel_params, strain_in
     [0.0, 0.0, 0.0, 2e-3],
     [1e-3, 5e-4, 2e-4, 1e-3],
 ])
-def test_analytical_stress_matches_autodiff(pe_model, pe_state, steel_params, strain_inc_vec):
+def test_analytical_stress_matches_autodiff(pe_model, pe_state, strain_inc_vec):
     """Analytical and autodiff stress must agree to atol=1e-6."""
     deps = jnp.array(strain_inc_vec)
     s_ad, _, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params, method="autodiff"
+        pe_model, deps, jnp.zeros(4), pe_state, method="autodiff"
     )
     s_an, _, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params, method="analytical"
+        pe_model, deps, jnp.zeros(4), pe_state, method="analytical"
     )
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
@@ -186,14 +185,14 @@ def test_analytical_stress_matches_autodiff(pe_model, pe_state, steel_params, st
     [1e-3, -5e-4, -5e-4, 0.0],
     [0.0, 0.0, 0.0, 2e-3],
 ])
-def test_analytical_tangent_matches_autodiff(pe_model, pe_state, steel_params, strain_inc_vec):
+def test_analytical_tangent_matches_autodiff(pe_model, pe_state, strain_inc_vec):
     """Analytical and autodiff tangent must agree within 1e-5 relative error."""
     deps = jnp.array(strain_inc_vec)
     _, _, D_ad = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params, method="autodiff"
+        pe_model, deps, jnp.zeros(4), pe_state, method="autodiff"
     )
     _, _, D_an = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state, steel_params, method="analytical"
+        pe_model, deps, jnp.zeros(4), pe_state, method="analytical"
     )
     rel_err = jnp.abs(D_an - D_ad) / (jnp.abs(D_ad) + 1.0)
     assert float(jnp.max(rel_err)) < 1e-5, \
@@ -204,32 +203,32 @@ def test_analytical_tangent_matches_autodiff(pe_model, pe_state, steel_params, s
 # Driver integration
 # ---------------------------------------------------------------------------
 
-def test_uniaxial_driver_plane_strain(pe_model, steel_params):
+def test_uniaxial_driver_plane_strain(pe_model):
     """StrainDriver (uniaxial) works with a PLANE_STRAIN model."""
     eps_history = np.linspace(0, 5e-3, 20)
     load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
-    result = StrainDriver().run(pe_model, load, steel_params)
+    result = StrainDriver().run(pe_model, load)
     assert result.stress.shape == (20, 4)
     # σ11 must increase monotonically for hardening material
     assert np.all(np.diff(result.stress[:, 0]) >= 0)
 
 
-def test_general_driver_plane_strain_shapes(pe_model, steel_params):
+def test_general_driver_plane_strain_shapes(pe_model):
     """StrainDriver (general) produces (N, 4) stress output for PLANE_STRAIN model."""
     N = 15
     strain_history = np.zeros((N, 4))
     strain_history[:, 0] = np.linspace(0, 5e-3, N)  # ramp eps_11
     load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-    result = StrainDriver().run(pe_model, load, steel_params)
+    result = StrainDriver().run(pe_model, load)
     assert result.stress.shape == (N, 4)
 
 
-def test_plane_strain_sigma33_nonzero(pe_model, steel_params):
+def test_plane_strain_sigma33_nonzero(pe_model):
     """Plane-strain constraint produces non-zero sigma_33 under axial loading."""
     eps_history = np.zeros((10, 4))
     eps_history[:, 0] = np.linspace(0, 5e-3, 10)  # ramp eps_11 only
     load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
-    result = StrainDriver().run(pe_model, load, steel_params)
+    result = StrainDriver().run(pe_model, load)
     # sigma_33 (index 2) must be non-zero due to plane-strain lateral constraint
     assert np.any(np.abs(result.stress[:, 2]) > 1.0), \
         f"sigma_33 unexpectedly near zero: {result.stress[:, 2]}"
@@ -239,26 +238,26 @@ def test_plane_strain_sigma33_nonzero(pe_model, steel_params):
 # Autodiff path and analytical-raises behavior
 # ---------------------------------------------------------------------------
 
-def test_j2isotropic3d_autodiff_plane_strain(pe_state, steel_params):
+def test_j2isotropic3d_autodiff_plane_strain(pe_state):
     """J2Isotropic3D(PLANE_STRAIN) with method='autodiff' works correctly."""
-    model = J2Isotropic3D(PLANE_STRAIN)
+    model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
     stress, state, ddsdde = return_mapping(
-        model, deps, jnp.zeros(4), pe_state, steel_params, method="autodiff"
+        model, deps, jnp.zeros(4), pe_state, method="autodiff"
     )
     assert stress.shape == (4,)
     assert ddsdde.shape == (4, 4)
     # Yield consistency
-    f = model.yield_function(stress, state, steel_params)
+    f = model.yield_function(stress, state)
     assert abs(float(f)) < 1e-8
 
 
-def test_autodiff_only_model_analytical_raises(steel_params):
+def test_autodiff_only_model_analytical_raises():
     """J2IsotropicPS (no plastic_corrector) raises NotImplementedError for method='analytical'."""
-    model = J2IsotropicPS()
+    model = J2IsotropicPS(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     deps = jnp.array([2e-3, 0.0, 0.0])
     state0 = model.initial_state()
     with pytest.raises(NotImplementedError):
         return_mapping(
-            model, deps, jnp.zeros(3), state0, steel_params, method="analytical"
+            model, deps, jnp.zeros(3), state0, method="analytical"
         )

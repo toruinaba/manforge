@@ -33,6 +33,11 @@ class MaterialModel(ABC):
     stress_state: StressState = SOLID_3D
     hardening_type: str = "explicit"  # "explicit" or "implicit"
 
+    @property
+    def params(self) -> dict:
+        """Material parameters as a dict keyed by :attr:`param_names`."""
+        return {name: getattr(self, name) for name in self.param_names}
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         # Skip intermediate abstract classes (MaterialModel3D, MaterialModelPS, etc.)
@@ -70,13 +75,8 @@ class MaterialModel(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+    def elastic_stiffness(self) -> jnp.ndarray:
         """Return the elastic stiffness tensor in Voigt notation.
-
-        Parameters
-        ----------
-        params : dict
-            Material parameters keyed by :attr:`param_names`.
 
         Returns
         -------
@@ -89,9 +89,8 @@ class MaterialModel(ABC):
         self,
         stress: jnp.ndarray,
         state: dict,
-        params: dict,
     ) -> jnp.ndarray:
-        """Evaluate the yield function f(σ, q, params).
+        """Evaluate the yield function f(σ, q).
 
         The material is in the elastic domain when f ≤ 0.
 
@@ -101,8 +100,6 @@ class MaterialModel(ABC):
             Stress in Voigt notation.
         state : dict
             Internal state variables.
-        params : dict
-            Material parameters.
 
         Returns
         -------
@@ -115,7 +112,6 @@ class MaterialModel(ABC):
         dlambda: jnp.ndarray,
         stress: jnp.ndarray,
         state: dict,
-        params: dict,
     ) -> dict:
         """Return updated state variables after a plastic increment.
 
@@ -133,8 +129,6 @@ class MaterialModel(ABC):
             may ignore this argument.
         state : dict
             State at the beginning of the increment.
-        params : dict
-            Material parameters.
 
         Returns
         -------
@@ -157,21 +151,19 @@ class MaterialModel(ABC):
         dlambda: jnp.ndarray,
         stress: jnp.ndarray,
         state_n: dict,
-        params: dict,
     ) -> dict:
         """Residual of the hardening evolution equations (optional override).
 
-        Defines R_h(q_{n+1}, Δλ, σ, q_n, params) = 0 for use in the
-        augmented residual system where state variables are independent
-        unknowns.
+        Defines R_h(q_{n+1}, Δλ, σ, q_n) = 0 for use in the augmented
+        residual system where state variables are independent unknowns.
 
         Default implementation derives from ``hardening_increment``::
 
-            R_h = q_{n+1} - hardening_increment(Δλ, σ, q_n, params)
+            R_h = q_{n+1} - hardening_increment(Δλ, σ, q_n)
 
         Override this method to define implicit hardening laws where
         ``state_new`` cannot be expressed in closed form as a function of
-        ``(dlambda, stress, state_n, params)``.
+        ``(dlambda, stress, state_n)``.
 
         Parameters
         ----------
@@ -183,8 +175,6 @@ class MaterialModel(ABC):
             Current stress σ_{n+1}.
         state_n : dict
             State at the beginning of the increment.
-        params : dict
-            Material parameters.
 
         Returns
         -------
@@ -192,7 +182,7 @@ class MaterialModel(ABC):
             Residual dict with same keys and shapes as ``state_new``.
             Zero at convergence.
         """
-        state_explicit = self.hardening_increment(dlambda, stress, state_n, params)
+        state_explicit = self.hardening_increment(dlambda, stress, state_n)
         return {k: state_new[k] - state_explicit[k] for k in state_new}
 
     # ------------------------------------------------------------------
@@ -310,7 +300,6 @@ class MaterialModel(ABC):
         stress_trial: jnp.ndarray,
         C: jnp.ndarray,
         state_n: dict,
-        params: dict,
     ):
         """Closed-form plastic correction (optional).
 
@@ -327,8 +316,6 @@ class MaterialModel(ABC):
             Elastic stiffness tensor (already computed by the caller).
         state_n : dict
             Internal state at the beginning of the increment.
-        params : dict
-            Material parameters.
 
         Returns
         -------
@@ -348,7 +335,6 @@ class MaterialModel(ABC):
         dlambda: jnp.ndarray,
         C: jnp.ndarray,
         state_n: dict,
-        params: dict,
     ):
         """Closed-form consistent tangent (optional).
 
@@ -369,8 +355,6 @@ class MaterialModel(ABC):
             Elastic stiffness tensor (already computed by the caller).
         state_n : dict
             Internal state at the beginning of the increment.
-        params : dict
-            Material parameters.
 
         Returns
         -------

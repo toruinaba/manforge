@@ -30,7 +30,7 @@ Compare results explicitly against the Python reference::
     import jax.numpy as jnp
 
     stress_py, state_py, ddsdde_py = return_mapping(
-        model, jnp.array(dstran), jnp.zeros(6), model.initial_state(), params
+        model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
     )
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
 """

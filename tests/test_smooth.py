@@ -258,7 +258,7 @@ class TestAFPattern:
         import manforge
         from manforge.models.af_kinematic import AFKinematic3D
 
-        model = AFKinematic3D()
+        model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         xi = jnp.zeros(6)
         s_xi = model._dev(xi)
         vm_safe = smooth_abs(model._vonmises(xi))
@@ -273,14 +273,12 @@ class TestAFPattern:
         """
         from manforge.models.af_kinematic import AFKinematic3D
 
-        model = AFKinematic3D()
-        params = {"E": 210000.0, "nu": 0.3, "sigma_y0": 250.0,
-                  "C_k": 10000.0, "gamma": 100.0}
+        model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         state0 = model.initial_state()
         stress = jnp.zeros(6)
 
         def alpha_sq_norm(dl):
-            st = model.hardening_increment(dl, stress, state0, params)
+            st = model.hardening_increment(dl, stress, state0)
             return jnp.sum(st["alpha"] ** 2)
 
         # Gradient at dlambda=0 (where xi = stress - alpha = 0)

@@ -27,28 +27,28 @@ def strain_load(data):
 
 @pytest.fixture
 def model_3d():
-    return J2Isotropic3D(SOLID_3D)
+    return J2Isotropic3D(SOLID_3D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture
 def model_1d():
-    return J2Isotropic1D(UNIAXIAL_1D)
+    return J2Isotropic1D(UNIAXIAL_1D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 # ---------------------------------------------------------------------------
 # Elastic-only stress control
 # ---------------------------------------------------------------------------
 
-def test_elastic_strain_matches_compliance(model_3d, steel_params):
+def test_elastic_strain_matches_compliance(model_3d):
     """In the elastic regime, StressDriver must recover S @ σ exactly."""
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     N = 10
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 0.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
-    C = np.array(model_3d.elastic_stiffness(steel_params))
+    C = np.array(model_3d.elastic_stiffness())
     S = np.linalg.inv(C)
 
     for i in range(N):
@@ -64,27 +64,27 @@ def test_elastic_strain_matches_compliance(model_3d, steel_params):
 # Uniaxial stress in 3D model
 # ---------------------------------------------------------------------------
 
-def test_uniaxial_stress_3d_lateral_strains_negative(model_3d, steel_params):
+def test_uniaxial_stress_3d_lateral_strains_negative(model_3d):
     """Under σ11 loading with other components zero, lateral strains must be negative."""
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     N = 20
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
     assert np.all(result.strain[1:, 1] <= 0.0), "ε22 should be non-positive"
     assert np.all(result.strain[1:, 2] <= 0.0), "ε33 should be non-positive"
 
 
-def test_uniaxial_stress_3d_off_diagonal_stress_near_zero(model_3d, steel_params):
+def test_uniaxial_stress_3d_off_diagonal_stress_near_zero(model_3d):
     """Off-axis stress components must remain near zero under uniaxial stress target."""
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     N = 20
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
     np.testing.assert_allclose(
         result.stress[:, 1:], 0.0, atol=1e-6,
@@ -92,14 +92,14 @@ def test_uniaxial_stress_3d_off_diagonal_stress_near_zero(model_3d, steel_params
     )
 
 
-def test_uniaxial_stress_3d_sigma11_matches_target(model_3d, steel_params):
+def test_uniaxial_stress_3d_sigma11_matches_target(model_3d):
     """σ11 output must match the prescribed target at every step."""
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     N = 20
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
     np.testing.assert_allclose(
         result.stress[:, 0], stress_history[:, 0], atol=1e-8,
@@ -107,13 +107,13 @@ def test_uniaxial_stress_3d_sigma11_matches_target(model_3d, steel_params):
     )
 
 
-def test_output_shapes(model_3d, steel_params):
+def test_output_shapes(model_3d):
     """StressDriver must return stress and strain arrays of shape (N, ntens)."""
     N = 15
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0, 200.0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
     assert result.stress.shape == (N, 6)
     assert result.strain.shape == (N, 6)
@@ -123,19 +123,19 @@ def test_output_shapes(model_3d, steel_params):
 # State variable output
 # ---------------------------------------------------------------------------
 
-def test_state_not_collected_by_default(model_3d, steel_params):
+def test_state_not_collected_by_default(model_3d):
     """Without collect_state, DriverResult contains only Stress and Strain."""
     stress_history = np.zeros((5, 6))
     stress_history[:, 0] = np.linspace(0, 200.0, 5)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), steel_params)
+    result = StressDriver().run(model_3d, stress_load(stress_history))
 
     assert set(result.fields.keys()) == {"Stress", "Strain"}
 
 
-def test_state_ep_collected_when_requested(model_3d, steel_params):
+def test_state_ep_collected_when_requested(model_3d):
     """With collect_state, DriverResult contains the requested state field."""
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     N = 20
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
@@ -143,7 +143,6 @@ def test_state_ep_collected_when_requested(model_3d, steel_params):
     result = StressDriver().run(
         model_3d,
         stress_load(stress_history),
-        steel_params,
         collect_state={"ep": FieldType.STRAIN},
     )
 
@@ -155,10 +154,10 @@ def test_state_ep_collected_when_requested(model_3d, steel_params):
     assert ep[-1] > 0.0, "ep should be positive after plastic loading"
 
 
-def test_strain_driver_collect_state(model_3d, steel_params):
+def test_strain_driver_collect_state(model_3d):
     """StrainDriver also collects state when collect_state is provided."""
-    sigma_y0 = steel_params["sigma_y0"]
-    E = steel_params["E"]
+    sigma_y0 = model_3d.sigma_y0
+    E = model_3d.E
     N = 20
     strain_history = np.zeros((N, 6))
     strain_history[:, 0] = np.linspace(0.0, 3 * sigma_y0 / E, N)
@@ -166,7 +165,6 @@ def test_strain_driver_collect_state(model_3d, steel_params):
     result = StrainDriver().run(
         model_3d,
         FieldHistory(FieldType.STRAIN, "Strain", strain_history),
-        steel_params,
         collect_state={"ep": FieldType.STRAIN},
     )
 
@@ -179,7 +177,7 @@ def test_strain_driver_collect_state(model_3d, steel_params):
 # Consistency with StrainDriver (1D model)
 # ---------------------------------------------------------------------------
 
-def test_consistency_with_strain_driver_1d(model_1d, steel_params):
+def test_consistency_with_strain_driver_1d(model_1d):
     """StressDriver must recover the strain used by StrainDriver (1D model).
 
     Procedure:
@@ -187,8 +185,8 @@ def test_consistency_with_strain_driver_1d(model_1d, steel_params):
     2. Feed that stress history into StressDriver → get recovered strain.
     3. The recovered strain must match the original strain history.
     """
-    sigma_y0 = steel_params["sigma_y0"]
-    E = steel_params["E"]
+    sigma_y0 = model_1d.sigma_y0
+    E = model_1d.E
 
     eps_yield = sigma_y0 / E
     N = 25
@@ -196,13 +194,13 @@ def test_consistency_with_strain_driver_1d(model_1d, steel_params):
 
     # Step 1: strain → stress
     result_strain = StrainDriver().run(
-        model_1d, strain_load(eps_history_1d), steel_params
+        model_1d, strain_load(eps_history_1d)
     )
     sigma_history_2d = result_strain.stress  # (N, 1)
 
     # Step 2: stress → strain via StressDriver
     result_stress = StressDriver().run(
-        model_1d, stress_load(sigma_history_2d), steel_params
+        model_1d, stress_load(sigma_history_2d)
     )
     recovered_strain = result_stress.strain[:, 0]
 
@@ -216,7 +214,7 @@ def test_consistency_with_strain_driver_1d(model_1d, steel_params):
 # Convergence failure
 # ---------------------------------------------------------------------------
 
-def test_convergence_failure_raises(model_3d, steel_params):
+def test_convergence_failure_raises(model_3d):
     """Insufficient iterations for a plastic step must raise RuntimeError.
 
     With max_iter=1 and a target stress in the plastic regime, the elastic
@@ -225,10 +223,10 @@ def test_convergence_failure_raises(model_3d, steel_params):
     is never re-evaluated within the single allowed iteration, so the outer NR
     cannot reach the target and must raise RuntimeError.
     """
-    sigma_y0 = steel_params["sigma_y0"]
+    sigma_y0 = model_3d.sigma_y0
     stress_history = np.zeros((1, 6))
     stress_history[0, 0] = 1.5 * sigma_y0
 
     driver = StressDriver(max_iter=1)
     with pytest.raises(RuntimeError, match="NR did not converge"):
-        driver.run(model_3d, stress_load(stress_history), steel_params)
+        driver.run(model_3d, stress_load(stress_history))

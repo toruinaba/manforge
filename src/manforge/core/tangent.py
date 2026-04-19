@@ -3,7 +3,7 @@
 At the converged return-mapping point the residual system is
 
     R1 = σ - σ_trial + Δλ C n(σ, state(Δλ, σ)) = 0    (ntens equations)
-    R2 = f(σ, state(Δλ, σ), params)              = 0    (1 equation)
+    R2 = f(σ, state(Δλ, σ))                      = 0    (1 equation)
 
 where state may depend on both Δλ and σ (e.g. kinematic hardening with
 backstress updated via the flow direction).
@@ -26,7 +26,7 @@ import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
 
-def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params):
+def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     """Compute the consistent (algorithmic) tangent dσ_{n+1}/dΔε.
 
     Uses implicit differentiation at the converged return-mapping point;
@@ -43,12 +43,9 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
     dlambda : jnp.ndarray, scalar
         Converged plastic multiplier increment Δλ.
     stress_n : jnp.ndarray, shape (ntens,)
-        Stress at step n (used only to identify σ_trial = σ_n + C Δε,
-        not needed here — kept for API symmetry).
+        Stress at step n (kept for API symmetry).
     state_n : dict
         Internal state at step n (needed to evaluate ∂state/∂(Δλ, σ)).
-    params : dict
-        Material parameters.
 
     Returns
     -------
@@ -56,21 +53,21 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
         Consistent tangent dσ_{n+1}/dΔε.
     """
     ntens = model.ntens
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
 
     # Reconstruct σ_trial from converged quantities.
     # At convergence R1 = 0  ⟹  σ_trial = σ + Δλ C n.
-    n_conv = jax.grad(lambda s: model.yield_function(s, state, params))(stress)
+    n_conv = jax.grad(lambda s: model.yield_function(s, state))(stress)
     stress_trial = stress + dlambda * (C @ n_conv)
 
     # --- Full coupled residual as function of x = [σ (ntens), Δλ (1)] ---
     def _residual_vec(x):
         sig = x[:ntens]
         dl = x[ntens]
-        st = model.hardening_increment(dl, sig, state_n, params)
-        nn = jax.grad(lambda s: model.yield_function(s, st, params))(sig)
+        st = model.hardening_increment(dl, sig, state_n)
+        nn = jax.grad(lambda s: model.yield_function(s, st))(sig)
         R1 = sig - stress_trial + dl * (C @ nn)
-        R2 = model.yield_function(sig, st, params)
+        R2 = model.yield_function(sig, st)
         return jnp.concatenate([R1, R2.reshape(1)])
 
     # ∂R/∂x  — JAX computes all coupling terms automatically, including
@@ -88,9 +85,7 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n, params)
     return dxde[:ntens, :]
 
 
-def augmented_consistent_tangent(
-    model, stress, state, dlambda, stress_n, state_n, params
-):
+def augmented_consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     """Consistent tangent for implicit-state models (augmented residual system).
 
     The residual system is (ntens+1+n_state) equations in
@@ -111,8 +106,6 @@ def augmented_consistent_tangent(
         Stress at step n (used only to reconstruct σ_trial).
     state_n : dict
         Internal state at step n.
-    params : dict
-        Material parameters.
 
     Returns
     -------
@@ -122,15 +115,13 @@ def augmented_consistent_tangent(
     from manforge.core.residual import make_augmented_residual
 
     ntens = model.ntens
-    C = model.elastic_stiffness(params)
+    C = model.elastic_stiffness()
 
     # Reconstruct σ_trial from converged quantities (R1 = 0 at convergence).
-    n_conv = jax.grad(lambda s: model.yield_function(s, state, params))(stress)
+    n_conv = jax.grad(lambda s: model.yield_function(s, state))(stress)
     stress_trial = stress + dlambda * (C @ n_conv)
 
-    residual_fn, n_state, _ = make_augmented_residual(
-        model, stress_trial, C, state_n, params
-    )
+    residual_fn, n_state, _ = make_augmented_residual(model, stress_trial, C, state_n)
 
     # Converged augmented unknown vector
     flat_state, _ = ravel_pytree(state)

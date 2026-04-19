@@ -1,8 +1,8 @@
 """Uniaxial tension simulation with J2 isotropic hardening.
 
 Demonstrates:
-- Defining material parameters for J2Isotropic1D
-- Running a uniaxial strain history with UniaxialDriver
+- Defining a J2Isotropic1D model with constructor parameters
+- Running a uniaxial strain history with StrainDriver
 - Verifying the consistent tangent with check_tangent
 - Plotting the stress-strain curve (saved as PNG)
 
@@ -30,41 +30,39 @@ except ImportError:
 import jax.numpy as jnp
 
 # ---------------------------------------------------------------------------
-# Material parameters (steel, MPa units)
+# Model (steel, MPa units)
 # ---------------------------------------------------------------------------
-params = {
-    "E": 210_000.0,   # Young's modulus [MPa]
-    "nu": 0.3,        # Poisson's ratio
-    "sigma_y0": 250.0, # Initial yield stress [MPa]
-    "H": 1_000.0,     # Linear isotropic hardening modulus [MPa]
-}
+model = J2Isotropic1D(
+    E=210_000.0,    # Young's modulus [MPa]
+    nu=0.3,         # Poisson's ratio
+    sigma_y0=250.0, # Initial yield stress [MPa]
+    H=1_000.0,      # Linear isotropic hardening modulus [MPa]
+)
 
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-model = J2Isotropic1D()
 driver = StrainDriver()
 
 N = 100
 strain_history = np.linspace(0.0, 5e-3, N)   # cumulative ε11
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = driver.run(model, load, params)
+result = driver.run(model, load)
 stress_history = result.stress[:, 0]   # σ11
 
 # ---------------------------------------------------------------------------
 # Console output
 # ---------------------------------------------------------------------------
-sigma_y0 = params["sigma_y0"]
 sigma_final = stress_history[-1]
-eps_yield_approx = sigma_y0 / params["E"]
+eps_yield_approx = model.sigma_y0 / model.E
 
 print("=" * 50)
 print("  J2 Uniaxial Tension Simulation")
 print("=" * 50)
-print(f"  E          = {params['E']:.0f} MPa")
-print(f"  nu         = {params['nu']}")
-print(f"  sigma_y0   = {params['sigma_y0']:.1f} MPa")
-print(f"  H          = {params['H']:.0f} MPa")
+print(f"  E          = {model.E:.0f} MPa")
+print(f"  nu         = {model.nu}")
+print(f"  sigma_y0   = {model.sigma_y0:.1f} MPa")
+print(f"  H          = {model.H:.0f} MPa")
 print(f"  Strain range: 0 → {strain_history[-1]:.4f}")
 print(f"  Approx. yield strain: {eps_yield_approx:.5f}")
 print(f"  Final stress (sigma11): {sigma_final:.2f} MPa")
@@ -78,7 +76,6 @@ result_e = check_tangent(
     model,
     jnp.zeros(1),
     model.initial_state(),
-    params,
     jnp.array([1e-5]),
 )
 status = "PASS" if result_e.passed else "FAIL"
@@ -89,7 +86,6 @@ result_p = check_tangent(
     model,
     jnp.zeros(1),
     model.initial_state(),
-    params,
     jnp.array([2e-3]),
 )
 status = "PASS" if result_p.passed else "FAIL"
@@ -103,8 +99,8 @@ if HAS_MATPLOTLIB:
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(strain_history * 100, stress_history, color="steelblue", linewidth=2,
             label="J2 isotropic hardening")
-    ax.axhline(sigma_y0, color="gray", linestyle="--", linewidth=1,
-               label=f"$\\sigma_{{y0}}$ = {sigma_y0:.0f} MPa")
+    ax.axhline(model.sigma_y0, color="gray", linestyle="--", linewidth=1,
+               label=f"$\\sigma_{{y0}}$ = {model.sigma_y0:.0f} MPa")
     ax.set_xlabel("Axial strain ε₁₁  [%]")
     ax.set_ylabel("Axial stress σ₁₁  [MPa]")
     ax.set_title("Uniaxial Tension — J2 Isotropic Hardening")

@@ -80,7 +80,7 @@ class DriverResult:
     --------
     Access common outputs via convenience properties::
 
-        result = driver.run(model, load, params)
+        result = driver.run(model, load)
         result.stress          # np.ndarray (N, ntens)
         result.strain          # np.ndarray (N, ntens)
 

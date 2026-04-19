@@ -24,13 +24,13 @@ class _Stub3D(MaterialModel3D):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self, params):
+    def elastic_stiffness(self):
         raise NotImplementedError
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state, params):
+    def hardening_increment(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -123,7 +123,7 @@ def test_dev_isotropic_stress_is_zero():
 # _vonmises
 # ---------------------------------------------------------------------------
 
-def test_vonmises_uniaxial_solid_3d(steel_params):
+def test_vonmises_uniaxial_solid_3d():
     """Uniaxial σ11: von Mises = σ11."""
     m = _Stub3D(SOLID_3D)
     sigma = 300.0
@@ -180,9 +180,9 @@ def test_isotropic_C_symmetry(ss):
     np.testing.assert_allclose(np.asarray(C), np.asarray(C.T), atol=1e-10)
 
 
-def test_isotropic_C_solid_3d_diagonal(steel_params):
+def test_isotropic_C_solid_3d_diagonal():
     """C[0,0] = λ + 2μ and C[0,1] = λ for SOLID_3D."""
-    E, nu = steel_params["E"], steel_params["nu"]
+    E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
     m = _Stub3D(SOLID_3D)
@@ -192,9 +192,9 @@ def test_isotropic_C_solid_3d_diagonal(steel_params):
     np.testing.assert_allclose(float(C[3, 3]), mu, rtol=1e-8)
 
 
-def test_isotropic_C_plane_strain_is_submatrix(steel_params):
+def test_isotropic_C_plane_strain_is_submatrix():
     """PLANE_STRAIN C must equal the top-left 4×4 of SOLID_3D C."""
-    E, nu = steel_params["E"], steel_params["nu"]
+    E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
     C3d = _Stub3D(SOLID_3D).isotropic_C(lam, mu)
@@ -241,13 +241,13 @@ class _StubPS(MaterialModelPS):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self, params):
+    def elastic_stiffness(self):
         raise NotImplementedError
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state, params):
+    def hardening_increment(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -379,9 +379,9 @@ def test_ps_isotropic_C_symmetry():
     np.testing.assert_allclose(np.asarray(C), np.asarray(C.T), atol=1e-10)
 
 
-def test_ps_isotropic_C_known_values(steel_params):
+def test_ps_isotropic_C_known_values():
     """C[0,0] = E/(1-nu²) and C[0,1] = E*nu/(1-nu²) for plane stress."""
-    E, nu = steel_params["E"], steel_params["nu"]
+    E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
     m = _StubPS()
@@ -417,13 +417,13 @@ class _Stub1D(MaterialModel1D):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self, params):
+    def elastic_stiffness(self):
         raise NotImplementedError
 
-    def yield_function(self, stress, state, params):
+    def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state, params):
+    def hardening_increment(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -522,9 +522,9 @@ def test_1d_isotropic_C_shape():
     assert C.shape == (1, 1)
 
 
-def test_1d_isotropic_C_equals_E(steel_params):
+def test_1d_isotropic_C_equals_E():
     """C[0,0] must equal Young's modulus E."""
-    E, nu = steel_params["E"], steel_params["nu"]
+    E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
     m = _Stub1D()
@@ -565,10 +565,10 @@ def test_explicit_without_hardening_increment_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self, params):
+            def elastic_stiffness(self):
                 pass
 
-            def yield_function(self, stress, state, params):
+            def yield_function(self, stress, state):
                 pass
 
 
@@ -580,10 +580,10 @@ def test_implicit_without_hardening_residual_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self, params):
+            def elastic_stiffness(self):
                 pass
 
-            def yield_function(self, stress, state, params):
+            def yield_function(self, stress, state):
                 pass
 
 
@@ -595,13 +595,13 @@ def test_invalid_hardening_type_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self, params):
+            def elastic_stiffness(self):
                 pass
 
-            def yield_function(self, stress, state, params):
+            def yield_function(self, stress, state):
                 pass
 
-            def hardening_increment(self, dlambda, stress, state, params):
+            def hardening_increment(self, dlambda, stress, state):
                 return {}
 
 
@@ -612,16 +612,16 @@ def test_implicit_with_both_methods_allowed():
         param_names = []
         state_names = []
 
-        def elastic_stiffness(self, params):
+        def elastic_stiffness(self):
             pass
 
-        def yield_function(self, stress, state, params):
+        def yield_function(self, stress, state):
             pass
 
-        def hardening_increment(self, dlambda, stress, state, params):
+        def hardening_increment(self, dlambda, stress, state):
             return {}
 
-        def hardening_residual(self, state_new, dlambda, stress, state_n, params):
+        def hardening_residual(self, state_new, dlambda, stress, state_n):
             return {}
 
     assert OKImplicit().hardening_type == "implicit"

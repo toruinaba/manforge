@@ -47,6 +47,7 @@ Notes
 import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
 class AFKinematic3D(MaterialModel3D):
@@ -61,10 +62,29 @@ class AFKinematic3D(MaterialModel3D):
     stress_state : StressState, optional
         Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
         Defaults to ``SOLID_3D``.
+    E : float
+        Young's modulus.
+    nu : float
+        Poisson's ratio.
+    sigma_y0 : float
+        Initial yield stress.
+    C_k : float
+        Kinematic hardening modulus.
+    gamma : float
+        Dynamic recovery parameter.
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
+
+    def __init__(self, stress_state: StressState = SOLID_3D, *,
+                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(stress_state)
+        self.E = E
+        self.nu = nu
+        self.sigma_y0 = sigma_y0
+        self.C_k = C_k
+        self.gamma = gamma
 
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
@@ -73,19 +93,18 @@ class AFKinematic3D(MaterialModel3D):
             "ep": jnp.array(0.0),
         }
 
-    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+    def elastic_stiffness(self) -> jnp.ndarray:
         """Isotropic elastic stiffness tensor."""
-        E, nu = params["E"], params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict, params: dict) -> jnp.ndarray:
+    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
-        return self._vonmises(xi) - params["sigma_y0"]
+        return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
+    def hardening_increment(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update (implicit, analytical).
 
         α_{n+1} = (α_n + C_k Δλ ŝ) / (1 + γ Δλ)
@@ -97,7 +116,7 @@ class AFKinematic3D(MaterialModel3D):
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
+        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
 
 
@@ -117,10 +136,29 @@ class AFKinematicPS(MaterialModelPS):
     stress_state : StressState, optional
         Must satisfy ``stress_state.is_plane_stress``.
         Defaults to ``PLANE_STRESS``.
+    E : float
+        Young's modulus.
+    nu : float
+        Poisson's ratio.
+    sigma_y0 : float
+        Initial yield stress.
+    C_k : float
+        Kinematic hardening modulus.
+    gamma : float
+        Dynamic recovery parameter.
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
+
+    def __init__(self, stress_state: StressState = PLANE_STRESS, *,
+                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(stress_state)
+        self.E = E
+        self.nu = nu
+        self.sigma_y0 = sigma_y0
+        self.C_k = C_k
+        self.gamma = gamma
 
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
@@ -129,26 +167,25 @@ class AFKinematicPS(MaterialModelPS):
             "ep": jnp.array(0.0),
         }
 
-    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+    def elastic_stiffness(self) -> jnp.ndarray:
         """Plane-stress isotropic stiffness (3×3 condensed)."""
-        E, nu = params["E"], params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict, params: dict) -> jnp.ndarray:
+    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
-        return self._vonmises(xi) - params["sigma_y0"]
+        return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
+    def hardening_increment(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update."""
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
+        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
 
 
@@ -166,10 +203,29 @@ class AFKinematic1D(MaterialModel1D):
     ----------
     stress_state : StressState, optional
         Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
+    E : float
+        Young's modulus.
+    nu : float
+        Poisson's ratio.
+    sigma_y0 : float
+        Initial yield stress.
+    C_k : float
+        Kinematic hardening modulus.
+    gamma : float
+        Dynamic recovery parameter.
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
+
+    def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
+                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(stress_state)
+        self.E = E
+        self.nu = nu
+        self.sigma_y0 = sigma_y0
+        self.C_k = C_k
+        self.gamma = gamma
 
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
@@ -178,24 +234,23 @@ class AFKinematic1D(MaterialModel1D):
             "ep": jnp.array(0.0),
         }
 
-    def elastic_stiffness(self, params: dict) -> jnp.ndarray:
+    def elastic_stiffness(self) -> jnp.ndarray:
         """1D elastic stiffness [[E]]."""
-        E, nu = params["E"], params["nu"]
-        mu = E / (2.0 * (1.0 + nu))
-        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict, params: dict) -> jnp.ndarray:
+    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
-        return self._vonmises(xi) - params["sigma_y0"]
+        return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state, params) -> dict:
+    def hardening_increment(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update."""
         alpha_n = state["alpha"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + params["C_k"] * dlambda * n_hat) / (1.0 + params["gamma"] * dlambda)
+        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
         return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
