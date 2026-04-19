@@ -22,12 +22,12 @@ def _fd_tangent(model, strain_inc, stress_n, state_n, h=1e-7):
     for j in range(ntens):
         e_j = jnp.zeros(ntens).at[j].set(1.0)
 
-        s_fwd, _, _ = return_mapping(
+        s_fwd = return_mapping(
             model, strain_inc + h * e_j, stress_n, state_n
-        )
-        s_bwd, _, _ = return_mapping(
+        ).stress
+        s_bwd = return_mapping(
             model, strain_inc - h * e_j, stress_n, state_n
-        )
+        ).stress
         col = (s_fwd - s_bwd) / (2.0 * h)
         ddsdde_fd = ddsdde_fd.at[:, j].set(col)
 
@@ -44,9 +44,9 @@ def test_tangent_fd_elastic(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _, _, ddsdde_ad = return_mapping(
+    ddsdde_ad = return_mapping(
         model, strain_inc, stress_n, state_n
-    )
+    ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
 
     np.testing.assert_allclose(
@@ -65,9 +65,9 @@ def test_tangent_fd_plastic_uniaxial(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _, _, ddsdde_ad = return_mapping(
+    ddsdde_ad = return_mapping(
         model, strain_inc, stress_n, state_n
-    )
+    ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
 
     # Relative tolerance on the dominant non-zero entries
@@ -86,9 +86,9 @@ def test_tangent_fd_plastic_multiaxial(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _, _, ddsdde_ad = return_mapping(
+    ddsdde_ad = return_mapping(
         model, strain_inc, stress_n, state_n
-    )
+    ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
 
     denom = jnp.abs(ddsdde_fd) + 1e-2
@@ -109,9 +109,9 @@ def test_tangent_fd_plastic_prestress(model):
     # Now push into plastic domain
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _, _, ddsdde_ad = return_mapping(
+    ddsdde_ad = return_mapping(
         model, strain_inc, stress_n, state_n
-    )
+    ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
 
     denom = jnp.abs(ddsdde_fd) + 1e-2

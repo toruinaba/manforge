@@ -18,13 +18,14 @@ from manforge.verification.compare import compare_solvers, SolverComparisonResul
 def _make_solver(model, method):
     """Return a SolverFn bound to the given model and method."""
     def _solve(strain_inc, stress_n, state_n):
-        return return_mapping(
+        _r = return_mapping(
             model,
             jnp.asarray(strain_inc),
             jnp.asarray(stress_n),
             state_n,
             method=method,
         )
+        return _r.stress, _r.state, _r.ddsdde
     return _solve
 
 
@@ -106,11 +107,11 @@ def test_wrong_solver_fails(model, test_cases):
     solver_ad = _make_solver(model, "autodiff")
 
     def bad_solver(strain_inc, stress_n, state_n):
-        stress, state, ddsdde = return_mapping(
+        _r = return_mapping(
             model, jnp.asarray(strain_inc), jnp.asarray(stress_n),
             state_n, method="autodiff"
         )
-        return stress * 1.1, state, ddsdde  # 10% error in stress
+        return _r.stress * 1.1, _r.state, _r.ddsdde  # 10% error in stress
 
     result = compare_solvers(solver_ad, bad_solver, test_cases, stress_tol=1e-6)
 

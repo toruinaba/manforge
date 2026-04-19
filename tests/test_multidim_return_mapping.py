@@ -71,9 +71,8 @@ def pe_state(pe_model):
 def test_elastic_step_shapes(pe_model, pe_state):
     """Elastic step produces stress (4,) and tangent (4, 4)."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
-    stress, state, ddsdde = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state
-    )
+    _r = return_mapping(pe_model, deps, jnp.zeros(4), pe_state)
+    stress, state, ddsdde = _r.stress, _r.state, _r.ddsdde
     assert stress.shape == (4,)
     assert ddsdde.shape == (4, 4)
 
@@ -82,9 +81,9 @@ def test_elastic_step_stress_equals_C_deps(pe_model, pe_state):
     """Elastic stress must equal C @ deps."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
     C = pe_model.elastic_stiffness()
-    stress, _, _ = return_mapping(
+    stress = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state
-    )
+    ).stress
     np.testing.assert_allclose(np.asarray(stress), np.asarray(C @ deps), rtol=1e-10)
 
 
@@ -92,9 +91,9 @@ def test_elastic_step_tangent_equals_C(pe_model, pe_state):
     """Elastic tangent must equal the elastic stiffness C."""
     deps = jnp.array([1e-4, 0.0, 0.0, 0.0])
     C = pe_model.elastic_stiffness()
-    _, _, ddsdde = return_mapping(
+    ddsdde = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state
-    )
+    ).ddsdde
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
 
@@ -111,9 +110,8 @@ def test_elastic_step_tangent_equals_C(pe_model, pe_state):
 def test_plastic_yield_consistency(pe_model, pe_state, strain_inc_vec):
     """Plastic step: yield function ≈ 0 at converged state."""
     deps = jnp.array(strain_inc_vec)
-    stress, state, _ = return_mapping(
-        pe_model, deps, jnp.zeros(4), pe_state
-    )
+    _r = return_mapping(pe_model, deps, jnp.zeros(4), pe_state)
+    stress, state = _r.stress, _r.state
     f = pe_model.yield_function(stress, state)
     assert abs(float(f)) < 1e-8, f"|f| = {abs(float(f)):.3e}"
 
@@ -127,9 +125,9 @@ def test_plastic_yield_consistency(pe_model, pe_state, strain_inc_vec):
 def test_plastic_ep_positive(pe_model, pe_state, strain_inc_vec):
     """Plastic step: equivalent plastic strain must increase."""
     deps = jnp.array(strain_inc_vec)
-    _, state, _ = return_mapping(
+    state = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state
-    )
+    ).state
     assert float(state["ep"]) > 0.0
 
 
@@ -168,12 +166,12 @@ def test_analytical_tangent_fd_check(pe_model, pe_state, strain_inc_vec):
 def test_analytical_stress_matches_autodiff(pe_model, pe_state, strain_inc_vec):
     """Analytical and autodiff stress must agree to atol=1e-6."""
     deps = jnp.array(strain_inc_vec)
-    s_ad, _, _ = return_mapping(
+    s_ad = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, method="autodiff"
-    )
-    s_an, _, _ = return_mapping(
+    ).stress
+    s_an = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, method="analytical"
-    )
+    ).stress
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
         err_msg=f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}",
@@ -188,12 +186,12 @@ def test_analytical_stress_matches_autodiff(pe_model, pe_state, strain_inc_vec):
 def test_analytical_tangent_matches_autodiff(pe_model, pe_state, strain_inc_vec):
     """Analytical and autodiff tangent must agree within 1e-5 relative error."""
     deps = jnp.array(strain_inc_vec)
-    _, _, D_ad = return_mapping(
+    D_ad = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, method="autodiff"
-    )
-    _, _, D_an = return_mapping(
+    ).ddsdde
+    D_an = return_mapping(
         pe_model, deps, jnp.zeros(4), pe_state, method="analytical"
-    )
+    ).ddsdde
     rel_err = jnp.abs(D_an - D_ad) / (jnp.abs(D_ad) + 1.0)
     assert float(jnp.max(rel_err)) < 1e-5, \
         f"max tangent rel err = {float(jnp.max(rel_err)):.3e}"
@@ -242,9 +240,8 @@ def test_j2isotropic3d_autodiff_plane_strain(pe_state):
     """J2Isotropic3D(PLANE_STRAIN) with method='autodiff' works correctly."""
     model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
-    stress, state, ddsdde = return_mapping(
-        model, deps, jnp.zeros(4), pe_state, method="autodiff"
-    )
+    _r = return_mapping(model, deps, jnp.zeros(4), pe_state, method="autodiff")
+    stress, state, ddsdde = _r.stress, _r.state, _r.ddsdde
     assert stress.shape == (4,)
     assert ddsdde.shape == (4, 4)
     # Yield consistency

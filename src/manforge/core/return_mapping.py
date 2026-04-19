@@ -39,11 +39,41 @@ Notes
   (the classic radial-return closed form).
 """
 
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
 from manforge.core.tangent import augmented_consistent_tangent, consistent_tangent
+
+
+@dataclass
+class ReturnMappingResult:
+    """Result of a single return-mapping increment.
+
+    Attributes
+    ----------
+    stress : jnp.ndarray, shape (ntens,)
+        Converged stress σ_{n+1}.
+    state : dict
+        Converged internal state at step n+1.
+    ddsdde : jnp.ndarray, shape (ntens, ntens)
+        Consistent tangent dσ_{n+1}/dΔε.
+    dlambda : jnp.ndarray, scalar
+        Plastic multiplier increment Δλ (0 for elastic steps).
+    stress_trial : jnp.ndarray, shape (ntens,)
+        Elastic trial stress σ_trial = σ_n + C Δε.
+    is_plastic : bool
+        True if the step is plastic (yield function was active).
+    """
+
+    stress: jnp.ndarray
+    state: dict
+    ddsdde: jnp.ndarray
+    dlambda: jnp.ndarray
+    stress_trial: jnp.ndarray
+    is_plastic: bool
 
 
 def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
@@ -133,12 +163,9 @@ def return_mapping(
 
     Returns
     -------
-    stress_new : jnp.ndarray, shape (ntens,)
-        Updated stress σ_{n+1}.
-    state_new : dict
-        Updated internal state.
-    ddsdde : jnp.ndarray, shape (ntens, ntens)
-        Consistent tangent dσ_{n+1}/dΔε.
+    ReturnMappingResult
+        Converged stress, state, consistent tangent, plastic multiplier,
+        trial stress, and plasticity flag.
 
     Raises
     ------
@@ -168,7 +195,14 @@ def return_mapping(
     f_trial = model.yield_function(stress_trial, state_n)
 
     if f_trial <= 0.0:
-        return stress_trial, state_n, C
+        return ReturnMappingResult(
+            stress=stress_trial,
+            state=state_n,
+            ddsdde=C,
+            dlambda=jnp.array(0.0),
+            stress_trial=stress_trial,
+            is_plastic=False,
+        )
 
     # ------------------------------------------------------------------
     # Step 3 — plastic correction
@@ -236,7 +270,14 @@ def return_mapping(
     if method != "autodiff":
         _ddsdde = model.analytical_tangent(stress, state_new, dlambda, C, state_n)
         if _ddsdde is not None:
-            return stress, state_new, _ddsdde
+            return ReturnMappingResult(
+                stress=stress,
+                state=state_new,
+                ddsdde=_ddsdde,
+                dlambda=dlambda,
+                stress_trial=stress_trial,
+                is_plastic=True,
+            )
         elif method == "analytical":
             raise NotImplementedError(
                 f"{type(model).__name__} does not implement analytical_tangent; "
@@ -253,4 +294,11 @@ def return_mapping(
             model, stress, state_new, dlambda, stress_n, state_n
         )
 
-    return stress, state_new, ddsdde
+    return ReturnMappingResult(
+        stress=stress,
+        state=state_new,
+        ddsdde=ddsdde,
+        dlambda=dlambda,
+        stress_trial=stress_trial,
+        is_plastic=True,
+    )

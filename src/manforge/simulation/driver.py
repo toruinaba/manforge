@@ -128,12 +128,8 @@ class StrainDriver(DriverBase):
 
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
-        state_accum: dict[str, list] = (
-            {k: [] for k in collect_state} if collect_state else {}
-        )
-
-        stress_out = np.zeros((N, ntens))
         strain_out = np.zeros((N, ntens))
+        step_results = []
 
         for i in range(N):
             if uniaxial:
@@ -145,20 +141,16 @@ class StrainDriver(DriverBase):
                 strain_inc = jnp.array(data[i] - prev)
                 strain_out[i] = data[i]
 
-            stress_n, state_n, _ = return_mapping(model, strain_inc, stress_n, state_n)
-            stress_out[i] = np.array(stress_n)
-            if collect_state:
-                for k in collect_state:
-                    state_accum[k].append(np.asarray(state_n[k]))
+            rm = return_mapping(model, strain_inc, stress_n, state_n)
+            stress_n = rm.stress
+            state_n = rm.state
+            step_results.append(rm)
 
-        fields: dict[str, FieldHistory] = {
-            "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
-            "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
-        }
-        if collect_state:
-            for k, ft in collect_state.items():
-                fields[k] = FieldHistory(ft, k, np.stack(state_accum[k]))
-        return DriverResult(fields=fields)
+        return DriverResult(
+            step_results=step_results,
+            strain=strain_out,
+            collect_state=collect_state,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -228,16 +220,12 @@ class StressDriver(DriverBase):
         stress_n = jnp.zeros(ntens)
         state_n = model.initial_state()
         eps_total = np.zeros(ntens)
-        state_accum: dict[str, list] = (
-            {k: [] for k in collect_state} if collect_state else {}
-        )
+        strain_out = np.zeros((N, ntens))
+        step_results = []
 
         # Elastic compliance for the initial strain-increment guess
         C = model.elastic_stiffness()
         S = jnp.linalg.inv(C)
-
-        stress_out = np.zeros((N, ntens))
-        strain_out = np.zeros((N, ntens))
 
         for i in range(N):
             sigma_target = jnp.array(stress_history[i])
@@ -247,15 +235,14 @@ class StressDriver(DriverBase):
 
             converged = False
             residual = jnp.full(ntens, jnp.inf)
+            rm = None
             for _ in range(self.max_iter):
-                stress_new, state_new, ddsdde = return_mapping(
-                    model, deps, stress_n, state_n
-                )
-                residual = sigma_target - stress_new
+                rm = return_mapping(model, deps, stress_n, state_n)
+                residual = sigma_target - rm.stress
                 if float(jnp.max(jnp.abs(residual))) < self.tol:
                     converged = True
                     break
-                deps = deps + jnp.linalg.solve(ddsdde, residual)
+                deps = deps + jnp.linalg.solve(rm.ddsdde, residual)
 
             if not converged:
                 raise RuntimeError(
@@ -264,23 +251,17 @@ class StressDriver(DriverBase):
                     f"tol = {self.tol:.3e})"
                 )
 
-            stress_n = stress_new
-            state_n = state_new
+            stress_n = rm.stress
+            state_n = rm.state
             eps_total = eps_total + np.array(deps)
-            stress_out[i] = np.array(stress_new)
             strain_out[i] = eps_total.copy()
-            if collect_state:
-                for k in collect_state:
-                    state_accum[k].append(np.asarray(state_n[k]))
+            step_results.append(rm)
 
-        fields: dict[str, FieldHistory] = {
-            "Stress": FieldHistory(FieldType.STRESS, "Stress", stress_out),
-            "Strain": FieldHistory(FieldType.STRAIN, "Strain", strain_out),
-        }
-        if collect_state:
-            for k, ft in collect_state.items():
-                fields[k] = FieldHistory(ft, k, np.stack(state_accum[k]))
-        return DriverResult(fields=fields)
+        return DriverResult(
+            step_results=step_results,
+            strain=strain_out,
+            collect_state=collect_state,
+        )
 
 
 # ---------------------------------------------------------------------------

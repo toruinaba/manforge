@@ -54,13 +54,10 @@ def _fd_tangent(
     for j in range(ntens):
         e_j = jnp.zeros(ntens).at[j].set(1.0)
 
-        s_fwd, _, _ = return_mapping(
-            model, strain_inc + eps * e_j, stress_n, state_n, method=method
-        )
-        s_bwd, _, _ = return_mapping(
-            model, strain_inc - eps * e_j, stress_n, state_n, method=method
-        )
-        col = (s_fwd - s_bwd) / (2.0 * eps)
+        col = (
+            return_mapping(model, strain_inc + eps * e_j, stress_n, state_n, method=method).stress
+            - return_mapping(model, strain_inc - eps * e_j, stress_n, state_n, method=method).stress
+        ) / (2.0 * eps)
         ddsdde_fd = ddsdde_fd.at[:, j].set(col)
 
     return ddsdde_fd
@@ -125,7 +122,7 @@ def check_tangent(
     >>> result.passed
     True
     """
-    _, _, ddsdde_ad = return_mapping(model, strain_inc, stress, state, method=method)
+    ddsdde_ad = return_mapping(model, strain_inc, stress, state, method=method).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress, state, eps=eps, method=method)
 
     rel_err_matrix = jnp.abs(ddsdde_ad - ddsdde_fd) / (

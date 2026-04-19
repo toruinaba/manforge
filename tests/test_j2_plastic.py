@@ -40,9 +40,8 @@ def test_plastic_stress_uniaxial(model, lame_constants):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    stress_new, state_new, _ = return_mapping(
-        model, strain_inc, stress_n, state_n
-    )
+    _r = return_mapping(model, strain_inc, stress_n, state_n)
+    stress_new, state_new = _r.stress, _r.state
 
     # Correct analytic Δλ: use vonmises of the triaxial trial stress
     C = model.elastic_stiffness()
@@ -66,9 +65,9 @@ def test_plastic_ep_updated(model):
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    _, state_new, _ = return_mapping(
+    state_new = return_mapping(
         model, strain_inc, jnp.zeros(6), state_n
-    )
+    ).state
 
     assert float(state_new["ep"]) > 0.0
 
@@ -91,9 +90,9 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
     sigma_vm_trial = 2.0 * mu * deps11
     dlambda_analytic = (sigma_vm_trial - sigma_y0) / (3.0 * mu + H)
 
-    _, state_new, _ = return_mapping(
+    state_new = return_mapping(
         model, strain_inc, jnp.zeros(6), state_n
-    )
+    ).state
 
     np.testing.assert_allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
 
@@ -104,9 +103,8 @@ def test_plastic_yield_consistency(model):
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    stress_new, state_new, _ = return_mapping(
-        model, strain_inc, jnp.zeros(6), state_n
-    )
+    _r = return_mapping(model, strain_inc, jnp.zeros(6), state_n)
+    stress_new, state_new = _r.stress, _r.state
 
     f_final = model.yield_function(stress_new, state_new)
     assert jnp.abs(f_final) < 1e-8, f"|f| = {float(jnp.abs(f_final)):.3e}"
@@ -118,9 +116,9 @@ def test_plastic_ddsdde_differs_from_C(model):
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _, _, ddsdde = return_mapping(
+    ddsdde = return_mapping(
         model, strain_inc, jnp.zeros(6), model.initial_state()
-    )
+    ).ddsdde
 
     assert not np.allclose(np.asarray(ddsdde), np.asarray(C), atol=1.0), \
         "Plastic tangent should differ from elastic stiffness"

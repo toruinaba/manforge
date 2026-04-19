@@ -32,9 +32,8 @@ def test_plastic_corrector_elastic_path_not_called(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    stress_new, state_new, ddsdde = return_mapping(
-        model, strain_inc, stress_n, state_n, method="analytical"
-    )
+    _r = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
     C = model.elastic_stiffness()
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
@@ -89,8 +88,10 @@ def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    s_ad, st_ad, _ = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff")
-    s_an, st_an, _ = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    _r_ad = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff")
+    s_ad, st_ad = _r_ad.stress, _r_ad.state
+    _r_an = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    s_an, st_an = _r_an.stress, _r_an.state
 
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
@@ -103,12 +104,13 @@ def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model):
     """Works correctly from a pre-stressed state."""
     # First step to build up pre-stress
     strain_inc1 = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    s1, st1, _ = return_mapping(model, strain_inc1, jnp.zeros(6), model.initial_state())
+    _r1 = return_mapping(model, strain_inc1, jnp.zeros(6), model.initial_state())
+    s1, st1 = _r1.stress, _r1.state
 
     # Second plastic step
     strain_inc2 = jnp.array([1e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    s_ad, _, _ = return_mapping(model, strain_inc2, s1, st1, method="autodiff")
-    s_an, _, _ = return_mapping(model, strain_inc2, s1, st1, method="analytical")
+    s_ad = return_mapping(model, strain_inc2, s1, st1, method="autodiff").stress
+    s_an = return_mapping(model, strain_inc2, s1, st1, method="analytical").stress
 
     np.testing.assert_allclose(np.asarray(s_an), np.asarray(s_ad), atol=1e-6)
 
@@ -128,8 +130,8 @@ def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _, _, D_ad = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff")
-    _, _, D_an = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    D_ad = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff").ddsdde
+    D_an = return_mapping(model, strain_inc, stress_n, state_n, method="analytical").ddsdde
 
     rel_err = jnp.abs(D_an - D_ad) / (jnp.abs(D_ad) + 1.0)
     assert float(jnp.max(rel_err)) < 1e-5, \
@@ -146,8 +148,10 @@ def test_method_auto_uses_analytical(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    s_auto, _, D_auto = return_mapping(model, strain_inc, stress_n, state_n, method="auto")
-    s_an,   _, D_an   = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    _r_auto = return_mapping(model, strain_inc, stress_n, state_n, method="auto")
+    s_auto, D_auto = _r_auto.stress, _r_auto.ddsdde
+    _r_an = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    s_an, D_an = _r_an.stress, _r_an.ddsdde
 
     np.testing.assert_allclose(np.asarray(s_auto), np.asarray(s_an), atol=1e-12,
                                err_msg="auto should match analytical path")
