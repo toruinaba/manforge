@@ -592,38 +592,72 @@ make docker-test          # Docker 環境でビルド + テスト
 
 ---
 
-## 収束点の詳細取得 (ReturnMappingResult / JacobianBlocks)
+## 解析解の段階的検証
 
-`return_mapping()` は `ReturnMappingResult` dataclass を返す。収束後の `dlambda`・`stress_trial`・`is_plastic` に直接アクセスできる。
+新しい構成則モデルを実装するとき、典型的な開発手順は次の通り:
+
+1. **残差方程式の立式** — 増分型の応力更新式と硬化則残差を定義
+2. **数値解での動作確認** — `hardening_type = "implicit"` + `hardening_residual()` を実装し、汎用 NR + JAX autodiff で収束を確認
+3. **解析微分の導出と検証** — ヤコビアンの各ブロック (フロー方向・硬化接線・状態変数間結合項 等) を手計算し、AD 値と要素ごとに照合
+4. **解析解への切り替え** — 検証済みのブロックを `plastic_corrector()` / `analytical_tangent()` として実装
+5. **Fortran への移植** — 検証済みブロック構造をそのままサブルーチン構成に対応させる
+
+ステップ3の「AD 値との照合」を支援するのが `ReturnMappingResult` と `JacobianBlocks` の目的。
+
+### 収束点の詳細取得
+
+`return_mapping()` は `ReturnMappingResult` dataclass を返す。ソルバー内部でのみ使われていた `dlambda`・`stress_trial` をユーザーが取り出せる。
 
 ```python
 from manforge.core.return_mapping import return_mapping
+
+result = return_mapping(model, deps, stress_n, state_n)
+result.stress        # 収束応力 σ_{n+1}
+result.ddsdde        # コンシステント接線
+result.dlambda       # 塑性乗数 Δλ（解析式の検証・デバッグ用）
+result.stress_trial  # 試行応力 σ_trial = σ_n + C Δε
+result.is_plastic    # 塑性ステップか否か
+```
+
+Driver 経由でまとめて回した後でも特定ステップを取り出せる:
+
+```python
+from manforge.simulation.driver import StrainDriver
+
+driver_result = StrainDriver().run(model, load)
+rm = driver_result.step_results[15]   # 15ステップ目の ReturnMappingResult
+```
+
+### ヤコビアンブロックの検証
+
+`ad_jacobian_blocks()` は収束点の残差ヤコビアンを JAX で計算し、物理量・状態変数名をキーとするブロックに分解して返す。自分の解析式と `numpy.testing` で直接比較できる。
+
+```python
 from manforge.core.jacobian import ad_jacobian_blocks
 import numpy.testing as npt
 
 result = return_mapping(model, deps, stress_n, state_n)
-print(result.dlambda)      # 塑性乗数 Δλ
-print(result.stress_trial) # 試行応力 σ_trial
-print(result.is_plastic)   # 塑性ステップか
-
-# ADヤコビアンを変数名キーで分解（解析式の逐次検証に使用）
 jac = ad_jacobian_blocks(model, result, state_n)
-print(jac.dyield_dsigma)    # フロー方向 n = ∂f/∂σ
-print(jac.dstress_dsigma)   # ∂R_stress/∂σ (ntens×ntens)
-# implicitモデルでは state 変数名キーのblockも取得可能
-# jac.dstate_dsigma["alpha"], jac.dstate_dstate["alpha"]["ep"], ...
 
-# 自分の解析式と比較
-my_n = ...
+# フロー方向 n = ∂f/∂σ を自分の式と照合
+my_n = (3/2) * dev_stress / sigma_vm
 npt.assert_allclose(jac.dyield_dsigma, my_n, rtol=1e-8)
+
+# 硬化接線 ∂f/∂Δλ を照合
+npt.assert_allclose(float(jac.dyield_ddlambda), -H, rtol=1e-8)
+
+# 応力残差ヤコビアン ∂R_stress/∂σ
+print(jac.dstress_dsigma)   # shape (ntens, ntens)
 ```
 
-Driverの特定ステップも同様に取り出せる:
+implicit モデル (例: Ohno-Wang) では状態変数名をキーとするブロックも取得できる:
 
 ```python
-driver_result = StrainDriver().run(model, load)
-rm = driver_result.step_results[15]          # 15番目のステップ
-jac = ad_jacobian_blocks(model, rm, driver_result.step_results[14].state)
+# OWKinematic: state_names = ["alpha", "ep"]
+jac.dstate_dsigma["alpha"]        # ∂R_alpha/∂σ,  shape (ntens, ntens)
+jac.dstate_ddlambda["ep"]         # ∂R_ep/∂Δλ,    shape (1,)
+jac.dstate_dstate["alpha"]["ep"]  # ∂R_alpha/∂ep, shape (ntens, 1)
+jac.full                          # フラットな全体行列 (ntens+1+n_state, ntens+1+n_state)
 ```
 
 ---
