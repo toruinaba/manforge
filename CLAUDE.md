@@ -66,7 +66,8 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 
 **2. Solver layer** — `src/manforge/core/`
 
-- `return_mapping.py`: Elastic trial → yield check → dispatches on `model.hardening_type`: explicit → scalar NR on Δλ; implicit → augmented (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10)
+- `return_mapping.py`: Elastic trial → yield check → dispatches on `model.hardening_type`: explicit → scalar NR on Δλ; implicit → augmented (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10). Returns `ReturnMappingResult` dataclass with fields: `stress`, `state`, `ddsdde`, `dlambda`, `stress_trial`, `is_plastic`.
+- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point via `jax.jacobian` and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). For implicit models, state blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`). Used for step-by-step verification of analytical derivatives.
 - `tangent.py`: Consistent tangent via implicit differentiation — explicit models use (ntens+1)×(ntens+1) system; implicit models use augmented (ntens+1+n_state) system (does NOT differentiate through NR iterations)
 - `residual.py`: Shared augmented residual builder used by both NR solver and tangent for implicit models
 
@@ -74,7 +75,7 @@ JAX autodiff computes yield function gradients and the Hessian needed for the ta
 
 **3. Application layer**
 
-- `simulation/driver.py`: `UniaxialDriver`, `BiaxialDriver`, `GeneralDriver` — step through strain histories, accumulate stress/state
+- `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Returns `DriverResult` with `step_results: list[ReturnMappingResult]` as primary data; `stress`, `strain`, `fields` are derived properties computed from `step_results`.
 - `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
