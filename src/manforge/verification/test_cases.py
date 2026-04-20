@@ -18,7 +18,7 @@ generate_strain_history
 import numpy as np
 import jax.numpy as jnp
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 
 
 def estimate_yield_strain(model) -> float:
@@ -123,7 +123,7 @@ def generate_single_step_cases(model, eps_y=None) -> list[dict]:
 
     # Case 5: Pre-stressed starting state
     prestress_de = jnp.zeros(ntens).at[0].set(3.0 * eps_y)
-    _pre = return_mapping(model, prestress_de, jnp.zeros(ntens), model.initial_state())
+    _pre = stress_update(model, prestress_de, jnp.zeros(ntens), model.initial_state())
     stress_pre, state_pre = _pre.stress, _pre.state
     de2 = np.zeros(ntens)
     de2[0] = 2.0 * eps_y

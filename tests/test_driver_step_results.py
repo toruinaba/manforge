@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from manforge.core.return_mapping import ReturnMappingResult
+from manforge.core.stress_update import StressUpdateResult
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.types import DriverResult, FieldHistory, FieldType
 from manforge.models.j2_isotropic import J2Isotropic3D
@@ -44,7 +44,7 @@ class TestStrainDriverStepResults:
         driver = StrainDriver()
         result = driver.run(model, load)
         for rm in result.step_results:
-            assert isinstance(rm, ReturnMappingResult)
+            assert isinstance(rm, StressUpdateResult)
 
     def test_step_results_stress_matches_fields(self, model):
         load = _uniaxial_strain_load(n_steps=15)
@@ -125,7 +125,7 @@ class TestStressDriverStepResults:
         driver = StressDriver()
         result = driver.run(model, load)
         for rm in result.step_results:
-            assert isinstance(rm, ReturnMappingResult)
+            assert isinstance(rm, StressUpdateResult)
 
     def test_fields_stress_property(self, model):
         load = _uniaxial_stress_load(model, n_steps=10)

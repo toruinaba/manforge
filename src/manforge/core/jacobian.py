@@ -12,11 +12,11 @@ Usage
 -----
 ::
 
-    from manforge.core.return_mapping import return_mapping
+    from manforge.core.stress_update import stress_update
     from manforge.core.jacobian import ad_jacobian_blocks
     import numpy.testing as npt
 
-    result = return_mapping(model, deps, stress_n, state_n)
+    result = stress_update(model, deps, stress_n, state_n)
     jac = ad_jacobian_blocks(model, result, state_n)
 
     # Inspect AD-computed blocks
@@ -100,9 +100,10 @@ def ad_jacobian_blocks(model, result, state_n: dict) -> JacobianBlocks:
     ----------
     model : MaterialModel
         Constitutive model instance.
-    result : ReturnMappingResult
-        Converged result from :func:`~manforge.core.return_mapping.return_mapping`.
-        Provides ``stress``, ``dlambda``, and ``stress_trial``.
+    result : StressUpdateResult or ReturnMappingResult
+        Converged result from :func:`~manforge.core.stress_update.stress_update`
+        or :func:`~manforge.core.stress_update.return_mapping`.
+        Must be a plastic step (``is_plastic=True`` / ``return_mapping`` not None).
     state_n : dict
         Internal state at the *beginning* of the increment (step n).
 
@@ -111,10 +112,26 @@ def ad_jacobian_blocks(model, result, state_n: dict) -> JacobianBlocks:
     JacobianBlocks
         All Jacobian blocks at the converged point.
     """
-    stress = result.stress
-    dlambda = result.dlambda
-    stress_trial = result.stress_trial
-    state = result.state
+    from manforge.core.stress_update import StressUpdateResult
+    if isinstance(result, StressUpdateResult):
+        if result.return_mapping is None:
+            # Elastic step — evaluate Jacobian at trial stress with dlambda=0
+            stress = result.stress_trial
+            dlambda = jnp.zeros(())
+            stress_trial = result.stress_trial
+            state = result._state_n
+        else:
+            stress = result.return_mapping.stress
+            dlambda = result.return_mapping.dlambda
+            stress_trial = result.stress_trial
+            state = result.return_mapping.state
+    else:
+        # ReturnMappingResult — caller must pass stress_trial separately
+        # or this path is not reached in normal usage
+        stress = result.stress
+        dlambda = result.dlambda
+        stress_trial = getattr(result, "stress_trial", None)
+        state = result.state
     ntens = model.ntens
     C = model.elastic_stiffness()
 

@@ -11,7 +11,7 @@ The two must agree to rtol = 1e-5.
 import numpy as np
 import jax.numpy as jnp
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 
 
 def _fd_tangent(model, strain_inc, stress_n, state_n, h=1e-7):
@@ -22,10 +22,10 @@ def _fd_tangent(model, strain_inc, stress_n, state_n, h=1e-7):
     for j in range(ntens):
         e_j = jnp.zeros(ntens).at[j].set(1.0)
 
-        s_fwd = return_mapping(
+        s_fwd = stress_update(
             model, strain_inc + h * e_j, stress_n, state_n
         ).stress
-        s_bwd = return_mapping(
+        s_bwd = stress_update(
             model, strain_inc - h * e_j, stress_n, state_n
         ).stress
         col = (s_fwd - s_bwd) / (2.0 * h)
@@ -44,7 +44,7 @@ def test_tangent_fd_elastic(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    ddsdde_ad = return_mapping(
+    ddsdde_ad = stress_update(
         model, strain_inc, stress_n, state_n
     ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
@@ -65,7 +65,7 @@ def test_tangent_fd_plastic_uniaxial(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    ddsdde_ad = return_mapping(
+    ddsdde_ad = stress_update(
         model, strain_inc, stress_n, state_n
     ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
@@ -86,7 +86,7 @@ def test_tangent_fd_plastic_multiaxial(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    ddsdde_ad = return_mapping(
+    ddsdde_ad = stress_update(
         model, strain_inc, stress_n, state_n
     ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)
@@ -109,7 +109,7 @@ def test_tangent_fd_plastic_prestress(model):
     # Now push into plastic domain
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    ddsdde_ad = return_mapping(
+    ddsdde_ad = stress_update(
         model, strain_inc, stress_n, state_n
     ).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress_n, state_n)

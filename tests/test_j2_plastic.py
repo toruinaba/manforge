@@ -13,7 +13,7 @@ import numpy as np
 import jax.numpy as jnp
 import pytest
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def test_plastic_stress_uniaxial(model, lame_constants):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _r = return_mapping(model, strain_inc, stress_n, state_n)
+    _r = stress_update(model, strain_inc, stress_n, state_n)
     stress_new, state_new = _r.stress, _r.state
 
     # Correct analytic Δλ: use vonmises of the triaxial trial stress
@@ -65,7 +65,7 @@ def test_plastic_ep_updated(model):
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    state_new = return_mapping(
+    state_new = stress_update(
         model, strain_inc, jnp.zeros(6), state_n
     ).state
 
@@ -90,7 +90,7 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
     sigma_vm_trial = 2.0 * mu * deps11
     dlambda_analytic = (sigma_vm_trial - sigma_y0) / (3.0 * mu + H)
 
-    state_new = return_mapping(
+    state_new = stress_update(
         model, strain_inc, jnp.zeros(6), state_n
     ).state
 
@@ -103,7 +103,7 @@ def test_plastic_yield_consistency(model):
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    _r = return_mapping(model, strain_inc, jnp.zeros(6), state_n)
+    _r = stress_update(model, strain_inc, jnp.zeros(6), state_n)
     stress_new, state_new = _r.stress, _r.state
 
     f_final = model.yield_function(stress_new, state_new)
@@ -116,7 +116,7 @@ def test_plastic_ddsdde_differs_from_C(model):
     deps11 = 2e-3
     strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    ddsdde = return_mapping(
+    ddsdde = stress_update(
         model, strain_inc, jnp.zeros(6), model.initial_state()
     ).ddsdde
 

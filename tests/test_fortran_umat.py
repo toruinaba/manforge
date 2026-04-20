@@ -21,7 +21,7 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.verification import FortranUMAT
 
 
@@ -69,7 +69,7 @@ def test_fortran_vs_python_elastic(fortran, model):
         model.E, model.nu, model.sigma_y0, model.H,
         np.zeros(6), 0.0, dstran,
     )
-    _r = return_mapping(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
+    _r = stress_update(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
     stress_py, ddsdde_py = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
@@ -85,7 +85,7 @@ def test_fortran_vs_python_plastic_uniaxial(fortran, model):
         model.E, model.nu, model.sigma_y0, model.H,
         np.zeros(6), 0.0, dstran,
     )
-    _r = return_mapping(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
+    _r = stress_update(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
     stress_py, state_py, ddsdde_py = _r.stress, _r.state, _r.ddsdde
 
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
@@ -102,7 +102,7 @@ def test_fortran_vs_python_plastic_multiaxial(fortran, model):
         model.E, model.nu, model.sigma_y0, model.H,
         np.zeros(6), 0.0, dstran,
     )
-    _r = return_mapping(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
+    _r = stress_update(model, jnp.array(dstran), jnp.zeros(6), model.initial_state())
     stress_py, ddsdde_py = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
@@ -146,7 +146,7 @@ def test_multi_step_tension_unload_compression(fortran, model):
         dstran = history[i] - eps_prev
         eps_prev = history[i].copy()
 
-        _r = return_mapping(model, jnp.array(dstran), stress_py, state_py)
+        _r = stress_update(model, jnp.array(dstran), stress_py, state_py)
         stress_py, state_py = _r.stress, _r.state
         stress_f, ep_f, _ = fortran.call(
             "j2_isotropic_3d",

@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.core.jacobian import ad_jacobian_blocks, JacobianBlocks
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.af_kinematic import AFKinematic3D
@@ -30,7 +30,7 @@ def ow_model():
 def _plastic_result(model, strain_scale=3e-3):
     deps = jnp.zeros(model.ntens).at[0].set(strain_scale)
     state0 = model.initial_state()
-    return return_mapping(model, deps, jnp.zeros(model.ntens), state0), state0
+    return stress_update(model, deps, jnp.zeros(model.ntens), state0), state0
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ class TestExplicitBlocks:
     def test_elastic_step_raises_no_error(self, j2_model):
         deps = jnp.array([1e-4, 0, 0, 0, 0, 0])
         state0 = j2_model.initial_state()
-        result = return_mapping(j2_model, deps, jnp.zeros(6), state0)
+        result = stress_update(j2_model, deps, jnp.zeros(6), state0)
         # elastic step: dlambda=0, stress_trial==stress, but jacobian should still work
         jac = ad_jacobian_blocks(j2_model, result, state0)
         assert isinstance(jac, JacobianBlocks)

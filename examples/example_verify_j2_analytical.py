@@ -2,8 +2,8 @@
 
 Demonstrates the step-by-step workflow for verifying closed-form solutions:
 
-1. Run return_mapping (autodiff) to get the numerical reference
-2. Call plastic_corrector / analytical_tangent to get analytical results
+1. Run stress_update (numerical_newton) to get the numerical reference
+2. Call user_defined_corrector / user_defined_tangent to get analytical results
 3. Compare element-by-element with numpy.testing
 4. Use ad_jacobian_blocks to inspect individual derivative blocks
 
@@ -22,7 +22,7 @@ import numpy as np
 import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.core.jacobian import ad_jacobian_blocks
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
@@ -48,11 +48,11 @@ print("=" * 60)
 deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 stress_n = jnp.zeros(6)
 
-# --- numerical (autodiff) ---
-result_ad = return_mapping(model, deps, stress_n, state0, method="autodiff")
+# --- numerical (Newton-Raphson) ---
+result_ad = stress_update(model, deps, stress_n, state0, method="numerical_newton")
 
-# --- analytical (closed-form) ---
-result_an = return_mapping(model, deps, stress_n, state0, method="analytical")
+# --- analytical (user-defined closed-form) ---
+result_an = stress_update(model, deps, stress_n, state0, method="user_defined")
 
 # Compare stress
 npt.assert_allclose(result_ad.stress, result_an.stress, rtol=1e-10)
@@ -77,18 +77,18 @@ print("  stress_trial    : PASS")
 print()
 
 # You can also call the hooks directly:
-stress_new, state_new, dlambda = model.plastic_corrector(
+stress_new, state_new, dlambda = model.user_defined_corrector(
     result_ad.stress_trial, C, state0
 )
 npt.assert_allclose(result_ad.stress, stress_new, rtol=1e-10)
 npt.assert_allclose(result_ad.dlambda, dlambda, rtol=1e-10)
-print("  plastic_corrector (direct call): PASS")
+print("  user_defined_corrector (direct call): PASS")
 
-ddsdde_an = model.analytical_tangent(
+ddsdde_an = model.user_defined_tangent(
     result_ad.stress, result_ad.state, result_ad.dlambda, C, state0
 )
 npt.assert_allclose(result_ad.ddsdde, ddsdde_an, rtol=1e-10)
-print("  analytical_tangent (direct call): PASS")
+print("  user_defined_tangent (direct call): PASS")
 print()
 
 
@@ -165,20 +165,20 @@ step_idx = first_plastic + 5  # a few steps into plastic regime
 rm = driver_result.step_results[step_idx]
 state_prev = driver_result.step_results[step_idx - 1].state
 
-# Call plastic_corrector with the same inputs
-stress_an, state_an, dlambda_an = model.plastic_corrector(
+# Call user_defined_corrector with the same inputs
+stress_an, state_an, dlambda_an = model.user_defined_corrector(
     rm.stress_trial, C, state_prev
 )
 npt.assert_allclose(rm.stress, stress_an, rtol=1e-10)
 npt.assert_allclose(rm.dlambda, dlambda_an, rtol=1e-10)
-print(f"  Step {step_idx} plastic_corrector: PASS")
+print(f"  Step {step_idx} user_defined_corrector: PASS")
 
-# Call analytical_tangent
-ddsdde_an = model.analytical_tangent(
+# Call user_defined_tangent
+ddsdde_an = model.user_defined_tangent(
     rm.stress, rm.state, rm.dlambda, C, state_prev
 )
 npt.assert_allclose(rm.ddsdde, ddsdde_an, rtol=1e-10)
-print(f"  Step {step_idx} analytical_tangent: PASS")
+print(f"  Step {step_idx} user_defined_tangent: PASS")
 
 # Jacobian blocks for this step
 jac = ad_jacobian_blocks(model, rm, state_prev)

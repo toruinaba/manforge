@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import jax.numpy as jnp
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.simulation.types import DriverResult, FieldHistory, FieldType
 
 
@@ -96,6 +96,7 @@ class StrainDriver(DriverBase):
         model,
         load: FieldHistory,
         collect_state: dict[str, FieldType] | None = None,
+        method: str = "auto",
     ) -> DriverResult:
         """Run the strain-controlled loading history.
 
@@ -113,6 +114,10 @@ class StrainDriver(DriverBase):
             State variables to include in the result.  Example::
 
                 collect_state={"ep": FieldType.STRAIN}
+
+        method : {"auto", "autodiff", "analytical"}, optional
+            Passed to :func:`~manforge.core.return_mapping.return_mapping`
+            at every step (default ``"auto"``).
 
         Returns
         -------
@@ -141,7 +146,7 @@ class StrainDriver(DriverBase):
                 strain_inc = jnp.array(data[i] - prev)
                 strain_out[i] = data[i]
 
-            rm = return_mapping(model, strain_inc, stress_n, state_n)
+            rm = stress_update(model, strain_inc, stress_n, state_n, method=method)
             stress_n = rm.stress
             state_n = rm.state
             step_results.append(rm)
@@ -237,7 +242,7 @@ class StressDriver(DriverBase):
             residual = jnp.full(ntens, jnp.inf)
             rm = None
             for _ in range(self.max_iter):
-                rm = return_mapping(model, deps, stress_n, state_n)
+                rm = stress_update(model, deps, stress_n, state_n)
                 residual = sigma_target - rm.stress
                 if float(jnp.max(jnp.abs(residual))) < self.tol:
                     converged = True

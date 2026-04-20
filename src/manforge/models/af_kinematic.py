@@ -33,14 +33,14 @@ where the (2/3) and (3/2) factors cancel.  Solving for α_{n+1}:
     α_{n+1} = (α_n + C_k Δλ ŝ) / (1 + γ Δλ)
 
 with ŝ = dev(σ − α_n) / σ_vm(σ − α_n) evaluated at the beginning-of-step
-backstress.  The generic NR in return_mapping iterates to self-consistency.
+backstress.  The generic NR in stress_update iterates to self-consistency.
 
 Notes
 -----
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k.
 * The saturated backstress magnitude under monotonic loading is C_k / gamma.
-* No analytical plastic_corrector or analytical_tangent is provided; the
-  generic Newton-Raphson + JAX autodiff path is used, which is exactly what
+* No user_defined_corrector or user_defined_tangent is provided; the
+  generic numerical_newton + JAX autodiff path is used, which is exactly what
   this model is designed to test.
 """
 

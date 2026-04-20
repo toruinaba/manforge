@@ -100,7 +100,7 @@ class J2Isotropic3D(MaterialModel3D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def plastic_corrector(self, stress_trial, C, state_n):
+    def user_defined_corrector(self, stress_trial, C, state_n):
         """J2 radial return — closed-form plastic correction.
 
         Notes
@@ -136,7 +136,7 @@ class J2Isotropic3D(MaterialModel3D):
 
         return stress_new, {"ep": ep_n + dlambda}, jnp.asarray(dlambda)
 
-    def analytical_tangent(self, stress, state, dlambda, C, state_n):
+    def user_defined_tangent(self, stress, state, dlambda, C, state_n):
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
 
             D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)
@@ -286,7 +286,7 @@ class J2Isotropic1D(MaterialModel1D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def plastic_corrector(self, stress_trial, C, state_n):
+    def user_defined_corrector(self, stress_trial, C, state_n):
         """1D J2 radial return — closed-form.
 
         Δλ = (|σ_trial| − σ_y) / (E + H)
@@ -311,7 +311,7 @@ class J2Isotropic1D(MaterialModel1D):
         stress_new = stress_trial - E * dlambda * n
         return stress_new, {"ep": ep_n + dlambda}, jnp.asarray(dlambda)
 
-    def analytical_tangent(self, stress, state, dlambda, C, state_n):
+    def user_defined_tangent(self, stress, state, dlambda, C, state_n):
         """1D consistent tangent D^ep = [[E · H / (E + H)]].
 
         Parameters

@@ -22,7 +22,7 @@ import jax.numpy as jnp
 import manforge  # enables JAX float64
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.core.stress_state import PLANE_STRAIN, PLANE_STRESS
 from manforge.verification.fd_check import check_tangent
 
@@ -136,8 +136,8 @@ def test_implicit_matches_explicit_stress_3d(af_model, implicit_model, deps_vec)
     stress0 = jnp.zeros(6)
     state0 = af_model.initial_state()
 
-    stress_exp = return_mapping(af_model, deps, stress0, state0).stress
-    stress_imp = return_mapping(implicit_model, deps, stress0, state0).stress
+    stress_exp = stress_update(af_model, deps, stress0, state0).stress
+    stress_imp = stress_update(implicit_model, deps, stress0, state0).stress
 
     np.testing.assert_allclose(
         np.array(stress_imp), np.array(stress_exp), atol=1e-7,
@@ -156,8 +156,8 @@ def test_implicit_matches_explicit_state_3d(af_model, implicit_model, deps_vec):
     stress0 = jnp.zeros(6)
     state0 = af_model.initial_state()
 
-    state_exp = return_mapping(af_model, deps, stress0, state0).state
-    state_imp = return_mapping(implicit_model, deps, stress0, state0).state
+    state_exp = stress_update(af_model, deps, stress0, state0).state
+    state_imp = stress_update(implicit_model, deps, stress0, state0).state
 
     np.testing.assert_allclose(
         np.array(state_imp["alpha"]), np.array(state_exp["alpha"]), atol=1e-7,
@@ -184,7 +184,7 @@ def test_implicit_yield_consistency_3d(implicit_model, deps_vec):
     state0 = implicit_model.initial_state()
     deps = jnp.array(deps_vec)
 
-    _r = return_mapping(implicit_model, deps, jnp.zeros(6), state0)
+    _r = stress_update(implicit_model, deps, jnp.zeros(6), state0)
     stress_new, state_new = _r.stress, _r.state
     f = implicit_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
@@ -222,7 +222,7 @@ def test_implicit_fd_tangent_prestressed_3d(implicit_model):
 
     # First step: push into plasticity
     deps1 = jnp.zeros(6).at[0].set(3e-3)
-    _r1 = return_mapping(implicit_model, deps1, jnp.zeros(6), state0)
+    _r1 = stress_update(implicit_model, deps1, jnp.zeros(6), state0)
     stress1, state1 = _r1.stress, _r1.state
 
     # Second step: verify FD tangent
@@ -240,7 +240,7 @@ def test_implicit_yield_consistency_plane_stress(implicit_ps_model):
     state0 = implicit_ps_model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0])
 
-    _r = return_mapping(implicit_ps_model, deps, jnp.zeros(3), state0)
+    _r = stress_update(implicit_ps_model, deps, jnp.zeros(3), state0)
     stress_new, state_new = _r.stress, _r.state
     f = implicit_ps_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
@@ -264,8 +264,8 @@ def test_implicit_matches_explicit_stress_plane_stress(implicit_ps_model):
     explicit_model = AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     state0 = explicit_model.initial_state()
 
-    stress_exp = return_mapping(explicit_model, deps, jnp.zeros(3), state0).stress
-    stress_imp = return_mapping(implicit_ps_model, deps, jnp.zeros(3), state0).stress
+    stress_exp = stress_update(explicit_model, deps, jnp.zeros(3), state0).stress
+    stress_imp = stress_update(implicit_ps_model, deps, jnp.zeros(3), state0).stress
 
     np.testing.assert_allclose(
         np.array(stress_imp), np.array(stress_exp), atol=1e-7,
@@ -282,7 +282,7 @@ def test_implicit_elastic_step_3d(implicit_model):
     C = implicit_model.elastic_stiffness()
     deps = jnp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _r = return_mapping(implicit_model, deps, jnp.zeros(6), state0)
+    _r = stress_update(implicit_model, deps, jnp.zeros(6), state0)
     stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
 
     np.testing.assert_allclose(np.array(stress_new), np.array(C @ deps), rtol=1e-10)
@@ -306,8 +306,8 @@ def test_implicit_tangent_matches_explicit_3d(af_model, implicit_model, deps_vec
     stress0 = jnp.zeros(6)
     state0 = af_model.initial_state()
 
-    ddsdde_exp = return_mapping(af_model, deps, stress0, state0).ddsdde
-    ddsdde_imp = return_mapping(implicit_model, deps, stress0, state0).ddsdde
+    ddsdde_exp = stress_update(af_model, deps, stress0, state0).ddsdde
+    ddsdde_imp = stress_update(implicit_model, deps, stress0, state0).ddsdde
 
     np.testing.assert_allclose(
         np.array(ddsdde_imp), np.array(ddsdde_exp), atol=1e-6,
@@ -351,7 +351,7 @@ def test_implicit_yield_consistency_plane_strain():
     state0 = model.initial_state()
     deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
 
-    _r = return_mapping(model, deps, jnp.zeros(4), state0)
+    _r = stress_update(model, deps, jnp.zeros(4), state0)
     stress_new, state_new = _r.stress, _r.state
     f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
@@ -378,9 +378,9 @@ def test_implicit_matches_explicit_plane_strain():
     implicit_model = _AFKinematicImplicitPE()
     state0 = explicit_model.initial_state()
 
-    _r_exp = return_mapping(explicit_model, deps, jnp.zeros(4), state0)
+    _r_exp = stress_update(explicit_model, deps, jnp.zeros(4), state0)
     stress_exp, ddsdde_exp = _r_exp.stress, _r_exp.ddsdde
-    _r_imp = return_mapping(implicit_model, deps, jnp.zeros(4), state0)
+    _r_imp = stress_update(implicit_model, deps, jnp.zeros(4), state0)
     stress_imp, ddsdde_imp = _r_imp.stress, _r_imp.ddsdde
 
     np.testing.assert_allclose(
