@@ -1,31 +1,68 @@
-"""Augmented residual system for implicit hardening laws.
+"""Residual builders for return-mapping systems.
 
-When a model has ``hardening_type == 'implicit'``, the return-mapping
-residual is extended from (ntens+1) to
-(ntens+1+n_state) equations by treating the state variables as independent
-unknowns:
+Two factory functions are provided:
 
-    x = [σ  (ntens),  Δλ (1),  q_flat (n_state)]
+- :func:`make_explicit_residual` — for ``hardening_type == 'explicit'``.
+  Builds the (ntens+1) residual ``[R_stress, R_yield]`` with x = [σ, Δλ].
 
-    R(x) = [ R_stress ]  ntens equations
-            [ R_yield  ]  1 equation
-            [ R_state  ]  n_state equations
+- :func:`make_augmented_residual` — for ``hardening_type == 'implicit'``.
+  Extends the system to (ntens+1+n_state) equations by treating state
+  variables as additional unknowns:
 
-where
+      x = [σ  (ntens),  Δλ (1),  q_flat (n_state)]
 
-    R_stress = σ - σ_trial + Δλ C n(σ, q)
-    R_yield  = f(σ, q)
-    R_state  = flatten(model.hardening_residual(q, Δλ, σ, q_n))
+      R(x) = [ R_stress ]  ntens equations
+              [ R_yield  ]  1 equation
+              [ R_state  ]  n_state equations
 
-This module provides a factory function that builds the residual callable.
-The same callable is used by both the Newton-Raphson solver
-(:mod:`manforge.core.return_mapping`) and the consistent tangent computation
+  where
+
+      R_stress = σ - σ_trial + Δλ C n(σ, q)
+      R_yield  = f(σ, q)
+      R_state  = flatten(model.hardening_residual(q, Δλ, σ, q_n))
+
+Both callables are used by the Newton-Raphson solver
+(:mod:`manforge.core.solver`) and the consistent tangent computation
 (:mod:`manforge.core.tangent`).
 """
 
 import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
+
+
+def make_explicit_residual(model, stress_trial, C, state_n):
+    """Build the residual function for explicit-state models.
+
+    Parameters
+    ----------
+    model : MaterialModel
+        Constitutive model with ``hardening_type == 'explicit'``.
+    stress_trial : jnp.ndarray, shape (ntens,)
+        Elastic trial stress σ_trial = σ_n + C Δε.
+    C : jnp.ndarray, shape (ntens, ntens)
+        Elastic stiffness tensor.
+    state_n : dict
+        Internal state at the beginning of the increment.
+
+    Returns
+    -------
+    residual_fn : callable
+        ``residual_fn(x) -> jnp.ndarray`` of shape ``(ntens+1,)``
+        where x = [σ (ntens), Δλ (1)].
+    """
+    ntens = model.ntens
+
+    def residual_fn(x):
+        sig = x[:ntens]
+        dl = x[ntens]
+        st = model.hardening_increment(dl, sig, state_n)
+        n = jax.grad(lambda s: model.yield_function(s, st))(sig)
+        R_stress = sig - stress_trial + dl * (C @ n)
+        R_yield = model.yield_function(sig, st)
+        return jnp.concatenate([R_stress, R_yield.reshape(1)])
+
+    return residual_fn
 
 
 def make_augmented_residual(model, stress_trial, C, state_n):
@@ -81,3 +118,14 @@ def make_augmented_residual(model, stress_trial, C, state_n):
         return jnp.concatenate([R_stress, R_yield.reshape(1), R_state_flat])
 
     return residual_fn, n_state, unflatten_fn
+
+
+def select_residual_builder(model):
+    """Return the appropriate residual builder for *model*.
+
+    Returns :func:`make_explicit_residual` for ``hardening_type == 'explicit'``
+    and :func:`make_augmented_residual` for ``hardening_type == 'implicit'``.
+    """
+    if model.hardening_type == "implicit":
+        return make_augmented_residual
+    return make_explicit_residual

@@ -25,6 +25,8 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
+from manforge.core.residual import make_augmented_residual, make_explicit_residual
+
 
 def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     """Compute the consistent (algorithmic) tangent dσ_{n+1}/dΔε.
@@ -60,20 +62,12 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     n_conv = jax.grad(lambda s: model.yield_function(s, state))(stress)
     stress_trial = stress + dlambda * (C @ n_conv)
 
-    # --- Full coupled residual as function of x = [σ (ntens), Δλ (1)] ---
-    def _residual_vec(x):
-        sig = x[:ntens]
-        dl = x[ntens]
-        st = model.hardening_increment(dl, sig, state_n)
-        nn = jax.grad(lambda s: model.yield_function(s, st))(sig)
-        R1 = sig - stress_trial + dl * (C @ nn)
-        R2 = model.yield_function(sig, st)
-        return jnp.concatenate([R1, R2.reshape(1)])
+    residual_fn = make_explicit_residual(model, stress_trial, C, state_n)
 
     # ∂R/∂x  — JAX computes all coupling terms automatically, including
     # ∂(state)/∂σ that arises with stress-dependent hardening increments.
     x_conv = jnp.concatenate([stress, dlambda.reshape(1)])
-    A = jax.jacobian(_residual_vec)(x_conv)  # (ntens+1, ntens+1)
+    A = jax.jacobian(residual_fn)(x_conv)  # (ntens+1, ntens+1)
 
     # ∂R/∂ε  →  right-hand side  (−∂R/∂ε = [C; 0])
     rhs = jnp.vstack([C, jnp.zeros((1, ntens))])  # (ntens+1, ntens)
@@ -112,8 +106,6 @@ def augmented_consistent_tangent(model, stress, state, dlambda, stress_n, state_
     jnp.ndarray, shape (ntens, ntens)
         Consistent tangent dσ_{n+1}/dΔε.
     """
-    from manforge.core.residual import make_augmented_residual
-
     ntens = model.ntens
     C = model.elastic_stiffness()
 
@@ -139,3 +131,10 @@ def augmented_consistent_tangent(model, stress, state, dlambda, stress_n, state_
 
     # Extract dσ/dε (top ntens rows)
     return dxde[:ntens, :]
+
+
+def _select_tangent(model):
+    """Return the consistent-tangent function appropriate for *model*."""
+    if model.hardening_type == "implicit":
+        return augmented_consistent_tangent
+    return consistent_tangent
