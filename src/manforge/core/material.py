@@ -31,7 +31,7 @@ class MaterialModel(ABC):
     param_names: list[str]
     state_names: list[str]
     stress_state: StressState = SOLID_3D
-    hardening_type: str = "explicit"  # "explicit" or "implicit"
+    hardening_type: str = "reduced"  # "reduced" or "augmented"
 
     @property
     def params(self) -> dict:
@@ -49,19 +49,22 @@ class MaterialModel(ABC):
                 cls.yield_function is MaterialModel.yield_function):
             return
         ht = cls.hardening_type
-        if ht not in ("explicit", "implicit"):
+        if ht not in ("reduced", "augmented"):
+            _hint = ""
+            if ht in ("explicit", "implicit"):
+                _hint = f" (renamed to '{'reduced' if ht == 'explicit' else 'augmented'}' — update hardening_type on {cls.__name__})"
             raise TypeError(
-                f"{cls.__name__}: hardening_type must be 'explicit' or 'implicit', "
-                f"got {ht!r}"
+                f"{cls.__name__}: hardening_type must be 'reduced' or 'augmented', "
+                f"got {ht!r}{_hint}"
             )
-        if ht == "explicit" and cls.hardening_increment is MaterialModel.hardening_increment:
+        if ht == "reduced" and cls.hardening_increment is MaterialModel.hardening_increment:
             raise TypeError(
-                f"{cls.__name__}: explicit hardening models must implement "
+                f"{cls.__name__}: reduced hardening models must implement "
                 "hardening_increment()"
             )
-        if ht == "implicit" and cls.hardening_residual is MaterialModel.hardening_residual:
+        if ht == "augmented" and cls.hardening_residual is MaterialModel.hardening_residual:
             raise TypeError(
-                f"{cls.__name__}: implicit hardening models must implement "
+                f"{cls.__name__}: augmented hardening models must implement "
                 "hardening_residual()"
             )
 
@@ -115,8 +118,8 @@ class MaterialModel(ABC):
     ) -> dict:
         """Return updated state variables after a plastic increment.
 
-        Required for explicit hardening models (``hardening_type='explicit'``).
-        Optional for implicit models (``hardening_type='implicit'``) — may be
+        Required for reduced hardening models (``hardening_type='reduced'``).
+        Optional for augmented models (``hardening_type='augmented'``) — may be
         implemented as an initial-guess seed for the augmented NR solver.
 
         Parameters
@@ -138,11 +141,11 @@ class MaterialModel(ABC):
         Raises
         ------
         NotImplementedError
-            If not overridden on an explicit model.
+            If not overridden on a reduced model.
         """
         raise NotImplementedError(
             f"{type(self).__name__}.hardening_increment() is not implemented. "
-            "Explicit models (hardening_type='explicit') must override this method."
+            "Reduced models (hardening_type='reduced') must override this method."
         )
 
     def hardening_residual(

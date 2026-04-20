@@ -56,15 +56,15 @@ def state0(model):
 # ---------------------------------------------------------------------------
 
 def test_hardening_type_ow3d():
-    assert OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
+    assert OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
 
 
 def test_hardening_type_owps():
-    assert OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
+    assert OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
 
 
 def test_hardening_type_ow1d():
-    assert OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "implicit"
+    assert OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
 
 
 # ---------------------------------------------------------------------------

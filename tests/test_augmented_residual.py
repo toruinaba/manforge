@@ -48,7 +48,7 @@ class _AFKinematicImplicit3D(AFKinematic3D):
     validate the augmented residual machinery without introducing model error.
     """
 
-    hardening_type = "implicit"
+    hardening_type = "augmented"
 
     def hardening_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -66,7 +66,7 @@ class _AFKinematicImplicit3D(AFKinematic3D):
 class _AFKinematicImplicitPS(AFKinematicPS):
     """Plane-stress variant of the implicit AF model."""
 
-    hardening_type = "implicit"
+    hardening_type = "augmented"
 
     def hardening_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -105,19 +105,19 @@ def implicit_ps_model():
 # ---------------------------------------------------------------------------
 
 def test_hardening_type_j2_is_explicit():
-    assert J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0).hardening_type == "explicit"
+    assert J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0).hardening_type == "reduced"
 
 
 def test_hardening_type_af_is_explicit():
-    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "explicit"
+    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "reduced"
 
 
 def test_hardening_type_implicit_af_is_implicit(implicit_model):
-    assert implicit_model.hardening_type == "implicit"
+    assert implicit_model.hardening_type == "augmented"
 
 
 def test_hardening_type_implicit_ps_is_implicit(implicit_ps_model):
-    assert implicit_ps_model.hardening_type == "implicit"
+    assert implicit_ps_model.hardening_type == "augmented"
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ def test_implicit_tangent_matches_explicit_3d(af_model, implicit_model, deps_vec
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
-    hardening_type = "implicit"
+    hardening_type = "augmented"
 
     def __init__(self):
         super().__init__(stress_state=PLANE_STRAIN,
@@ -342,7 +342,7 @@ class _AFKinematicImplicitPE(AFKinematic3D):
 
 
 def test_hardening_type_implicit_pe_is_implicit():
-    assert _AFKinematicImplicitPE().hardening_type == "implicit"
+    assert _AFKinematicImplicitPE().hardening_type == "augmented"
 
 
 def test_implicit_yield_consistency_plane_strain():
