@@ -139,7 +139,7 @@ import numpy as np
 import jax.numpy as jnp
 import manforge  # enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.verification import FortranUMAT
 
 model   = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
@@ -160,13 +160,13 @@ stress_f, ep_f, ddsdde_f = fortran.call(
 )
 
 # Python
-stress_py, state_py, ddsdde_py = return_mapping(
+result_py = stress_update(
     model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
 )
 
 # Compare
-np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
-np.testing.assert_allclose(np.array(ddsdde_py), np.array(ddsdde_f), rtol=1e-5)
+np.testing.assert_allclose(np.array(result_py.stress), stress_f, rtol=1e-6)
+np.testing.assert_allclose(np.array(result_py.ddsdde), np.array(ddsdde_f), rtol=1e-5)
 ```
 
 ### Component-level comparison

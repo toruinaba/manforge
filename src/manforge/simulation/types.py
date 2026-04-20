@@ -72,9 +72,9 @@ class DriverResult:
     Parameters
     ----------
     step_results : list
-        Per-step :class:`~manforge.core.return_mapping.ReturnMappingResult`
+        Per-step :class:`~manforge.core.stress_update.StressUpdateResult`
         objects, one per increment.  Provides access to converged stress,
-        state, tangent, dlambda, stress_trial, and is_plastic for every step.
+        state, tangent (ddsdde), dlambda, stress_trial, and is_plastic for every step.
     strain : np.ndarray, shape (N, ntens)
         Cumulative strain history computed by the driver.
     collect_state : dict[str, FieldType] or None
