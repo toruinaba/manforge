@@ -295,18 +295,19 @@ class MaterialModel(ABC):
         sq_norm = jnp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
-    def plastic_corrector(
+    def user_defined_corrector(
         self,
         stress_trial: jnp.ndarray,
         C: jnp.ndarray,
         state_n: dict,
     ):
-        """Closed-form plastic correction (optional).
+        """User-supplied return mapping corrector (optional).
 
-        Override to provide an analytical return-mapping algorithm.
-        The default returns ``None``, causing
-        :func:`~manforge.core.return_mapping.return_mapping` to fall back
-        to the generic Newton-Raphson + autodiff path.
+        Override to provide a model-specific plastic correction algorithm.
+        The implementation may use any solver internally — closed-form
+        radial return, custom Newton-Raphson, etc.  The default returns
+        ``None``, causing :func:`~manforge.core.stress_update.stress_update`
+        to fall back to the framework's generic ``numerical_newton`` solver.
 
         Parameters
         ----------
@@ -320,15 +321,20 @@ class MaterialModel(ABC):
         Returns
         -------
         None
-            Return ``None`` to signal that no analytical corrector is
-            available and the generic path should be used.
+            Signals that no user-defined corrector is available; the
+            framework falls back to ``numerical_newton``.
         tuple[jnp.ndarray, dict, jnp.ndarray]
             ``(stress_new, state_new, dlambda)`` — converged stress,
             updated state dict, and plastic multiplier increment Δλ.
+        tuple[jnp.ndarray, dict, jnp.ndarray, int, list]
+            ``(stress_new, state_new, dlambda, n_iterations, residual_history)``
+            — same as above plus the iteration count and residual-norm history
+            from the corrector's internal solver, which are stored in the
+            returned :class:`~manforge.core.stress_update.ReturnMappingResult`.
         """
         return None
 
-    def analytical_tangent(
+    def user_defined_tangent(
         self,
         stress: jnp.ndarray,
         state: dict,
@@ -336,12 +342,12 @@ class MaterialModel(ABC):
         C: jnp.ndarray,
         state_n: dict,
     ):
-        """Closed-form consistent tangent (optional).
+        """User-supplied consistent tangent (optional).
 
-        Override to provide an analytical expression for dσ_{n+1}/dΔε.
-        The default returns ``None``, causing
-        :func:`~manforge.core.return_mapping.return_mapping` to fall back
-        to the generic implicit-differentiation + autodiff path.
+        Override to provide a model-specific analytical expression for
+        dσ_{n+1}/dΔε.  The default returns ``None``, causing
+        :func:`~manforge.core.stress_update.stress_update` to fall back
+        to the generic autodiff tangent.
 
         Parameters
         ----------
@@ -359,8 +365,8 @@ class MaterialModel(ABC):
         Returns
         -------
         None
-            Return ``None`` to signal that no analytical tangent is
-            available and the generic path should be used.
+            Signals that no user-defined tangent is available; the
+            framework falls back to autodiff.
         jnp.ndarray, shape (ntens, ntens)
             Consistent tangent dσ_{n+1}/dΔε.
         """

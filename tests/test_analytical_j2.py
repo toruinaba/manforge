@@ -2,17 +2,17 @@
 
 Covers:
 - plastic_corrector and analytical_tangent as standalone methods
-- method="analytical" vs method="autodiff" agreement
+- method="user_defined" vs method="numerical_newton" agreement
 - method="auto" selects the analytical path
-- check_tangent with method="analytical" (FD verification of closed-form tangent)
-- method="analytical" raises NotImplementedError on a model without hooks
+- check_tangent with method="user_defined" (FD verification of closed-form tangent)
+- method="user_defined" raises NotImplementedError on a model without hooks
 """
 
 import numpy as np
 import jax.numpy as jnp
 import pytest
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.core.material import MaterialModel3D
 from manforge.verification.fd_check import check_tangent
 
@@ -26,15 +26,14 @@ def test_plastic_corrector_elastic_path_not_called(model):
 
     When return_mapping detects an elastic step (f_trial ≤ 0), it returns
     before calling plastic_corrector.  This test verifies the elastic step
-    still works under method='analytical'.
+    still works under method='user_defined'.
     """
     strain_inc = jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])  # tiny, stays elastic
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    stress_new, state_new, ddsdde = return_mapping(
-        model, strain_inc, stress_n, state_n, method="analytical"
-    )
+    _r = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
     C = model.elastic_stiffness()
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
@@ -48,7 +47,7 @@ def test_plastic_corrector_standalone_plastic(model):
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
-    result = model.plastic_corrector(stress_trial, C, state_n)
+    result = model.user_defined_corrector(stress_trial, C, state_n)
     assert result is not None, "plastic_corrector should return a result for plastic step"
 
     stress_new, state_new, dlambda = result
@@ -69,12 +68,12 @@ def test_plastic_corrector_dlambda_positive(model):
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
-    _, _, dlambda = model.plastic_corrector(stress_trial, C, state_n)
+    _, _, dlambda = model.user_defined_corrector(stress_trial, C, state_n)
     assert float(dlambda) > 0.0
 
 
 # ---------------------------------------------------------------------------
-# method="analytical" vs method="autodiff" — stress and state
+# method="user_defined" vs method="numerical_newton" — stress and state
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
@@ -84,13 +83,15 @@ def test_plastic_corrector_dlambda_positive(model):
     [1e-3, 5e-4, 2e-4, 1e-3, 5e-4, 2e-4],      # mixed
 ])
 def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
-    """method='analytical' stress must match method='autodiff' to tight tolerance."""
+    """method='user_defined' stress must match method='numerical_newton' to tight tolerance."""
     strain_inc = jnp.array(strain_inc_vec)
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    s_ad, st_ad, _ = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff")
-    s_an, st_an, _ = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    _r_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton")
+    s_ad, st_ad = _r_ad.stress, _r_ad.state
+    _r_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    s_an, st_an = _r_an.stress, _r_an.state
 
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
@@ -103,18 +104,19 @@ def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model):
     """Works correctly from a pre-stressed state."""
     # First step to build up pre-stress
     strain_inc1 = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    s1, st1, _ = return_mapping(model, strain_inc1, jnp.zeros(6), model.initial_state())
+    _r1 = stress_update(model, strain_inc1, jnp.zeros(6), model.initial_state())
+    s1, st1 = _r1.stress, _r1.state
 
     # Second plastic step
     strain_inc2 = jnp.array([1e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    s_ad, _, _ = return_mapping(model, strain_inc2, s1, st1, method="autodiff")
-    s_an, _, _ = return_mapping(model, strain_inc2, s1, st1, method="analytical")
+    s_ad = stress_update(model, strain_inc2, s1, st1, method="numerical_newton").stress
+    s_an = stress_update(model, strain_inc2, s1, st1, method="user_defined").stress
 
     np.testing.assert_allclose(np.asarray(s_an), np.asarray(s_ad), atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# method="analytical" vs method="autodiff" — tangent
+# method="user_defined" vs method="numerical_newton" — tangent
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
@@ -128,8 +130,8 @@ def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    _, _, D_ad = return_mapping(model, strain_inc, stress_n, state_n, method="autodiff")
-    _, _, D_an = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    D_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton").ddsdde
+    D_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined").ddsdde
 
     rel_err = jnp.abs(D_an - D_ad) / (jnp.abs(D_ad) + 1.0)
     assert float(jnp.max(rel_err)) < 1e-5, \
@@ -146,8 +148,10 @@ def test_method_auto_uses_analytical(model):
     stress_n = jnp.zeros(6)
     state_n = model.initial_state()
 
-    s_auto, _, D_auto = return_mapping(model, strain_inc, stress_n, state_n, method="auto")
-    s_an,   _, D_an   = return_mapping(model, strain_inc, stress_n, state_n, method="analytical")
+    _r_auto = stress_update(model, strain_inc, stress_n, state_n, method="auto")
+    s_auto, D_auto = _r_auto.stress, _r_auto.ddsdde
+    _r_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    s_an, D_an = _r_an.stress, _r_an.ddsdde
 
     np.testing.assert_allclose(np.asarray(s_auto), np.asarray(s_an), atol=1e-12,
                                err_msg="auto should match analytical path")
@@ -166,7 +170,7 @@ def test_analytical_tangent_fd_check_elastic(model):
         jnp.zeros(6),
         model.initial_state(),
         jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        method="analytical",
+        method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
@@ -183,7 +187,7 @@ def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
         jnp.zeros(6),
         model.initial_state(),
         jnp.array(strain_inc_vec),
-        method="analytical",
+        method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
@@ -193,7 +197,7 @@ def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
 # ---------------------------------------------------------------------------
 
 def test_method_analytical_raises_if_no_hooks():
-    """method='analytical' raises NotImplementedError for a model without hooks."""
+    """method='user_defined' raises NotImplementedError for a model without hooks."""
 
     class MinimalModel(MaterialModel3D):
         param_names = ["E", "nu", "sigma_y0"]
@@ -220,11 +224,11 @@ def test_method_analytical_raises_if_no_hooks():
     strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     with pytest.raises(NotImplementedError):
-        return_mapping(minimal_model, strain_inc, jnp.zeros(6), {}, method="analytical")
+        stress_update(minimal_model, strain_inc, jnp.zeros(6), {}, method="user_defined")
 
 
 def test_method_invalid_raises_value_error(model):
     """Unrecognised method string raises ValueError."""
     with pytest.raises(ValueError, match="method must be"):
-        return_mapping(model, jnp.zeros(6), jnp.zeros(6), model.initial_state(),
+        stress_update(model, jnp.zeros(6), jnp.zeros(6), model.initial_state(),
                        method="wrong")

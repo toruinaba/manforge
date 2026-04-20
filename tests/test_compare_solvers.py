@@ -11,20 +11,21 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 from manforge.verification.compare import compare_solvers, SolverComparisonResult
 
 
 def _make_solver(model, method):
     """Return a SolverFn bound to the given model and method."""
     def _solve(strain_inc, stress_n, state_n):
-        return return_mapping(
+        _r = stress_update(
             model,
             jnp.asarray(strain_inc),
             jnp.asarray(stress_n),
             state_n,
             method=method,
         )
+        return _r.stress, _r.state, _r.ddsdde
     return _solve
 
 
@@ -66,7 +67,7 @@ def test_cases(model):
 
 def test_identical_solvers_pass(model, test_cases):
     """Comparing a solver to itself gives zero error and passes."""
-    solver = _make_solver(model, "autodiff")
+    solver = _make_solver(model, "numerical_newton")
     result = compare_solvers(solver, solver, test_cases)
 
     assert isinstance(result, SolverComparisonResult)
@@ -83,8 +84,8 @@ def test_identical_solvers_pass(model, test_cases):
 
 def test_autodiff_vs_analytical_pass(model, test_cases):
     """autodiff and analytical solvers must agree within default tolerances."""
-    solver_ad = _make_solver(model, "autodiff")
-    solver_an = _make_solver(model, "analytical")
+    solver_ad = _make_solver(model, "numerical_newton")
+    solver_an = _make_solver(model, "user_defined")
 
     result = compare_solvers(solver_ad, solver_an, test_cases)
 
@@ -103,14 +104,14 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
 
 def test_wrong_solver_fails(model, test_cases):
     """A solver that returns wrong stress must be flagged as failed."""
-    solver_ad = _make_solver(model, "autodiff")
+    solver_ad = _make_solver(model, "numerical_newton")
 
     def bad_solver(strain_inc, stress_n, state_n):
-        stress, state, ddsdde = return_mapping(
+        _r = stress_update(
             model, jnp.asarray(strain_inc), jnp.asarray(stress_n),
-            state_n, method="autodiff"
+            state_n, method="numerical_newton"
         )
-        return stress * 1.1, state, ddsdde  # 10% error in stress
+        return _r.stress * 1.1, _r.state, _r.ddsdde  # 10% error in stress
 
     result = compare_solvers(solver_ad, bad_solver, test_cases, stress_tol=1e-6)
 
@@ -125,14 +126,14 @@ def test_wrong_solver_fails(model, test_cases):
 
 def test_result_details_length(model, test_cases):
     """details list length equals the number of test cases."""
-    solver = _make_solver(model, "autodiff")
+    solver = _make_solver(model, "numerical_newton")
     result = compare_solvers(solver, solver, test_cases)
     assert len(result.details) == len(test_cases)
 
 
 def test_result_details_keys(model, test_cases):
     """Each detail record has the required keys."""
-    solver = _make_solver(model, "autodiff")
+    solver = _make_solver(model, "numerical_newton")
     result = compare_solvers(solver, solver, test_cases)
     for d in result.details:
         assert "case_index"      in d
@@ -143,7 +144,7 @@ def test_result_details_keys(model, test_cases):
 
 def test_empty_test_cases(model):
     """compare_solvers with an empty list passes vacuously."""
-    solver = _make_solver(model, "autodiff")
+    solver = _make_solver(model, "numerical_newton")
     result = compare_solvers(solver, solver, [])
     assert result.passed
     assert result.n_cases == 0

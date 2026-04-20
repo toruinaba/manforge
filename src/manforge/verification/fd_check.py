@@ -1,7 +1,7 @@
 """Finite-difference verification of the consistent tangent.
 
 Provides :func:`check_tangent`, a reusable utility that compares the AD
-consistent tangent (returned by :func:`~manforge.core.return_mapping.return_mapping`)
+consistent tangent (returned by :func:`~manforge.core.stress_update.stress_update`)
 against a central-difference approximation.  Useful for validating custom
 :class:`~manforge.core.material.MaterialModel` implementations.
 """
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import jax.numpy as jnp
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 
 
 @dataclass
@@ -54,13 +54,10 @@ def _fd_tangent(
     for j in range(ntens):
         e_j = jnp.zeros(ntens).at[j].set(1.0)
 
-        s_fwd, _, _ = return_mapping(
-            model, strain_inc + eps * e_j, stress_n, state_n, method=method
-        )
-        s_bwd, _, _ = return_mapping(
-            model, strain_inc - eps * e_j, stress_n, state_n, method=method
-        )
-        col = (s_fwd - s_bwd) / (2.0 * eps)
+        col = (
+            stress_update(model, strain_inc + eps * e_j, stress_n, state_n, method=method).stress
+            - stress_update(model, strain_inc - eps * e_j, stress_n, state_n, method=method).stress
+        ) / (2.0 * eps)
         ddsdde_fd = ddsdde_fd.at[:, j].set(col)
 
     return ddsdde_fd
@@ -102,7 +99,7 @@ def check_tangent(
         Small offset added to ``|ddsdde_fd|`` before dividing to avoid
         near-zero division on small tangent entries (default 1e-2).
     method : str, optional
-        Passed to :func:`~manforge.core.return_mapping.return_mapping`
+        Passed to :func:`~manforge.core.stress_update.stress_update`
         (default ``"auto"``).
 
     Returns
@@ -125,7 +122,7 @@ def check_tangent(
     >>> result.passed
     True
     """
-    _, _, ddsdde_ad = return_mapping(model, strain_inc, stress, state, method=method)
+    ddsdde_ad = stress_update(model, strain_inc, stress, state, method=method).ddsdde
     ddsdde_fd = _fd_tangent(model, strain_inc, stress, state, eps=eps, method=method)
 
     rel_err_matrix = jnp.abs(ddsdde_ad - ddsdde_fd) / (

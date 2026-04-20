@@ -3,7 +3,7 @@
 import numpy as np
 import jax.numpy as jnp
 
-from manforge.core.return_mapping import return_mapping
+from manforge.core.stress_update import stress_update
 
 
 # ---------------------------------------------------------------------------
@@ -15,9 +15,8 @@ def test_elastic_stress_update(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    stress_new, state_new, ddsdde = return_mapping(
-        model, strain_inc, jnp.zeros(6), initial_state
-    )
+    _r = stress_update(model, strain_inc, jnp.zeros(6), initial_state)
+    stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
 
     expected_stress = C @ strain_inc
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(expected_stress), rtol=1e-10)
@@ -28,9 +27,9 @@ def test_elastic_tangent_equals_C(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _, _, ddsdde = return_mapping(
+    ddsdde = stress_update(
         model, strain_inc, jnp.zeros(6), initial_state
-    )
+    ).ddsdde
 
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 
@@ -39,9 +38,9 @@ def test_elastic_state_unchanged(model, initial_state):
     """Internal state must not change in an elastic step."""
     strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _, state_new, _ = return_mapping(
+    state_new = stress_update(
         model, strain_inc, jnp.zeros(6), initial_state
-    )
+    ).state
 
     np.testing.assert_allclose(np.asarray(state_new["ep"]), np.asarray(initial_state["ep"]))
 
@@ -51,9 +50,8 @@ def test_elastic_multiaxial(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = jnp.array([5e-6, 3e-6, -2e-6, 1e-6, 0.0, 0.0])
 
-    stress_new, _, ddsdde = return_mapping(
-        model, strain_inc, jnp.zeros(6), initial_state
-    )
+    _r = stress_update(model, strain_inc, jnp.zeros(6), initial_state)
+    stress_new, ddsdde = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
@@ -68,9 +66,8 @@ def test_elastic_from_prestress(model):
     state_n = model.initial_state()
     strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    stress_new, _, ddsdde = return_mapping(
-        model, strain_inc, stress_n, state_n
-    )
+    _r = stress_update(model, strain_inc, stress_n, state_n)
+    stress_new, ddsdde = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(stress_n + C @ strain_inc), rtol=1e-10)
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)

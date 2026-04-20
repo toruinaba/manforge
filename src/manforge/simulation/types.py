@@ -71,33 +71,54 @@ class DriverResult:
 
     Parameters
     ----------
-    fields : dict[str, FieldHistory]
-        All output fields keyed by name.  At minimum contains ``"Stress"``
-        and ``"Strain"``.  State variables (e.g. ``"ep"``) are included
-        when ``collect_state`` is passed to the driver's ``run()`` method.
+    step_results : list
+        Per-step :class:`~manforge.core.stress_update.StressUpdateResult`
+        objects, one per increment.  Provides access to converged stress,
+        state, tangent (ddsdde), dlambda, stress_trial, and is_plastic for every step.
+    strain : np.ndarray, shape (N, ntens)
+        Cumulative strain history computed by the driver.
+    collect_state : dict[str, FieldType] or None
+        State-variable fields requested at driver construction time.
 
     Examples
     --------
-    Access common outputs via convenience properties::
+    Access common outputs::
 
         result = driver.run(model, load)
         result.stress          # np.ndarray (N, ntens)
         result.strain          # np.ndarray (N, ntens)
 
-    Access state-variable history directly::
+    Access a specific step's details::
 
-        result.fields["ep"].data          # np.ndarray (N,)  — scalar, strain-space
-        result.fields["ep"].type          # FieldType.STRAIN
+        rm = result.step_results[15]
+        rm.dlambda             # plastic multiplier at step 15
+        rm.is_plastic          # whether step 15 was plastic
+
+    Access state-variable history via fields::
+
+        result.fields["ep"].data   # np.ndarray (N,) — scalar, strain-space
     """
 
-    fields: dict[str, FieldHistory]
+    step_results: list
+    strain: np.ndarray
+    collect_state: "dict[str, FieldType] | None" = None
 
     @property
     def stress(self) -> np.ndarray:
         """Stress history, shape ``(N, ntens)``."""
-        return self.fields["Stress"].data
+        return np.array([np.asarray(r.stress) for r in self.step_results])
 
     @property
-    def strain(self) -> np.ndarray:
-        """Strain history, shape ``(N, ntens)``."""
-        return self.fields["Strain"].data
+    def fields(self) -> "dict[str, FieldHistory]":
+        """All output fields constructed from step_results."""
+        out: dict[str, FieldHistory] = {
+            "Stress": FieldHistory(FieldType.STRESS, "Stress", self.stress),
+            "Strain": FieldHistory(FieldType.STRAIN, "Strain", self.strain),
+        }
+        if self.collect_state:
+            for k, ft in self.collect_state.items():
+                data = np.stack(
+                    [np.asarray(r.state[k]) for r in self.step_results]
+                )
+                out[k] = FieldHistory(ft, k, data)
+        return out
