@@ -60,11 +60,65 @@ Notes
 
 from dataclasses import dataclass, field
 
-import jax
 import jax.numpy as jnp
-from jax.flatten_util import ravel_pytree
 
-from manforge.core.tangent import augmented_consistent_tangent, consistent_tangent
+from manforge.core.solver import _select_nr
+from manforge.core.tangent import _select_tangent
+
+_VALID_METHODS = ("auto", "numerical_newton", "user_defined")
+
+
+def _validate_method(method: str) -> None:
+    if method not in _VALID_METHODS:
+        raise ValueError(
+            f"method must be 'auto', 'numerical_newton', or 'user_defined'; "
+            f"got {method!r}"
+        )
+
+
+def _try_user_corrector(model, stress_trial, C, state_n, method):
+    """Attempt user_defined_corrector; return ReturnMappingResult or None.
+
+    Returns None when method='auto' and the model has no corrector hook.
+    Raises NotImplementedError when method='user_defined' and hook is absent.
+    """
+    if method == "numerical_newton":
+        return None
+    _result = model.user_defined_corrector(stress_trial, C, state_n)
+    if _result is not None:
+        if len(_result) == 5:
+            stress, state_new, dlambda, n_iter, res_hist = _result
+        else:
+            stress, state_new, dlambda = _result
+            n_iter, res_hist = 0, []
+        return ReturnMappingResult(
+            stress=stress,
+            state=state_new,
+            dlambda=dlambda,
+            n_iterations=n_iter,
+            residual_history=res_hist,
+        )
+    if method == "user_defined":
+        raise NotImplementedError(
+            f"{type(model).__name__} does not implement user_defined_corrector; "
+            "cannot use method='user_defined'."
+        )
+    return None
+
+
+def _try_user_tangent(model, rm, stress_n, state_n, C, method):
+    """Attempt user_defined_tangent; return ddsdde array or None."""
+    if method == "numerical_newton":
+        return None
+    ddsdde = model.user_defined_tangent(rm.stress, rm.state, rm.dlambda, C, state_n)
+    if ddsdde is not None:
+        return ddsdde
+    if method == "user_defined":
+        raise NotImplementedError(
+            f"{type(model).__name__} does not implement user_defined_tangent; "
+            "cannot use method='user_defined'."
+        )
+    return None
 
 
 @dataclass
@@ -167,64 +221,6 @@ class StressUpdateResult:
         return self.return_mapping.residual_history
 
 
-def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
-    """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
-
-    Used when ``model.hardening_type == 'implicit'``.
-
-    Parameters
-    ----------
-    model : MaterialModel
-    stress_trial : jnp.ndarray, shape (ntens,)
-    C : jnp.ndarray, shape (ntens, ntens)
-    state_n : dict
-    max_iter : int
-    tol : float
-
-    Returns
-    -------
-    stress : jnp.ndarray, shape (ntens,)
-    state_new : dict
-    dlambda : jnp.ndarray, scalar
-    n_iterations : int
-        Number of Newton updates performed.
-    residual_history : list[float]
-        Residual norm (inf-norm) at the start of each iteration.
-    """
-    from manforge.core.residual import make_augmented_residual
-
-    ntens = model.ntens
-    residual_fn, n_state, unflatten_fn = make_augmented_residual(
-        model, stress_trial, C, state_n
-    )
-
-    flat_state_n, _ = ravel_pytree(state_n)
-    x = jnp.concatenate([stress_trial, jnp.array([0.0]), flat_state_n])
-
-    residual_history = []
-    n_iterations = 0
-    for _iteration in range(max_iter):
-        R = residual_fn(x)
-        res_norm = float(jnp.max(jnp.abs(R)))
-        residual_history.append(res_norm)
-        if res_norm < tol:
-            break
-        J = jax.jacobian(residual_fn)(x)
-        dx = jnp.linalg.solve(J, R)
-        x = x - dx
-        n_iterations += 1
-    else:
-        raise RuntimeError(
-            f"_augmented_nr: NR did not converge in {max_iter} iterations "
-            f"(||R||_inf = {float(jnp.max(jnp.abs(R))):.3e}, tol = {tol:.3e})"
-        )
-
-    stress = x[:ntens]
-    dlambda = jnp.asarray(x[ntens])
-    state_new = unflatten_fn(x[ntens + 1 :])
-    return stress, state_new, dlambda, n_iterations, residual_history
-
-
 def return_mapping(
     model,
     stress_trial: jnp.ndarray,
@@ -283,71 +279,17 @@ def return_mapping(
     ValueError
         If ``method`` is not one of the recognised values.
     """
-    if method not in ("auto", "numerical_newton", "user_defined"):
-        raise ValueError(
-            f"method must be 'auto', 'numerical_newton', or 'user_defined'; "
-            f"got {method!r}"
-        )
+    _validate_method(method)
 
-    _n_iter = 0
-    _res_hist = []
-
-    if method != "numerical_newton":
-        _result = model.user_defined_corrector(stress_trial, C, state_n)
-        if _result is not None:
-            if len(_result) == 5:
-                stress, state_new, dlambda, _n_iter, _res_hist = _result
-            else:
-                stress, state_new, dlambda = _result
-            return ReturnMappingResult(
-                stress=stress,
-                state=state_new,
-                dlambda=dlambda,
-                n_iterations=_n_iter,
-                residual_history=_res_hist,
-            )
-        if method == "user_defined":
-            raise NotImplementedError(
-                f"{type(model).__name__} does not implement user_defined_corrector; "
-                "cannot use method='user_defined'."
-            )
+    rm = _try_user_corrector(model, stress_trial, C, state_n, method)
+    if rm is not None:
+        return rm
 
     # numerical_newton path
-    if model.hardening_type == "implicit":
-        stress, state_new, dlambda, _n_iter, _res_hist = _augmented_nr(
-            model, stress_trial, C, state_n, max_iter, tol
-        )
-    else:
-        dlambda = jnp.array(0.0)
-        stress = stress_trial
-        state_new = state_n
-
-        for _iteration in range(max_iter):
-            state_new = model.hardening_increment(dlambda, stress, state_n)
-            n = jax.grad(lambda s: model.yield_function(s, state_new))(stress)
-            stress = stress_trial - dlambda * (C @ n)
-            state_new = model.hardening_increment(dlambda, stress, state_n)
-            f = model.yield_function(stress, state_new)
-            _res_hist.append(float(jnp.abs(f)))
-
-            if jnp.abs(f) < tol:
-                break
-
-            def _f_residual(dl, _stress=stress):
-                st = model.hardening_increment(dl, _stress, state_n)
-                nn = jax.grad(lambda s: model.yield_function(s, st))(_stress)
-                s_upd = stress_trial - dl * (C @ nn)
-                return model.yield_function(s_upd, st)
-
-            dfddl = jax.grad(_f_residual)(dlambda)
-            dlambda = dlambda - f / dfddl
-            _n_iter += 1
-
-        else:
-            raise RuntimeError(
-                f"return_mapping: NR did not converge in {max_iter} iterations "
-                f"(|f| = {float(jnp.abs(f)):.3e}, tol = {tol:.3e})"
-            )
+    nr = _select_nr(model)
+    stress, state_new, dlambda, _n_iter, _res_hist = nr(
+        model, stress_trial, C, state_n, max_iter, tol
+    )
 
     return ReturnMappingResult(
         stress=stress,
@@ -415,11 +357,7 @@ def stress_update(
     ValueError
         If ``method`` is not one of the recognised values.
     """
-    if method not in ("auto", "numerical_newton", "user_defined"):
-        raise ValueError(
-            f"method must be 'auto', 'numerical_newton', or 'user_defined'; "
-            f"got {method!r}"
-        )
+    _validate_method(method)
 
     # ------------------------------------------------------------------
     # Step 1 — elastic stiffness and trial stress
@@ -451,33 +389,19 @@ def stress_update(
     # ------------------------------------------------------------------
     # Step 4 — consistent tangent
     # ------------------------------------------------------------------
-    if method != "numerical_newton":
-        _ddsdde = model.user_defined_tangent(
-            rm.stress, rm.state, rm.dlambda, C, state_n
+    _ddsdde = _try_user_tangent(model, rm, stress_n, state_n, C, method)
+    if _ddsdde is not None:
+        return StressUpdateResult(
+            return_mapping=rm,
+            ddsdde=_ddsdde,
+            stress_trial=stress_trial,
+            is_plastic=True,
+            _state_n=state_n,
         )
-        if _ddsdde is not None:
-            return StressUpdateResult(
-                return_mapping=rm,
-                ddsdde=_ddsdde,
-                stress_trial=stress_trial,
-                is_plastic=True,
-                _state_n=state_n,
-            )
-        if method == "user_defined":
-            raise NotImplementedError(
-                f"{type(model).__name__} does not implement user_defined_tangent; "
-                "cannot use method='user_defined'."
-            )
 
     # Autodiff tangent
-    if model.hardening_type == "implicit":
-        ddsdde = augmented_consistent_tangent(
-            model, rm.stress, rm.state, rm.dlambda, stress_n, state_n
-        )
-    else:
-        ddsdde = consistent_tangent(
-            model, rm.stress, rm.state, rm.dlambda, stress_n, state_n
-        )
+    tangent_fn = _select_tangent(model)
+    ddsdde = tangent_fn(model, rm.stress, rm.state, rm.dlambda, stress_n, state_n)
 
     return StressUpdateResult(
         return_mapping=rm,

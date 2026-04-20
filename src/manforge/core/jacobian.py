@@ -126,7 +126,7 @@ def ad_jacobian_blocks(
             stress = result.stress_trial
             dlambda = jnp.zeros(())
             stress_trial = result.stress_trial
-            state = result._state_n
+            state = result.state
         else:
             stress = result.return_mapping.stress
             dlambda = result.return_mapping.dlambda
@@ -146,14 +146,12 @@ def ad_jacobian_blocks(
     ntens = model.ntens
     C = model.elastic_stiffness()
 
-    if model.hardening_type == "implicit":
-        return _jacobian_blocks_implicit(
-            model, stress, state, dlambda, stress_trial, C, state_n, ntens
-        )
-    else:
-        return _jacobian_blocks_explicit(
-            model, stress, state, dlambda, stress_trial, C, state_n, ntens
-        )
+    _blocks_fn = (
+        _jacobian_blocks_implicit
+        if model.hardening_type == "implicit"
+        else _jacobian_blocks_explicit
+    )
+    return _blocks_fn(model, stress, state, dlambda, stress_trial, C, state_n, ntens)
 
 
 # ---------------------------------------------------------------------------
@@ -164,16 +162,9 @@ def _jacobian_blocks_explicit(
     model, stress, state, dlambda, stress_trial, C, state_n, ntens
 ):
     """Build JacobianBlocks for the explicit (ntens+1) residual system."""
+    from manforge.core.residual import make_explicit_residual
 
-    def residual_fn(x):
-        sig = x[:ntens]
-        dl = x[ntens]
-        st = model.hardening_increment(dl, sig, state_n)
-        n = jax.grad(lambda s: model.yield_function(s, st))(sig)
-        R_stress = sig - stress_trial + dl * (C @ n)
-        R_yield = model.yield_function(sig, st)
-        return jnp.concatenate([R_stress, R_yield.reshape(1)])
-
+    residual_fn = make_explicit_residual(model, stress_trial, C, state_n)
     x_conv = jnp.concatenate([stress, dlambda.reshape(1)])
     J = jax.jacobian(residual_fn)(x_conv)  # (ntens+1, ntens+1)
 
