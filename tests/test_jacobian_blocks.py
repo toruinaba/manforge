@@ -148,3 +148,45 @@ class TestImplicitBlocks:
         np.testing.assert_allclose(
             np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
         )
+
+
+# ---------------------------------------------------------------------------
+# ReturnMappingResult path
+# ---------------------------------------------------------------------------
+
+class TestReturnMappingResultPath:
+    def test_with_explicit_stress_trial(self, j2_model):
+        from manforge.core.stress_update import return_mapping
+        deps = jnp.zeros(j2_model.ntens).at[0].set(3e-3)
+        state0 = j2_model.initial_state()
+        C = j2_model.elastic_stiffness()
+        st = C @ deps
+        rm = return_mapping(j2_model, st, C, state0)
+        jac = ad_jacobian_blocks(j2_model, rm, state0, stress_trial=st)
+        assert isinstance(jac, JacobianBlocks)
+        assert jac.dstress_dsigma.shape == (j2_model.ntens, j2_model.ntens)
+
+    def test_matches_stress_update_result(self, j2_model):
+        from manforge.core.stress_update import return_mapping
+        deps = jnp.zeros(j2_model.ntens).at[0].set(3e-3)
+        state0 = j2_model.initial_state()
+        C = j2_model.elastic_stiffness()
+        st = C @ deps
+        rm = return_mapping(j2_model, st, C, state0)
+        jac_rm = ad_jacobian_blocks(j2_model, rm, state0, stress_trial=st)
+
+        su = stress_update(j2_model, deps, jnp.zeros(j2_model.ntens), state0)
+        jac_su = ad_jacobian_blocks(j2_model, su, state0)
+
+        np.testing.assert_allclose(
+            np.array(jac_rm.dstress_dsigma), np.array(jac_su.dstress_dsigma), rtol=1e-10
+        )
+
+    def test_missing_stress_trial_raises(self, j2_model):
+        from manforge.core.stress_update import return_mapping
+        deps = jnp.zeros(j2_model.ntens).at[0].set(3e-3)
+        state0 = j2_model.initial_state()
+        C = j2_model.elastic_stiffness()
+        rm = return_mapping(j2_model, C @ deps, C, state0)
+        with pytest.raises(ValueError, match="stress_trial must be provided"):
+            ad_jacobian_blocks(j2_model, rm, state0)

@@ -205,8 +205,9 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     n_iterations = 0
     for _iteration in range(max_iter):
         R = residual_fn(x)
-        residual_history.append(float(jnp.max(jnp.abs(R))))
-        if jnp.max(jnp.abs(R)) < tol:
+        res_norm = float(jnp.max(jnp.abs(R)))
+        residual_history.append(res_norm)
+        if res_norm < tol:
             break
         J = jax.jacobian(residual_fn)(x)
         dx = jnp.linalg.solve(J, R)

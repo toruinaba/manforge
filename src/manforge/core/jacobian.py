@@ -86,7 +86,9 @@ class JacobianBlocks:
     full: jnp.ndarray
 
 
-def ad_jacobian_blocks(model, result, state_n: dict) -> JacobianBlocks:
+def ad_jacobian_blocks(
+    model, result, state_n: dict, *, stress_trial: jnp.ndarray | None = None
+) -> JacobianBlocks:
     """Compute the residual Jacobian at the converged point and decompose into blocks.
 
     For explicit-hardening models, builds the (ntens+1)×(ntens+1) residual
@@ -106,6 +108,11 @@ def ad_jacobian_blocks(model, result, state_n: dict) -> JacobianBlocks:
         Must be a plastic step (``is_plastic=True`` / ``return_mapping`` not None).
     state_n : dict
         Internal state at the *beginning* of the increment (step n).
+    stress_trial : jnp.ndarray, optional
+        Elastic trial stress, shape ``(ntens,)``.  Required when *result* is a
+        bare :class:`~manforge.core.stress_update.ReturnMappingResult`;
+        automatically extracted when *result* is a
+        :class:`~manforge.core.stress_update.StressUpdateResult`.
 
     Returns
     -------
@@ -126,12 +133,16 @@ def ad_jacobian_blocks(model, result, state_n: dict) -> JacobianBlocks:
             stress_trial = result.stress_trial
             state = result.return_mapping.state
     else:
-        # ReturnMappingResult — caller must pass stress_trial separately
-        # or this path is not reached in normal usage
+        # ReturnMappingResult — stress_trial must be supplied explicitly
         stress = result.stress
         dlambda = result.dlambda
-        stress_trial = getattr(result, "stress_trial", None)
         state = result.state
+        if stress_trial is None:
+            raise ValueError(
+                "stress_trial must be provided when passing a ReturnMappingResult "
+                "to ad_jacobian_blocks(). Use stress_update() instead, or pass "
+                "stress_trial=... explicitly."
+            )
     ntens = model.ntens
     C = model.elastic_stiffness()
 
