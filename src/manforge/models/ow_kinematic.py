@@ -3,7 +3,7 @@
 This model is the canonical example of a *genuinely implicit* hardening law
 in manforge.  Unlike the standard Armstrong-Frederick model, the backward-Euler
 discretization of the Ohno-Wang evolution equation cannot be solved in closed
-form, so the model overrides ``hardening_residual`` and triggers the augmented
+form, so the model overrides ``state_residual`` and triggers the augmented
 (ntens+1+n_state) residual system automatically.
 
 Model parameters
@@ -40,7 +40,7 @@ Backward-Euler discretisation of the OW equation:
 
     α_{n+1} = α_n + C_k Δλ n̂ − γ Δλ ‖α_{n+1}‖ α_{n+1}
 
-Rearranged as a residual (the form used by ``hardening_residual``):
+Rearranged as a residual (the form used by ``state_residual``):
 
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
@@ -64,7 +64,7 @@ Flow direction consistency
 The augmented residual system (``core/residual.py``) computes the flow
 direction as ``n = ∂f/∂σ`` evaluated at ``(σ, state_new)``.  For this model
 ``f = σ_vm(σ − α)``, so ``n`` depends on ``α_{n+1}``.  For full backward-Euler
-consistency, ``hardening_residual`` also evaluates ``n̂`` from the relative
+consistency, ``state_residual`` also evaluates ``n̂`` from the relative
 stress ``σ − α_{n+1}`` (using ``state_new["alpha"]``), making the entire
 system fully coupled and implicit.
 
@@ -73,7 +73,7 @@ Notes
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k
   (same limit as standard AF).
 * The plastic increment is always solved via the augmented NR using
-  ``hardening_residual``.  No ``hardening_increment`` is defined because
+  ``state_residual``.  No ``update_state`` is defined because
   ``hardening_type = 'augmented'`` does not require one.
 """
 
@@ -139,7 +139,7 @@ class OWKinematic3D(MaterialModel3D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n) -> dict:
+    def state_residual(self, state_new, dlambda, stress, state_n) -> dict:
         """Ohno-Wang implicit backstress residual.
 
         R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
@@ -229,7 +229,7 @@ class OWKinematicPS(MaterialModelPS):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n) -> dict:
+    def state_residual(self, state_new, dlambda, stress, state_n) -> dict:
         """Ohno-Wang implicit backstress residual (plane stress)."""
         alpha_new = state_new["alpha"]
         xi = stress - alpha_new
@@ -302,7 +302,7 @@ class OWKinematic1D(MaterialModel1D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_residual(self, state_new, dlambda, stress, state_n) -> dict:
+    def state_residual(self, state_new, dlambda, stress, state_n) -> dict:
         """Ohno-Wang implicit backstress residual (1D)."""
         alpha_new = state_new["alpha"]
         xi = stress - alpha_new

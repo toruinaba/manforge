@@ -1,11 +1,11 @@
-"""NR convergence history verification for explicit and implicit hardening models.
+"""NR convergence history verification for explicit and augmented hardening models.
 
 Shows how to access Newton-Raphson convergence history via
 ``StressUpdateResult.residual_history`` and verify quadratic convergence.
 
-- J2Isotropic3D (explicit hardening, scalar NR): converges in exactly 1 step
+- J2Isotropic3D (reduced hardening, scalar NR): converges in exactly 1 step
   for linear isotropic hardening (exact linearization).
-- OWKinematic3D (implicit hardening, augmented NR): multiple iterations with
+- OWKinematic3D (augmented hardening, augmented NR): multiple iterations with
   quadratic convergence.
 
 Usage
@@ -29,10 +29,10 @@ deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 
 # =========================================================================
-# Part 1: J2 explicit hardening — scalar NR, linear → 1 iteration
+# Part 1: J2 reduced hardening — scalar NR, linear → 1 iteration
 # =========================================================================
 print("=" * 60)
-print("  Part 1: J2Isotropic3D — explicit hardening (scalar NR)")
+print("  Part 1: J2Isotropic3D — reduced hardening (scalar NR)")
 print("=" * 60)
 
 j2 = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
@@ -55,7 +55,7 @@ print()
 # Part 2: OWKinematic3D — augmented NR, quadratic convergence
 # =========================================================================
 print("=" * 60)
-print("  Part 2: OWKinematic3D — implicit hardening (augmented NR)")
+print("  Part 2: OWKinematic3D — augmented hardening (augmented NR)")
 print("=" * 60)
 
 ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=50_000.0, gamma=500.0)

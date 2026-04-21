@@ -48,7 +48,7 @@ def test_analytical_path_no_history(j2_model):
 
 
 # ---------------------------------------------------------------------------
-# Scalar NR (explicit hardening, J2)
+# Scalar NR (reduced hardening, J2)
 # ---------------------------------------------------------------------------
 
 def test_scalar_nr_records_history(j2_model):
@@ -79,7 +79,7 @@ def test_scalar_nr_residual_decreasing(j2_model):
 
 
 # ---------------------------------------------------------------------------
-# Augmented NR (implicit hardening, OWKinematic)
+# Augmented NR (augmented hardening, OWKinematic)
 # ---------------------------------------------------------------------------
 
 def test_augmented_nr_records_history(ow_model):

@@ -31,7 +31,7 @@ from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, Stre
 class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment`` which
+    ``hardening_type = "reduced"``: implements ``update_state`` which
     returns the updated state directly in closed form (Δep = Δλ).
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
@@ -92,7 +92,7 @@ class J2Isotropic3D(MaterialModel3D):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
         return {"ep": state["ep"] + dlambda}
 
@@ -175,7 +175,7 @@ class J2Isotropic3D(MaterialModel3D):
 class J2IsotropicPS(MaterialModelPS):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment``
+    ``hardening_type = "reduced"``: implements ``update_state``
     (Δep = Δλ). Uses the autodiff return-mapping path (``method="autodiff"``).
     A closed-form plane-stress corrector (which requires an iterative σ33 = 0
     enforcement loop) is not yet implemented.
@@ -223,7 +223,7 @@ class J2IsotropicPS(MaterialModelPS):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
         return {"ep": state["ep"] + dlambda}
 
@@ -231,7 +231,7 @@ class J2IsotropicPS(MaterialModelPS):
 class J2Isotropic1D(MaterialModel1D):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment``
+    ``hardening_type = "reduced"``: implements ``update_state``
     (Δep = Δλ). Provides closed-form ``plastic_corrector`` and
     ``analytical_tangent`` using the 1D radial return mapping.
 
@@ -278,7 +278,7 @@ class J2Isotropic1D(MaterialModel1D):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
         return {"ep": state["ep"] + dlambda}
 

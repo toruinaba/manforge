@@ -53,7 +53,7 @@ from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, Stre
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment`` which
+    ``hardening_type = "reduced"``: implements ``update_state`` which
     solves the backward-Euler AF equation in closed form.
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
@@ -104,7 +104,7 @@ class AFKinematic3D(MaterialModel3D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update (implicit, analytical).
 
         α_{n+1} = (α_n + C_k Δλ ŝ) / (1 + γ Δλ)
@@ -123,7 +123,7 @@ class AFKinematic3D(MaterialModel3D):
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment`` with
+    ``hardening_type = "reduced"``: implements ``update_state`` with
     closed-form backward-Euler AF update.
     Uses the generic NR + autodiff return-mapping path.
 
@@ -178,7 +178,7 @@ class AFKinematicPS(MaterialModelPS):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update."""
         alpha_n = state["alpha"]
         xi = stress - alpha_n
@@ -192,7 +192,7 @@ class AFKinematicPS(MaterialModelPS):
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
-    ``hardening_type = "reduced"``: implements ``hardening_increment`` with
+    ``hardening_type = "reduced"``: implements ``update_state`` with
     closed-form backward-Euler AF update.
     Uses the generic NR + autodiff return-mapping path.
 
@@ -245,7 +245,7 @@ class AFKinematic1D(MaterialModel1D):
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def hardening_increment(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, stress, state) -> dict:
         """Armstrong-Frederick backstress update."""
         alpha_n = state["alpha"]
         xi = stress - alpha_n

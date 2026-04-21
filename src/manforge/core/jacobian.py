@@ -48,7 +48,7 @@ class JacobianBlocks:
                  │ dyield_dsigma     dyield_ddlambda     dyield_dstate  │
                  └ dstate_dsigma     dstate_ddlambda     dstate_dstate  ┘
 
-    For explicit-hardening models (ntens+1 system), state blocks are ``None``.
+    For reduced-hardening models (ntens+1 system), state blocks are ``None``.
 
     Attributes
     ----------
@@ -91,8 +91,8 @@ def ad_jacobian_blocks(
 ) -> JacobianBlocks:
     """Compute the residual Jacobian at the converged point and decompose into blocks.
 
-    For explicit-hardening models, builds the (ntens+1)×(ntens+1) residual
-    Jacobian.  For implicit-hardening models, builds the full
+    For reduced-hardening models, builds the (ntens+1)×(ntens+1) residual
+    Jacobian.  For augmented-hardening models, builds the full
     (ntens+1+n_state)×(ntens+1+n_state) augmented system Jacobian.
 
     State-related blocks are decomposed by variable name using the ordering

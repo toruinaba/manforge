@@ -125,10 +125,10 @@ print("  dstress_ddlambda (= C @ n)     : PASS")
 npt.assert_allclose(float(jac.dyield_ddlambda), -model.H, rtol=1e-10)
 print(f"  dyield_ddlambda (= -H = {float(jac.dyield_ddlambda):.1f}): PASS")
 
-# --- explicit hardening: state blocks are None ---
+# --- reduced hardening: state blocks are None ---
 assert jac.dstate_dsigma is None
 assert jac.dstate_dstate is None
-print("  state blocks (explicit model)  : None (correct)")
+print("  state blocks (reduced model)   : None (correct)")
 
 # --- full matrix shape ---
 assert jac.full.shape == (7, 7)  # ntens + 1 = 6 + 1

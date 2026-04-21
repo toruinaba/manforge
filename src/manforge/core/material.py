@@ -57,15 +57,26 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: hardening_type must be 'reduced' or 'augmented', "
                 f"got {ht!r}{_hint}"
             )
-        if ht == "reduced" and cls.hardening_increment is MaterialModel.hardening_increment:
+        # Detect old method names (removed in this version) and guide migration.
+        if "hardening_increment" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__}: hardening_increment() has been renamed to "
+                "update_state() — rename the method on your subclass"
+            )
+        if "hardening_residual" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__}: hardening_residual() has been renamed to "
+                "state_residual() — rename the method on your subclass"
+            )
+        if ht == "reduced" and cls.update_state is MaterialModel.update_state:
             raise TypeError(
                 f"{cls.__name__}: reduced hardening models must implement "
-                "hardening_increment()"
+                "update_state()"
             )
-        if ht == "augmented" and cls.hardening_residual is MaterialModel.hardening_residual:
+        if ht == "augmented" and cls.state_residual is MaterialModel.state_residual:
             raise TypeError(
                 f"{cls.__name__}: augmented hardening models must implement "
-                "hardening_residual()"
+                "state_residual()"
             )
 
     @property
@@ -110,7 +121,7 @@ class MaterialModel(ABC):
             Yield function value.
         """
 
-    def hardening_increment(
+    def update_state(
         self,
         dlambda: jnp.ndarray,
         stress: jnp.ndarray,
@@ -118,9 +129,18 @@ class MaterialModel(ABC):
     ) -> dict:
         """Return updated state variables after a plastic increment.
 
-        Required for reduced hardening models (``hardening_type='reduced'``).
-        Optional for augmented models (``hardening_type='augmented'``) — may be
-        implemented as an initial-guess seed for the augmented NR solver.
+        Closed-form update rule: given (Δλ, σ, q_n), computes q_{n+1}
+        directly.  Required for reduced hardening models
+        (``hardening_type='reduced'``).
+
+        The companion residual form is :meth:`state_residual`, related by::
+
+            state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
+
+        The base class provides a default ``state_residual`` derived from this
+        method, so reduced models only need to implement ``update_state``.
+        Augmented models that cannot express q_{n+1} in closed form must
+        instead override :meth:`state_residual` directly.
 
         Parameters
         ----------
@@ -136,7 +156,7 @@ class MaterialModel(ABC):
         Returns
         -------
         dict
-            Updated state ``state_{n+1}``.
+            Updated state ``q_{n+1}``.
 
         Raises
         ------
@@ -144,29 +164,31 @@ class MaterialModel(ABC):
             If not overridden on a reduced model.
         """
         raise NotImplementedError(
-            f"{type(self).__name__}.hardening_increment() is not implemented. "
+            f"{type(self).__name__}.update_state() is not implemented. "
             "Reduced models (hardening_type='reduced') must override this method."
         )
 
-    def hardening_residual(
+    def state_residual(
         self,
         state_new: dict,
         dlambda: jnp.ndarray,
         stress: jnp.ndarray,
         state_n: dict,
     ) -> dict:
-        """Residual of the hardening evolution equations (optional override).
+        """Residual of the state evolution equations.
 
         Defines R_h(q_{n+1}, Δλ, σ, q_n) = 0 for use in the augmented
         residual system where state variables are independent unknowns.
 
-        Default implementation derives from ``hardening_increment``::
+        The relationship to the closed-form update rule is::
 
-            R_h = q_{n+1} - hardening_increment(Δλ, σ, q_n)
+            state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
 
-        Override this method to define implicit hardening laws where
-        ``state_new`` cannot be expressed in closed form as a function of
-        ``(dlambda, stress, state_n)``.
+        The default implementation derives ``state_residual`` automatically from
+        :meth:`update_state`.  Override this method directly to define implicit
+        hardening laws where ``state_new`` cannot be expressed in closed form as
+        a function of ``(dlambda, stress, state_n)`` — this is the ``augmented``
+        path.
 
         Parameters
         ----------
@@ -185,7 +207,7 @@ class MaterialModel(ABC):
             Residual dict with same keys and shapes as ``state_new``.
             Zero at convergence.
         """
-        state_explicit = self.hardening_increment(dlambda, stress, state_n)
+        state_explicit = self.update_state(dlambda, stress, state_n)
         return {k: state_new[k] - state_explicit[k] for k in state_new}
 
     # ------------------------------------------------------------------
@@ -397,9 +419,9 @@ class MaterialModel3D(MaterialModel):
     :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
     ``smooth_sqrt`` with n_missing=0, equivalent to √(3/2 s:s)).
 
-    Subclasses still must implement the three abstract material methods:
-    :meth:`elastic_stiffness`, :meth:`yield_function`,
-    :meth:`hardening_increment`.
+    Subclasses still must implement the required material methods:
+    :meth:`elastic_stiffness`, :meth:`yield_function`, and either
+    :meth:`update_state` (reduced) or :meth:`state_residual` (augmented).
 
     Parameters
     ----------

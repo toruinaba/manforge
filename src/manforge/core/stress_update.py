@@ -22,7 +22,7 @@ Algorithm (stress_update)
 
    *numerical_newton*  (generic, default fallback)
      Scalar NR on Δλ using ``jax.grad`` for flow direction and linearisation
-     (explicit hardening), or augmented (ntens+1+n_state) vector NR (implicit).
+     (reduced hardening), or augmented (ntens+1+n_state) vector NR (augmented).
 
    *user_defined*  (model-supplied, opt-in)
      Calls ``model.user_defined_corrector(σ_trial, C, state_n)`` if the model
