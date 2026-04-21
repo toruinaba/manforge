@@ -30,7 +30,7 @@ class _Stub3D(MaterialModel3D):
     def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state):
+    def update_state(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -247,7 +247,7 @@ class _StubPS(MaterialModelPS):
     def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state):
+    def update_state(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -423,7 +423,7 @@ class _Stub1D(MaterialModel1D):
     def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state):
+    def update_state(self, dlambda, stress, state):
         raise NotImplementedError
 
 
@@ -558,9 +558,9 @@ def test_1d_I_dev_projects_to_deviatoric():
 # __init_subclass__ validation
 # ---------------------------------------------------------------------------
 
-def test_explicit_without_hardening_increment_raises():
-    """Explicit model that does not implement hardening_increment must raise TypeError."""
-    with pytest.raises(TypeError, match="hardening_increment"):
+def test_reduced_without_update_state_raises():
+    """Reduced model that does not implement update_state must raise TypeError."""
+    with pytest.raises(TypeError, match="update_state"):
         class Bad(MaterialModel3D):
             param_names = []
             state_names = []
@@ -572,9 +572,9 @@ def test_explicit_without_hardening_increment_raises():
                 pass
 
 
-def test_implicit_without_hardening_residual_raises():
-    """Implicit model that does not implement hardening_residual must raise TypeError."""
-    with pytest.raises(TypeError, match="hardening_residual"):
+def test_augmented_without_state_residual_raises():
+    """Augmented model that does not implement state_residual must raise TypeError."""
+    with pytest.raises(TypeError, match="state_residual"):
         class Bad(MaterialModel3D):
             hardening_type = "augmented"
             param_names = []
@@ -601,12 +601,12 @@ def test_invalid_hardening_type_raises():
             def yield_function(self, stress, state):
                 pass
 
-            def hardening_increment(self, dlambda, stress, state):
+            def update_state(self, dlambda, stress, state):
                 return {}
 
 
-def test_implicit_with_both_methods_allowed():
-    """Implicit model may optionally define hardening_increment (seed)."""
+def test_augmented_with_both_methods_allowed():
+    """Augmented model may optionally define update_state as well."""
     class OKImplicit(MaterialModel3D):
         hardening_type = "augmented"
         param_names = []
@@ -618,10 +618,10 @@ def test_implicit_with_both_methods_allowed():
         def yield_function(self, stress, state):
             pass
 
-        def hardening_increment(self, dlambda, stress, state):
+        def update_state(self, dlambda, stress, state):
             return {}
 
-        def hardening_residual(self, state_new, dlambda, stress, state_n):
+        def state_residual(self, state_new, dlambda, stress, state_n):
             return {}
 
     assert OKImplicit().hardening_type == "augmented"
@@ -646,7 +646,7 @@ class _StubWithParams(MaterialModel3D):
     def yield_function(self, stress, state):
         raise NotImplementedError
 
-    def hardening_increment(self, dlambda, stress, state):
+    def update_state(self, dlambda, stress, state):
         raise NotImplementedError
 
 

@@ -34,10 +34,10 @@ def _plastic_result(model, strain_scale=3e-3):
 
 
 # ---------------------------------------------------------------------------
-# Structure tests (explicit hardening — J2)
+# Structure tests (reduced hardening — J2)
 # ---------------------------------------------------------------------------
 
-class TestExplicitBlocks:
+class TestReducedBlocks:
     def test_returns_jacobian_blocks(self, j2_model):
         result, state0 = _plastic_result(j2_model)
         jac = ad_jacobian_blocks(j2_model, result, state0)
@@ -91,23 +91,23 @@ class TestExplicitBlocks:
 
 
 # ---------------------------------------------------------------------------
-# Structure tests (explicit hardening — AF, tensor state)
+# Structure tests (reduced hardening — AF, tensor state)
 # ---------------------------------------------------------------------------
 
-class TestExplicitBlocksAF:
+class TestReducedBlocksAF:
     def test_af_state_blocks_are_none(self, af_model):
         result, state0 = _plastic_result(af_model)
         jac = ad_jacobian_blocks(af_model, result, state0)
-        # AF is explicit hardening — state blocks should be None
+        # AF is reduced hardening — state blocks should be None
         assert jac.dstate_dsigma is None
         assert jac.dstate_dstate is None
 
 
 # ---------------------------------------------------------------------------
-# Structure tests (implicit hardening — OW)
+# Structure tests (augmented hardening — OW)
 # ---------------------------------------------------------------------------
 
-class TestImplicitBlocks:
+class TestAugmentedBlocks:
     def test_returns_jacobian_blocks(self, ow_model):
         result, state0 = _plastic_result(ow_model)
         jac = ad_jacobian_blocks(ow_model, result, state0)

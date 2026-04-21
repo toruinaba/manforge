@@ -78,7 +78,7 @@ def check_tangent(
     Computes DDSDDE two ways and checks whether the maximum element-wise
     relative error is within tolerance.  Useful for validating that a
     custom :class:`~manforge.core.material.MaterialModel`'s
-    ``yield_function`` and ``hardening_increment`` are correctly
+    ``yield_function`` and ``update_state`` / ``state_residual`` are correctly
     differentiable.
 
     Parameters

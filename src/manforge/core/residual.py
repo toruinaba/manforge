@@ -4,6 +4,7 @@ Two factory functions are provided:
 
 - :func:`make_reduced_residual` — for ``hardening_type == 'reduced'``.
   Builds the (ntens+1) residual ``[R_stress, R_yield]`` with x = [σ, Δλ].
+  State q_{n+1} is eliminated by substitution via :meth:`~MaterialModel.update_state`.
 
 - :func:`make_augmented_residual` — for ``hardening_type == 'augmented'``.
   Extends the system to (ntens+1+n_state) equations by treating state
@@ -19,7 +20,7 @@ Two factory functions are provided:
 
       R_stress = σ - σ_trial + Δλ C n(σ, q)
       R_yield  = f(σ, q)
-      R_state  = flatten(model.hardening_residual(q, Δλ, σ, q_n))
+      R_state  = flatten(model.state_residual(q, Δλ, σ, q_n))
 
 Both callables are used by the Newton-Raphson solver
 (:mod:`manforge.core.solver`) and the consistent tangent computation
@@ -56,7 +57,7 @@ def make_reduced_residual(model, stress_trial, C, state_n):
     def residual_fn(x):
         sig = x[:ntens]
         dl = x[ntens]
-        st = model.hardening_increment(dl, sig, state_n)
+        st = model.update_state(dl, sig, state_n)
         n = jax.grad(lambda s: model.yield_function(s, st))(sig)
         R_stress = sig - stress_trial + dl * (C @ n)
         R_yield = model.yield_function(sig, st)
@@ -111,8 +112,8 @@ def make_augmented_residual(model, stress_trial, C, state_n):
         # Yield residual: R2 = f(σ, q)
         R_yield = model.yield_function(sig, state_new)
 
-        # State residual: R_h = hardening_residual(q_{n+1}, Δλ, σ, q_n)
-        R_state_dict = model.hardening_residual(state_new, dlambda, sig, state_n)
+        # State residual: R_h = state_residual(q_{n+1}, Δλ, σ, q_n)
+        R_state_dict = model.state_residual(state_new, dlambda, sig, state_n)
         R_state_flat, _ = ravel_pytree(R_state_dict)
 
         return jnp.concatenate([R_stress, R_yield.reshape(1), R_state_flat])

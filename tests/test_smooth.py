@@ -278,7 +278,7 @@ class TestAFPattern:
         stress = jnp.zeros(6)
 
         def alpha_sq_norm(dl):
-            st = model.hardening_increment(dl, stress, state0)
+            st = model.update_state(dl, stress, state0)
             return jnp.sum(st["alpha"] ** 2)
 
         # Gradient at dlambda=0 (where xi = stress - alpha = 0)

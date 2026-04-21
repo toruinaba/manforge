@@ -48,8 +48,8 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods based on `hardening_type`:
 - `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
 - `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- For **reduced** hardening (`hardening_type = "reduced"`, default): `hardening_increment(dlambda, stress, state)` → updated state dict. State is substituted into the residual each NR iteration; scalar NR on Δλ only (1D reduced system).
-- For **augmented** hardening (`hardening_type = "augmented"`): `hardening_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence). State is an independent unknown; full (ntens+1+n_state) vector NR (augmented system).
+- For **reduced** hardening (`hardening_type = "reduced"`, default): `update_state(dlambda, stress, state)` → updated state dict `q_{n+1}`. State is substituted into the residual each NR iteration; scalar NR on Δλ only (1D reduced system).
+- For **augmented** hardening (`hardening_type = "augmented"`): `state_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence). State is an independent unknown; full (ntens+1+n_state) vector NR (augmented system). The two are related by `state_residual = q_{n+1} − update_state(...)`, and the base class provides `state_residual` automatically from `update_state`.
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 

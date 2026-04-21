@@ -53,10 +53,10 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
     for _iteration in range(max_iter):
         # Evaluate state and flow direction at current stress, then update stress,
         # then re-evaluate state at the new stress (two calls is intentional).
-        state_new = model.hardening_increment(dlambda, stress, state_n)
+        state_new = model.update_state(dlambda, stress, state_n)
         n = jax.grad(lambda s: model.yield_function(s, state_new))(stress)
         stress = stress_trial - dlambda * (C @ n)
-        state_new = model.hardening_increment(dlambda, stress, state_n)
+        state_new = model.update_state(dlambda, stress, state_n)
         f = model.yield_function(stress, state_new)
         residual_history.append(float(jnp.abs(f)))
 
@@ -64,7 +64,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
             break
 
         def _f_residual(dl, _stress=stress):
-            st = model.hardening_increment(dl, _stress, state_n)
+            st = model.update_state(dl, _stress, state_n)
             nn = jax.grad(lambda s: model.yield_function(s, st))(_stress)
             s_upd = stress_trial - dl * (C @ nn)
             return model.yield_function(s_upd, st)
@@ -75,7 +75,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
 
     else:
         raise RuntimeError(
-            f"_explicit_nr: NR did not converge in {max_iter} iterations "
+            f"_reduced_nr: NR did not converge in {max_iter} iterations "
             f"(|f| = {float(jnp.abs(f)):.3e}, tol = {tol:.3e})"
         )
 

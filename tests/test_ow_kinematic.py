@@ -7,11 +7,11 @@ the Ohno-Wang evolution equation:
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
 cannot be solved in closed form, so the model uses the augmented residual path
-(hardening_type = 'implicit').
+(hardening_type = 'augmented').
 
 Key verifications
 -----------------
-- hardening_type is 'implicit' for all OW variants
+- hardening_type is 'augmented' for all OW variants
 - Elastic domain: tangent = C, state unchanged
 - Yield surface consistency after plastic steps
 - FD tangent vs AD tangent agreement (core correctness test)
