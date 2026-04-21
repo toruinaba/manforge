@@ -35,7 +35,9 @@ packages = ["src/manforge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers"
+pythonpath = ["."]
 markers = [
-    "slow: marks tests as slow (fitting/optimization) -- deselect with -m 'not slow'",
-    "fortran: marks tests requiring compiled Fortran modules -- deselect with -m 'not fortran'",
+    "slow: measured >1s (fitting, long cyclic loops) -- deselect with -m 'not slow'",
+    "fortran: requires compiled Fortran modules (f2py). Auto-skipped if module missing -- deselect with -m 'not fortran'",
 ]
