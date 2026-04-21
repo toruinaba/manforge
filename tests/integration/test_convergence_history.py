@@ -153,6 +153,7 @@ def test_driver_j2_autodiff_has_history(j2_model):
             assert rm.residual_history == []
 
 
+@pytest.mark.slow
 def test_driver_ow_step_results_have_history(ow_model):
     driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))

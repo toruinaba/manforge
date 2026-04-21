@@ -13,25 +13,7 @@ import pytest
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-
-
-# ---------------------------------------------------------------------------
-# Minimal concrete subclass for testing (does not implement material physics)
-# ---------------------------------------------------------------------------
-
-class _Stub3D(MaterialModel3D):
-    """Concrete stub — lets us instantiate MaterialModel3D for operator tests."""
-    param_names = []
-    state_names = []
-
-    def elastic_stiffness(self):
-        raise NotImplementedError
-
-    def yield_function(self, stress, state):
-        raise NotImplementedError
-
-    def update_state(self, dlambda, stress, state):
-        raise NotImplementedError
+from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
 
 # ---------------------------------------------------------------------------
@@ -236,21 +218,6 @@ def test_I_dev_projects_to_deviatoric(ss):
 # MaterialModelPS
 # ===========================================================================
 
-class _StubPS(MaterialModelPS):
-    """Concrete stub for MaterialModelPS operator tests."""
-    param_names = []
-    state_names = []
-
-    def elastic_stiffness(self):
-        raise NotImplementedError
-
-    def yield_function(self, stress, state):
-        raise NotImplementedError
-
-    def update_state(self, dlambda, stress, state):
-        raise NotImplementedError
-
-
 # ---------------------------------------------------------------------------
 # Constructor validation
 # ---------------------------------------------------------------------------
@@ -411,21 +378,6 @@ def test_ps_I_dev_projects_to_deviatoric():
 # ===========================================================================
 # MaterialModel1D
 # ===========================================================================
-
-class _Stub1D(MaterialModel1D):
-    """Concrete stub for MaterialModel1D operator tests."""
-    param_names = []
-    state_names = []
-
-    def elastic_stiffness(self):
-        raise NotImplementedError
-
-    def yield_function(self, stress, state):
-        raise NotImplementedError
-
-    def update_state(self, dlambda, stress, state):
-        raise NotImplementedError
-
 
 # ---------------------------------------------------------------------------
 # Constructor validation
@@ -631,25 +583,6 @@ def test_augmented_with_both_methods_allowed():
 # params property
 # ---------------------------------------------------------------------------
 
-class _StubWithParams(MaterialModel3D):
-    """Stub with concrete param_names to test the params property."""
-    param_names = ["a", "b"]
-    state_names = []
-
-    def __init__(self, a, b):
-        self.a = a
-        self.b = b
-
-    def elastic_stiffness(self):
-        raise NotImplementedError
-
-    def yield_function(self, stress, state):
-        raise NotImplementedError
-
-    def update_state(self, dlambda, stress, state):
-        raise NotImplementedError
-
-
 def test_params_returns_dict_keyed_by_param_names():
     model = _StubWithParams(a=1.0, b=2.0)
     assert model.params == {"a": 1.0, "b": 2.0}
@@ -666,9 +599,7 @@ def test_params_empty_when_param_names_empty():
     assert model.params == {}
 
 
-def test_j2_isotropic3d_params_contains_all_param_names():
-    from manforge.models.j2_isotropic import J2Isotropic3D
-    model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+def test_j2_isotropic3d_params_contains_all_param_names(model):
     assert set(model.params.keys()) == set(model.param_names)
     assert model.params["E"] == 210000.0
     assert model.params["sigma_y0"] == 250.0
