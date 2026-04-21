@@ -74,9 +74,9 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
   - `method` values: `"auto"` (use `user_defined_corrector` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_corrector`).
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
-- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point via `jax.jacobian` and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). For implicit models, state blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`). Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
-- `tangent.py`: Consistent tangent via implicit differentiation — explicit models use (ntens+1)×(ntens+1) system; implicit models use augmented (ntens+1+n_state) system (does NOT differentiate through NR iterations)
-- `residual.py`: Shared augmented residual builder used by both NR solver and tangent for implicit models
+- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point via `jax.jacobian` and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). For augmented models, state blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`). Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
+- `tangent.py`: Consistent tangent via implicit differentiation — reduced models use (ntens+1)×(ntens+1) system; augmented models use (ntens+1+n_state) system (does NOT differentiate through NR iterations)
+- `residual.py`: Residual builders for both paths: `make_reduced_residual` (reduced) and `make_augmented_residual` (augmented), plus `select_residual_builder` dispatch
 
 JAX autodiff computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 

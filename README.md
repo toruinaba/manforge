@@ -111,9 +111,10 @@ src/manforge/
 ├── core/
 │   ├── stress_state.py    # StressState — 次元記述子 (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material.py        # MaterialModel ABC + MaterialModel3D/PS/1D (応力状態基底)
-│   ├── return_mapping.py  # Closest point projection + Newton-Raphson (scalar and augmented)
-│   ├── tangent.py         # Consistent tangent (暗黙微分 / augmented)
-│   └── residual.py        # make_augmented_residual() — 拡張残差 factory (implicit hardening 用)
+│   ├── stress_update.py   # stress_update / return_mapping — Newton-Raphson (reduced and augmented)
+│   ├── solver.py          # _reduced_nr / _augmented_nr NR solvers
+│   ├── tangent.py         # Consistent tangent (暗黙微分 / reduced and augmented)
+│   └── residual.py        # make_reduced_residual / make_augmented_residual — 残差 factory
 ├── autodiff/
 │   ├── backend.py         # JAX バックエンド設定
 │   └── operators.py       # dev, vonmises, hydrostatic, norm_mandel 等 (StressState 対応)
@@ -305,7 +306,7 @@ class MyModel(MaterialModel3D):
 | `"autodiff"` | 常に NR+autodiff | 常に autodiff |
 | `"analytical"` | 解析解 (なければ `NotImplementedError`) | 解析解 (なければ `NotImplementedError`) |
 
-### 暗黙的硬化則 (implicit hardening)
+### 拡張残差系硬化則 (augmented hardening)
 
 `hardening_increment` が closed-form で解けない場合（後方 Euler 離散化に状態変数が非線形に現れる場合）、
 `hardening_type = "augmented"` を宣言し `hardening_residual` を実装すると **augmented residual system** が自動的に有効になる。
@@ -651,7 +652,7 @@ npt.assert_allclose(float(jac.dyield_ddlambda), -H, rtol=1e-8)
 print(jac.dstress_dsigma)   # shape (ntens, ntens)
 ```
 
-implicit モデル (例: Ohno-Wang) では状態変数名をキーとするブロックも取得できる:
+augmented モデル (例: Ohno-Wang) では状態変数名をキーとするブロックも取得できる:
 
 ```python
 # OWKinematic: state_names = ["alpha", "ep"]
