@@ -576,7 +576,7 @@ def test_implicit_without_hardening_residual_raises():
     """Implicit model that does not implement hardening_residual must raise TypeError."""
     with pytest.raises(TypeError, match="hardening_residual"):
         class Bad(MaterialModel3D):
-            hardening_type = "implicit"
+            hardening_type = "augmented"
             param_names = []
             state_names = []
 
@@ -608,7 +608,7 @@ def test_invalid_hardening_type_raises():
 def test_implicit_with_both_methods_allowed():
     """Implicit model may optionally define hardening_increment (seed)."""
     class OKImplicit(MaterialModel3D):
-        hardening_type = "implicit"
+        hardening_type = "augmented"
         param_names = []
         state_names = []
 
@@ -624,7 +624,7 @@ def test_implicit_with_both_methods_allowed():
         def hardening_residual(self, state_new, dlambda, stress, state_n):
             return {}
 
-    assert OKImplicit().hardening_type == "implicit"
+    assert OKImplicit().hardening_type == "augmented"
 
 
 # ---------------------------------------------------------------------------

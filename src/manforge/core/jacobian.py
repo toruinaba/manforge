@@ -147,24 +147,24 @@ def ad_jacobian_blocks(
     C = model.elastic_stiffness()
 
     _blocks_fn = (
-        _jacobian_blocks_implicit
-        if model.hardening_type == "implicit"
-        else _jacobian_blocks_explicit
+        _jacobian_blocks_augmented
+        if model.hardening_type == "augmented"
+        else _jacobian_blocks_reduced
     )
     return _blocks_fn(model, stress, state, dlambda, stress_trial, C, state_n, ntens)
 
 
 # ---------------------------------------------------------------------------
-# Explicit hardening path — (ntens+1) × (ntens+1) system
+# Reduced path — (ntens+1) × (ntens+1) system
 # ---------------------------------------------------------------------------
 
-def _jacobian_blocks_explicit(
+def _jacobian_blocks_reduced(
     model, stress, state, dlambda, stress_trial, C, state_n, ntens
 ):
-    """Build JacobianBlocks for the explicit (ntens+1) residual system."""
-    from manforge.core.residual import make_explicit_residual
+    """Build JacobianBlocks for the reduced (ntens+1) residual system."""
+    from manforge.core.residual import make_reduced_residual
 
-    residual_fn = make_explicit_residual(model, stress_trial, C, state_n)
+    residual_fn = make_reduced_residual(model, stress_trial, C, state_n)
     x_conv = jnp.concatenate([stress, dlambda.reshape(1)])
     J = jax.jacobian(residual_fn)(x_conv)  # (ntens+1, ntens+1)
 
@@ -183,13 +183,13 @@ def _jacobian_blocks_explicit(
 
 
 # ---------------------------------------------------------------------------
-# Implicit hardening path — (ntens+1+n_state) × (ntens+1+n_state) system
+# Augmented path — (ntens+1+n_state) × (ntens+1+n_state) system
 # ---------------------------------------------------------------------------
 
-def _jacobian_blocks_implicit(
+def _jacobian_blocks_augmented(
     model, stress, state, dlambda, stress_trial, C, state_n, ntens
 ):
-    """Build JacobianBlocks for the implicit (ntens+1+n_state) residual system."""
+    """Build JacobianBlocks for the augmented (ntens+1+n_state) residual system."""
     from manforge.core.residual import make_augmented_residual
 
     residual_fn, n_state, unflatten_fn = make_augmented_residual(

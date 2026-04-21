@@ -2,9 +2,9 @@
 
 Two solvers are provided:
 
-- :func:`_explicit_nr` — scalar NR on Δλ for ``hardening_type == 'explicit'``.
+- :func:`_reduced_nr` — scalar NR on Δλ for ``hardening_type == 'reduced'``.
 - :func:`_augmented_nr` — vector NR on [σ, Δλ, q_flat] for
-  ``hardening_type == 'implicit'``.
+  ``hardening_type == 'augmented'``.
 
 Both return a 5-tuple ``(stress, state_new, dlambda, n_iterations,
 residual_history)`` consumed by :func:`~manforge.core.stress_update.return_mapping`.
@@ -14,11 +14,11 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
-from manforge.core.residual import make_augmented_residual, make_explicit_residual
+from manforge.core.residual import make_augmented_residual, make_reduced_residual
 
 
-def _explicit_nr(model, stress_trial, C, state_n, max_iter, tol):
-    """Newton-Raphson solver for the explicit (ntens+1) residual system.
+def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
+    """Newton-Raphson solver for the reduced (ntens+1) residual system.
 
     Scalar NR on Δλ: evaluates the full residual at each step and uses
     ``jax.grad`` to compute dR/dΔλ for the update.
@@ -26,7 +26,7 @@ def _explicit_nr(model, stress_trial, C, state_n, max_iter, tol):
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model with ``hardening_type == 'explicit'``.
+        Constitutive model with ``hardening_type == 'reduced'``.
     stress_trial : jnp.ndarray, shape (ntens,)
     C : jnp.ndarray, shape (ntens, ntens)
     state_n : dict
@@ -85,7 +85,7 @@ def _explicit_nr(model, stress_trial, C, state_n, max_iter, tol):
 def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
 
-    Used when ``model.hardening_type == 'implicit'``.
+    Used when ``model.hardening_type == 'augmented'``.
 
     Parameters
     ----------
@@ -138,6 +138,6 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
 
 def _select_nr(model):
     """Return the NR solver function appropriate for *model*."""
-    if model.hardening_type == "implicit":
+    if model.hardening_type == "augmented":
         return _augmented_nr
-    return _explicit_nr
+    return _reduced_nr

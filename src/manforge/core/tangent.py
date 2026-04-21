@@ -25,7 +25,7 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
-from manforge.core.residual import make_augmented_residual, make_explicit_residual
+from manforge.core.residual import make_augmented_residual, make_reduced_residual
 
 
 def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
@@ -62,7 +62,7 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     n_conv = jax.grad(lambda s: model.yield_function(s, state))(stress)
     stress_trial = stress + dlambda * (C @ n_conv)
 
-    residual_fn = make_explicit_residual(model, stress_trial, C, state_n)
+    residual_fn = make_reduced_residual(model, stress_trial, C, state_n)
 
     # ∂R/∂x  — JAX computes all coupling terms automatically, including
     # ∂(state)/∂σ that arises with stress-dependent hardening increments.
@@ -89,7 +89,7 @@ def augmented_consistent_tangent(model, stress, state, dlambda, stress_n, state_
     Parameters
     ----------
     model : MaterialModel
-        Model with ``hardening_type == 'implicit'``.
+        Model with ``hardening_type == 'augmented'``.
     stress : jnp.ndarray, shape (ntens,)
         Converged stress σ_{n+1}.
     state : dict
@@ -135,6 +135,6 @@ def augmented_consistent_tangent(model, stress, state, dlambda, stress_n, state_
 
 def _select_tangent(model):
     """Return the consistent-tangent function appropriate for *model*."""
-    if model.hardening_type == "implicit":
+    if model.hardening_type == "augmented":
         return augmented_consistent_tangent
     return consistent_tangent

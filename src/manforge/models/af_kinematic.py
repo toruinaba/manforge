@@ -53,7 +53,7 @@ from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, Stre
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    ``hardening_type = "explicit"``: implements ``hardening_increment`` which
+    ``hardening_type = "reduced"``: implements ``hardening_increment`` which
     solves the backward-Euler AF equation in closed form.
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
@@ -123,7 +123,7 @@ class AFKinematic3D(MaterialModel3D):
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
-    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    ``hardening_type = "reduced"``: implements ``hardening_increment`` with
     closed-form backward-Euler AF update.
     Uses the generic NR + autodiff return-mapping path.
 
@@ -192,7 +192,7 @@ class AFKinematicPS(MaterialModelPS):
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
-    ``hardening_type = "explicit"``: implements ``hardening_increment`` with
+    ``hardening_type = "reduced"``: implements ``hardening_increment`` with
     closed-form backward-Euler AF update.
     Uses the generic NR + autodiff return-mapping path.
 

@@ -48,8 +48,8 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods based on `hardening_type`:
 - `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
 - `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- For **explicit** hardening (`hardening_type = "explicit"`, default): `hardening_increment(dlambda, stress, state)` → updated state dict
-- For **implicit** hardening (`hardening_type = "implicit"`): `hardening_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence)
+- For **reduced** hardening (`hardening_type = "reduced"`, default): `hardening_increment(dlambda, stress, state)` → updated state dict. State is substituted into the residual each NR iteration; scalar NR on Δλ only (1D reduced system).
+- For **augmented** hardening (`hardening_type = "augmented"`): `hardening_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence). State is an independent unknown; full (ntens+1+n_state) vector NR (augmented system).
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
@@ -70,7 +70,7 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 
 - `stress_update.py`: Two-level API:
   - `stress_update(model, deps, stress_n, state_n, method="auto")` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call.
-  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). Dispatches on `model.hardening_type`: explicit → scalar NR on Δλ; implicit → augmented (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10).
+  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). Dispatches on `model.hardening_type`: `"reduced"` → scalar NR on Δλ; `"augmented"` → (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10).
   - `method` values: `"auto"` (use `user_defined_corrector` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_corrector`).
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).

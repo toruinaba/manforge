@@ -2,10 +2,10 @@
 
 Two factory functions are provided:
 
-- :func:`make_explicit_residual` — for ``hardening_type == 'explicit'``.
+- :func:`make_reduced_residual` — for ``hardening_type == 'reduced'``.
   Builds the (ntens+1) residual ``[R_stress, R_yield]`` with x = [σ, Δλ].
 
-- :func:`make_augmented_residual` — for ``hardening_type == 'implicit'``.
+- :func:`make_augmented_residual` — for ``hardening_type == 'augmented'``.
   Extends the system to (ntens+1+n_state) equations by treating state
   variables as additional unknowns:
 
@@ -31,13 +31,13 @@ import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
 
-def make_explicit_residual(model, stress_trial, C, state_n):
-    """Build the residual function for explicit-state models.
+def make_reduced_residual(model, stress_trial, C, state_n):
+    """Build the residual function for reduced-system models.
 
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model with ``hardening_type == 'explicit'``.
+        Constitutive model with ``hardening_type == 'reduced'``.
     stress_trial : jnp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
     C : jnp.ndarray, shape (ntens, ntens)
@@ -71,7 +71,7 @@ def make_augmented_residual(model, stress_trial, C, state_n):
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model with ``hardening_type == 'implicit'``.
+        Constitutive model with ``hardening_type == 'augmented'``.
     stress_trial : jnp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
     C : jnp.ndarray, shape (ntens, ntens)
@@ -123,9 +123,9 @@ def make_augmented_residual(model, stress_trial, C, state_n):
 def select_residual_builder(model):
     """Return the appropriate residual builder for *model*.
 
-    Returns :func:`make_explicit_residual` for ``hardening_type == 'explicit'``
-    and :func:`make_augmented_residual` for ``hardening_type == 'implicit'``.
+    Returns :func:`make_reduced_residual` for ``hardening_type == 'reduced'``
+    and :func:`make_augmented_residual` for ``hardening_type == 'augmented'``.
     """
-    if model.hardening_type == "implicit":
+    if model.hardening_type == "augmented":
         return make_augmented_residual
-    return make_explicit_residual
+    return make_reduced_residual
