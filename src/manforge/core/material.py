@@ -320,13 +320,13 @@ class MaterialModel(ABC):
         sq_norm = jnp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
-    def user_defined_corrector(
+    def user_defined_return_mapping(
         self,
         stress_trial: jnp.ndarray,
         C: jnp.ndarray,
         state_n: dict,
     ):
-        """User-supplied return mapping corrector (optional).
+        """User-supplied return mapping (optional).
 
         Override to provide a model-specific plastic correction algorithm.
         The implementation may use any solver internally — closed-form
@@ -346,16 +346,13 @@ class MaterialModel(ABC):
         Returns
         -------
         None
-            Signals that no user-defined corrector is available; the
+            Signals that no user-defined return mapping is available; the
             framework falls back to ``numerical_newton``.
-        tuple[jnp.ndarray, dict, jnp.ndarray]
-            ``(stress_new, state_new, dlambda)`` — converged stress,
-            updated state dict, and plastic multiplier increment Δλ.
-        tuple[jnp.ndarray, dict, jnp.ndarray, int, list]
-            ``(stress_new, state_new, dlambda, n_iterations, residual_history)``
-            — same as above plus the iteration count and residual-norm history
-            from the corrector's internal solver, which are stored in the
-            returned :class:`~manforge.core.stress_update.ReturnMappingResult`.
+        ReturnMappingResult
+            Converged result with fields ``stress``, ``state``, ``dlambda``,
+            ``n_iterations`` (default 0 for closed-form solvers), and
+            ``residual_history`` (default ``[]`` for closed-form solvers).
+            Import via ``from manforge.core import ReturnMappingResult``.
         """
         return None
 

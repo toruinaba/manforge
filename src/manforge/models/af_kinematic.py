@@ -39,7 +39,7 @@ Notes
 -----
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k.
 * The saturated backstress magnitude under monotonic loading is C_k / gamma.
-* No user_defined_corrector or user_defined_tangent is provided; the
+* No user_defined_return_mapping or user_defined_tangent is provided; the
   generic numerical_newton + JAX autodiff path is used, which is exactly what
   this model is designed to test.
 """

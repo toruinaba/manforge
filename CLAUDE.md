@@ -67,7 +67,7 @@ Stress-state base classes (choose the appropriate one):
 
 Each base provides branch-free operator methods (`_dev`, `_vonmises`, `isotropic_C`, `_I_vol`, `_I_dev`) tailored to its stress state. The `_vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
 
-Optional hooks for user-supplied implementations: `user_defined_corrector(stress_trial, C, state_n)` → 3-tuple `(stress, state, dlambda)` or 5-tuple `(..., n_iterations, residual_history)`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array. Both default to `None` (framework falls back to autodiff/NR).
+Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR).
 
 The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotropic3D, J2IsotropicPS, J2Isotropic1D).
 
@@ -76,7 +76,7 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 - `stress_update.py`: Two-level API:
   - `stress_update(model, deps, stress_n, state_n, method="auto")` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call.
   - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). Dispatches on `model.hardening_type`: `"reduced"` → scalar NR on Δλ; `"augmented"` → (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10).
-  - `method` values: `"auto"` (use `user_defined_corrector` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_corrector`).
+  - `method` values: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`).
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
 - `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point via `jax.jacobian` and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). For augmented models, state blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`). Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.

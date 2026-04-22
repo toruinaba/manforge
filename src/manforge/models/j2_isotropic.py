@@ -26,6 +26,7 @@ import jax.numpy as jnp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
+from manforge.core.stress_update import ReturnMappingResult
 
 
 class J2Isotropic3D(MaterialModel3D):
@@ -100,7 +101,7 @@ class J2Isotropic3D(MaterialModel3D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_corrector(self, stress_trial, C, state_n):
+    def user_defined_return_mapping(self, stress_trial, C, state_n):
         """J2 radial return — closed-form plastic correction.
 
         Notes
@@ -118,8 +119,7 @@ class J2Isotropic3D(MaterialModel3D):
 
         Returns
         -------
-        tuple[jnp.ndarray, dict, jnp.ndarray]
-            ``(stress_new, state_new, dlambda)``
+        ReturnMappingResult
         """
         mu = self.E / (2.0 * (1.0 + self.nu))
         ep_n = state_n["ep"]
@@ -134,7 +134,11 @@ class J2Isotropic3D(MaterialModel3D):
         # Radial return: σ_new = σ_trial − (3μΔλ/σ_vm) s_trial
         stress_new = stress_trial - (3.0 * mu * dlambda / sigma_vm_trial) * s_trial
 
-        return stress_new, {"ep": ep_n + dlambda}, jnp.asarray(dlambda)
+        return ReturnMappingResult(
+            stress=stress_new,
+            state={"ep": ep_n + dlambda},
+            dlambda=jnp.asarray(dlambda),
+        )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
@@ -286,7 +290,7 @@ class J2Isotropic1D(MaterialModel1D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_corrector(self, stress_trial, C, state_n):
+    def user_defined_return_mapping(self, stress_trial, C, state_n):
         """1D J2 radial return — closed-form.
 
         Δλ = (|σ_trial| − σ_y) / (E + H)
@@ -300,7 +304,7 @@ class J2Isotropic1D(MaterialModel1D):
 
         Returns
         -------
-        tuple[jnp.ndarray, dict, jnp.ndarray]
+        ReturnMappingResult
         """
         E = C[0, 0]
         ep_n = state_n["ep"]
@@ -309,7 +313,11 @@ class J2Isotropic1D(MaterialModel1D):
         dlambda = (sigma_vm_trial - sigma_y) / (E + self.H)
         n = stress_trial / sigma_vm_trial  # sign(σ_trial) as length-1 array
         stress_new = stress_trial - E * dlambda * n
-        return stress_new, {"ep": ep_n + dlambda}, jnp.asarray(dlambda)
+        return ReturnMappingResult(
+            stress=stress_new,
+            state={"ep": ep_n + dlambda},
+            dlambda=jnp.asarray(dlambda),
+        )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
         """1D consistent tangent D^ep = [[E · H / (E + H)]].

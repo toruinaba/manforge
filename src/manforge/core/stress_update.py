@@ -25,8 +25,8 @@ Algorithm (stress_update)
      (reduced hardening), or augmented (ntens+1+n_state) vector NR (augmented).
 
    *user_defined*  (model-supplied, opt-in)
-     Calls ``model.user_defined_corrector(σ_trial, C, state_n)`` if the model
-     provides one.  The corrector may use any algorithm internally (closed-form,
+     Calls ``model.user_defined_return_mapping(σ_trial, C, state_n)`` if the
+     model provides one.  May use any algorithm internally (closed-form,
      custom NR, etc.).
 
 4. Consistent tangent — path selected by ``method``:
@@ -76,31 +76,20 @@ def _validate_method(method: str) -> None:
         )
 
 
-def _try_user_corrector(model, stress_trial, C, state_n, method):
-    """Attempt user_defined_corrector; return ReturnMappingResult or None.
+def _try_user_return_mapping(model, stress_trial, C, state_n, method):
+    """Attempt user_defined_return_mapping; return ReturnMappingResult or None.
 
-    Returns None when method='auto' and the model has no corrector hook.
+    Returns None when method='auto' and the model has no return mapping hook.
     Raises NotImplementedError when method='user_defined' and hook is absent.
     """
     if method == "numerical_newton":
         return None
-    _result = model.user_defined_corrector(stress_trial, C, state_n)
-    if _result is not None:
-        if len(_result) == 5:
-            stress, state_new, dlambda, n_iter, res_hist = _result
-        else:
-            stress, state_new, dlambda = _result
-            n_iter, res_hist = 0, []
-        return ReturnMappingResult(
-            stress=stress,
-            state=state_new,
-            dlambda=dlambda,
-            n_iterations=n_iter,
-            residual_history=res_hist,
-        )
+    rm = model.user_defined_return_mapping(stress_trial, C, state_n)
+    if rm is not None:
+        return rm
     if method == "user_defined":
         raise NotImplementedError(
-            f"{type(model).__name__} does not implement user_defined_corrector; "
+            f"{type(model).__name__} does not implement user_defined_return_mapping; "
             "cannot use method='user_defined'."
         )
     return None
@@ -251,13 +240,13 @@ def return_mapping(
     method : {"auto", "numerical_newton", "user_defined"}, optional
         Solver strategy.
 
-        * ``"auto"``             — use ``model.user_defined_corrector`` if
-                                   available, else ``"numerical_newton"``
+        * ``"auto"``             — use ``model.user_defined_return_mapping``
+                                   if available, else ``"numerical_newton"``
                                    (default).
         * ``"numerical_newton"`` — framework generic NR solver (explicit:
                                    scalar NR on Δλ; implicit: augmented
                                    vector NR).
-        * ``"user_defined"``     — require ``model.user_defined_corrector``;
+        * ``"user_defined"``     — require ``model.user_defined_return_mapping``;
                                    raise ``NotImplementedError`` if absent.
     max_iter : int, optional
         Maximum Newton iterations (default 50, ``numerical_newton`` only).
@@ -275,13 +264,13 @@ def return_mapping(
         If the NR iteration does not converge within ``max_iter`` steps.
     NotImplementedError
         If ``method="user_defined"`` and the model does not implement
-        ``user_defined_corrector``.
+        ``user_defined_return_mapping``.
     ValueError
         If ``method`` is not one of the recognised values.
     """
     _validate_method(method)
 
-    rm = _try_user_corrector(model, stress_trial, C, state_n, method)
+    rm = _try_user_return_mapping(model, stress_trial, C, state_n, method)
     if rm is not None:
         return rm
 
