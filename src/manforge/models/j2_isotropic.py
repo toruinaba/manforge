@@ -128,9 +128,10 @@ class J2Isotropic3D(MaterialModel3D):
         sigma_y = self.sigma_y0 + self.H * ep_n
         s_trial = self._dev(stress_trial)
         sigma_vm_trial = self._vonmises(stress_trial)
+        f_trial = sigma_vm_trial - sigma_y  # > 0 (caller ensures plasticity)
 
-        # Δλ = (σ_vm_trial − σ_y) / (3μ + H)
-        dlambda = (sigma_vm_trial - sigma_y) / (3.0 * mu + self.H)
+        # Δλ = f_trial / (3μ + H)
+        dlambda = f_trial / (3.0 * mu + self.H)
 
         # Radial return: σ_new = σ_trial − (3μΔλ/σ_vm) s_trial
         stress_new = stress_trial - (3.0 * mu * dlambda / sigma_vm_trial) * s_trial
@@ -139,6 +140,8 @@ class J2Isotropic3D(MaterialModel3D):
             stress=stress_new,
             state={"ep": ep_n + dlambda},
             dlambda=anp.asarray(dlambda),
+            n_iterations=1,
+            residual_history=[float(f_trial), 0.0],
         )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
@@ -311,13 +314,16 @@ class J2Isotropic1D(MaterialModel1D):
         ep_n = state_n["ep"]
         sigma_y = self.sigma_y0 + self.H * ep_n
         sigma_vm_trial = anp.abs(stress_trial[0])
-        dlambda = (sigma_vm_trial - sigma_y) / (E + self.H)
+        f_trial = sigma_vm_trial - sigma_y  # > 0 (caller ensures plasticity)
+        dlambda = f_trial / (E + self.H)
         n = stress_trial / sigma_vm_trial  # sign(σ_trial) as length-1 array
         stress_new = stress_trial - E * dlambda * n
         return ReturnMappingResult(
             stress=stress_new,
             state={"ep": ep_n + dlambda},
             dlambda=anp.asarray(dlambda),
+            n_iterations=1,
+            residual_history=[float(f_trial), 0.0],
         )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):

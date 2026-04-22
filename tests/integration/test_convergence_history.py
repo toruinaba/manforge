@@ -38,13 +38,14 @@ def test_elastic_step_no_history(j2_model):
 # Analytical path: closed-form, no NR
 # ---------------------------------------------------------------------------
 
-def test_analytical_path_no_history(j2_model):
+def test_analytical_path_history(j2_model):
     deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state(),
                             method="user_defined")
     assert result.is_plastic is True
-    assert result.n_iterations == 0
-    assert result.residual_history == []
+    assert result.n_iterations == 1
+    assert len(result.residual_history) == 2
+    assert result.residual_history[-1] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -127,15 +128,20 @@ def test_augmented_nr_quadratic_convergence(ow_model):
 # StrainDriver integration: access history via step_results
 # ---------------------------------------------------------------------------
 
-def test_driver_j2_analytical_no_history(j2_model):
-    """J2 uses analytical plastic_corrector by default: NR history is empty."""
+def test_driver_j2_analytical_history(j2_model):
+    """J2 user_defined_return_mapping records n_iterations=1 and 2-entry history."""
     driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
     dr = driver.run(j2_model, load)
 
     for rm in dr.step_results:
-        assert rm.n_iterations == 0
-        assert rm.residual_history == []
+        if rm.is_plastic:
+            assert rm.n_iterations == 1
+            assert len(rm.residual_history) == 2
+            assert rm.residual_history[-1] == 0.0
+        else:
+            assert rm.n_iterations == 0
+            assert rm.residual_history == []
 
 
 def test_driver_j2_autodiff_has_history(j2_model):
