@@ -25,60 +25,9 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.stress_update import stress_update
 from manforge.core.stress_state import PLANE_STRAIN, PLANE_STRESS
 from manforge.verification.fd_check import check_tangent
-
-
-# ---------------------------------------------------------------------------
-# Test model: AF kinematic hardening recast in purely implicit residual form
-#
-# The explicit update for alpha is:
-#   alpha_new = (alpha_n + C_k * dlambda * n_hat) / (1 + gamma * dlambda)
-#
-# Rearranged as a residual:
-#   R_alpha = alpha_new * (1 + gamma * dlambda) - alpha_n - C_k * dlambda * n_hat = 0
-#
-# Note: n_hat here is evaluated at (stress - alpha_n), i.e. the OLD backstress,
-# exactly as in the explicit path.  This makes the two paths algebraically
-# identical at convergence, so we can validate exact agreement.
-# ---------------------------------------------------------------------------
-
-class _AFKinematicImplicit3D(AFKinematic3D):
-    """AF kinematic 3D model with hardening expressed as an implicit residual.
-
-    Mathematically identical to AFKinematic3D at convergence — used to
-    validate the augmented residual machinery without introducing model error.
-    """
-
-    hardening_type = "augmented"
-
-    def state_residual(self, state_new, dlambda, stress, state_n):
-        alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-
-        scale = 1.0 + self.gamma * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
-
-
-class _AFKinematicImplicitPS(AFKinematicPS):
-    """Plane-stress variant of the implicit AF model."""
-
-    hardening_type = "augmented"
-
-    def state_residual(self, state_new, dlambda, stress, state_n):
-        alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-
-        scale = 1.0 + self.gamma * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+from tests.fixtures.implicit_models import (
+    _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -104,8 +53,8 @@ def implicit_ps_model():
 # hardening_type detection
 # ---------------------------------------------------------------------------
 
-def test_hardening_type_j2_is_reduced():
-    assert J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0).hardening_type == "reduced"
+def test_hardening_type_j2_is_reduced(model):
+    assert model.hardening_type == "reduced"
 
 
 def test_hardening_type_af_is_reduced():
@@ -200,6 +149,7 @@ def test_augmented_yield_consistency_3d(implicit_model, deps_vec):
     [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
     [2e-3, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
+@pytest.mark.slow
 def test_augmented_fd_tangent_virgin_3d(implicit_model, deps_vec):
     """Augmented consistent tangent must match FD for the augmented AF model."""
     state0 = implicit_model.initial_state()
@@ -216,6 +166,7 @@ def test_augmented_fd_tangent_virgin_3d(implicit_model, deps_vec):
     )
 
 
+@pytest.mark.slow
 def test_augmented_fd_tangent_prestressed_3d(implicit_model):
     """FD tangent from a pre-strained state via the augmented AF path."""
     state0 = implicit_model.initial_state()
@@ -246,6 +197,7 @@ def test_augmented_yield_consistency_plane_stress(implicit_ps_model):
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
 
 
+@pytest.mark.slow
 def test_augmented_fd_tangent_plane_stress(implicit_ps_model):
     """Augmented consistent tangent must match FD for plane-stress implicit AF."""
     state0 = implicit_ps_model.initial_state()
@@ -257,6 +209,7 @@ def test_augmented_fd_tangent_plane_stress(implicit_ps_model):
     )
 
 
+@pytest.mark.slow
 def test_augmented_matches_reduced_stress_plane_stress(implicit_ps_model):
     """Augmented AF PS path must produce the same stress as the reduced AF PS path."""
     deps = jnp.array([2e-3, -1e-3, 0.0])
@@ -319,28 +272,6 @@ def test_augmented_tangent_matches_reduced_3d(af_model, implicit_model, deps_vec
 # PLANE_STRAIN stress state
 # ---------------------------------------------------------------------------
 
-class _AFKinematicImplicitPE(AFKinematic3D):
-    """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
-
-    hardening_type = "augmented"
-
-    def __init__(self):
-        super().__init__(stress_state=PLANE_STRAIN,
-                         E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
-
-    def state_residual(self, state_new, dlambda, stress, state_n):
-        alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-
-        scale = 1.0 + self.gamma * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
-
-
 def test_hardening_type_augmented_pe_is_augmented():
     assert _AFKinematicImplicitPE().hardening_type == "augmented"
 
@@ -357,6 +288,7 @@ def test_augmented_yield_consistency_plane_strain():
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
 
 
+@pytest.mark.slow
 def test_augmented_fd_tangent_plane_strain():
     """Augmented consistent tangent must match FD for plane-strain implicit AF."""
     model = _AFKinematicImplicitPE()

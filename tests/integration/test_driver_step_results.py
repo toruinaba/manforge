@@ -7,12 +7,6 @@ import pytest
 from manforge.core.stress_update import StressUpdateResult
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.types import DriverResult, FieldHistory, FieldType
-from manforge.models.j2_isotropic import J2Isotropic3D
-
-
-@pytest.fixture
-def model():
-    return J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 def _uniaxial_strain_load(n_steps=20, max_strain=3e-3):

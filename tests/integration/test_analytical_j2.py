@@ -232,3 +232,24 @@ def test_method_invalid_raises_value_error(model):
     with pytest.raises(ValueError, match="method must be"):
         stress_update(model, jnp.zeros(6), jnp.zeros(6), model.initial_state(),
                        method="wrong")
+
+
+# ---------------------------------------------------------------------------
+# FD tangent verification (J2 numerical path)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("strain_inc_vec,stress_n_fn,description", [
+    ([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: jnp.zeros(6), "elastic"),
+    ([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: jnp.zeros(6), "plastic_uniaxial"),
+    ([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0], lambda m: jnp.zeros(6), "plastic_multiaxial"),
+    ([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
+     lambda m: jnp.array([m.sigma_y0 / 2.0, 0.0, 0.0, 0.0, 0.0, 0.0]), "plastic_prestress"),
+])
+def test_j2_fd_tangent(model, initial_state, strain_inc_vec, stress_n_fn, description):
+    """J2 consistent tangent (numerical NR path) matches central-difference FD."""
+    stress_n = stress_n_fn(model)
+    state_n = model.initial_state() if stress_n[0] == 0.0 else initial_state
+    result = check_tangent(model, stress_n, state_n, jnp.array(strain_inc_vec))
+    assert result.passed, (
+        f"[{description}] FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
+    )

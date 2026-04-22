@@ -230,3 +230,14 @@ def test_convergence_failure_raises(model_3d):
     driver = StressDriver(max_iter=1)
     with pytest.raises(RuntimeError, match="NR did not converge"):
         driver.run(model_3d, stress_load(stress_history))
+
+
+def test_strain_driver_general_shape(model):
+    """StrainDriver with (N, 6) input produces (N, 6) stress output."""
+    N = 20
+    strain6 = np.zeros((N, 6))
+    strain6[:, 0] = np.linspace(0.0, 5e-3, N)
+    load = FieldHistory(FieldType.STRAIN, "Strain", strain6)
+    result = StrainDriver().run(model, load)
+    assert result.stress.shape == (N, 6)
+    assert result.stress[-1, 0] > model.sigma_y0

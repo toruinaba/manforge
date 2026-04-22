@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-test test docker-build docker-test clean
+.PHONY: fortran-build fortran-build-umat fortran-test fortran-test-umat test test-unit test-integration test-slow test-fortran test-all docker-build docker-test clean
 
 # ---------------------------------------------------------------------------
 # Fortran build (host)
@@ -27,13 +27,29 @@ fortran-test:
 fortran-test-umat:
 	uv run pytest tests/test_fortran_umat.py -v
 
-## Run full test suite (excluding slow fitting tests)
+## Run fast tests: unit + integration, excluding slow and fortran (default)
 test:
-	uv run pytest tests/ -m "not slow" -v
+	uv run pytest tests/unit tests/integration -m "not slow" -v
 
-## Run complete test suite (slow — includes fitting tests)
+## Run unit tests only (fastest)
+test-unit:
+	uv run pytest tests/unit -v
+
+## Run integration tests only (no slow)
+test-integration:
+	uv run pytest tests/integration -m "not slow" -v
+
+## Run slow tests only (fitting, long FD tangent checks)
+test-slow:
+	uv run pytest tests/slow tests/integration tests/unit -m "slow" -v
+
+## Run Fortran-dependent tests (requires compiled .so)
+test-fortran:
+	uv run pytest tests/fortran -v
+
+## Run complete test suite (includes slow and fortran if modules present)
 test-all:
-	uv run pytest tests/ -v
+	uv run pytest tests -v
 
 # ---------------------------------------------------------------------------
 # Docker targets (requires Docker installed)

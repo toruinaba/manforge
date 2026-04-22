@@ -10,9 +10,14 @@ uv sync --extra dev          # Python tests
 uv sync --all-extras         # All extras including matplotlib, meson/ninja
 
 # Test
-make test                    # All tests except slow fitting tests
-make test-all                # Full suite including slow fitting tests
-uv run pytest tests/test_j2_elastic.py -v  # Single test file
+make test                    # Fast tests: unit + integration, excluding slow/fortran
+make test-unit               # Unit tests only (fastest)
+make test-integration        # Integration tests excluding slow
+make test-slow               # Slow tests (FD tangent, fitting, long loops)
+make test-fortran            # Fortran cross-validation (requires compiled .so)
+make test-all                # Full suite including slow and fortran
+uv run pytest tests/integration/test_j2_elastic.py -v  # Single test file
+uv run pytest tests/ --durations=20                    # Show 20 slowest tests
 
 # Fortran compilation (requires gfortran)
 # Option A: CLI (recommended for Python users)
