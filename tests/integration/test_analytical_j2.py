@@ -9,7 +9,7 @@ Covers:
 """
 
 import numpy as np
-import jax.numpy as jnp
+import autograd.numpy as anp
 import pytest
 
 from manforge.core.stress_update import stress_update
@@ -28,8 +28,8 @@ def test_plastic_corrector_elastic_path_not_called(model):
     before calling plastic_corrector.  This test verifies the elastic step
     still works under method='user_defined'.
     """
-    strain_inc = jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])  # tiny, stays elastic
-    stress_n = jnp.zeros(6)
+    strain_inc = anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])  # tiny, stays elastic
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
     _r = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
@@ -43,7 +43,7 @@ def test_plastic_corrector_standalone_plastic(model):
     """plastic_corrector returns correct (stress, state, dlambda) for a plastic step."""
     C = model.elastic_stiffness()
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
@@ -62,7 +62,7 @@ def test_plastic_corrector_standalone_plastic(model):
 def test_plastic_corrector_dlambda_positive(model):
     """Δλ must be positive for a genuinely plastic increment."""
     C = model.elastic_stiffness()
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
@@ -82,8 +82,8 @@ def test_plastic_corrector_dlambda_positive(model):
 ])
 def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
     """method='user_defined' stress must match method='numerical_newton' to tight tolerance."""
-    strain_inc = jnp.array(strain_inc_vec)
-    stress_n = jnp.zeros(6)
+    strain_inc = anp.array(strain_inc_vec)
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
     _r_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton")
@@ -93,7 +93,7 @@ def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
 
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
-        err_msg=f"max stress diff = {float(jnp.max(jnp.abs(s_an - s_ad))):.3e}",
+        err_msg=f"max stress diff = {float(anp.max(anp.abs(s_an - s_ad))):.3e}",
     )
     assert abs(float(st_an["ep"]) - float(st_ad["ep"])) < 1e-10
 
@@ -101,12 +101,12 @@ def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
 def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model):
     """Works correctly from a pre-stressed state."""
     # First step to build up pre-stress
-    strain_inc1 = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    _r1 = stress_update(model, strain_inc1, jnp.zeros(6), model.initial_state())
+    strain_inc1 = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    _r1 = stress_update(model, strain_inc1, anp.zeros(6), model.initial_state())
     s1, st1 = _r1.stress, _r1.state
 
     # Second plastic step
-    strain_inc2 = jnp.array([1e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc2 = anp.array([1e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     s_ad = stress_update(model, strain_inc2, s1, st1, method="numerical_newton").stress
     s_an = stress_update(model, strain_inc2, s1, st1, method="user_defined").stress
 
@@ -124,16 +124,16 @@ def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model):
 ])
 def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
     """Analytical DDSDDE must match autodiff DDSDDE to 1e-5 relative tolerance."""
-    strain_inc = jnp.array(strain_inc_vec)
-    stress_n = jnp.zeros(6)
+    strain_inc = anp.array(strain_inc_vec)
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
     D_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton").ddsdde
     D_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined").ddsdde
 
-    rel_err = jnp.abs(D_an - D_ad) / (jnp.abs(D_ad) + 1.0)
-    assert float(jnp.max(rel_err)) < 1e-5, \
-        f"max tangent rel err = {float(jnp.max(rel_err)):.3e}"
+    rel_err = anp.abs(D_an - D_ad) / (anp.abs(D_ad) + 1.0)
+    assert float(anp.max(rel_err)) < 1e-5, \
+        f"max tangent rel err = {float(anp.max(rel_err)):.3e}"
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +142,8 @@ def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
 
 def test_method_auto_uses_analytical(model):
     """method='auto' should use plastic_corrector when it returns non-None."""
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    stress_n = jnp.zeros(6)
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
     _r_auto = stress_update(model, strain_inc, stress_n, state_n, method="auto")
@@ -165,9 +165,9 @@ def test_analytical_tangent_fd_check_elastic(model):
     """Elastic step: analytical tangent = C = FD tangent."""
     result = check_tangent(
         model,
-        jnp.zeros(6),
+        anp.zeros(6),
         model.initial_state(),
-        jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
         method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
@@ -182,9 +182,9 @@ def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
     """Plastic step: analytical tangent passes finite-difference check."""
     result = check_tangent(
         model,
-        jnp.zeros(6),
+        anp.zeros(6),
         model.initial_state(),
-        jnp.array(strain_inc_vec),
+        anp.array(strain_inc_vec),
         method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
@@ -219,16 +219,16 @@ def test_method_analytical_raises_if_no_hooks():
             return {}
 
     minimal_model = MinimalModel()
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     with pytest.raises(NotImplementedError):
-        stress_update(minimal_model, strain_inc, jnp.zeros(6), {}, method="user_defined")
+        stress_update(minimal_model, strain_inc, anp.zeros(6), {}, method="user_defined")
 
 
 def test_method_invalid_raises_value_error(model):
     """Unrecognised method string raises ValueError."""
     with pytest.raises(ValueError, match="method must be"):
-        stress_update(model, jnp.zeros(6), jnp.zeros(6), model.initial_state(),
+        stress_update(model, anp.zeros(6), anp.zeros(6), model.initial_state(),
                        method="wrong")
 
 
@@ -237,17 +237,17 @@ def test_method_invalid_raises_value_error(model):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec,stress_n_fn,description", [
-    ([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: jnp.zeros(6), "elastic"),
-    ([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: jnp.zeros(6), "plastic_uniaxial"),
-    ([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0], lambda m: jnp.zeros(6), "plastic_multiaxial"),
+    ([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: anp.zeros(6), "elastic"),
+    ([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0], lambda m: anp.zeros(6), "plastic_uniaxial"),
+    ([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0], lambda m: anp.zeros(6), "plastic_multiaxial"),
     ([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
-     lambda m: jnp.array([m.sigma_y0 / 2.0, 0.0, 0.0, 0.0, 0.0, 0.0]), "plastic_prestress"),
+     lambda m: anp.array([m.sigma_y0 / 2.0, 0.0, 0.0, 0.0, 0.0, 0.0]), "plastic_prestress"),
 ])
 def test_j2_fd_tangent(model, initial_state, strain_inc_vec, stress_n_fn, description):
     """J2 consistent tangent (numerical NR path) matches central-difference FD."""
     stress_n = stress_n_fn(model)
     state_n = model.initial_state() if stress_n[0] == 0.0 else initial_state
-    result = check_tangent(model, stress_n, state_n, jnp.array(strain_inc_vec))
+    result = check_tangent(model, stress_n, state_n, anp.array(strain_inc_vec))
     assert result.passed, (
         f"[{description}] FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )

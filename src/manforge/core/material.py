@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.autodiff.operators import identity_voigt
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
@@ -89,42 +89,42 @@ class MaterialModel(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """Return the elastic stiffness tensor in Voigt notation.
 
         Returns
         -------
-        jnp.ndarray, shape (ntens, ntens)
+        anp.ndarray, shape (ntens, ntens)
             Elastic stiffness C (σ = C : ε, engineering shear convention).
         """
 
     @abstractmethod
     def yield_function(
         self,
-        stress: jnp.ndarray,
+        stress: anp.ndarray,
         state: dict,
-    ) -> jnp.ndarray:
+    ) -> anp.ndarray:
         """Evaluate the yield function f(σ, q).
 
         The material is in the elastic domain when f ≤ 0.
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
             Stress in Voigt notation.
         state : dict
             Internal state variables.
 
         Returns
         -------
-        jnp.ndarray, scalar
+        anp.ndarray, scalar
             Yield function value.
         """
 
     def update_state(
         self,
-        dlambda: jnp.ndarray,
-        stress: jnp.ndarray,
+        dlambda: anp.ndarray,
+        stress: anp.ndarray,
         state: dict,
     ) -> dict:
         """Return updated state variables after a plastic increment.
@@ -144,9 +144,9 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        dlambda : jnp.ndarray, scalar
+        dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ ≥ 0.
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
             Current stress within the NR iteration (Voigt notation).
             Models that depend only on dlambda (e.g. isotropic hardening)
             may ignore this argument.
@@ -171,8 +171,8 @@ class MaterialModel(ABC):
     def state_residual(
         self,
         state_new: dict,
-        dlambda: jnp.ndarray,
-        stress: jnp.ndarray,
+        dlambda: anp.ndarray,
+        stress: anp.ndarray,
         state_n: dict,
     ) -> dict:
         """Residual of the state evolution equations.
@@ -194,9 +194,9 @@ class MaterialModel(ABC):
         ----------
         state_new : dict
             Proposed state at step n+1 (independent unknown).
-        dlambda : jnp.ndarray, scalar
+        dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
             Current stress σ_{n+1}.
         state_n : dict
             State at the beginning of the increment.
@@ -214,7 +214,7 @@ class MaterialModel(ABC):
     # Default helpers provided by the framework
     # ------------------------------------------------------------------
 
-    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """Build the isotropic elastic stiffness tensor.
 
         Builds the full 3D 6×6 stiffness first, then extracts/condenses to
@@ -237,12 +237,12 @@ class MaterialModel(ABC):
 
         Returns
         -------
-        jnp.ndarray, shape (ntens, ntens)
+        anp.ndarray, shape (ntens, ntens)
         """
         # Build the full 3D 6×6 tensor
         delta_6 = identity_voigt()  # 6-component, no ss
-        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
-        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+        scale_6 = anp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * anp.outer(delta_6, delta_6) + mu * anp.diag(scale_6)
 
         ss = self.stress_state
 
@@ -251,29 +251,29 @@ class MaterialModel(ABC):
 
         if ss.ntens == 4:
             # Plane strain / axisymmetric: components [11,22,33,12]
-            idx = jnp.array([0, 1, 2, 3])
-            return C6[jnp.ix_(idx, idx)]
+            idx = anp.array([0, 1, 2, 3])
+            return C6[anp.ix_(idx, idx)]
 
         if ss.ntens == 3:
             # Plane stress: condense out sigma_33 (index 2 of the 4×4 plane-
             # strain submatrix) to enforce sigma_33 = 0.
             # Retain indices [0,1,3] of the 6×6 → [s11, s22, s12].
             # Step 1: 4×4 plane-strain sub-block
-            idx4 = jnp.array([0, 1, 2, 3])
-            C4 = C6[jnp.ix_(idx4, idx4)]
+            idx4 = anp.array([0, 1, 2, 3])
+            C4 = C6[anp.ix_(idx4, idx4)]
             # Step 2: static condensation — eliminate row/col 2 (s33)
             # D_ps = D_00 - D_02 * D_22^{-1} * D_20  (Schur complement)
             # Retained dof within C4: [0, 1, 3] → mapped to [0, 1, 2]
-            retain = jnp.array([0, 1, 3])
-            C_rr = C4[jnp.ix_(retain, retain)]
+            retain = anp.array([0, 1, 3])
+            C_rr = C4[anp.ix_(retain, retain)]
             C_rc = C4[retain, 2]          # shape (3,)
             C_cc = C4[2, 2]               # scalar
-            return C_rr - jnp.outer(C_rc, C_rc) / C_cc
+            return C_rr - anp.outer(C_rc, C_rc) / C_cc
 
         if ss.ntens == 1:
             # 1D truss (uniaxial stress): C = [[E]]
             E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
-            return jnp.array([[E]])
+            return anp.array([[E]])
 
         raise ValueError(
             f"isotropic_C: unsupported ntens={ss.ntens} for stress_state '{ss.name}'"
@@ -285,11 +285,11 @@ class MaterialModel(ABC):
         Returns
         -------
         dict
-            ``{name: jnp.array(0.0) for name in self.state_names}``
+            ``{name: anp.array(0.0) for name in self.state_names}``
         """
-        return {name: jnp.array(0.0) for name in self.state_names}
+        return {name: anp.array(0.0) for name in self.state_names}
 
-    def _vonmises(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _vonmises(self, stress: anp.ndarray) -> anp.ndarray:
         """Von Mises equivalent stress with missing-component correction.
 
         Computes √(3/2 · (‖s_m‖² + n_missing · p²)) using ``smooth_sqrt``
@@ -308,22 +308,22 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
 
         Returns
         -------
-        jnp.ndarray, scalar
+        anp.ndarray, scalar
         """
         s = self._dev(stress)
         p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_jnp
-        sq_norm = jnp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
+        s_m = s * self.stress_state.mandel_factors_np
+        sq_norm = anp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
     def user_defined_return_mapping(
         self,
-        stress_trial: jnp.ndarray,
-        C: jnp.ndarray,
+        stress_trial: anp.ndarray,
+        C: anp.ndarray,
         state_n: dict,
     ):
         """User-supplied return mapping (optional).
@@ -336,9 +336,9 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        stress_trial : jnp.ndarray, shape (ntens,)
+        stress_trial : anp.ndarray, shape (ntens,)
             Elastic trial stress σ_trial = σ_n + C Δε.
-        C : jnp.ndarray, shape (ntens, ntens)
+        C : anp.ndarray, shape (ntens, ntens)
             Elastic stiffness tensor (already computed by the caller).
         state_n : dict
             Internal state at the beginning of the increment.
@@ -358,10 +358,10 @@ class MaterialModel(ABC):
 
     def user_defined_tangent(
         self,
-        stress: jnp.ndarray,
+        stress: anp.ndarray,
         state: dict,
-        dlambda: jnp.ndarray,
-        C: jnp.ndarray,
+        dlambda: anp.ndarray,
+        C: anp.ndarray,
         state_n: dict,
     ):
         """User-supplied consistent tangent (optional).
@@ -373,13 +373,13 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
             Converged stress σ_{n+1}.
         state : dict
             Converged internal state at step n+1.
-        dlambda : jnp.ndarray, scalar
+        dlambda : anp.ndarray, scalar
             Converged plastic multiplier increment Δλ.
-        C : jnp.ndarray, shape (ntens, ntens)
+        C : anp.ndarray, shape (ntens, ntens)
             Elastic stiffness tensor (already computed by the caller).
         state_n : dict
             Internal state at the beginning of the increment.
@@ -389,7 +389,7 @@ class MaterialModel(ABC):
         None
             Signals that no user-defined tangent is available; the
             framework falls back to autodiff.
-        jnp.ndarray, shape (ntens, ntens)
+        anp.ndarray, shape (ntens, ntens)
             Consistent tangent dσ_{n+1}/dΔε.
         """
         return None
@@ -446,19 +446,19 @@ class MaterialModel3D(MaterialModel):
     # Operator methods — concrete for full-rank stress states
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = (σ11 + σ22 + σ33) / 3.
 
         All three direct components are stored, so no correction is needed.
         """
         return (stress[0] + stress[1] + stress[2]) / 3.0
 
-    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_jnp
+        return stress - p * self.stress_state.identity_np
 
-    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """Isotropic elastic stiffness via submatrix extraction.
 
         Builds the full 6×6 tensor, then extracts the ntens×ntens subblock
@@ -474,25 +474,25 @@ class MaterialModel3D(MaterialModel):
 
         Returns
         -------
-        jnp.ndarray, shape (ntens, ntens)
+        anp.ndarray, shape (ntens, ntens)
         """
-        delta_6 = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
-        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
-        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+        delta_6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        scale_6 = anp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * anp.outer(delta_6, delta_6) + mu * anp.diag(scale_6)
         if self.ntens == 6:
             return C6
         # PLANE_STRAIN / AXISYMMETRIC: components [11, 22, 33, 12]
-        idx = jnp.array([0, 1, 2, 3])
-        return C6[jnp.ix_(idx, idx)]
+        idx = anp.array([0, 1, 2, 3])
+        return C6[anp.ix_(idx, idx)]
 
-    def _I_vol(self) -> jnp.ndarray:
+    def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
-        delta = self.stress_state.identity_jnp
-        return jnp.outer(delta, delta) / 3.0
+        delta = self.stress_state.identity_np
+        return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> jnp.ndarray:
+    def _I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
-        return jnp.eye(self.ntens) - self._I_vol()
+        return anp.eye(self.ntens) - self._I_vol()
 
 
 class MaterialModelPS(MaterialModel):
@@ -539,19 +539,19 @@ class MaterialModelPS(MaterialModel):
     # Operator methods — concrete for PLANE_STRESS
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = (σ11 + σ22) / 3.
 
         σ33 = 0 is enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return (stress[0] + stress[1]) / 3.0
 
-    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored components, s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_jnp  # δ = [1, 1, 0]
+        return stress - p * self.stress_state.identity_np  # δ = [1, 1, 0]
 
-    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """Plane-stress isotropic stiffness via static condensation.
 
         Starts from the 4×4 plane-strain submatrix and applies the Schur
@@ -565,29 +565,29 @@ class MaterialModelPS(MaterialModel):
 
         Returns
         -------
-        jnp.ndarray, shape (3, 3)
+        anp.ndarray, shape (3, 3)
         """
-        delta_6 = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
-        scale_6 = jnp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
-        C6 = lam * jnp.outer(delta_6, delta_6) + mu * jnp.diag(scale_6)
+        delta_6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        scale_6 = anp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * anp.outer(delta_6, delta_6) + mu * anp.diag(scale_6)
         # 4×4 plane-strain sub-block
-        idx4 = jnp.array([0, 1, 2, 3])
-        C4 = C6[jnp.ix_(idx4, idx4)]
+        idx4 = anp.array([0, 1, 2, 3])
+        C4 = C6[anp.ix_(idx4, idx4)]
         # Schur complement: eliminate σ33 (index 2 of C4)
-        retain = jnp.array([0, 1, 3])
-        C_rr = C4[jnp.ix_(retain, retain)]
+        retain = anp.array([0, 1, 3])
+        C_rr = C4[anp.ix_(retain, retain)]
         C_rc = C4[retain, 2]
         C_cc = C4[2, 2]
-        return C_rr - jnp.outer(C_rc, C_rc) / C_cc
+        return C_rr - anp.outer(C_rc, C_rc) / C_cc
 
-    def _I_vol(self) -> jnp.ndarray:
+    def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
-        delta = self.stress_state.identity_jnp  # [1, 1, 0]
-        return jnp.outer(delta, delta) / 3.0
+        delta = self.stress_state.identity_np  # [1, 1, 0]
+        return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> jnp.ndarray:
+    def _I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
-        return jnp.eye(self.ntens) - self._I_vol()
+        return anp.eye(self.ntens) - self._I_vol()
 
 
 class MaterialModel1D(MaterialModel):
@@ -631,19 +631,19 @@ class MaterialModel1D(MaterialModel):
     # Operator methods — concrete for UNIAXIAL_1D
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = σ11 / 3.
 
         σ22 = σ33 = 0 are enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return stress[0] / 3.0
 
-    def _dev(self, stress: jnp.ndarray) -> jnp.ndarray:
+    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored component, s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_jnp  # δ = [1.0]
+        return stress - p * self.stress_state.identity_np  # δ = [1.0]
 
-    def isotropic_C(self, lam: float, mu: float) -> jnp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).
 
         Parameters
@@ -653,16 +653,16 @@ class MaterialModel1D(MaterialModel):
 
         Returns
         -------
-        jnp.ndarray, shape (1, 1)
+        anp.ndarray, shape (1, 1)
         """
         E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
-        return jnp.array([[E]])
+        return anp.array([[E]])
 
-    def _I_vol(self) -> jnp.ndarray:
+    def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor [[1/3]] for ntens=1."""
-        delta = self.stress_state.identity_jnp  # [1.0]
-        return jnp.outer(delta, delta) / 3.0
+        delta = self.stress_state.identity_np  # [1.0]
+        return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> jnp.ndarray:
+    def _I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
-        return jnp.eye(1) - self._I_vol()
+        return anp.eye(1) - self._I_vol()

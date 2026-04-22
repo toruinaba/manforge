@@ -17,7 +17,7 @@ Key verifications
 
 import pytest
 import numpy as np
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 import manforge  # enables JAX float64
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
@@ -81,8 +81,8 @@ def test_hardening_type_augmented_ps_is_augmented(implicit_ps_model):
 ])
 def test_augmented_matches_reduced_stress_3d(af_model, implicit_model, deps_vec):
     """Augmented AF path must produce the same stress as the reduced AF path."""
-    deps = jnp.array(deps_vec)
-    stress0 = jnp.zeros(6)
+    deps = anp.array(deps_vec)
+    stress0 = anp.zeros(6)
     state0 = af_model.initial_state()
 
     stress_exp = stress_update(af_model, deps, stress0, state0).stress
@@ -101,8 +101,8 @@ def test_augmented_matches_reduced_stress_3d(af_model, implicit_model, deps_vec)
 ])
 def test_augmented_matches_reduced_state_3d(af_model, implicit_model, deps_vec):
     """Augmented AF path must produce the same state as the reduced AF path."""
-    deps = jnp.array(deps_vec)
-    stress0 = jnp.zeros(6)
+    deps = anp.array(deps_vec)
+    stress0 = anp.zeros(6)
     state0 = af_model.initial_state()
 
     state_exp = stress_update(af_model, deps, stress0, state0).state
@@ -131,9 +131,9 @@ def test_augmented_matches_reduced_state_3d(af_model, implicit_model, deps_vec):
 def test_augmented_yield_consistency_3d(implicit_model, deps_vec):
     """After a plastic step via the augmented path, stress must lie on the yield surface."""
     state0 = implicit_model.initial_state()
-    deps = jnp.array(deps_vec)
+    deps = anp.array(deps_vec)
 
-    _r = stress_update(implicit_model, deps, jnp.zeros(6), state0)
+    _r = stress_update(implicit_model, deps, anp.zeros(6), state0)
     stress_new, state_new = _r.stress, _r.state
     f = implicit_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
@@ -155,9 +155,9 @@ def test_augmented_fd_tangent_virgin_3d(implicit_model, deps_vec):
     state0 = implicit_model.initial_state()
     result = check_tangent(
         implicit_model,
-        jnp.zeros(6),
+        anp.zeros(6),
         state0,
-        jnp.array(deps_vec),
+        anp.array(deps_vec),
     )
     assert result.passed, (
         f"FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}\n"
@@ -172,12 +172,12 @@ def test_augmented_fd_tangent_prestressed_3d(implicit_model):
     state0 = implicit_model.initial_state()
 
     # First step: push into plasticity
-    deps1 = jnp.zeros(6).at[0].set(3e-3)
-    _r1 = stress_update(implicit_model, deps1, jnp.zeros(6), state0)
+    deps1 = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
+    _r1 = stress_update(implicit_model, deps1, anp.zeros(6), state0)
     stress1, state1 = _r1.stress, _r1.state
 
     # Second step: verify FD tangent
-    deps2 = jnp.zeros(6).at[0].set(1e-3)
+    deps2 = (lambda _a: (_a.__setitem__(0, 1e-3), _a)[1])(np.zeros(6))
     result = check_tangent(implicit_model, stress1, state1, deps2)
     assert result.passed, f"Pre-stressed FD tangent failed: {result.max_rel_err:.3e}"
 
@@ -189,9 +189,9 @@ def test_augmented_fd_tangent_prestressed_3d(implicit_model):
 def test_augmented_yield_consistency_plane_stress(implicit_ps_model):
     """Implicit AF plane-stress model: yield surface consistency."""
     state0 = implicit_ps_model.initial_state()
-    deps = jnp.array([2e-3, 0.0, 0.0])
+    deps = anp.array([2e-3, 0.0, 0.0])
 
-    _r = stress_update(implicit_ps_model, deps, jnp.zeros(3), state0)
+    _r = stress_update(implicit_ps_model, deps, anp.zeros(3), state0)
     stress_new, state_new = _r.stress, _r.state
     f = implicit_ps_model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
@@ -201,9 +201,9 @@ def test_augmented_yield_consistency_plane_stress(implicit_ps_model):
 def test_augmented_fd_tangent_plane_stress(implicit_ps_model):
     """Augmented consistent tangent must match FD for plane-stress implicit AF."""
     state0 = implicit_ps_model.initial_state()
-    deps = jnp.array([2e-3, 0.0, 0.0])
+    deps = anp.array([2e-3, 0.0, 0.0])
 
-    result = check_tangent(implicit_ps_model, jnp.zeros(3), state0, deps)
+    result = check_tangent(implicit_ps_model, anp.zeros(3), state0, deps)
     assert result.passed, (
         f"PS FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )
@@ -212,13 +212,13 @@ def test_augmented_fd_tangent_plane_stress(implicit_ps_model):
 @pytest.mark.slow
 def test_augmented_matches_reduced_stress_plane_stress(implicit_ps_model):
     """Augmented AF PS path must produce the same stress as the reduced AF PS path."""
-    deps = jnp.array([2e-3, -1e-3, 0.0])
+    deps = anp.array([2e-3, -1e-3, 0.0])
 
     explicit_model = AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     state0 = explicit_model.initial_state()
 
-    stress_exp = stress_update(explicit_model, deps, jnp.zeros(3), state0).stress
-    stress_imp = stress_update(implicit_ps_model, deps, jnp.zeros(3), state0).stress
+    stress_exp = stress_update(explicit_model, deps, anp.zeros(3), state0).stress
+    stress_imp = stress_update(implicit_ps_model, deps, anp.zeros(3), state0).stress
 
     np.testing.assert_allclose(
         np.array(stress_imp), np.array(stress_exp), atol=1e-7,
@@ -233,9 +233,9 @@ def test_augmented_elastic_step_3d(implicit_model):
     """Elastic step via augmented-state model returns C as tangent, state unchanged."""
     state0 = implicit_model.initial_state()
     C = implicit_model.elastic_stiffness()
-    deps = jnp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    deps = anp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _r = stress_update(implicit_model, deps, jnp.zeros(6), state0)
+    _r = stress_update(implicit_model, deps, anp.zeros(6), state0)
     stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
 
     np.testing.assert_allclose(np.array(stress_new), np.array(C @ deps), rtol=1e-10)
@@ -255,8 +255,8 @@ def test_augmented_elastic_step_3d(implicit_model):
 ])
 def test_augmented_tangent_matches_reduced_3d(af_model, implicit_model, deps_vec):
     """Consistent tangent from the augmented system must match the reduced path tangent."""
-    deps = jnp.array(deps_vec)
-    stress0 = jnp.zeros(6)
+    deps = anp.array(deps_vec)
+    stress0 = anp.zeros(6)
     state0 = af_model.initial_state()
 
     ddsdde_exp = stress_update(af_model, deps, stress0, state0).ddsdde
@@ -280,9 +280,9 @@ def test_augmented_yield_consistency_plane_strain():
     """Implicit AF plane-strain model: yield surface consistency."""
     model = _AFKinematicImplicitPE()
     state0 = model.initial_state()
-    deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
+    deps = anp.array([2e-3, 0.0, 0.0, 0.0])
 
-    _r = stress_update(model, deps, jnp.zeros(4), state0)
+    _r = stress_update(model, deps, anp.zeros(4), state0)
     stress_new, state_new = _r.stress, _r.state
     f = model.yield_function(stress_new, state_new)
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
@@ -293,9 +293,9 @@ def test_augmented_fd_tangent_plane_strain():
     """Augmented consistent tangent must match FD for plane-strain implicit AF."""
     model = _AFKinematicImplicitPE()
     state0 = model.initial_state()
-    deps = jnp.array([2e-3, 0.0, 0.0, 0.0])
+    deps = anp.array([2e-3, 0.0, 0.0, 0.0])
 
-    result = check_tangent(model, jnp.zeros(4), state0, deps)
+    result = check_tangent(model, anp.zeros(4), state0, deps)
     assert result.passed, (
         f"PE FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )
@@ -303,16 +303,16 @@ def test_augmented_fd_tangent_plane_strain():
 
 def test_augmented_matches_reduced_plane_strain():
     """Implicit AF plane-strain path must produce the same stress as the explicit path."""
-    deps = jnp.array([2e-3, -1e-3, 0.0, 1e-3])
+    deps = anp.array([2e-3, -1e-3, 0.0, 1e-3])
 
     explicit_model = AFKinematic3D(stress_state=PLANE_STRAIN,
                                    E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     implicit_model = _AFKinematicImplicitPE()
     state0 = explicit_model.initial_state()
 
-    _r_exp = stress_update(explicit_model, deps, jnp.zeros(4), state0)
+    _r_exp = stress_update(explicit_model, deps, anp.zeros(4), state0)
     stress_exp, ddsdde_exp = _r_exp.stress, _r_exp.ddsdde
-    _r_imp = stress_update(implicit_model, deps, jnp.zeros(4), state0)
+    _r_imp = stress_update(implicit_model, deps, anp.zeros(4), state0)
     stress_imp, ddsdde_imp = _r_imp.stress, _r_imp.ddsdde
 
     np.testing.assert_allclose(

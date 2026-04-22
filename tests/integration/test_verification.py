@@ -6,7 +6,7 @@ TangentCheckResult structure is correct, and that the Fortran bridge skeleton
 raises NotImplementedError as expected.
 """
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 import pytest
 
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
@@ -19,9 +19,9 @@ from manforge.verification.fortran_bridge import FortranUMAT
 
 def test_check_tangent_elastic_passes(model):
     """Elastic domain: AD tangent matches FD tangent within tolerance."""
-    strain_inc = jnp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), strain_inc
+        model, anp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed
@@ -36,9 +36,9 @@ def test_check_tangent_elastic_passes(model):
 
 def test_check_tangent_plastic_uniaxial_passes(model):
     """Plastic uniaxial domain: AD tangent matches FD tangent."""
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), strain_inc
+        model, anp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
@@ -50,9 +50,9 @@ def test_check_tangent_plastic_uniaxial_passes(model):
 
 def test_check_tangent_plastic_multiaxial_passes(model):
     """Plastic multiaxial domain: AD tangent matches FD tangent."""
-    strain_inc = jnp.array([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0])
+    strain_inc = anp.array([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), strain_inc
+        model, anp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
@@ -64,9 +64,9 @@ def test_check_tangent_plastic_multiaxial_passes(model):
 
 def test_check_tangent_result_structure(model):
     """TangentCheckResult has correct types for all fields."""
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), strain_inc
+        model, anp.zeros(6), model.initial_state(), strain_inc
     )
 
     assert isinstance(result, TangentCheckResult)
@@ -83,9 +83,9 @@ def test_check_tangent_result_structure(model):
 
 def test_check_tangent_tight_tol_can_fail(model):
     """Using tol=1e-15 triggers failure due to FD truncation error."""
-    strain_inc = jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     result = check_tangent(
-        model, jnp.zeros(6), model.initial_state(), strain_inc,
+        model, anp.zeros(6), model.initial_state(), strain_inc,
         tol=1e-15,
     )
 

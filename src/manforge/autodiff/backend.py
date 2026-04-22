@@ -1,22 +1,14 @@
-"""JAX backend configuration and utilities."""
+"""Autograd backend utilities."""
 
-import jax
-import jax.numpy as jnp  # noqa: F401  (re-exported for convenience)
+import autograd.numpy as anp  # noqa: F401  (re-exported for convenience)
 
-__all__ = ["jnp", "check_float64"]
+__all__ = ["anp", "check_float64"]
 
 
 def check_float64() -> None:
-    """Verify that JAX float64 mode is active.
-
-    Raises
-    ------
-    RuntimeError
-        If jax_enable_x64 has not been set before importing JAX arrays.
-    """
-    if jnp.zeros(1).dtype != jnp.float64:
+    """Verify that numpy is operating in float64 (always true by default)."""
+    if anp.zeros(1).dtype != anp.float64:
         raise RuntimeError(
-            "JAX float64 is not enabled. "
-            "Ensure 'import manforge' is executed before any jax imports, "
-            "or call jax.config.update('jax_enable_x64', True) at startup."
+            "numpy float64 is not the default dtype. "
+            "This should not occur in a standard numpy installation."
         )

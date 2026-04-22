@@ -1,9 +1,9 @@
 import sys
 import os
 import pytest
-import jax.numpy as jnp
+import autograd.numpy as anp
 
-import manforge  # noqa: F401 — enables JAX float64 for the entire test session
+import manforge  # noqa: F401
 
 from manforge.models.j2_isotropic import J2Isotropic3D
 from tests.fixtures.strain_vectors import (
@@ -43,29 +43,29 @@ def lame_constants(model):
 
 @pytest.fixture
 def deps_uniaxial():
-    return jnp.array(DEPS_UNIAXIAL_3D)
+    return anp.array(DEPS_UNIAXIAL_3D)
 
 
 @pytest.fixture
 def deps_equibiaxial():
-    return jnp.array(DEPS_EQUIBIAXIAL_3D)
+    return anp.array(DEPS_EQUIBIAXIAL_3D)
 
 
 @pytest.fixture
 def deps_pure_shear():
-    return jnp.array(DEPS_PURE_SHEAR_3D)
+    return anp.array(DEPS_PURE_SHEAR_3D)
 
 
 @pytest.fixture
 def deps_combined():
-    return jnp.array(DEPS_COMBINED_3D)
+    return anp.array(DEPS_COMBINED_3D)
 
 
 @pytest.fixture
 def deps_catalog():
     return {
-        "uniaxial":    jnp.array(DEPS_UNIAXIAL_3D),
-        "equibiaxial": jnp.array(DEPS_EQUIBIAXIAL_3D),
-        "pure_shear":  jnp.array(DEPS_PURE_SHEAR_3D),
-        "combined":    jnp.array(DEPS_COMBINED_3D),
+        "uniaxial":    anp.array(DEPS_UNIAXIAL_3D),
+        "equibiaxial": anp.array(DEPS_EQUIBIAXIAL_3D),
+        "pure_shear":  anp.array(DEPS_PURE_SHEAR_3D),
+        "combined":    anp.array(DEPS_COMBINED_3D),
     }

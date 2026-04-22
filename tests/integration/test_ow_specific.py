@@ -10,7 +10,7 @@ These tests cover physics unique to the OW model:
 import math
 import pytest
 import numpy as np
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinematic1D
 from manforge.models.af_kinematic import AFKinematic3D
@@ -43,15 +43,15 @@ def test_backstress_saturation():
     model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     alpha_sat_expected = math.sqrt(model.C_k / model.gamma)  # 100 MPa
 
-    stress_n = jnp.zeros(6)
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
     for _ in range(200):
-        deps = jnp.zeros(6).at[0].set(5e-4)
+        deps = (lambda _a: (_a.__setitem__(0, 5e-4), _a)[1])(np.zeros(6))
         _r = stress_update(model, deps, stress_n, state_n)
         stress_n, state_n = _r.stress, _r.state
 
     alpha = state_n["alpha"]
-    alpha_vm = float(jnp.sqrt(1.5 * jnp.sum(alpha ** 2)))
+    alpha_vm = float(anp.sqrt(1.5 * anp.sum(alpha ** 2)))
 
     assert abs(alpha_vm - alpha_sat_expected) / alpha_sat_expected < 0.05, (
         f"Backstress norm {alpha_vm:.2f} not close to saturation {alpha_sat_expected:.2f}"
@@ -69,10 +69,10 @@ def test_ow_approaches_af_for_small_alpha():
     """
     ow_model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     af_model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
-    deps = jnp.zeros(6).at[0].set(3e-4)  # very small step — near linear regime
+    deps = (lambda _a: (_a.__setitem__(0, 3e-4), _a)[1])(np.zeros(6))  # very small step — near linear regime
 
-    stress_ow = stress_update(ow_model, deps, jnp.zeros(6), ow_model.initial_state()).stress
-    stress_af = stress_update(af_model, deps, jnp.zeros(6), af_model.initial_state()).stress
+    stress_ow = stress_update(ow_model, deps, anp.zeros(6), ow_model.initial_state()).stress
+    stress_af = stress_update(af_model, deps, anp.zeros(6), af_model.initial_state()).stress
 
     np.testing.assert_allclose(
         np.array(stress_ow), np.array(stress_af), rtol=0.10,

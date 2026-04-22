@@ -2,7 +2,7 @@
 
 import math
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 import numpy as np
 import pytest
 
@@ -72,23 +72,23 @@ def test_invalid_stress_state_raises():
 
 
 def test_identity_voigt_3d():
-    expected = jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+    expected = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(identity_voigt(), expected)
     np.testing.assert_allclose(identity_voigt(SOLID_3D), expected)
 
 
 def test_identity_voigt_plane_strain():
-    expected = jnp.array([1.0, 1.0, 1.0, 0.0])
+    expected = anp.array([1.0, 1.0, 1.0, 0.0])
     np.testing.assert_allclose(identity_voigt(PLANE_STRAIN), expected)
 
 
 def test_identity_voigt_plane_stress():
-    expected = jnp.array([1.0, 1.0, 0.0])
+    expected = anp.array([1.0, 1.0, 0.0])
     np.testing.assert_allclose(identity_voigt(PLANE_STRESS), expected)
 
 
 def test_identity_voigt_1d():
-    expected = jnp.array([1.0])
+    expected = anp.array([1.0])
     np.testing.assert_allclose(identity_voigt(UNIAXIAL_1D), expected)
 
 
@@ -100,20 +100,20 @@ def test_identity_voigt_1d():
 @pytest.mark.parametrize("ss", ALL_SS)
 def test_mandel_roundtrip(ss):
     """from_mandel(to_mandel(v)) == v for any stress state."""
-    v = jnp.ones(ss.ntens)
+    v = anp.ones(ss.ntens)
     np.testing.assert_allclose(from_mandel(to_mandel(v, ss), ss), v, atol=1e-12)
 
 
 def test_to_mandel_3d_backward_compat():
     """to_mandel with no ss arg matches 6-component convention."""
-    v = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    expected = jnp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2, 5.0 * _sqrt2, 6.0 * _sqrt2])
+    v = anp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    expected = anp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2, 5.0 * _sqrt2, 6.0 * _sqrt2])
     np.testing.assert_allclose(to_mandel(v), expected, atol=1e-12)
 
 
 def test_to_mandel_plane_strain():
-    v = jnp.array([1.0, 2.0, 3.0, 4.0])
-    expected = jnp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2])
+    v = anp.array([1.0, 2.0, 3.0, 4.0])
+    expected = anp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2])
     np.testing.assert_allclose(to_mandel(v, PLANE_STRAIN), expected, atol=1e-12)
 
 
@@ -123,26 +123,26 @@ def test_to_mandel_plane_strain():
 
 
 def test_hydrostatic_3d():
-    stress = jnp.array([90.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    stress = anp.array([90.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(hydrostatic(stress), 30.0, atol=1e-10)
     np.testing.assert_allclose(hydrostatic(stress, SOLID_3D), 30.0, atol=1e-10)
 
 
 def test_hydrostatic_plane_strain():
     # All 3 direct components present; same arithmetic as 3D
-    stress = jnp.array([90.0, 30.0, 0.0, 0.0])
+    stress = anp.array([90.0, 30.0, 0.0, 0.0])
     np.testing.assert_allclose(hydrostatic(stress, PLANE_STRAIN), 40.0, atol=1e-10)
 
 
 def test_hydrostatic_plane_stress():
     # ndi=2 stored, ndi_phys=3 → divide by 3 (sigma_33=0 implicitly)
-    stress = jnp.array([90.0, 30.0, 0.0])
+    stress = anp.array([90.0, 30.0, 0.0])
     np.testing.assert_allclose(hydrostatic(stress, PLANE_STRESS), 40.0, atol=1e-10)
 
 
 def test_hydrostatic_1d():
     # ndi_phys=3: uniaxial stress sigma_22=sigma_33=0, so p = sigma_11 / 3
-    stress = jnp.array([90.0])
+    stress = anp.array([90.0])
     np.testing.assert_allclose(hydrostatic(stress, UNIAXIAL_1D), 30.0, atol=1e-10)
 
 
@@ -153,7 +153,7 @@ def test_vonmises_uniaxial_1d():
     Each contributes deviatoric -p to the full Mandel norm.
     """
     sigma = 100.0
-    stress = jnp.array([sigma])
+    stress = anp.array([sigma])
     np.testing.assert_allclose(vonmises(stress, UNIAXIAL_1D), sigma, atol=1e-8)
 
 
@@ -164,7 +164,7 @@ def test_vonmises_uniaxial_plane_stress():
     -p.  Accounting for this extra component gives the correct 3D von Mises.
     """
     sigma = 100.0
-    stress = jnp.array([sigma, 0.0, 0.0])
+    stress = anp.array([sigma, 0.0, 0.0])
     np.testing.assert_allclose(vonmises(stress, PLANE_STRESS), sigma, atol=1e-8)
 
 
@@ -177,15 +177,15 @@ def test_vonmises_uniaxial_plane_stress():
 def test_dev_trace_zero(ss):
     """Sum of direct components of dev(sigma) == 0 when all 3 normals present."""
     n = ss.ntens
-    stress = jnp.arange(1.0, n + 1)
+    stress = anp.arange(1.0, n + 1)
     s = dev(stress, ss)
-    np.testing.assert_allclose(float(jnp.sum(s[: ss.ndi])), 0.0, atol=1e-10)
+    np.testing.assert_allclose(float(anp.sum(s[: ss.ndi])), 0.0, atol=1e-10)
 
 
 def test_dev_3d_backward_compat():
-    stress = jnp.array([100.0, 200.0, 300.0, 0.0, 0.0, 0.0])
+    stress = anp.array([100.0, 200.0, 300.0, 0.0, 0.0, 0.0])
     s = dev(stress)
-    np.testing.assert_allclose(jnp.sum(s[:3]), 0.0, atol=1e-10)
+    np.testing.assert_allclose(anp.sum(s[:3]), 0.0, atol=1e-10)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ def test_dev_3d_backward_compat():
 
 def test_vonmises_uniaxial_3d():
     sigma = 100.0
-    stress = jnp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
+    stress = anp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(vonmises(stress), sigma, atol=1e-8)
 
 
@@ -203,7 +203,7 @@ def test_vonmises_uniaxial_plane_strain():
     # Plane strain under uniaxial load: sigma_33 = nu * sigma_11 but here we
     # test a pure [sigma, 0, 0, 0] vector for simplicity.
     sigma = 100.0
-    stress = jnp.array([sigma, 0.0, 0.0, 0.0])
+    stress = anp.array([sigma, 0.0, 0.0, 0.0])
     # dev = [2/3, -1/3, -1/3, 0] * sigma
     # vm  = sqrt(3/2 * (4/9 + 1/9 + 1/9)) * sigma = sigma
     np.testing.assert_allclose(vonmises(stress, PLANE_STRAIN), sigma, atol=1e-8)
@@ -215,7 +215,7 @@ def test_vonmises_pure_shear_3d():
     # s_mandel = [0,0,0,sqrt(2)*tau,0,0]  → ||s_mandel|| = sqrt(2)*tau
     # sigma_vm = sqrt(1.5) * sqrt(2) * tau = sqrt(3) * tau
     tau = 100.0
-    stress = jnp.array([0.0, 0.0, 0.0, tau, 0.0, 0.0])
+    stress = anp.array([0.0, 0.0, 0.0, tau, 0.0, 0.0])
     np.testing.assert_allclose(vonmises(stress), tau * math.sqrt(3), atol=1e-8)
 
 
@@ -229,12 +229,12 @@ def test_projection_identity(ss):
     I_d = I_dev_voigt(ss)
     I_v = I_vol_voigt(ss)
     I_sum = I_d + I_v
-    np.testing.assert_allclose(I_sum, jnp.eye(ss.ntens), atol=1e-12)
+    np.testing.assert_allclose(I_sum, anp.eye(ss.ntens), atol=1e-12)
 
 
 def test_projection_identity_no_ss():
     """Backward-compat: no ss argument uses 6-component tensors."""
-    np.testing.assert_allclose(I_dev_voigt() + I_vol_voigt(), jnp.eye(6), atol=1e-12)
+    np.testing.assert_allclose(I_dev_voigt() + I_vol_voigt(), anp.eye(6), atol=1e-12)
 
 
 # ---------------------------------------------------------------------------

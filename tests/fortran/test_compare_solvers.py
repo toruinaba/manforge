@@ -7,7 +7,7 @@ Covers:
 - compare_solvers works with mixed plastic/elastic test cases
 """
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 import numpy as np
 import pytest
 
@@ -20,8 +20,8 @@ def _make_solver(model, method):
     def _solve(strain_inc, stress_n, state_n):
         _r = stress_update(
             model,
-            jnp.asarray(strain_inc),
-            jnp.asarray(stress_n),
+            anp.asarray(strain_inc),
+            anp.asarray(stress_n),
             state_n,
             method=method,
         )
@@ -36,26 +36,26 @@ def test_cases(model):
     return [
         # elastic step
         {
-            "strain_inc": jnp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            "stress_n":   jnp.zeros(6),
+            "strain_inc": anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            "stress_n":   anp.zeros(6),
             "state_n":    state_n,
         },
         # plastic uniaxial
         {
-            "strain_inc": jnp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            "stress_n":   jnp.zeros(6),
+            "strain_inc": anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            "stress_n":   anp.zeros(6),
             "state_n":    state_n,
         },
         # plastic shear
         {
-            "strain_inc": jnp.array([0.0, 0.0, 0.0, 3e-3, 0.0, 0.0]),
-            "stress_n":   jnp.zeros(6),
+            "strain_inc": anp.array([0.0, 0.0, 0.0, 3e-3, 0.0, 0.0]),
+            "stress_n":   anp.zeros(6),
             "state_n":    state_n,
         },
         # plastic mixed
         {
-            "strain_inc": jnp.array([1e-3, -5e-4, -5e-4, 1e-3, 0.0, 0.0]),
-            "stress_n":   jnp.zeros(6),
+            "strain_inc": anp.array([1e-3, -5e-4, -5e-4, 1e-3, 0.0, 0.0]),
+            "stress_n":   anp.zeros(6),
             "state_n":    state_n,
         },
     ]
@@ -108,7 +108,7 @@ def test_wrong_solver_fails(model, test_cases):
 
     def bad_solver(strain_inc, stress_n, state_n):
         _r = stress_update(
-            model, jnp.asarray(strain_inc), jnp.asarray(stress_n),
+            model, anp.asarray(strain_inc), anp.asarray(stress_n),
             state_n, method="numerical_newton"
         )
         return _r.stress * 1.1, _r.state, _r.ddsdde  # 10% error in stress

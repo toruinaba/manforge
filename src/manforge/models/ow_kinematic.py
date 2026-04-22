@@ -77,7 +77,7 @@ Notes
   ``hardening_type = 'augmented'`` does not require one.
 """
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel1D, MaterialModel3D, MaterialModelPS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
@@ -124,17 +124,17 @@ class OWKinematic3D(MaterialModel3D):
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
         return {
-            "alpha": jnp.zeros(self.ntens),
-            "ep": jnp.array(0.0),
+            "alpha": anp.zeros(self.ntens),
+            "ep": anp.array(0.0),
         }
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """Isotropic elastic stiffness tensor."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
@@ -214,17 +214,17 @@ class OWKinematicPS(MaterialModelPS):
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
         return {
-            "alpha": jnp.zeros(self.ntens),
-            "ep": jnp.array(0.0),
+            "alpha": anp.zeros(self.ntens),
+            "ep": anp.array(0.0),
         }
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """Plane-stress isotropic stiffness (3×3 condensed)."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
@@ -287,17 +287,17 @@ class OWKinematic1D(MaterialModel1D):
     def initial_state(self) -> dict:
         """Return virgin state: zero backstress tensor and zero plastic strain."""
         return {
-            "alpha": jnp.zeros(self.ntens),
-            "ep": jnp.array(0.0),
+            "alpha": anp.zeros(self.ntens),
+            "ep": anp.array(0.0),
         }
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """1D elastic stiffness [[E]]."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0

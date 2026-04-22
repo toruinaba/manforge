@@ -26,9 +26,9 @@ pytestmark = pytest.mark.fortran
 
 def _py_stress(model, dstran):
     """Reference: Python elastic stiffness matrix-vector product."""
-    import jax.numpy as jnp
+    import autograd.numpy as anp
     C = model.elastic_stiffness()
-    return np.array(C @ jnp.array(dstran))
+    return np.array(C @ anp.array(dstran))
 
 
 # ---------------------------------------------------------------------------

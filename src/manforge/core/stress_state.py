@@ -1,55 +1,14 @@
-"""StressState: dimensionality descriptor for stress/strain analyses.
-
-Encapsulates the ABAQUS NTENS convention so that operators and models can
-be written once and work for any element type.
-
-ABAQUS conventions
-------------------
-Element type        NDI  NSHR  NTENS  Components
-3D solid (C3D8)       3     3      6  [11,22,33,12,13,23]
-Plane strain (CPE4)   3     1      4  [11,22,33,12]
-Axisymmetric (CAX4)   3     1      4  [11,22,33,12]
-Plane stress (CPS4)   2     1      3  [11,22,12]  (sigma_33=0 enforced)
-1D truss/bar          1     0      1  [11]
-"""
+"""StressState: dimensionality descriptor for stress/strain analyses."""
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-import jax.numpy as jnp
+import numpy as np
 
 
 @dataclass(frozen=True)
 class StressState:
-    """Dimensionality descriptor for a stress analysis.
-
-    Parameters
-    ----------
-    name : str
-        Human-readable label (e.g. "3D_SOLID").
-    ntens : int
-        Total number of stored stress/strain components (= ndi + nshr).
-    ndi : int
-        Number of stored direct (normal) stress components.
-    nshr : int
-        Number of stored shear stress components.
-    ndi_phys : int
-        Physical number of spatial dimensions (3 for 3D/plane/axisymmetric,
-        1 for 1D truss).  Used when computing hydrostatic pressure so that
-        the divisor is always the physical dimensionality, not just the
-        number of stored direct components (relevant for plane stress where
-        ndi=2 but sigma_33=0 contributes to the mean, so we divide by 3).
-    mandel_factors : tuple[float, ...]
-        Length ``ntens``.  Multiply a Voigt vector by these to obtain the
-        Mandel representation (shear entries scaled by sqrt(2)).
-    is_plane_stress : bool
-        True only for plane-stress states.  For J2 (von Mises) plasticity
-        with isotropic hardening, the reduced-space radial return preserves
-        sigma_33=0, so no outer iteration is required.  For pressure-dependent
-        models (e.g. Drucker-Prager, Gurson) a ``PlaneStressWrapper`` that
-        iterates on eps_33 would be necessary; such a wrapper is not yet
-        implemented.
-    """
+    """Dimensionality descriptor for a stress analysis."""
 
     name: str
     ntens: int
@@ -58,10 +17,6 @@ class StressState:
     ndi_phys: int
     mandel_factors: tuple
     is_plane_stress: bool = False
-
-    # ------------------------------------------------------------------
-    # Cached JAX arrays (computed lazily on first access)
-    # ------------------------------------------------------------------
 
     def __post_init__(self):
         if self.ntens != self.ndi + self.nshr:
@@ -77,24 +32,28 @@ class StressState:
 
     @property
     def n_missing(self) -> int:
-        """Number of unstored direct stress components (ndi_phys − ndi).
-
-        Used by ``_vonmises`` to correct for physically-present but unstored
-        direct components (e.g. σ33=0 in plane stress, σ22=σ33=0 in 1D).
-
-        Values: SOLID_3D=0, PLANE_STRAIN=0, PLANE_STRESS=1, UNIAXIAL_1D=2.
-        """
+        """Number of unstored direct stress components (ndi_phys − ndi)."""
         return self.ndi_phys - self.ndi
 
     @property
-    def mandel_factors_jnp(self) -> jnp.ndarray:
-        """Mandel scaling factors as a JAX array, shape (ntens,)."""
-        return jnp.array(self.mandel_factors)
+    def mandel_factors_np(self) -> np.ndarray:
+        """Mandel scaling factors as a numpy array, shape (ntens,)."""
+        return np.array(self.mandel_factors)
+
+    # backward-compat alias
+    @property
+    def mandel_factors_jnp(self) -> np.ndarray:
+        return self.mandel_factors_np
 
     @property
-    def identity_jnp(self) -> jnp.ndarray:
+    def identity_np(self) -> np.ndarray:
         """Voigt identity vector [1,...,1, 0,...,0], shape (ntens,)."""
-        return jnp.array([1.0] * self.ndi + [0.0] * self.nshr)
+        return np.array([1.0] * self.ndi + [0.0] * self.nshr)
+
+    # backward-compat alias
+    @property
+    def identity_jnp(self) -> np.ndarray:
+        return self.identity_np
 
 
 # ---------------------------------------------------------------------------

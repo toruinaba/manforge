@@ -1,6 +1,6 @@
 """Canonical strain increment vectors reused across integration tests."""
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 # 4 canonical 3D (ntens=6) strain increments
 DEPS_UNIAXIAL_3D    = [2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]

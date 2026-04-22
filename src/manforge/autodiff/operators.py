@@ -13,7 +13,7 @@ argument so that it works for any element dimensionality.  When ``ss`` is
 omitted the 6-component 3D convention is used (backward-compatible).
 """
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.utils.voigt import to_mandel
 
@@ -28,164 +28,53 @@ __all__ = [
 ]
 
 
-def identity_voigt(ss=None) -> jnp.ndarray:
-    """Second-order identity tensor δ_{ij} in Voigt notation.
-
-    Parameters
-    ----------
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D`` (6-component).
-
-    Returns
-    -------
-    jnp.ndarray, shape (ntens,)
-        [1, ..., 1, 0, ..., 0]  (ones for direct components, zeros for shear).
-    """
+def identity_voigt(ss=None) -> anp.ndarray:
+    """Second-order identity tensor δ_{ij} in Voigt notation."""
     if ss is None:
-        return jnp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
-    return ss.identity_jnp
+        return anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+    return ss.identity_np
 
 
-def hydrostatic(stress: jnp.ndarray, ss=None) -> jnp.ndarray:
-    """Hydrostatic pressure (mean normal stress).
-
-    Parameters
-    ----------
-    stress : jnp.ndarray, shape (ntens,)
-        Stress in Voigt notation.
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, scalar
-        p = (sum of stored direct components) / ndi_phys
-
-    Notes
-    -----
-    For plane stress (ndi=2, ndi_phys=3): divides by 3 because sigma_33=0
-    is enforced externally and contributes zero to the trace.
-    """
+def hydrostatic(stress: anp.ndarray, ss=None) -> anp.ndarray:
+    """Hydrostatic pressure (mean normal stress)."""
     if ss is None:
         return (stress[0] + stress[1] + stress[2]) / 3.0
-    return jnp.sum(stress[: ss.ndi]) / ss.ndi_phys
+    return anp.sum(stress[: ss.ndi]) / ss.ndi_phys
 
 
-def dev(stress: jnp.ndarray, ss=None) -> jnp.ndarray:
-    """Deviatoric stress tensor.
-
-    Parameters
-    ----------
-    stress : jnp.ndarray, shape (ntens,)
-        Stress in Voigt notation.
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, shape (ntens,)
-        s = σ - p·δ  where p = hydrostatic(σ)
-    """
+def dev(stress: anp.ndarray, ss=None) -> anp.ndarray:
+    """Deviatoric stress tensor."""
     p = hydrostatic(stress, ss)
     return stress - p * identity_voigt(ss)
 
 
-def norm_mandel(t_voigt: jnp.ndarray, ss=None) -> jnp.ndarray:
-    """Mandel norm of a symmetric second-order tensor.
-
-    Converts to Mandel notation first so that the Euclidean norm equals
-    the tensor norm  ‖T‖ = √(T:T).
-
-    Parameters
-    ----------
-    t_voigt : jnp.ndarray, shape (ntens,)
-        Tensor in Voigt notation.
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, scalar
-        √(T:T)  =  ‖t_mandel‖₂
-    """
+def norm_mandel(t_voigt: anp.ndarray, ss=None) -> anp.ndarray:
+    """Mandel norm of a symmetric second-order tensor."""
     t_m = to_mandel(t_voigt, ss)
-    return jnp.sqrt(jnp.dot(t_m, t_m))
+    return anp.sqrt(anp.dot(t_m, t_m))
 
 
-def vonmises(stress: jnp.ndarray, ss=None) -> jnp.ndarray:
-    """Von Mises equivalent stress.
-
-    σ_vm = √(3/2 · s:s)  where s = dev(σ)
-
-    Uses Mandel norm internally:
-      s:s  = ‖s_mandel‖²
-      σ_vm = √(3/2) · ‖s_mandel‖
-
-    For reduced stress states (PLANE_STRESS, UNIAXIAL_1D) where fewer direct
-    components are stored than exist physically, the unstored zero-stress
-    components each contribute a deviatoric value of ``-p`` to the full
-    tensor norm.  These are accounted for analytically:
-
-      ‖s‖² = ‖s_stored‖²_Mandel + (ndi_phys - ndi) · p²
-
-    Parameters
-    ----------
-    stress : jnp.ndarray, shape (ntens,)
-        Stress in Voigt notation.
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, scalar
-        Von Mises equivalent stress.
-    """
+def vonmises(stress: anp.ndarray, ss=None) -> anp.ndarray:
+    """Von Mises equivalent stress."""
     s = dev(stress, ss)
     p = hydrostatic(stress, ss)
     ndi_phys = 3 if ss is None else ss.ndi_phys
     ndi_stored = 3 if ss is None else ss.ndi
     n_missing = ndi_phys - ndi_stored
     s_m = to_mandel(s, ss)
-    sq_norm = jnp.dot(s_m, s_m) + n_missing * p ** 2
-    return jnp.sqrt(1.5 * sq_norm)
+    sq_norm = anp.dot(s_m, s_m) + n_missing * p ** 2
+    return anp.sqrt(1.5 * sq_norm)
 
 
-def I_vol_voigt(ss=None) -> jnp.ndarray:
-    """Volumetric projection tensor P_vol in Voigt notation.
-
-    P_vol = (1/ndi_phys) δ⊗δ
-
-    Parameters
-    ----------
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, shape (ntens, ntens)
-    """
+def I_vol_voigt(ss=None) -> anp.ndarray:
+    """Volumetric projection tensor P_vol in Voigt notation."""
     delta = identity_voigt(ss)
     ndi_phys = 3 if ss is None else ss.ndi_phys
-    return jnp.outer(delta, delta) / ndi_phys
+    return anp.outer(delta, delta) / ndi_phys
 
 
-def I_dev_voigt(ss=None) -> jnp.ndarray:
-    """Deviatoric projection tensor P_dev in Voigt notation.
-
-    P_dev = I_sym - P_vol
-
-    where I_sym is the ntens×ntens symmetric identity (maps Voigt vector to
-    itself for the normal components; shear components unchanged).
-
-    Parameters
-    ----------
-    ss : StressState, optional
-        Dimensionality descriptor.  Defaults to ``SOLID_3D``.
-
-    Returns
-    -------
-    jnp.ndarray, shape (ntens, ntens)
-    """
+def I_dev_voigt(ss=None) -> anp.ndarray:
+    """Deviatoric projection tensor P_dev in Voigt notation."""
     ntens = 6 if ss is None else ss.ntens
-    I_sym = jnp.eye(ntens)
+    I_sym = anp.eye(ntens)
     return I_sym - I_vol_voigt(ss)

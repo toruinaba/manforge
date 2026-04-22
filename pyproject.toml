@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "manforge"
 version = "0.1.0"
-description = "Framework for validating Fortran UMAT constitutive models with JAX autodiff"
+description = "Framework for validating Fortran UMAT constitutive models with autodiff"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -13,7 +13,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "jax[cpu]>=0.4.20",
+    "autograd>=1.8.0",
     "numpy",
     "scipy",
 ]

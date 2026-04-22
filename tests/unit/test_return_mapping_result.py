@@ -1,6 +1,6 @@
 """Tests for ReturnMappingResult dataclass fields."""
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 import numpy as np
 import pytest
 
@@ -8,14 +8,14 @@ from manforge.core.stress_update import stress_update, ReturnMappingResult, Stre
 
 
 def test_result_is_dataclass(model, initial_state):
-    deps = jnp.zeros(6)
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.zeros(6)
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
     assert isinstance(result, StressUpdateResult)
 
 
 def test_elastic_step_fields(model, initial_state):
-    deps = jnp.array([1e-4, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.array([1e-4, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
 
     assert result.is_plastic is False
     assert float(result.dlambda) == pytest.approx(0.0)
@@ -28,8 +28,8 @@ def test_elastic_step_fields(model, initial_state):
 
 def test_plastic_step_fields(model, initial_state):
     # Large uniaxial strain — clearly plastic
-    deps = jnp.array([3e-3, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
 
     assert result.is_plastic is True
     assert float(result.dlambda) > 0.0
@@ -44,29 +44,29 @@ def test_plastic_step_fields(model, initial_state):
 
 def test_stress_trial_is_elastic_prediction(model, initial_state):
     C = model.elastic_stiffness()
-    deps = jnp.array([3e-3, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
 
-    expected_trial = jnp.zeros(6) + C @ deps
+    expected_trial = anp.zeros(6) + C @ deps
     np.testing.assert_allclose(
         np.array(result.stress_trial), np.array(expected_trial), rtol=1e-12
     )
 
 
 def test_analytical_method_sets_is_plastic(model, initial_state):
-    deps = jnp.array([3e-3, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state, method="user_defined")
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state, method="user_defined")
     assert result.is_plastic is True
     assert float(result.dlambda) > 0.0
 
 
 def test_state_updated_in_plastic_step(model, initial_state):
-    deps = jnp.array([3e-3, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
     assert float(result.state["ep"]) > 0.0
 
 
 def test_state_unchanged_in_elastic_step(model, initial_state):
-    deps = jnp.array([1e-4, 0, 0, 0, 0, 0])
-    result = stress_update(model, deps, jnp.zeros(6), initial_state)
+    deps = anp.array([1e-4, 0, 0, 0, 0, 0])
+    result = stress_update(model, deps, anp.zeros(6), initial_state)
     assert float(result.state["ep"]) == pytest.approx(0.0)

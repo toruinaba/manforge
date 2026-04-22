@@ -10,7 +10,7 @@ where σ_y = σ_y0 + H ep_n.
 """
 
 import numpy as np
-import jax.numpy as jnp
+import autograd.numpy as anp
 import pytest
 
 from manforge.core.stress_update import stress_update
@@ -36,8 +36,8 @@ def test_plastic_stress_uniaxial(model, lame_constants):
     H = model.H
 
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
-    stress_n = jnp.zeros(6)
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
     _r = stress_update(model, strain_inc, stress_n, state_n)
@@ -62,11 +62,11 @@ def test_plastic_stress_uniaxial(model, lame_constants):
 def test_plastic_ep_updated(model):
     """Equivalent plastic strain must increase after plastic step."""
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
     state_new = stress_update(
-        model, strain_inc, jnp.zeros(6), state_n
+        model, strain_inc, anp.zeros(6), state_n
     ).state
 
     assert float(state_new["ep"]) > 0.0
@@ -83,7 +83,7 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
     H = model.H
 
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
     # Correct σ_vm_trial = 2μ·deps11  (for uniaxial strain increment)
@@ -91,7 +91,7 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
     dlambda_analytic = (sigma_vm_trial - sigma_y0) / (3.0 * mu + H)
 
     state_new = stress_update(
-        model, strain_inc, jnp.zeros(6), state_n
+        model, strain_inc, anp.zeros(6), state_n
     ).state
 
     np.testing.assert_allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
@@ -100,24 +100,24 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
 def test_plastic_yield_consistency(model):
     """After plastic step, updated stress should lie on the yield surface."""
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    _r = stress_update(model, strain_inc, jnp.zeros(6), state_n)
+    _r = stress_update(model, strain_inc, anp.zeros(6), state_n)
     stress_new, state_new = _r.stress, _r.state
 
     f_final = model.yield_function(stress_new, state_new)
-    assert jnp.abs(f_final) < 1e-8, f"|f| = {float(jnp.abs(f_final)):.3e}"
+    assert anp.abs(f_final) < 1e-8, f"|f| = {float(anp.abs(f_final)):.3e}"
 
 
 def test_plastic_ddsdde_differs_from_C(model):
     """In plastic domain, DDSDDE must differ from elastic stiffness."""
     C = model.elastic_stiffness()
     deps11 = 2e-3
-    strain_inc = jnp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
+    strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     ddsdde = stress_update(
-        model, strain_inc, jnp.zeros(6), model.initial_state()
+        model, strain_inc, anp.zeros(6), model.initial_state()
     ).ddsdde
 
     assert not np.allclose(np.asarray(ddsdde), np.asarray(C), atol=1.0), \
