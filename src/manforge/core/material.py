@@ -78,6 +78,8 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: augmented hardening models must implement "
                 "state_residual()"
             )
+        from manforge.verification.fortran_registry import collect_bindings
+        cls._fortran_bindings = collect_bindings(cls)
 
     @property
     def ntens(self) -> int:

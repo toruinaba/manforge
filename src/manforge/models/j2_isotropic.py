@@ -27,6 +27,7 @@ import autograd.numpy as anp
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 from manforge.core.stress_update import ReturnMappingResult
+from manforge.verification.fortran_registry import verified_against_fortran
 
 
 class J2Isotropic3D(MaterialModel3D):
@@ -83,6 +84,10 @@ class J2Isotropic3D(MaterialModel3D):
     # Material physics — reduced hardening (hardening_type = "reduced")
     # ------------------------------------------------------------------
 
+    @verified_against_fortran(
+        "j2_isotropic_3d_elastic_stiffness",
+        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
+    )
     def elastic_stiffness(self) -> anp.ndarray:
         """Isotropic elastic stiffness tensor."""
         mu = self.E / (2.0 * (1.0 + self.nu))
