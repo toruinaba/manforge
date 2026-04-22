@@ -18,10 +18,14 @@ via ``result.fields["name"]``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from manforge.core.stress_update import StressUpdateResult
 
 
 class FieldType(Enum):
@@ -101,7 +105,7 @@ class DriverResult:
 
     step_results: list
     strain: np.ndarray
-    collect_state: "dict[str, FieldType] | None" = None
+    collect_state: dict[str, FieldType] | None = None
 
     @property
     def stress(self) -> np.ndarray:
@@ -109,7 +113,7 @@ class DriverResult:
         return np.array([np.asarray(r.stress) for r in self.step_results])
 
     @property
-    def fields(self) -> "dict[str, FieldHistory]":
+    def fields(self) -> dict[str, FieldHistory]:
         """All output fields constructed from step_results."""
         out: dict[str, FieldHistory] = {
             "Stress": FieldHistory(FieldType.STRESS, "Stress", self.stress),
@@ -122,3 +126,45 @@ class DriverResult:
                 )
                 out[k] = FieldHistory(ft, k, data)
         return out
+
+
+@dataclass
+class DriverStep:
+    """Per-step snapshot yielded by :meth:`~manforge.simulation.driver.DriverBase.iter_run`.
+
+    Parameters
+    ----------
+    i : int
+        0-based step index.
+    strain : np.ndarray, shape (ntens,)
+        Cumulative strain at this step (copied — safe to retain across steps).
+    result : StressUpdateResult
+        Full stress-update result: stress, state, ddsdde, dlambda, is_plastic, etc.
+    converged : bool
+        Outer NR convergence flag (StressDriver only; always ``True`` for StrainDriver).
+    n_outer_iter : int
+        Number of outer NR iterations (StressDriver only; ``1`` for StrainDriver).
+    residual_inf : float
+        Final L∞ residual of outer NR (StressDriver only; ``0.0`` for StrainDriver).
+
+    Examples
+    --------
+    Break on the first plastic step::
+
+        for step in driver.iter_run(model, load):
+            if step.result.is_plastic:
+                print(f"Plasticity onset at step {step.i}")
+                break
+
+    Inspect StressDriver convergence details::
+
+        for step in driver.iter_run(model, load):
+            print(step.i, step.n_outer_iter, step.residual_inf)
+    """
+
+    i: int
+    strain: np.ndarray
+    result: StressUpdateResult
+    converged: bool = True
+    n_outer_iter: int = 1
+    residual_inf: float = 0.0

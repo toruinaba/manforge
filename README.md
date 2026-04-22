@@ -212,6 +212,28 @@ step = result.step_results[15]   # 15ステップ目の StressUpdateResult
 print(step.dlambda, step.n_iterations)
 ```
 
+`iter_run` を使うとステップごとに `DriverStep` を受け取るジェネレータになる。途中で分岐・打切り・対話的検査が可能:
+
+```python
+from manforge.simulation.driver import StrainDriver
+from manforge.simulation.types import FieldHistory, FieldType
+import numpy as np
+
+load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0, 5e-3, 100))
+driver = StrainDriver()
+
+# 塑性開始ステップで break
+for step in driver.iter_run(model, load):
+    # step.i           — 0-based ステップ番号
+    # step.strain      — 累積ひずみ (ntens,)
+    # step.result      — StressUpdateResult (stress, state, ddsdde, dlambda, ...)
+    if step.result.is_plastic:
+        print(f"Plasticity onset at step {step.i}, ep={step.result.state['ep']:.4e}")
+        break
+```
+
+`StressDriver` では `step.n_outer_iter` と `step.residual_inf` で外側 NR の収束状況を確認できる。非収束時の既定動作は `RuntimeError` だが、`raise_on_nonconverged=False` で `step.converged=False` の step を yield して consumer が判断することもできる。既存の `run` はそのまま使える（後方互換）。
+
 ### Fitting
 
 ```python
@@ -444,14 +466,14 @@ from manforge.verification.compare import compare_solvers
 from manforge.verification.test_cases import generate_single_step_cases
 
 def make_solver(method):
-    def _solve(strain_inc, stress_n, state_n):
-        r = stress_update(model, strain_inc, stress_n, state_n, method=method)
-        return r.stress, r.state, r.ddsdde
+    def _solve(model, strain_inc, stress_n, state_n):
+        return stress_update(model, strain_inc, stress_n, state_n, method=method)
     return _solve
 
 # 弾性・塑性・多軸・剪断ケースを自動生成
 cases = generate_single_step_cases(model)
 result = compare_solvers(
+    model,
     solver_a=make_solver("numerical_newton"),
     solver_b=make_solver("user_defined"),
     test_cases=cases,
@@ -460,6 +482,23 @@ print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}"
 ```
 
 `generate_single_step_cases` は `estimate_yield_strain` で降伏ひずみを自動推定し、5 ケース (弾性・塑性・多軸・剪断・プレストレス) を生成する。
+
+`iter_compare_solvers` を使うとケースごとに `SolverCaseResult` を受け取るジェネレータになる。最初の失敗ケースで打ち切って Jacobian 比較などの詳細デバッグが可能:
+
+```python
+from manforge.verification.compare import iter_compare_solvers, compare_jacobians
+
+for case in iter_compare_solvers(model, solver_a, solver_b, cases):
+    # case.case_index, case.stress_rel_err, case.passed など
+    if not case.passed:
+        print(f"Case {case.case_index} failed: stress_err={case.stress_rel_err:.2e}")
+        # result_a / result_b をそのまま compare_jacobians に渡せる
+        state_n = cases[case.case_index]["state_n"]
+        jac = compare_jacobians(model, case.result_a, case.result_b, state_n)
+        break
+```
+
+既存の `compare_solvers` はそのまま使える（後方互換）。
 
 ### Fortran UMAT クロス検証
 

@@ -1,4 +1,4 @@
-from manforge.simulation.types import FieldType, FieldHistory, DriverResult
+from manforge.simulation.types import FieldType, FieldHistory, DriverResult, DriverStep
 from manforge.simulation.driver import (
     DriverBase,
     StrainDriver,
@@ -16,4 +16,5 @@ __all__ = [
     "StressDriver",
     "UniaxialDriver",
     "GeneralDriver",
+    "DriverStep",
 ]

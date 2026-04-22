@@ -3,6 +3,8 @@
 from manforge.verification.compare import (
     compare_solvers,
     SolverComparisonResult,
+    iter_compare_solvers,
+    SolverCaseResult,
     compare_jacobians,
     JacobianComparisonResult,
 )
@@ -17,6 +19,8 @@ from manforge.verification.test_cases import (
 __all__ = [
     "compare_solvers",
     "SolverComparisonResult",
+    "iter_compare_solvers",
+    "SolverCaseResult",
     "compare_jacobians",
     "JacobianComparisonResult",
     "check_tangent",

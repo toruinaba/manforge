@@ -22,11 +22,12 @@ Backward-compatibility aliases
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 
 import numpy as np
 
 from manforge.core.stress_update import stress_update
-from manforge.simulation.types import DriverResult, FieldHistory, FieldType
+from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------
@@ -42,11 +43,46 @@ class DriverBase(ABC):
     """
 
     @abstractmethod
+    def iter_run(
+        self,
+        model,
+        load: FieldHistory,
+        *,
+        method: str = "auto",
+    ) -> Iterator[DriverStep]:
+        """Yield per-step results as a generator.
+
+        Parameters
+        ----------
+        model : MaterialModel
+        load : FieldHistory
+            Loading history (same requirements as :meth:`run`).
+        method : str, optional
+            Passed to the underlying stress-update call (default ``"auto"``).
+
+        Yields
+        ------
+        DriverStep
+            Snapshot after each step: cumulative strain, full
+            :class:`~manforge.core.stress_update.StressUpdateResult`, and
+            (for :class:`StressDriver`) outer-NR diagnostics.
+
+        Examples
+        --------
+        Break on plasticity onset::
+
+            for step in driver.iter_run(model, load):
+                if step.result.is_plastic:
+                    print(f"Plasticity at step {step.i}")
+                    break
+        """
+
     def run(
         self,
         model,
         load: FieldHistory,
         collect_state: dict[str, FieldType] | None = None,
+        method: str = "auto",
     ) -> DriverResult:
         """Run the loading simulation.
 
@@ -64,11 +100,28 @@ class DriverBase(ABC):
 
             If ``None`` (default), no state variables are collected and
             ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
+        method : str, optional
+            Passed to the underlying stress-update call (default ``"auto"``).
 
         Returns
         -------
         DriverResult
         """
+        step_results = []
+        strain_rows = []
+        for step in self.iter_run(model, load, method=method):
+            step_results.append(step.result)
+            strain_rows.append(step.strain)
+        strain_out = (
+            np.stack(strain_rows)
+            if strain_rows
+            else np.zeros((0, model.ntens))
+        )
+        return DriverResult(
+            step_results=step_results,
+            strain=strain_out,
+            collect_state=collect_state,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -90,14 +143,14 @@ class StrainDriver(DriverBase):
     ``UniaxialDriver`` and ``GeneralDriver`` are aliases for this class.
     """
 
-    def run(
+    def iter_run(
         self,
         model,
         load: FieldHistory,
-        collect_state: dict[str, FieldType] | None = None,
+        *,
         method: str = "auto",
-    ) -> DriverResult:
-        """Run the strain-controlled loading history.
+    ) -> Iterator[DriverStep]:
+        """Yield per-step results for the strain-controlled loading history.
 
         Parameters
         ----------
@@ -109,53 +162,37 @@ class StrainDriver(DriverBase):
             * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
             * ``(N, ntens)`` — general: all components prescribed.
 
-        collect_state : dict[str, FieldType] or None, optional
-            State variables to include in the result.  Example::
-
-                collect_state={"ep": FieldType.STRAIN}
-
-        method : {"auto", "autodiff", "analytical"}, optional
-            Passed to :func:`~manforge.core.return_mapping.return_mapping`
+        method : {"auto", "numerical_newton", "user_defined"}, optional
+            Passed to :func:`~manforge.core.stress_update.stress_update`
             at every step (default ``"auto"``).
 
-        Returns
-        -------
-        DriverResult
-            Always contains ``"Stress"`` (N, ntens) and ``"Strain"``
-            (N, ntens).  State-variable fields are added when
-            ``collect_state`` is provided.
+        Yields
+        ------
+        DriverStep
         """
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
         ntens = model.ntens
-        N = len(data)
 
         stress_n = np.zeros(ntens)
         state_n = model.initial_state()
-        strain_out = np.zeros((N, ntens))
-        step_results = []
 
-        for i in range(N):
+        for i in range(len(data)):
             if uniaxial:
                 deps11 = data[i] - (data[i - 1] if i > 0 else 0.0)
                 strain_inc = np.zeros(ntens)
                 strain_inc[0] = deps11
-                strain_out[i, 0] = data[i]
+                strain_cum = np.zeros(ntens)
+                strain_cum[0] = data[i]
             else:
                 prev = data[i - 1] if i > 0 else np.zeros(ntens)
                 strain_inc = np.array(data[i] - prev)
-                strain_out[i] = data[i]
+                strain_cum = np.array(data[i])
 
             rm = stress_update(model, strain_inc, stress_n, state_n, method=method)
             stress_n = rm.stress
             state_n = rm.state
-            step_results.append(rm)
-
-        return DriverResult(
-            step_results=step_results,
-            strain=strain_out,
-            collect_state=collect_state,
-        )
+            yield DriverStep(i=i, strain=strain_cum.copy(), result=rm)
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +221,100 @@ class StressDriver(DriverBase):
         self.max_iter = max_iter
         self.tol = tol
 
+    def iter_run(
+        self,
+        model,
+        load: FieldHistory,
+        *,
+        method: str = "auto",
+        raise_on_nonconverged: bool = True,
+    ) -> Iterator[DriverStep]:
+        """Yield per-step results for the stress-controlled loading history.
+
+        Parameters
+        ----------
+        model : MaterialModel
+            Constitutive model instance.
+        load : FieldHistory
+            Must have ``type = FieldType.STRESS`` and
+            ``load.data`` shape ``(N, ntens)`` — cumulative target stress
+            tensor (Voigt) at each step.
+        method : {"auto", "numerical_newton", "user_defined"}, optional
+            Passed to :func:`~manforge.core.stress_update.stress_update`
+            at every inner iteration (default ``"auto"``).
+        raise_on_nonconverged : bool, optional
+            If ``True`` (default), raise :exc:`RuntimeError` when Newton-Raphson
+            does not converge.  If ``False``, yield a :class:`DriverStep` with
+            ``converged=False`` instead; internal state is *not* advanced for
+            that step, so the caller should ``break`` immediately.
+
+        Yields
+        ------
+        DriverStep
+            Includes ``n_outer_iter`` and ``residual_inf`` for NR diagnostics.
+
+        Raises
+        ------
+        RuntimeError
+            If NR does not converge and ``raise_on_nonconverged=True``.
+        """
+        stress_history = np.asarray(load.data, dtype=float)
+        ntens = model.ntens
+
+        stress_n = np.zeros(ntens)
+        state_n = model.initial_state()
+        eps_total = np.zeros(ntens)
+
+        C = model.elastic_stiffness()
+        S = np.linalg.inv(np.array(C))
+
+        for i in range(stress_history.shape[0]):
+            sigma_target = np.array(stress_history[i])
+            deps = S @ (sigma_target - stress_n)
+
+            converged = False
+            residual = np.full(ntens, np.inf)
+            rm = None
+            k = 0
+            for k in range(self.max_iter):
+                rm = stress_update(model, deps, stress_n, state_n, method=method)
+                residual = sigma_target - np.array(rm.stress)
+                if float(np.max(np.abs(residual))) < self.tol:
+                    converged = True
+                    break
+                deps = deps + np.linalg.solve(np.array(rm.ddsdde), residual)
+
+            residual_inf = float(np.max(np.abs(residual)))
+
+            if not converged:
+                if raise_on_nonconverged:
+                    raise RuntimeError(
+                        f"StressDriver: NR did not converge at step {i} "
+                        f"(||residual||_inf = {residual_inf:.3e}, "
+                        f"tol = {self.tol:.3e})"
+                    )
+                yield DriverStep(
+                    i=i,
+                    strain=eps_total.copy(),
+                    result=rm,
+                    converged=False,
+                    n_outer_iter=k + 1,
+                    residual_inf=residual_inf,
+                )
+                return
+
+            eps_total = eps_total + np.array(deps)
+            stress_n = rm.stress
+            state_n = rm.state
+            yield DriverStep(
+                i=i,
+                strain=eps_total.copy(),
+                result=rm,
+                converged=True,
+                n_outer_iter=k + 1,
+                residual_inf=residual_inf,
+            )
+
     def run(
         self,
         model,
@@ -202,20 +333,14 @@ class StressDriver(DriverBase):
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
             tensor (Voigt) at each step.
         collect_state : dict[str, FieldType] or None, optional
-            State variables to include in the result.  Example::
-
-                collect_state={"ep": FieldType.STRAIN}
-
+            State variables to include in the result.
         method : {"auto", "numerical_newton", "user_defined"}, optional
             Passed to :func:`~manforge.core.stress_update.stress_update`
-            at every inner iteration (default ``"auto"``).
+            (default ``"auto"``).
 
         Returns
         -------
         DriverResult
-            Always contains ``"Stress"`` (N, ntens) and ``"Strain"``
-            (N, ntens).  State-variable fields are added when
-            ``collect_state`` is provided.
 
         Raises
         ------
@@ -223,50 +348,16 @@ class StressDriver(DriverBase):
             If Newton-Raphson does not converge within ``max_iter`` iterations
             at any step.
         """
-        stress_history = np.asarray(load.data, dtype=float)
-        N = stress_history.shape[0]
-        ntens = model.ntens
-
-        stress_n = np.zeros(ntens)
-        state_n = model.initial_state()
-        eps_total = np.zeros(ntens)
-        strain_out = np.zeros((N, ntens))
         step_results = []
-
-        # Elastic compliance for the initial strain-increment guess
-        C = model.elastic_stiffness()
-        S = np.linalg.inv(np.array(C))
-
-        for i in range(N):
-            sigma_target = np.array(stress_history[i])
-
-            # Initial guess: elastic compliance applied to stress increment
-            deps = S @ (sigma_target - stress_n)
-
-            converged = False
-            residual = np.full(ntens, np.inf)
-            rm = None
-            for _ in range(self.max_iter):
-                rm = stress_update(model, deps, stress_n, state_n, method=method)
-                residual = sigma_target - np.array(rm.stress)
-                if float(np.max(np.abs(residual))) < self.tol:
-                    converged = True
-                    break
-                deps = deps + np.linalg.solve(np.array(rm.ddsdde), residual)
-
-            if not converged:
-                raise RuntimeError(
-                    f"StressDriver: NR did not converge at step {i} "
-                    f"(||residual||_inf = {float(np.max(np.abs(residual))):.3e}, "
-                    f"tol = {self.tol:.3e})"
-                )
-
-            stress_n = rm.stress
-            state_n = rm.state
-            eps_total = eps_total + np.array(deps)
-            strain_out[i] = eps_total.copy()
-            step_results.append(rm)
-
+        strain_rows = []
+        for step in self.iter_run(model, load, method=method, raise_on_nonconverged=True):
+            step_results.append(step.result)
+            strain_rows.append(step.strain)
+        strain_out = (
+            np.stack(strain_rows)
+            if strain_rows
+            else np.zeros((0, model.ntens))
+        )
         return DriverResult(
             step_results=step_results,
             strain=strain_out,
