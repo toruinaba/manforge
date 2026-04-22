@@ -21,7 +21,7 @@ Algorithm (stress_update)
 3. Return mapping — solver selected by ``method``:
 
    *numerical_newton*  (generic, default fallback)
-     Scalar NR on Δλ using ``jax.grad`` for flow direction and linearisation
+     Scalar NR on Δλ using ``autograd.grad`` for flow direction and linearisation
      (reduced hardening), or augmented (ntens+1+n_state) vector NR (augmented).
 
    *user_defined*  (model-supplied, opt-in)
@@ -32,7 +32,7 @@ Algorithm (stress_update)
 4. Consistent tangent — path selected by ``method``:
 
    *autodiff*  (generic, always available)
-     Implicit differentiation via ``jax.jacobian``.
+     Implicit differentiation via ``autograd.jacobian``.
 
    *user_defined*  (model-supplied, opt-in)
      Calls ``model.user_defined_tangent(σ, state, Δλ, C, state_n)``
@@ -53,14 +53,14 @@ added as additional ``method`` values without changing the API.
 Notes
 -----
 - Python if/break is used for the elastic check and NR convergence.
-  jax.jit compatibility is left as a TODO.
+  jit compatibility is not applicable (autograd has no JIT).
 - For J2 with linear isotropic hardening the NR converges in a single step
   (the classic radial-return closed form).
 """
 
 from dataclasses import dataclass, field
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.core.solver import _select_nr
 from manforge.core.tangent import _select_tangent
@@ -119,11 +119,11 @@ class ReturnMappingResult:
 
     Attributes
     ----------
-    stress : jnp.ndarray, shape (ntens,)
+    stress : anp.ndarray, shape (ntens,)
         Converged stress σ_{n+1}.
     state : dict
         Converged internal state at step n+1.
-    dlambda : jnp.ndarray, scalar
+    dlambda : anp.ndarray, scalar
         Plastic multiplier increment Δλ.
     n_iterations : int
         Number of Newton updates performed by the framework's numerical solver.
@@ -138,9 +138,9 @@ class ReturnMappingResult:
         unless the corrector returns a 5-tuple with its own history.
     """
 
-    stress: jnp.ndarray
+    stress: anp.ndarray
     state: dict
-    dlambda: jnp.ndarray
+    dlambda: anp.ndarray
     n_iterations: int = 0
     residual_history: list = field(default_factory=list)
 
@@ -157,9 +157,9 @@ class StressUpdateResult:
     return_mapping : ReturnMappingResult or None
         Plastic correction result.  ``None`` for elastic steps (no plastic
         correction was performed).
-    ddsdde : jnp.ndarray, shape (ntens, ntens)
+    ddsdde : anp.ndarray, shape (ntens, ntens)
         Consistent tangent operator dσ_{n+1}/dΔε.
-    stress_trial : jnp.ndarray, shape (ntens,)
+    stress_trial : anp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
     is_plastic : bool
         True if the step activated plasticity.
@@ -169,13 +169,13 @@ class StressUpdateResult:
     """
 
     return_mapping: "ReturnMappingResult | None"
-    ddsdde: jnp.ndarray
-    stress_trial: jnp.ndarray
+    ddsdde: anp.ndarray
+    stress_trial: anp.ndarray
     is_plastic: bool
     _state_n: dict = field(repr=False)
 
     @property
-    def stress(self) -> jnp.ndarray:
+    def stress(self) -> anp.ndarray:
         """Converged stress σ_{n+1} (trial stress for elastic steps)."""
         if self.return_mapping is None:
             return self.stress_trial
@@ -189,10 +189,10 @@ class StressUpdateResult:
         return self.return_mapping.state
 
     @property
-    def dlambda(self) -> jnp.ndarray:
+    def dlambda(self) -> anp.ndarray:
         """Plastic multiplier increment (0 for elastic steps)."""
         if self.return_mapping is None:
-            return jnp.array(0.0)
+            return anp.array(0.0)
         return self.return_mapping.dlambda
 
     @property
@@ -212,8 +212,8 @@ class StressUpdateResult:
 
 def return_mapping(
     model,
-    stress_trial: jnp.ndarray,
-    C: jnp.ndarray,
+    stress_trial: anp.ndarray,
+    C: anp.ndarray,
     state_n: dict,
     method: str = "auto",
     max_iter: int = 50,
@@ -230,10 +230,10 @@ def return_mapping(
     ----------
     model : MaterialModel
         Constitutive model instance.
-    stress_trial : jnp.ndarray, shape (ntens,)
+    stress_trial : anp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.  The caller is responsible
         for computing this before calling return_mapping.
-    C : jnp.ndarray, shape (ntens, ntens)
+    C : anp.ndarray, shape (ntens, ntens)
         Elastic stiffness tensor.
     state_n : dict
         Internal state at the beginning of the increment.
@@ -291,8 +291,8 @@ def return_mapping(
 
 def stress_update(
     model,
-    strain_inc: jnp.ndarray,
-    stress_n: jnp.ndarray,
+    strain_inc: anp.ndarray,
+    stress_n: anp.ndarray,
     state_n: dict,
     method: str = "auto",
     max_iter: int = 50,
@@ -307,9 +307,9 @@ def stress_update(
     ----------
     model : MaterialModel
         Constitutive model instance.
-    strain_inc : jnp.ndarray, shape (ntens,)
+    strain_inc : anp.ndarray, shape (ntens,)
         Strain increment Δε (engineering shear convention).
-    stress_n : jnp.ndarray, shape (ntens,)
+    stress_n : anp.ndarray, shape (ntens,)
         Stress at the beginning of the increment.
     state_n : dict
         Internal state at the beginning of the increment.

@@ -22,7 +22,7 @@ Flow rule (associative)
 dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 """
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
@@ -40,11 +40,12 @@ class J2Isotropic3D(MaterialModel3D):
     provide branch-free implementations valid when all direct stress components
     are stored (``ndi == ndi_phys``).
 
-    Provides closed-form ``plastic_corrector`` and ``analytical_tangent``
-    using the identity ``C @ n_dev = 2μ · n_dev``, which holds exactly for
-    SOLID_3D and PLANE_STRAIN but not for statically condensed stress states
-    (PLANE_STRESS, UNIAXIAL_1D).  For those, use :class:`J2IsotropicPS` or
-    :class:`J2Isotropic1D` with the autodiff return-mapping path.
+    Provides closed-form ``user_defined_return_mapping`` and
+    ``user_defined_tangent`` using the identity ``C @ n_dev = 2μ · n_dev``,
+    which holds exactly for SOLID_3D and PLANE_STRAIN but not for statically
+    condensed stress states (PLANE_STRESS, UNIAXIAL_1D).  For those, use
+    :class:`J2IsotropicPS` or :class:`J2Isotropic1D` with the autodiff
+    return-mapping path.
 
     Parameters
     ----------
@@ -82,13 +83,13 @@ class J2Isotropic3D(MaterialModel3D):
     # Material physics — reduced hardening (hardening_type = "reduced")
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """Isotropic elastic stiffness tensor."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
@@ -113,8 +114,8 @@ class J2Isotropic3D(MaterialModel3D):
 
         Parameters
         ----------
-        stress_trial : jnp.ndarray, shape (ntens,)
-        C : jnp.ndarray, shape (ntens, ntens)
+        stress_trial : anp.ndarray, shape (ntens,)
+        C : anp.ndarray, shape (ntens, ntens)
         state_n : dict with key ``ep``
 
         Returns
@@ -137,7 +138,7 @@ class J2Isotropic3D(MaterialModel3D):
         return ReturnMappingResult(
             stress=stress_new,
             state={"ep": ep_n + dlambda},
-            dlambda=jnp.asarray(dlambda),
+            dlambda=anp.asarray(dlambda),
         )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
@@ -149,15 +150,15 @@ class J2Isotropic3D(MaterialModel3D):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (ntens,)
+        stress : anp.ndarray, shape (ntens,)
         state : dict  (unused; ep taken from state_n)
-        dlambda : jnp.ndarray, scalar
-        C : jnp.ndarray, shape (ntens, ntens)
+        dlambda : anp.ndarray, scalar
+        C : anp.ndarray, shape (ntens, ntens)
         state_n : dict with key ``ep``
 
         Returns
         -------
-        jnp.ndarray, shape (ntens, ntens)
+        anp.ndarray, shape (ntens, ntens)
         """
         mu = self.E / (2.0 * (1.0 + self.nu))
         ep_n = state_n["ep"]
@@ -173,14 +174,14 @@ class J2Isotropic3D(MaterialModel3D):
         I_vol = self._I_vol()
         I_dev = self._I_dev()
 
-        return I_vol @ C + theta * (I_dev @ C) - beta * jnp.outer(s_trial, s_trial)
+        return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)
 
 
 class J2IsotropicPS(MaterialModelPS):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
     ``hardening_type = "reduced"``: implements ``update_state``
-    (Δep = Δλ). Uses the autodiff return-mapping path (``method="autodiff"``).
+    (Δep = Δλ). Uses the autodiff return-mapping path (``method="auto"``).
     A closed-form plane-stress corrector (which requires an iterative σ33 = 0
     enforcement loop) is not yet implemented.
 
@@ -216,13 +217,13 @@ class J2IsotropicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """Plane-stress isotropic stiffness (3×3 condensed)."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
@@ -236,8 +237,8 @@ class J2Isotropic1D(MaterialModel1D):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
     ``hardening_type = "reduced"``: implements ``update_state``
-    (Δep = Δλ). Provides closed-form ``plastic_corrector`` and
-    ``analytical_tangent`` using the 1D radial return mapping.
+    (Δep = Δλ). Provides closed-form ``user_defined_return_mapping`` and
+    ``user_defined_tangent`` using the 1D radial return mapping.
 
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
@@ -271,13 +272,13 @@ class J2Isotropic1D(MaterialModel1D):
     # Material physics — reduced hardening (hardening_type = "reduced")
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self) -> jnp.ndarray:
+    def elastic_stiffness(self) -> anp.ndarray:
         """1D elastic stiffness [[E]]."""
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def yield_function(self, stress: jnp.ndarray, state: dict) -> jnp.ndarray:
+    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self._vonmises(stress) - sigma_y
@@ -298,8 +299,8 @@ class J2Isotropic1D(MaterialModel1D):
 
         Parameters
         ----------
-        stress_trial : jnp.ndarray, shape (1,)
-        C : jnp.ndarray, shape (1, 1)
+        stress_trial : anp.ndarray, shape (1,)
+        C : anp.ndarray, shape (1, 1)
         state_n : dict with key ``ep``
 
         Returns
@@ -309,14 +310,14 @@ class J2Isotropic1D(MaterialModel1D):
         E = C[0, 0]
         ep_n = state_n["ep"]
         sigma_y = self.sigma_y0 + self.H * ep_n
-        sigma_vm_trial = jnp.abs(stress_trial[0])
+        sigma_vm_trial = anp.abs(stress_trial[0])
         dlambda = (sigma_vm_trial - sigma_y) / (E + self.H)
         n = stress_trial / sigma_vm_trial  # sign(σ_trial) as length-1 array
         stress_new = stress_trial - E * dlambda * n
         return ReturnMappingResult(
             stress=stress_new,
             state={"ep": ep_n + dlambda},
-            dlambda=jnp.asarray(dlambda),
+            dlambda=anp.asarray(dlambda),
         )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
@@ -324,15 +325,15 @@ class J2Isotropic1D(MaterialModel1D):
 
         Parameters
         ----------
-        stress : jnp.ndarray, shape (1,)
+        stress : anp.ndarray, shape (1,)
         state : dict  (unused)
-        dlambda : jnp.ndarray, scalar
-        C : jnp.ndarray, shape (1, 1)
+        dlambda : anp.ndarray, scalar
+        C : anp.ndarray, shape (1, 1)
         state_n : dict  (unused)
 
         Returns
         -------
-        jnp.ndarray, shape (1, 1)
+        anp.ndarray, shape (1, 1)
         """
         E = C[0, 0]
-        return jnp.array([[E * self.H / (E + self.H)]])
+        return anp.array([[E * self.H / (E + self.H)]])

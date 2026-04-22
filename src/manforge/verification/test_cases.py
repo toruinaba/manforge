@@ -16,7 +16,7 @@ generate_strain_history
 """
 
 import numpy as np
-import jax.numpy as jnp
+import numpy as np
 
 from manforge.core.stress_update import stress_update
 
@@ -43,7 +43,7 @@ def estimate_yield_strain(model) -> float:
     C = model.elastic_stiffness()
     state_0 = model.initial_state()
 
-    e1 = jnp.zeros(ntens).at[0].set(1.0)
+    e1 = (lambda _a: (_a.__setitem__(0, 1.0), _a)[1])(np.zeros(ntens))
     sigma_unit = C @ e1
 
     eps_hi = 1e-3
@@ -53,7 +53,7 @@ def estimate_yield_strain(model) -> float:
             break
         eps_hi *= 10.0
     else:
-        C_diag_max = float(jnp.max(jnp.abs(jnp.diag(C))))
+        C_diag_max = float(np.max(np.abs(np.diag(C))))
         return 1.0 / C_diag_max
 
     eps_lo = 0.0
@@ -122,8 +122,8 @@ def generate_single_step_cases(model, eps_y=None) -> list[dict]:
         cases.append({"strain_inc": de, "stress_n": zero_stress.copy(), "state_n": dict(state_0)})
 
     # Case 5: Pre-stressed starting state
-    prestress_de = jnp.zeros(ntens).at[0].set(3.0 * eps_y)
-    _pre = stress_update(model, prestress_de, jnp.zeros(ntens), model.initial_state())
+    prestress_de = (lambda _a: (_a.__setitem__(0, 3.0 * eps_y), _a)[1])(np.zeros(ntens))
+    _pre = stress_update(model, prestress_de, np.zeros(ntens), model.initial_state())
     stress_pre, state_pre = _pre.stress, _pre.state
     de2 = np.zeros(ntens)
     de2[0] = 2.0 * eps_y

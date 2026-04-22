@@ -102,7 +102,7 @@ For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 
 
 ### State variables
 
-State is `dict[str, jnp.ndarray]`, e.g. `{"ep": 0.05}` for equivalent plastic strain. This is a JAX pytree and flows through JIT boundaries cleanly (though JIT is not used in the current version).
+State is `dict[str, anp.ndarray]`, e.g. `{"ep": 0.05}` for equivalent plastic strain.
 
 ### Fortran UMAT
 

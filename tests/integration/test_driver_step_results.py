@@ -1,6 +1,6 @@
 """Tests for DriverResult.step_results and related API."""
 
-import jax.numpy as jnp
+import autograd.numpy as anp
 import numpy as np
 import pytest
 

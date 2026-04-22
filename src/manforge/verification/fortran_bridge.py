@@ -27,10 +27,10 @@ Usage
 Compare results explicitly against the Python reference::
 
     from manforge.core.stress_update import stress_update
-    import jax.numpy as jnp
+    import numpy as np
 
     result = stress_update(
-        model, jnp.array(dstran), jnp.zeros(6), model.initial_state()
+        model, np.array(dstran), np.zeros(6), model.initial_state()
     )
     stress_py, ddsdde_py = result.stress, result.ddsdde
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)

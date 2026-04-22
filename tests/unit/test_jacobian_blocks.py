@@ -1,7 +1,7 @@
 """Tests for JacobianBlocks and ad_jacobian_blocks."""
 
-import jax
-import jax.numpy as jnp
+import autograd
+import autograd.numpy as anp
 import numpy as np
 import pytest
 
@@ -22,9 +22,9 @@ def ow_model():
 
 
 def _plastic_result(model, strain_scale=3e-3):
-    deps = jnp.zeros(model.ntens).at[0].set(strain_scale)
+    deps = (lambda _a: (_a.__setitem__(0, strain_scale), _a)[1])(np.zeros(model.ntens))
     state0 = model.initial_state()
-    return stress_update(model, deps, jnp.zeros(model.ntens), state0), state0
+    return stress_update(model, deps, anp.zeros(model.ntens), state0), state0
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +59,8 @@ class TestReducedBlocks:
         result, state0 = _plastic_result(model)
         jac = ad_jacobian_blocks(model, result, state0)
 
-        # flow direction is jax.grad of yield_function w.r.t. stress
-        n_ad = jax.grad(lambda s: model.yield_function(s, result.state))(result.stress)
+        # flow direction is autograd.grad of yield_function w.r.t. stress
+        n_ad = autograd.grad(lambda s: model.yield_function(s, result.state))(result.stress)
         np.testing.assert_allclose(
             np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
         )
@@ -76,9 +76,9 @@ class TestReducedBlocks:
         np.testing.assert_array_equal(jac.dyield_ddlambda, jac.full[ntens, ntens])
 
     def test_elastic_step_raises_no_error(self, model):
-        deps = jnp.array([1e-4, 0, 0, 0, 0, 0])
+        deps = anp.array([1e-4, 0, 0, 0, 0, 0])
         state0 = model.initial_state()
-        result = stress_update(model, deps, jnp.zeros(6), state0)
+        result = stress_update(model, deps, anp.zeros(6), state0)
         # elastic step: dlambda=0, stress_trial==stress, but jacobian should still work
         jac = ad_jacobian_blocks(model, result, state0)
         assert isinstance(jac, JacobianBlocks)
@@ -139,7 +139,7 @@ class TestAugmentedBlocks:
         result, state0 = _plastic_result(ow_model)
         jac = ad_jacobian_blocks(ow_model, result, state0)
 
-        n_ad = jax.grad(lambda s: ow_model.yield_function(s, result.state))(result.stress)
+        n_ad = autograd.grad(lambda s: ow_model.yield_function(s, result.state))(result.stress)
         np.testing.assert_allclose(
             np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
         )
@@ -152,7 +152,7 @@ class TestAugmentedBlocks:
 class TestReturnMappingResultPath:
     def test_with_explicit_stress_trial(self, model):
         from manforge.core.stress_update import return_mapping
-        deps = jnp.zeros(model.ntens).at[0].set(3e-3)
+        deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
         st = C @ deps
@@ -163,14 +163,14 @@ class TestReturnMappingResultPath:
 
     def test_matches_stress_update_result(self, model):
         from manforge.core.stress_update import return_mapping
-        deps = jnp.zeros(model.ntens).at[0].set(3e-3)
+        deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
         st = C @ deps
         rm = return_mapping(model, st, C, state0)
         jac_rm = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
 
-        su = stress_update(model, deps, jnp.zeros(model.ntens), state0)
+        su = stress_update(model, deps, anp.zeros(model.ntens), state0)
         jac_su = ad_jacobian_blocks(model, su, state0)
 
         np.testing.assert_allclose(
@@ -179,7 +179,7 @@ class TestReturnMappingResultPath:
 
     def test_missing_stress_trial_raises(self, model):
         from manforge.core.stress_update import return_mapping
-        deps = jnp.zeros(model.ntens).at[0].set(3e-3)
+        deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
         rm = return_mapping(model, C @ deps, C, state0)

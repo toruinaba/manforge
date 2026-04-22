@@ -24,7 +24,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import numpy as np
-import jax.numpy as jnp
 
 from manforge.core.stress_update import stress_update
 from manforge.simulation.types import DriverResult, FieldHistory, FieldType
@@ -131,7 +130,7 @@ class StrainDriver(DriverBase):
         ntens = model.ntens
         N = len(data)
 
-        stress_n = jnp.zeros(ntens)
+        stress_n = np.zeros(ntens)
         state_n = model.initial_state()
         strain_out = np.zeros((N, ntens))
         step_results = []
@@ -139,11 +138,12 @@ class StrainDriver(DriverBase):
         for i in range(N):
             if uniaxial:
                 deps11 = data[i] - (data[i - 1] if i > 0 else 0.0)
-                strain_inc = jnp.zeros(ntens).at[0].set(deps11)
+                strain_inc = np.zeros(ntens)
+                strain_inc[0] = deps11
                 strain_out[i, 0] = data[i]
             else:
                 prev = data[i - 1] if i > 0 else np.zeros(ntens)
-                strain_inc = jnp.array(data[i] - prev)
+                strain_inc = np.array(data[i] - prev)
                 strain_out[i] = data[i]
 
             rm = stress_update(model, strain_inc, stress_n, state_n, method=method)
@@ -222,7 +222,7 @@ class StressDriver(DriverBase):
         N = stress_history.shape[0]
         ntens = model.ntens
 
-        stress_n = jnp.zeros(ntens)
+        stress_n = np.zeros(ntens)
         state_n = model.initial_state()
         eps_total = np.zeros(ntens)
         strain_out = np.zeros((N, ntens))
@@ -230,29 +230,29 @@ class StressDriver(DriverBase):
 
         # Elastic compliance for the initial strain-increment guess
         C = model.elastic_stiffness()
-        S = jnp.linalg.inv(C)
+        S = np.linalg.inv(np.array(C))
 
         for i in range(N):
-            sigma_target = jnp.array(stress_history[i])
+            sigma_target = np.array(stress_history[i])
 
             # Initial guess: elastic compliance applied to stress increment
             deps = S @ (sigma_target - stress_n)
 
             converged = False
-            residual = jnp.full(ntens, jnp.inf)
+            residual = np.full(ntens, np.inf)
             rm = None
             for _ in range(self.max_iter):
                 rm = stress_update(model, deps, stress_n, state_n)
-                residual = sigma_target - rm.stress
-                if float(jnp.max(jnp.abs(residual))) < self.tol:
+                residual = sigma_target - np.array(rm.stress)
+                if float(np.max(np.abs(residual))) < self.tol:
                     converged = True
                     break
-                deps = deps + jnp.linalg.solve(rm.ddsdde, residual)
+                deps = deps + np.linalg.solve(np.array(rm.ddsdde), residual)
 
             if not converged:
                 raise RuntimeError(
                     f"StressDriver: NR did not converge at step {i} "
-                    f"(||residual||_inf = {float(jnp.max(jnp.abs(residual))):.3e}, "
+                    f"(||residual||_inf = {float(np.max(np.abs(residual))):.3e}, "
                     f"tol = {self.tol:.3e})"
                 )
 
