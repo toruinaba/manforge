@@ -15,6 +15,12 @@ from manforge.verification.test_cases import (
     generate_single_step_cases,
     generate_strain_history,
 )
+from manforge.verification.fortran_registry import (
+    FortranBinding,
+    verified_against_fortran,
+    collect_bindings,
+    check_bindings,
+)
 
 __all__ = [
     "compare_solvers",
@@ -29,4 +35,8 @@ __all__ = [
     "estimate_yield_strain",
     "generate_single_step_cases",
     "generate_strain_history",
+    "FortranBinding",
+    "verified_against_fortran",
+    "collect_bindings",
+    "check_bindings",
 ]
