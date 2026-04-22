@@ -126,16 +126,17 @@ class ReturnMappingResult:
     dlambda : anp.ndarray, scalar
         Plastic multiplier increment Δλ.
     n_iterations : int
-        Number of Newton updates performed by the framework's numerical solver.
-        Zero when ``method="user_defined"`` (the model's own corrector is
-        responsible for convergence tracking).
+        Number of Newton updates performed.  For ``numerical_newton`` plastic
+        steps this equals the number of NR updates (J2 linear hardening
+        converges in exactly 1).  For closed-form ``user_defined`` correctors
+        the recommended convention is ``1`` (one closed-form solve).
     residual_history : list[float]
-        Residual norm recorded at the start of each NR iteration by the
-        framework's numerical solver.  For ``method="numerical_newton"``
-        plastic steps ``len(residual_history) == n_iterations + 1`` (initial
-        residual plus one entry after each Newton update; the last entry is the
-        converged residual below ``tol``).  Empty when ``method="user_defined"``
-        unless the corrector returns a 5-tuple with its own history.
+        Residual norms.  The convention for both paths is
+        ``len(residual_history) == n_iterations + 1``: initial residual at
+        index 0, then one entry per update, with the final entry being the
+        converged residual (< ``tol`` for ``numerical_newton``, 0.0 for
+        closed-form ``user_defined``).  Closed-form implementations should
+        therefore supply ``[float(f_trial), 0.0]``.
     """
 
     stress: anp.ndarray
