@@ -47,18 +47,16 @@ def test_plastic_corrector_standalone_plastic(model):
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
-    result = model.user_defined_corrector(stress_trial, C, state_n)
-    assert result is not None, "plastic_corrector should return a result for plastic step"
-
-    stress_new, state_new, dlambda = result
+    rm = model.user_defined_return_mapping(stress_trial, C, state_n)
+    assert rm is not None, "plastic_corrector should return a result for plastic step"
 
     # Yield consistency: f(σ_new, state_new) ≈ 0
-    f_final = model.yield_function(stress_new, state_new)
+    f_final = model.yield_function(rm.stress, rm.state)
     assert abs(float(f_final)) < 1e-8, f"|f| = {float(abs(f_final)):.3e}"
 
     # State update: ep_new = ep_n + dlambda
     ep_n = float(state_n["ep"])
-    assert abs(float(state_new["ep"]) - (ep_n + float(dlambda))) < 1e-12
+    assert abs(float(rm.state["ep"]) - (ep_n + float(rm.dlambda))) < 1e-12
 
 
 def test_plastic_corrector_dlambda_positive(model):
@@ -68,8 +66,8 @@ def test_plastic_corrector_dlambda_positive(model):
     stress_trial = C @ strain_inc
     state_n = model.initial_state()
 
-    _, _, dlambda = model.user_defined_corrector(stress_trial, C, state_n)
-    assert float(dlambda) > 0.0
+    rm = model.user_defined_return_mapping(stress_trial, C, state_n)
+    assert float(rm.dlambda) > 0.0
 
 
 # ---------------------------------------------------------------------------
