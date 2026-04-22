@@ -66,7 +66,7 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     n_iterations = 0
     for _iteration in range(max_iter):
         R = residual_fn(x)
-        res_norm = float(np.max(np.abs(np.array(R))))
+        res_norm = float(np.linalg.norm(np.array(R)))
         residual_history.append(res_norm)
         if res_norm < tol:
             break
@@ -77,7 +77,7 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     else:
         raise RuntimeError(
             f"_augmented_nr: NR did not converge in {max_iter} iterations "
-            f"(||R||_inf = {float(np.max(np.abs(np.array(R)))):.3e}, tol = {tol:.3e})"
+            f"(||R||_2 = {float(np.linalg.norm(np.array(R))):.3e}, tol = {tol:.3e})"
         )
 
     stress = x[:ntens]
