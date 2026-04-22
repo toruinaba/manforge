@@ -7,25 +7,26 @@ Covers:
 - compare_solvers works with mixed plastic/elastic test cases
 """
 
+import dataclasses
+
 import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import stress_update
+from manforge.core.stress_update import stress_update, StressUpdateResult
 from manforge.verification.compare import compare_solvers, SolverComparisonResult
 
 
-def _make_solver(model, method):
-    """Return a SolverFn bound to the given model and method."""
-    def _solve(strain_inc, stress_n, state_n):
-        _r = stress_update(
+def _make_solver(method):
+    """Return a solver callable bound to the given method."""
+    def _solve(model, strain_inc, stress_n, state_n):
+        return stress_update(
             model,
             anp.asarray(strain_inc),
             anp.asarray(stress_n),
             state_n,
             method=method,
         )
-        return _r.stress, _r.state, _r.ddsdde
     return _solve
 
 
@@ -67,8 +68,8 @@ def test_cases(model):
 
 def test_identical_solvers_pass(model, test_cases):
     """Comparing a solver to itself gives zero error and passes."""
-    solver = _make_solver(model, "numerical_newton")
-    result = compare_solvers(solver, solver, test_cases)
+    solver = _make_solver("numerical_newton")
+    result = compare_solvers(model, solver, solver, test_cases)
 
     assert isinstance(result, SolverComparisonResult)
     assert result.passed
@@ -84,10 +85,10 @@ def test_identical_solvers_pass(model, test_cases):
 
 def test_autodiff_vs_analytical_pass(model, test_cases):
     """autodiff and analytical solvers must agree within default tolerances."""
-    solver_ad = _make_solver(model, "numerical_newton")
-    solver_an = _make_solver(model, "user_defined")
+    solver_ad = _make_solver("numerical_newton")
+    solver_an = _make_solver("user_defined")
 
-    result = compare_solvers(solver_ad, solver_an, test_cases)
+    result = compare_solvers(model, solver_ad, solver_an, test_cases)
 
     assert result.passed, (
         f"Solvers disagree: max_stress_err={result.max_stress_rel_err:.3e}, "
@@ -104,16 +105,19 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
 
 def test_wrong_solver_fails(model, test_cases):
     """A solver that returns wrong stress must be flagged as failed."""
-    solver_ad = _make_solver(model, "numerical_newton")
+    solver_ad = _make_solver("numerical_newton")
 
-    def bad_solver(strain_inc, stress_n, state_n):
-        _r = stress_update(
+    def bad_solver(model, strain_inc, stress_n, state_n):
+        r = stress_update(
             model, anp.asarray(strain_inc), anp.asarray(stress_n),
             state_n, method="numerical_newton"
         )
-        return _r.stress * 1.1, _r.state, _r.ddsdde  # 10% error in stress
+        if r.return_mapping is not None:
+            bad_rm = dataclasses.replace(r.return_mapping, stress=r.return_mapping.stress * 1.1)
+            return dataclasses.replace(r, return_mapping=bad_rm)
+        return r
 
-    result = compare_solvers(solver_ad, bad_solver, test_cases, stress_tol=1e-6)
+    result = compare_solvers(model, solver_ad, bad_solver, test_cases, stress_tol=1e-6)
 
     # At least the plastic cases should fail
     assert not result.passed
@@ -126,26 +130,28 @@ def test_wrong_solver_fails(model, test_cases):
 
 def test_result_details_length(model, test_cases):
     """details list length equals the number of test cases."""
-    solver = _make_solver(model, "numerical_newton")
-    result = compare_solvers(solver, solver, test_cases)
+    solver = _make_solver("numerical_newton")
+    result = compare_solvers(model, solver, solver, test_cases)
     assert len(result.details) == len(test_cases)
 
 
 def test_result_details_keys(model, test_cases):
     """Each detail record has the required keys."""
-    solver = _make_solver(model, "numerical_newton")
-    result = compare_solvers(solver, solver, test_cases)
+    solver = _make_solver("numerical_newton")
+    result = compare_solvers(model, solver, solver, test_cases)
+    required = {
+        "case_index", "stress_rel_err", "tangent_rel_err",
+        "state_rel_err", "trial_rel_err",
+        "is_plastic_match", "elastic_branch_match", "passed",
+    }
     for d in result.details:
-        assert "case_index"      in d
-        assert "stress_rel_err"  in d
-        assert "tangent_rel_err" in d
-        assert "passed"          in d
+        assert required <= d.keys()
 
 
 def test_empty_test_cases(model):
     """compare_solvers with an empty list passes vacuously."""
-    solver = _make_solver(model, "numerical_newton")
-    result = compare_solvers(solver, solver, [])
+    solver = _make_solver("numerical_newton")
+    result = compare_solvers(model, solver, solver, [])
     assert result.passed
     assert result.n_cases == 0
     assert result.n_passed == 0

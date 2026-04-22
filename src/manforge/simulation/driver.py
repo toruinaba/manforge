@@ -189,6 +189,7 @@ class StressDriver(DriverBase):
         model,
         load: FieldHistory,
         collect_state: dict[str, FieldType] | None = None,
+        method: str = "auto",
     ) -> DriverResult:
         """Run the stress-controlled loading history.
 
@@ -204,6 +205,10 @@ class StressDriver(DriverBase):
             State variables to include in the result.  Example::
 
                 collect_state={"ep": FieldType.STRAIN}
+
+        method : {"auto", "numerical_newton", "user_defined"}, optional
+            Passed to :func:`~manforge.core.stress_update.stress_update`
+            at every inner iteration (default ``"auto"``).
 
         Returns
         -------
@@ -242,7 +247,7 @@ class StressDriver(DriverBase):
             residual = np.full(ntens, np.inf)
             rm = None
             for _ in range(self.max_iter):
-                rm = stress_update(model, deps, stress_n, state_n)
+                rm = stress_update(model, deps, stress_n, state_n, method=method)
                 residual = sigma_target - np.array(rm.stress)
                 if float(np.max(np.abs(residual))) < self.tol:
                     converged = True

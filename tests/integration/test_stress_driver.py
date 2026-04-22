@@ -241,3 +241,23 @@ def test_strain_driver_general_shape(model):
     result = StrainDriver().run(model, load)
     assert result.stress.shape == (N, 6)
     assert result.stress[-1, 0] > model.sigma_y0
+
+
+# ---------------------------------------------------------------------------
+# StressDriver method argument
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("method", ["numerical_newton", "user_defined"])
+def test_stress_driver_method_arg(model_3d, method):
+    """StressDriver.run must accept a method argument and return step_results."""
+    sigma_y0 = model_3d.sigma_y0
+    N = 10
+    stress_history = np.zeros((N, 6))
+    stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
+
+    result = StressDriver().run(model_3d, stress_load(stress_history), method=method)
+
+    assert len(result.step_results) == N
+    from manforge.core.stress_update import StressUpdateResult
+    for sr in result.step_results:
+        assert isinstance(sr, StressUpdateResult)
