@@ -87,10 +87,11 @@ JAX autodiff computes yield function gradients and the Hessian needed for the ta
 
 **3. Application layer**
 
-- `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Returns `DriverResult` with `step_results: list[StressUpdateResult]` as primary data; `stress`, `strain`, `fields` are derived properties computed from `step_results`.
+- `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Two APIs: `run(model, load, collect_state, method)` → `DriverResult` (batch); `iter_run(model, load, *, method)` → `Iterator[DriverStep]` (step-by-step, supports early break / mid-loop branching). `DriverStep` fields: `i`, `strain` (cumulative), `result` (`StressUpdateResult`), `converged`, `n_outer_iter`, `residual_inf`. `StressDriver.iter_run` accepts `raise_on_nonconverged=False` to yield non-converged steps instead of raising. `DriverResult` fields: `step_results: list[StressUpdateResult]` (primary); `stress`, `strain`, `fields` are derived properties.
 - `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
+- `verification/compare.py`: `compare_solvers` (batch) and `iter_compare_solvers` (generator, yields `SolverCaseResult` per case — exposes raw `result_a`/`result_b` for direct use with `compare_jacobians`).
 
 ### StressState and dimensionality
 
