@@ -22,8 +22,12 @@ from manforge.verification.fortran_registry import (
     check_bindings,
 )
 from manforge.verification.umat_crosscheck import (
-    crosscheck_umat,
-    UMATCrosscheckResult,
+    CrosscheckCaseResult,
+    CrosscheckResult,
+    crosscheck_return_mapping,
+    iter_crosscheck_return_mapping,
+    crosscheck_stress_update,
+    iter_crosscheck_stress_update,
 )
 
 __all__ = [
@@ -43,6 +47,10 @@ __all__ = [
     "verified_against_fortran",
     "collect_bindings",
     "check_bindings",
-    "crosscheck_umat",
-    "UMATCrosscheckResult",
+    "CrosscheckCaseResult",
+    "CrosscheckResult",
+    "crosscheck_return_mapping",
+    "iter_crosscheck_return_mapping",
+    "crosscheck_stress_update",
+    "iter_crosscheck_stress_update",
 ]
