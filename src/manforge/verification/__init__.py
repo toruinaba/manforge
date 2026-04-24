@@ -21,6 +21,10 @@ from manforge.verification.fortran_registry import (
     collect_bindings,
     check_bindings,
 )
+from manforge.verification.umat_crosscheck import (
+    crosscheck_umat,
+    UMATCrosscheckResult,
+)
 
 __all__ = [
     "compare_solvers",
@@ -39,4 +43,6 @@ __all__ = [
     "verified_against_fortran",
     "collect_bindings",
     "check_bindings",
+    "crosscheck_umat",
+    "UMATCrosscheckResult",
 ]
