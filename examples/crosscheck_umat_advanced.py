@@ -2,12 +2,12 @@
 
 Demonstrates all features of the manforge Fortran crosscheck API:
 
-* Part 1 — crosscheck_return_mapping  (test_cases list, single-step, no state carry-over)
-* Part 2 — crosscheck_stress_update   (multi-step, method="user_defined", ddsdde comparison)
-* Part 3 — iter_crosscheck_stress_update  (step-by-step streaming, early break on failure)
-* Part 4 — StressDriver path          (stress-controlled loading)
-* Part 5 — custom hooks               (explicit state_to_args / parse_umat_return for
-                                       non-standard UMAT argument order — mock_kinematic)
+* Part 1 — ReturnMappingCrosscheck  (test_cases list, single-step)
+* Part 2 — StressUpdateCrosscheck   (multi-step, method="user_defined", ddsdde)
+* Part 3 — iter_run streaming + early break on failure
+* Part 4 — StressDriver path        (stress-controlled loading)
+* Part 5 — custom hooks             (explicit state_to_args / parse_umat_return
+                                     for non-standard UMAT argument order)
 
 Requires compiled Fortran modules:
 
@@ -31,9 +31,8 @@ from manforge.simulation import StrainDriver, StressDriver
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     FortranUMAT,
-    crosscheck_return_mapping,
-    crosscheck_stress_update,
-    iter_crosscheck_stress_update,
+    ReturnMappingCrosscheck,
+    StressUpdateCrosscheck,
     generate_single_step_cases,
     generate_strain_history,
 )
@@ -55,30 +54,26 @@ except ModuleNotFoundError:
 
 
 # =========================================================================
-# Part 1: crosscheck_return_mapping — single-step, test_cases list
+# Part 1: ReturnMappingCrosscheck — single-step, test_cases list
 # =========================================================================
 print("=" * 60)
-print("  Part 1: crosscheck_return_mapping (test_cases)")
+print("  Part 1: ReturnMappingCrosscheck (test_cases)")
 print("=" * 60)
 
-# generate_single_step_cases produces 5 cases spanning:
-#   elastic uniaxial / plastic uniaxial / plastic multiaxial / shear / pre-stressed
 test_cases = generate_single_step_cases(model)
 print(f"  Generated {len(test_cases)} test cases")
 
-result1 = crosscheck_return_mapping(
-    model,
+cc1 = ReturnMappingCrosscheck(
     fortran_j2,
-    test_cases,
     umat_subroutine="j2_isotropic_3d",
     param_fn=_PARAM_FN,
-    method="numerical_newton",  # explicit: framework NR solver
+    method="numerical_newton",
 )
+result1 = cc1.run(model, test_cases)
 
 print(f"  passed       : {result1.passed}  ({result1.n_passed}/{result1.n_cases})")
 print(f"  max stress err: {result1.max_stress_rel_err:.2e}")
 
-# Per-case detail — dlambda and state error for each case
 for cr in result1.cases:
     ep_err = cr.state_rel_err.get("ep", 0.0)
     plastic = cr.py_dlambda is not None and cr.py_dlambda > 0
@@ -93,25 +88,23 @@ print()
 
 
 # =========================================================================
-# Part 2: crosscheck_stress_update — method="user_defined" + ddsdde
+# Part 2: StressUpdateCrosscheck — method="user_defined" + ddsdde
 # =========================================================================
 print("=" * 60)
-print("  Part 2: crosscheck_stress_update (user_defined, ddsdde)")
+print("  Part 2: StressUpdateCrosscheck (user_defined, ddsdde)")
 print("=" * 60)
 
 history = generate_strain_history(model)
 load = FieldHistory(FieldType.STRAIN, "eps", history)
 
-result2 = crosscheck_stress_update(
-    StrainDriver(),
-    model,
+cc2 = StressUpdateCrosscheck(
     fortran_j2,
-    load,
     umat_subroutine="j2_isotropic_3d",
     param_fn=_PARAM_FN,
-    method="user_defined",       # compare analytical closed-form vs Fortran
+    method="user_defined",
     # parse_umat_ddsdde omitted → default: scan trailing returns for 2-D array
 )
+result2 = cc2.run(StrainDriver(), model, load)
 
 print(f"  passed           : {result2.passed}  ({result2.n_passed}/{result2.n_cases} steps)")
 print(f"  max stress err   : {result2.max_stress_rel_err:.2e}")
@@ -126,42 +119,37 @@ print()
 
 
 # =========================================================================
-# Part 3: iter_crosscheck_stress_update — step streaming + early break
+# Part 3: iter_run — step streaming + early break
 # =========================================================================
 print("=" * 60)
-print("  Part 3: iter_crosscheck_stress_update (streaming / early break)")
+print("  Part 3: iter_run (streaming / early break)")
 print("=" * 60)
 
-# First show normal streaming: print every 5th step
-print("  Normal run (printing every 5th step):")
-for cr in iter_crosscheck_stress_update(
-    StrainDriver(),
-    model,
+cc3 = StressUpdateCrosscheck(
     fortran_j2,
-    load,
     umat_subroutine="j2_isotropic_3d",
     param_fn=_PARAM_FN,
     method="numerical_newton",
-):
+)
+
+print("  Normal run (printing every 5th step):")
+for cr in cc3.iter_run(StrainDriver(), model, load):
     if cr.index % 5 == 0:
         print(
             f"    step {cr.index:2d}: stress_err={cr.stress_rel_err:.1e}  "
             f"passed={cr.passed}"
         )
 
-# Early-break demo: inject a wrong param_fn to force failure
 print()
 print("  Early-break demo (wrong param_fn → detect first failing step):")
-first_fail_index = None
-for cr in iter_crosscheck_stress_update(
-    StrainDriver(),
-    model,
+cc3_bad = StressUpdateCrosscheck(
     fortran_j2,
-    load,
     umat_subroutine="j2_isotropic_3d",
     param_fn=lambda m: (m.sigma_y0, m.H, m.E, m.nu),  # wrong order
     method="numerical_newton",
-):
+)
+first_fail_index = None
+for cr in cc3_bad.iter_run(StrainDriver(), model, load):
     if not cr.passed:
         first_fail_index = cr.index
         print(f"    First failure at step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
@@ -175,7 +163,7 @@ print()
 # Part 4: StressDriver — stress-controlled path
 # =========================================================================
 print("=" * 60)
-print("  Part 4: crosscheck_stress_update (StressDriver, stress-controlled)")
+print("  Part 4: StressUpdateCrosscheck (StressDriver, stress-controlled)")
 print("=" * 60)
 
 sigma_max = 1.5 * model.sigma_y0
@@ -184,15 +172,13 @@ stress_data = np.zeros((len(targets), model.ntens))
 stress_data[:, 0] = targets
 stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-result4 = crosscheck_stress_update(
-    StressDriver(),
-    model,
+cc4 = StressUpdateCrosscheck(
     fortran_j2,
-    stress_load,
     umat_subroutine="j2_isotropic_3d",
     param_fn=_PARAM_FN,
     method="numerical_newton",
 )
+result4 = cc4.run(StressDriver(), model, stress_load)
 
 print(f"  passed        : {result4.passed}  ({result4.n_passed}/{result4.n_cases} steps)")
 print(f"  max stress err: {result4.max_stress_rel_err:.2e}")
@@ -221,12 +207,6 @@ except ModuleNotFoundError:
     fortran_mock = None
 
 if fortran_mock is not None:
-    # mock_kinematic Fortran signature:
-    #   mock_kinematic(E, H_kin, H_iso, stress_in, alpha_in, ep_in, dstran,
-    #                  stress_out, alpha_out, ep_out)
-    # state_names = ["alpha", "ep"]  → default hook packs in this order (correct)
-    # parse_umat_return default: (stress_out, alpha_out, ep_out) → also correct
-
     import autograd.numpy as anp
     from manforge.core.stress_state import SOLID_3D
 
@@ -255,7 +235,7 @@ if fortran_mock is not None:
     strain_data[:, 0] = np.linspace(1e-3, 5e-3, n_steps)
     mock_load = FieldHistory(FieldType.STRAIN, "eps", strain_data)
 
-    # Build Python ground-truth manually (MockModel is not a full MaterialModel)
+    # Python ground-truth (MockModel is not a full MaterialModel)
     stress_ref = np.zeros(ntens)
     alpha_ref = np.zeros(ntens)
     ep_ref = 0.0
@@ -267,7 +247,7 @@ if fortran_mock is not None:
         alpha_ref  = alpha_ref + mock_model.H_kin * dstran
         ep_ref     = ep_ref + mock_model.H_iso * float(np.sum(np.abs(dstran)))
 
-    # Drive the Fortran side using low-level calls with default hooks
+    # Drive the Fortran side using default hooks
     from manforge.verification.umat_crosscheck import (
         _default_state_to_args, _default_parse_umat_return,
     )

@@ -1,4 +1,4 @@
-"""Multi-step crosscheck: crosscheck_return_mapping and crosscheck_stress_update tests.
+"""Multi-step crosscheck: ReturnMappingCrosscheck and StressUpdateCrosscheck tests.
 
 Requires compiled Fortran modules:
     uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
@@ -18,9 +18,8 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 from manforge.verification import (
-    crosscheck_return_mapping,
-    crosscheck_stress_update,
-    iter_crosscheck_stress_update,
+    ReturnMappingCrosscheck,
+    StressUpdateCrosscheck,
     FortranUMAT,
     generate_single_step_cases,
     generate_strain_history,
@@ -52,32 +51,30 @@ def _j2_load(model):
 
 def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
     """StrainDriver + tension-unload-compression: numerical_newton vs UMAT."""
-    result = crosscheck_stress_update(
-        StrainDriver(), model, fortran_j2, _j2_load(model),
+    cc = StressUpdateCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=_J2_PARAM_FN,
         method="numerical_newton",
     )
+    result = cc.run(StrainDriver(), model, _j2_load(model))
 
-    assert result.passed, (
-        f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
-    )
+    assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
     assert result.n_cases == result.n_passed
 
 
 def test_crosscheck_stress_update_user_defined(fortran_j2, model):
     """StrainDriver + history: user_defined (analytical) vs UMAT."""
-    result = crosscheck_stress_update(
-        StrainDriver(), model, fortran_j2, _j2_load(model),
+    cc = StressUpdateCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=_J2_PARAM_FN,
         method="user_defined",
     )
+    result = cc.run(StrainDriver(), model, _j2_load(model))
 
-    assert result.passed, (
-        f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
-    )
+    assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
 
 
@@ -89,34 +86,33 @@ def test_crosscheck_stress_update_stress_driven(fortran_j2, model):
     stress_data[:, 0] = targets
     load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-    result = crosscheck_stress_update(
-        StressDriver(), model, fortran_j2, load,
+    cc = StressUpdateCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=_J2_PARAM_FN,
         method="numerical_newton",
     )
+    result = cc.run(StressDriver(), model, load)
 
-    assert result.passed, (
-        f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
-    )
+    assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
 
 def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
-    """iter_* variant allows early break on first failing step."""
-    history = generate_strain_history(model)
-    load = FieldHistory(FieldType.STRAIN, "eps", history)
+    """iter_run allows early break on first failing step."""
+    load = _j2_load(model)
 
-    # Use a wrong param_fn to force failure on first plastic step
     def bad_param_fn(m):
         return (m.sigma_y0, m.H, m.E, m.nu)  # intentionally wrong order
 
-    found_failure = False
-    for cr in iter_crosscheck_stress_update(
-        StrainDriver(), model, fortran_j2, load,
+    cc = StressUpdateCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=bad_param_fn,
         method="numerical_newton",
-    ):
+    )
+
+    found_failure = False
+    for cr in cc.iter_run(StrainDriver(), model, load):
         if not cr.passed:
             found_failure = True
             break
@@ -130,14 +126,13 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
 
 def test_crosscheck_return_mapping_numerical_newton(fortran_j2, model):
     """Single-step cases (elastic/plastic/multiaxial) with numerical_newton."""
-    test_cases = generate_single_step_cases(model)
-
-    result = crosscheck_return_mapping(
-        model, fortran_j2, test_cases,
+    cc = ReturnMappingCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=_J2_PARAM_FN,
         method="numerical_newton",
     )
+    result = cc.run(model, generate_single_step_cases(model))
 
     assert result.passed, (
         f"max_stress_rel_err = {result.max_stress_rel_err:.2e}, "
@@ -148,18 +143,15 @@ def test_crosscheck_return_mapping_numerical_newton(fortran_j2, model):
 
 def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
     """Single-step cases with user_defined (analytical) return mapping."""
-    test_cases = generate_single_step_cases(model)
-
-    result = crosscheck_return_mapping(
-        model, fortran_j2, test_cases,
+    cc = ReturnMappingCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
         param_fn=_J2_PARAM_FN,
         method="user_defined",
     )
+    result = cc.run(model, generate_single_step_cases(model))
 
-    assert result.passed, (
-        f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
-    )
+    assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
 
 # ---------------------------------------------------------------------------
@@ -168,12 +160,11 @@ def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
 
 def test_method_required(fortran_j2, model):
     """Omitting method raises TypeError (it is a keyword-only required arg)."""
-    history = generate_strain_history(model)
-    load = FieldHistory(FieldType.STRAIN, "eps", history)
+    load = _j2_load(model)
 
     with pytest.raises(TypeError):
-        crosscheck_stress_update(
-            StrainDriver(), model, fortran_j2, load,
+        StressUpdateCrosscheck(
+            fortran_j2,
             umat_subroutine="j2_isotropic_3d",
             param_fn=_J2_PARAM_FN,
             # method intentionally omitted
@@ -182,13 +173,13 @@ def test_method_required(fortran_j2, model):
 
 def test_param_fn_order_sensitivity(fortran_j2, model):
     """Passing material params in wrong order produces a failed crosscheck."""
-    result = crosscheck_stress_update(
-        StrainDriver(), model, fortran_j2, _j2_load(model),
+    cc = StressUpdateCrosscheck(
+        fortran_j2,
         umat_subroutine="j2_isotropic_3d",
-        # Intentionally wrong order: UMAT expects (E, nu, sigma_y0, H)
-        param_fn=lambda m: (m.sigma_y0, m.H, m.E, m.nu),
+        param_fn=lambda m: (m.sigma_y0, m.H, m.E, m.nu),  # wrong order
         method="numerical_newton",
     )
+    result = cc.run(StrainDriver(), model, _j2_load(model))
 
     assert not result.passed, (
         "Expected crosscheck to fail with wrong param_fn order, "
@@ -297,7 +288,6 @@ def test_crosscheck_multi_state_mock(mock_fortran):
             ret, model.state_names, model.initial_state()
         )
 
-    # Verify state shapes round-tripped correctly
     assert np.asarray(state_f["alpha"]).shape == (ntens,), (
         f"alpha shape mismatch: {np.asarray(state_f['alpha']).shape}"
     )
@@ -305,14 +295,12 @@ def test_crosscheck_multi_state_mock(mock_fortran):
         f"ep should be scalar, got shape {np.asarray(state_f['ep']).shape}"
     )
 
-    # Verify stress trajectories agree
     stress_py_arr = np.vstack(stress_py_list)
     np.testing.assert_allclose(
         stress_f_arr, stress_py_arr[-1], rtol=1e-10,
         err_msg="Fortran and Python stress diverge"
     )
 
-    # Verify alpha matches non-physical linear formula
     expected_alpha = model.H_kin * np.sum(
         np.diff(strain_data, axis=0, prepend=np.zeros((1, ntens))), axis=0
     )
