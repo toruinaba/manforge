@@ -162,8 +162,10 @@ class StressUpdateResult:
         Consistent tangent operator dσ_{n+1}/dΔε.
     stress_trial : anp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
-    is_plastic : bool
-        True if the step activated plasticity.
+    is_plastic : bool or None
+        True if the step activated plasticity.  ``None`` when the information
+        is not available (e.g. results produced by :class:`FortranIntegrator`
+        where the UMAT does not expose a plasticity flag).
     _state_n : dict
         Internal state at step n (stored for the ``state`` convenience
         property on elastic steps).  Not part of the public API.
@@ -172,7 +174,7 @@ class StressUpdateResult:
     return_mapping: "ReturnMappingResult | None"
     ddsdde: anp.ndarray
     stress_trial: anp.ndarray
-    is_plastic: bool
+    is_plastic: "bool | None"
     _state_n: dict = field(repr=False)
 
     @property

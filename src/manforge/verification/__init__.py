@@ -1,10 +1,14 @@
 """Verification utilities for constitutive model validation."""
 
+from manforge.verification.comparator import (
+    Comparator,
+    CaseResult,
+    ComparisonResult,
+)
 from manforge.verification.compare import (
-    compare_solvers,
-    SolverComparisonResult,
-    iter_compare_solvers,
+    SolverComparison,
     SolverCaseResult,
+    SolverComparisonResult,
     compare_jacobians,
     JacobianComparisonResult,
 )
@@ -21,22 +25,41 @@ from manforge.verification.fortran_registry import (
     collect_bindings,
     check_bindings,
 )
+from manforge.verification.umat_crosscheck import (
+    CrosscheckCaseResult,
+    CrosscheckResult,
+    ReturnMappingCrosscheck,
+    StressUpdateCrosscheck,
+)
 
 __all__ = [
-    "compare_solvers",
-    "SolverComparisonResult",
-    "iter_compare_solvers",
+    # Comparator base
+    "Comparator",
+    "CaseResult",
+    "ComparisonResult",
+    # Python-vs-Python solver comparison
+    "SolverComparison",
     "SolverCaseResult",
+    "SolverComparisonResult",
     "compare_jacobians",
     "JacobianComparisonResult",
+    # Finite-difference tangent check
     "check_tangent",
     "TangentCheckResult",
+    # Fortran interface
     "FortranUMAT",
+    # Test case generation
     "estimate_yield_strain",
     "generate_single_step_cases",
     "generate_strain_history",
+    # Fortran binding registry
     "FortranBinding",
     "verified_against_fortran",
     "collect_bindings",
     "check_bindings",
+    # Crosscheck harnesses
+    "CrosscheckCaseResult",
+    "CrosscheckResult",
+    "ReturnMappingCrosscheck",
+    "StressUpdateCrosscheck",
 ]

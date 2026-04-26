@@ -1,21 +1,34 @@
-"""Generic solver-vs-solver and Jacobian comparison utilities.
+"""Solver-vs-solver and Jacobian comparison utilities.
 
-Provides :func:`compare_solvers` and :func:`compare_jacobians` for
-verifying that two constitutive-model implementations agree, plus
-:func:`iter_compare_solvers` for step-by-step iteration.
+:class:`SolverComparison` compares two Python solvers across a set of
+independent test cases.  It is a :class:`~manforge.verification.Comparator`
+subclass: configuration (solver_a, solver_b, tolerances) is fixed in
+``__init__``; ``iter_run(model, test_cases)`` drives the comparison.
 
 A *solver* is any callable with the signature::
 
     solver(model, strain_inc, stress_n, state_n) -> StressUpdateResult
+
+Usage
+-----
+::
+
+    cs = SolverComparison(solver_a, solver_b)
+    result = cs.run(model, test_cases)        # → ComparisonResult
+    for case in cs.iter_run(model, test_cases):   # step-by-step
+        if not case.passed:
+            break
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
+
+from manforge.verification.comparator import CaseResult, ComparisonResult, Comparator
 
 if TYPE_CHECKING:
     from manforge.core.stress_update import StressUpdateResult
@@ -24,223 +37,52 @@ _EPS = 1e-300  # zero-division guard — no physical meaning
 
 
 # ---------------------------------------------------------------------------
-# compare_solvers
+# Per-case and aggregate result dataclasses
 # ---------------------------------------------------------------------------
 
 @dataclass
-class SolverCaseResult:
-    """Per-case result yielded by :func:`iter_compare_solvers`.
+class SolverCaseResult(CaseResult):
+    """Per-case result from :class:`SolverComparison`.
 
-    Parameters
-    ----------
-    case_index : int
-        0-based index into the test-cases list.
-    result_a : StressUpdateResult
-        Raw output from solver A (useful for :func:`compare_jacobians`).
-    result_b : StressUpdateResult
-        Raw output from solver B.
-    stress_rel_err : float
-    tangent_rel_err : float
-    state_rel_err : dict[str, float]
-        Per state-variable relative error.
-    trial_rel_err : float
-    is_plastic_match : bool
-    elastic_branch_match : bool
-    passed : bool
-
-    Examples
-    --------
-    Break on the first failing case and inspect Jacobians::
-
-        for case in iter_compare_solvers(model, solver_a, solver_b, test_cases):
-            if not case.passed:
-                jac = compare_jacobians(model, case.result_a, case.result_b,
-                                        test_cases[case.case_index]["state_n"])
-                break
+    Extends :class:`~manforge.verification.CaseResult` with raw
+    :class:`~manforge.core.stress_update.StressUpdateResult` objects so the
+    caller can run :func:`compare_jacobians` on failing cases.
     """
 
-    case_index: int
-    result_a: StressUpdateResult
-    result_b: StressUpdateResult
-    stress_rel_err: float
-    tangent_rel_err: float
-    state_rel_err: dict
-    trial_rel_err: float
-    is_plastic_match: bool
-    elastic_branch_match: bool
-    passed: bool
+    result_a: StressUpdateResult | None = None
+    result_b: StressUpdateResult | None = None
+    trial_rel_err: float = 0.0
+    is_plastic_match: bool = True
+    elastic_branch_match: bool = True
 
 
 @dataclass
-class SolverComparisonResult:
-    """Result of comparing two solvers across a set of test cases.
+class SolverComparisonResult(ComparisonResult):
+    """Aggregate result from :class:`SolverComparison`.
 
-    Attributes
-    ----------
-    passed : bool
-        ``True`` if every test case is within tolerance.
-    n_cases : int
-        Number of test cases evaluated.
-    n_passed : int
-        Number of test cases that passed.
-    max_stress_rel_err : float
-        Maximum relative stress error across all cases.
-    max_tangent_rel_err : float
-        Maximum relative tangent error across all cases.
-    max_state_rel_err : dict[str, float]
-        Per state-variable maximum relative error across all cases.
-    max_trial_rel_err : float
-        Maximum relative stress_trial error across all cases.
-    details : list[dict]
-        Per-case records.  Each dict contains:
-
-        ``"case_index"``, ``"stress_rel_err"``, ``"tangent_rel_err"``,
-        ``"state_rel_err"`` (dict), ``"trial_rel_err"``,
-        ``"is_plastic_match"``, ``"elastic_branch_match"``, ``"passed"``.
-
-        Optional keys (when requested): ``"n_iterations_a"``,
-        ``"n_iterations_b"``, ``"residual_history_a"``,
-        ``"residual_history_b"``.
+    Extends :class:`~manforge.verification.ComparisonResult` with
+    ``max_trial_rel_err`` and a legacy ``details`` list for backwards
+    compatibility with existing tests that inspect ``result.details``.
     """
 
-    passed: bool
-    n_cases: int
-    n_passed: int
-    max_stress_rel_err: float
-    max_tangent_rel_err: float
-    max_state_rel_err: dict = field(default_factory=dict)
     max_trial_rel_err: float = 0.0
     details: list = field(default_factory=list)
 
 
-def iter_compare_solvers(
-    model,
-    solver_a,
-    solver_b,
-    test_cases: list,
-    *,
-    stress_tol: float = 1e-6,
-    tangent_tol: float = 1e-5,
-    state_tol: float = 1e-6,
-    check_state: bool = True,
-    check_is_plastic: bool = True,
-) -> Iterator[SolverCaseResult]:
-    """Yield per-case comparison results as a generator.
+# ---------------------------------------------------------------------------
+# SolverComparison
+# ---------------------------------------------------------------------------
+
+class SolverComparison(Comparator):
+    """Compare two Python solvers across a set of independent test cases.
 
     Parameters
     ----------
-    model : MaterialModel
-        Constitutive model instance — passed as first argument to each solver.
     solver_a : callable
         Reference solver: ``(model, strain_inc, stress_n, state_n)``
-        → ``StressUpdateResult``.
+        → :class:`~manforge.core.stress_update.StressUpdateResult`.
     solver_b : callable
         Candidate solver with the same signature.
-    test_cases : list[dict]
-        Each dict must contain keys ``"strain_inc"``, ``"stress_n"``, ``"state_n"``.
-    stress_tol, tangent_tol, state_tol : float, optional
-        Pass thresholds (same defaults as :func:`compare_solvers`).
-    check_state : bool, optional
-        Whether to include state error in pass/fail (default True).
-    check_is_plastic : bool, optional
-        Fail the case when ``is_plastic`` flags disagree (default True).
-
-    Yields
-    ------
-    SolverCaseResult
-        One result per test case.  ``result_a`` and ``result_b`` carry the raw
-        :class:`~manforge.core.stress_update.StressUpdateResult` for further
-        analysis (e.g. :func:`compare_jacobians`).
-
-    Examples
-    --------
-    Break on the first failing case::
-
-        for case in iter_compare_solvers(model, solver_a, solver_b, test_cases):
-            if not case.passed:
-                print(f"Case {case.case_index} failed: stress_err={case.stress_rel_err:.2e}")
-                break
-    """
-    for idx, case in enumerate(test_cases):
-        strain_inc = case["strain_inc"]
-        stress_n   = case["stress_n"]
-        state_n    = case["state_n"]
-
-        ra = solver_a(model, strain_inc, stress_n, state_n)
-        rb = solver_b(model, strain_inc, stress_n, state_n)
-
-        stress_a  = np.asarray(ra.stress,  dtype=float)
-        stress_b  = np.asarray(rb.stress,  dtype=float)
-        ddsdde_a  = np.asarray(ra.ddsdde,  dtype=float)
-        ddsdde_b  = np.asarray(rb.ddsdde,  dtype=float)
-        trial_a   = np.asarray(ra.stress_trial, dtype=float)
-        trial_b   = np.asarray(rb.stress_trial, dtype=float)
-
-        stress_rel_err  = float(np.max(np.abs(stress_b  - stress_a)  / (np.abs(stress_a)  + _EPS)))
-        tangent_rel_err = float(np.max(np.abs(ddsdde_b  - ddsdde_a)  / (np.abs(ddsdde_a)  + _EPS)))
-        trial_rel_err   = float(np.max(np.abs(trial_b   - trial_a)   / (np.abs(trial_a)   + _EPS)))
-
-        is_plastic_match     = bool(ra.is_plastic == rb.is_plastic)
-        elastic_branch_match = bool((ra.return_mapping is None) == (rb.return_mapping is None))
-
-        state_rel_err: dict[str, float] = {}
-        if check_state:
-            for key in ra.state:
-                va = np.asarray(ra.state[key], dtype=float)
-                vb = np.asarray(rb.state.get(key, np.zeros_like(va)), dtype=float)
-                state_rel_err[key] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
-
-        case_passed = stress_rel_err <= stress_tol and tangent_rel_err <= tangent_tol
-        if check_state and state_rel_err:
-            case_passed = case_passed and all(v <= state_tol for v in state_rel_err.values())
-        if check_is_plastic:
-            case_passed = case_passed and is_plastic_match
-
-        yield SolverCaseResult(
-            case_index=idx,
-            result_a=ra,
-            result_b=rb,
-            stress_rel_err=stress_rel_err,
-            tangent_rel_err=tangent_rel_err,
-            state_rel_err=state_rel_err,
-            trial_rel_err=trial_rel_err,
-            is_plastic_match=is_plastic_match,
-            elastic_branch_match=elastic_branch_match,
-            passed=case_passed,
-        )
-
-
-def compare_solvers(
-    model,
-    solver_a,
-    solver_b,
-    test_cases: list,
-    *,
-    stress_tol: float = 1e-6,
-    tangent_tol: float = 1e-5,
-    state_tol: float = 1e-6,
-    check_state: bool = True,
-    check_residual_history: bool = False,
-    check_n_iterations: bool = False,
-    check_is_plastic: bool = True,
-) -> SolverComparisonResult:
-    """Compare two solvers across a set of test cases.
-
-    Parameters
-    ----------
-    model : MaterialModel
-        Constitutive model instance — passed as first argument to each solver.
-    solver_a : callable
-        Reference solver: ``(model, strain_inc, stress_n, state_n)``
-        → ``StressUpdateResult``.
-    solver_b : callable
-        Candidate solver with the same signature.
-    test_cases : list[dict]
-        Each dict must contain keys:
-
-        - ``"strain_inc"`` : array-like, shape (ntens,)
-        - ``"stress_n"``   : array-like, shape (ntens,)
-        - ``"state_n"``    : dict
     stress_tol : float, optional
         Per-case pass threshold for relative stress error (default 1e-6).
     tangent_tol : float, optional
@@ -249,75 +91,181 @@ def compare_solvers(
         Per-case pass threshold for state relative error (default 1e-6).
     check_state : bool, optional
         Whether to include state error in pass/fail (default True).
-    check_residual_history : bool, optional
-        Include ``residual_history_a/b`` in detail records (default False).
-    check_n_iterations : bool, optional
-        Include ``n_iterations_a/b`` in detail records (default False).
     check_is_plastic : bool, optional
         Fail the case when ``is_plastic`` flags disagree (default True).
+    check_residual_history : bool, optional
+        Include ``residual_history_a/b`` in ``details`` records (default False).
+    check_n_iterations : bool, optional
+        Include ``n_iterations_a/b`` in ``details`` records (default False).
 
-    Returns
-    -------
-    SolverComparisonResult
+    Examples
+    --------
+    ::
+
+        cs = SolverComparison(solver_a, solver_b)
+        result = cs.run(model, test_cases)
+        assert result.passed
+
+        # Step-by-step with early break
+        for case in cs.iter_run(model, test_cases):
+            if not case.passed:
+                jac = compare_jacobians(model, case.result_a, case.result_b,
+                                        test_cases[case.index]["state_n"])
+                break
     """
-    details = []
-    max_stress_err = 0.0
-    max_tangent_err = 0.0
-    max_state_err: dict[str, float] = {}
-    max_trial_err = 0.0
-    n_passed = 0
 
-    for cr in iter_compare_solvers(
+    def __init__(
+        self,
+        solver_a: Callable,
+        solver_b: Callable,
+        *,
+        stress_tol: float = 1e-6,
+        tangent_tol: float = 1e-5,
+        state_tol: float = 1e-6,
+        check_state: bool = True,
+        check_is_plastic: bool = True,
+        check_residual_history: bool = False,
+        check_n_iterations: bool = False,
+    ) -> None:
+        self.solver_a = solver_a
+        self.solver_b = solver_b
+        self.stress_tol = stress_tol
+        self.tangent_tol = tangent_tol
+        self.state_tol = state_tol
+        self.check_state = check_state
+        self.check_is_plastic = check_is_plastic
+        self.check_residual_history = check_residual_history
+        self.check_n_iterations = check_n_iterations
+
+    def iter_run(
+        self,
         model,
-        solver_a,
-        solver_b,
-        test_cases,
-        stress_tol=stress_tol,
-        tangent_tol=tangent_tol,
-        state_tol=state_tol,
-        check_state=check_state,
-        check_is_plastic=check_is_plastic,
-    ):
-        ra = cr.result_a
-        rb = cr.result_b
+        test_cases: list,
+    ) -> Iterator[SolverCaseResult]:
+        """Yield per-case comparison results.
 
-        rec = {
-            "case_index":           cr.case_index,
-            "stress_rel_err":       cr.stress_rel_err,
-            "tangent_rel_err":      cr.tangent_rel_err,
-            "state_rel_err":        cr.state_rel_err,
-            "trial_rel_err":        cr.trial_rel_err,
-            "is_plastic_match":     cr.is_plastic_match,
-            "elastic_branch_match": cr.elastic_branch_match,
-            "passed":               cr.passed,
-        }
-        if check_n_iterations:
-            rec["n_iterations_a"] = ra.n_iterations
-            rec["n_iterations_b"] = rb.n_iterations
-        if check_residual_history:
-            rec["residual_history_a"] = ra.residual_history
-            rec["residual_history_b"] = rb.residual_history
+        Parameters
+        ----------
+        model : MaterialModel
+        test_cases : list[dict]
+            Each dict must have ``"strain_inc"``, ``"stress_n"``, ``"state_n"``.
 
-        details.append(rec)
+        Yields
+        ------
+        SolverCaseResult
+        """
+        for idx, case in enumerate(test_cases):
+            strain_inc = case["strain_inc"]
+            stress_n   = case["stress_n"]
+            state_n    = case["state_n"]
 
-        max_stress_err  = max(max_stress_err,  cr.stress_rel_err)
-        max_tangent_err = max(max_tangent_err, cr.tangent_rel_err)
-        max_trial_err   = max(max_trial_err,   cr.trial_rel_err)
-        for key, val in cr.state_rel_err.items():
-            max_state_err[key] = max(max_state_err.get(key, 0.0), val)
-        if cr.passed:
-            n_passed += 1
+            ra = self.solver_a(model, strain_inc, stress_n, state_n)
+            rb = self.solver_b(model, strain_inc, stress_n, state_n)
 
-    return SolverComparisonResult(
-        passed=n_passed == len(test_cases),
-        n_cases=len(test_cases),
-        n_passed=n_passed,
-        max_stress_rel_err=max_stress_err,
-        max_tangent_rel_err=max_tangent_err,
-        max_state_rel_err=max_state_err,
-        max_trial_rel_err=max_trial_err,
-        details=details,
-    )
+            stress_a  = np.asarray(ra.stress,  dtype=float)
+            stress_b  = np.asarray(rb.stress,  dtype=float)
+            ddsdde_a  = np.asarray(ra.ddsdde,  dtype=float)
+            ddsdde_b  = np.asarray(rb.ddsdde,  dtype=float)
+            trial_a   = np.asarray(ra.stress_trial, dtype=float)
+            trial_b   = np.asarray(rb.stress_trial, dtype=float)
+
+            stress_rel_err  = float(np.max(np.abs(stress_b  - stress_a)  / (np.abs(stress_a)  + _EPS)))
+            tangent_rel_err = float(np.max(np.abs(ddsdde_b  - ddsdde_a)  / (np.abs(ddsdde_a)  + _EPS)))
+            trial_rel_err   = float(np.max(np.abs(trial_b   - trial_a)   / (np.abs(trial_a)   + _EPS)))
+
+            is_plastic_match     = bool(ra.is_plastic == rb.is_plastic)
+            elastic_branch_match = bool((ra.return_mapping is None) == (rb.return_mapping is None))
+
+            state_rel_err: dict[str, float] = {}
+            if self.check_state:
+                for key in ra.state:
+                    va = np.asarray(ra.state[key], dtype=float)
+                    vb = np.asarray(rb.state.get(key, np.zeros_like(va)), dtype=float)
+                    state_rel_err[key] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
+
+            case_passed = stress_rel_err <= self.stress_tol and tangent_rel_err <= self.tangent_tol
+            if self.check_state and state_rel_err:
+                case_passed = case_passed and all(v <= self.state_tol for v in state_rel_err.values())
+            if self.check_is_plastic:
+                case_passed = case_passed and is_plastic_match
+
+            yield SolverCaseResult(
+                index=idx,
+                stress_rel_err=stress_rel_err,
+                tangent_rel_err=tangent_rel_err,
+                state_rel_err=state_rel_err,
+                passed=case_passed,
+                result_a=ra,
+                result_b=rb,
+                trial_rel_err=trial_rel_err,
+                is_plastic_match=is_plastic_match,
+                elastic_branch_match=elastic_branch_match,
+            )
+
+    def run(
+        self,
+        model,
+        test_cases: list,
+    ) -> SolverComparisonResult:
+        """Compare solvers across all test cases and return aggregate result.
+
+        Parameters
+        ----------
+        model : MaterialModel
+        test_cases : list[dict]
+
+        Returns
+        -------
+        SolverComparisonResult
+        """
+        cases: list[SolverCaseResult] = []
+        max_s_err = 0.0
+        max_t_err = 0.0
+        max_st_err: dict[str, float] = {}
+        max_trial_err = 0.0
+        n_passed = 0
+        details = []
+
+        for cr in self.iter_run(model, test_cases):
+            cases.append(cr)
+
+            rec: dict = {
+                "case_index":           cr.index,
+                "stress_rel_err":       cr.stress_rel_err,
+                "tangent_rel_err":      cr.tangent_rel_err,
+                "state_rel_err":        cr.state_rel_err,
+                "trial_rel_err":        cr.trial_rel_err,
+                "is_plastic_match":     cr.is_plastic_match,
+                "elastic_branch_match": cr.elastic_branch_match,
+                "passed":               cr.passed,
+            }
+            if self.check_n_iterations:
+                rec["n_iterations_a"] = cr.result_a.n_iterations
+                rec["n_iterations_b"] = cr.result_b.n_iterations
+            if self.check_residual_history:
+                rec["residual_history_a"] = cr.result_a.residual_history
+                rec["residual_history_b"] = cr.result_b.residual_history
+            details.append(rec)
+
+            max_s_err    = max(max_s_err,    cr.stress_rel_err or 0.0)
+            max_t_err    = max(max_t_err,    cr.tangent_rel_err or 0.0)
+            max_trial_err = max(max_trial_err, cr.trial_rel_err)
+            for key, val in cr.state_rel_err.items():
+                max_st_err[key] = max(max_st_err.get(key, 0.0), val)
+            if cr.passed:
+                n_passed += 1
+
+        return SolverComparisonResult(
+            passed=n_passed == len(test_cases),
+            n_cases=len(test_cases),
+            n_passed=n_passed,
+            max_stress_rel_err=max_s_err,
+            max_tangent_rel_err=max_t_err,
+            max_state_rel_err=max_st_err,
+            max_trial_rel_err=max_trial_err,
+            cases=cases,
+            details=details,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +305,6 @@ def compare_jacobians(
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model instance.
     result_a : StressUpdateResult
         First result (e.g. from ``method="numerical_newton"``).
     result_b : StressUpdateResult
