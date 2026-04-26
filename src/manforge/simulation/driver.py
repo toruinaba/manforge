@@ -30,6 +30,21 @@ from manforge.core.stress_update import stress_update
 from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
 
 
+def _as_integrator(model, method: str):
+    """Wrap a bare MaterialModel in PythonIntegrator; pass adapters through unchanged.
+
+    An object is treated as a StressIntegrator adapter (not a bare model) when
+    it already has a ``stress_update`` method that accepts three arguments
+    (strain_inc, stress_n, state_n) — i.e. the integrator's own method rather
+    than the module-level function.  Bare MaterialModels do not define
+    ``stress_update``; they rely on the module-level function.
+    """
+    from manforge.simulation.integrator import PythonIntegrator
+    if hasattr(model, "stress_update") and callable(model.stress_update):
+        return model
+    return PythonIntegrator(model, method=method)
+
+
 # ---------------------------------------------------------------------------
 # Base class
 # ---------------------------------------------------------------------------
@@ -88,7 +103,7 @@ class DriverBase(ABC):
 
         Parameters
         ----------
-        model : MaterialModel
+        model : MaterialModel or StressIntegrator
         load : FieldHistory
             Loading history.  The ``type`` and shape of ``load.data`` must
             match the driver's expectations (see subclass documentation).
@@ -102,20 +117,22 @@ class DriverBase(ABC):
             ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
         method : str, optional
             Passed to the underlying stress-update call (default ``"auto"``).
+            Ignored when ``model`` is already a :class:`~manforge.simulation.integrator.StressIntegrator`.
 
         Returns
         -------
         DriverResult
         """
+        integrator = _as_integrator(model, method)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(model, load, method=method):
+        for step in self.iter_run(integrator, load, method=method):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
             np.stack(strain_rows)
             if strain_rows
-            else np.zeros((0, model.ntens))
+            else np.zeros((0, integrator.ntens))
         )
         return DriverResult(
             step_results=step_results,
@@ -170,12 +187,13 @@ class StrainDriver(DriverBase):
         ------
         DriverStep
         """
+        integrator = _as_integrator(model, method)
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
-        ntens = model.ntens
+        ntens = integrator.ntens
 
         stress_n = np.zeros(ntens)
-        state_n = model.initial_state()
+        state_n = integrator.initial_state()
 
         for i in range(len(data)):
             if uniaxial:
@@ -189,7 +207,7 @@ class StrainDriver(DriverBase):
                 strain_inc = np.array(data[i] - prev)
                 strain_cum = np.array(data[i])
 
-            rm = stress_update(model, strain_inc, stress_n, state_n, method=method)
+            rm = integrator.stress_update(strain_inc, stress_n, state_n)
             stress_n = rm.stress
             state_n = rm.state
             yield DriverStep(i=i, strain=strain_cum.copy(), result=rm)
@@ -258,14 +276,15 @@ class StressDriver(DriverBase):
         RuntimeError
             If NR does not converge and ``raise_on_nonconverged=True``.
         """
+        integrator = _as_integrator(model, method)
         stress_history = np.asarray(load.data, dtype=float)
-        ntens = model.ntens
+        ntens = integrator.ntens
 
         stress_n = np.zeros(ntens)
-        state_n = model.initial_state()
+        state_n = integrator.initial_state()
         eps_total = np.zeros(ntens)
 
-        C = model.elastic_stiffness()
+        C = integrator.elastic_stiffness()
         S = np.linalg.inv(np.array(C))
 
         for i in range(stress_history.shape[0]):
@@ -277,7 +296,7 @@ class StressDriver(DriverBase):
             rm = None
             k = 0
             for k in range(self.max_iter):
-                rm = stress_update(model, deps, stress_n, state_n, method=method)
+                rm = integrator.stress_update(deps, stress_n, state_n)
                 residual = sigma_target - np.array(rm.stress)
                 if float(np.max(np.abs(residual))) < self.tol:
                     converged = True
@@ -348,15 +367,16 @@ class StressDriver(DriverBase):
             If Newton-Raphson does not converge within ``max_iter`` iterations
             at any step.
         """
+        integrator = _as_integrator(model, method)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(model, load, method=method, raise_on_nonconverged=True):
+        for step in self.iter_run(integrator, load, method=method, raise_on_nonconverged=True):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
             np.stack(strain_rows)
             if strain_rows
-            else np.zeros((0, model.ntens))
+            else np.zeros((0, integrator.ntens))
         )
         return DriverResult(
             step_results=step_results,

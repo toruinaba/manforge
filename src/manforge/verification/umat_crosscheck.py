@@ -4,16 +4,15 @@
 :class:`~manforge.verification.Comparator` subclasses that compare a Python
 constitutive model against a compiled Fortran UMAT.
 
-Both hold the static UMAT configuration in ``__init__`` (fortran module,
-subroutine name, param_fn, hooks, tolerances) and accept the dynamic
+Both hold the static configuration in ``__init__`` and accept the dynamic
 inputs (model, test_cases, driver+load) in ``iter_run`` / ``run``.
 
-External user workflow
-----------------------
+Phase 5 workflow — StressUpdateCrosscheck
+-----------------------------------------
 ::
 
-    from manforge.verification import StressUpdateCrosscheck, FortranUMAT
-    from manforge.simulation import StrainDriver
+    from manforge.verification import ReturnMappingCrosscheck, StressUpdateCrosscheck, FortranUMAT
+    from manforge.simulation import StrainDriver, PythonIntegrator, FortranIntegrator
     from manforge.simulation.types import FieldHistory, FieldType
     import numpy as np
 
@@ -22,56 +21,25 @@ External user workflow
     load    = FieldHistory(FieldType.STRAIN, "eps",
                            np.linspace([0]*6, [1e-3,0,0,0,0,0], 20))
 
-    cc = StressUpdateCrosscheck(
-        fortran,
-        umat_subroutine="my_model_core",
-        param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
-        method="numerical_newton",
+    py_int = PythonIntegrator(model, method="numerical_newton")
+    fc_int = FortranIntegrator(
+        fortran, "my_model_core",
+        param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
+        state_names=model.state_names,
+        initial_state=model.initial_state,
+        elastic_stiffness=model.elastic_stiffness,
     )
-    result = cc.run(StrainDriver(), model, load)
+
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+    result = cc.run(StrainDriver(), load)
     assert result.passed
     print(f"max stress rel error = {result.max_stress_rel_err:.2e}")
 
-Fortran subroutine requirements
---------------------------------
-``umat_subroutine`` must be a **f2py-callable core-logic subroutine**, NOT
-the full ABAQUS ``umat`` entry point (which has 20+ ``inout`` arguments).
-The expected interface is::
-
-    subroutine my_model_core(<material params>, stress_in, <state vars in>, dstran, &
-                             stress_out, <state vars out> [, ddsdde])
-        real(8), intent(in)  :: <material params>       ! scalars
-        real(8), intent(in)  :: stress_in(ntens)
-        real(8), intent(in)  :: <state vars in>         ! scalar or array each
-        real(8), intent(in)  :: dstran(ntens)
-        real(8), intent(out) :: stress_out(ntens)
-        real(8), intent(out) :: <state vars out>        ! same shapes as inputs
-        real(8), intent(out) :: ddsdde(ntens, ntens)    ! optional, may be absent
-
-Default hook convention
------------------------
-When ``state_to_args`` / ``parse_umat_return`` / ``parse_umat_ddsdde`` are
-omitted the defaults assume:
-
-* **Pack**: each entry in ``model.state_names`` is passed as one argument —
-  scalar → ``float``, ndarray → ``np.float64`` array of the same shape.
-* **Unpack stress/state**: Fortran returns
-  ``(stress, state[0], state[1], ..., <trailing>)``,
-  i.e. state variables follow ``stress`` in ``state_names`` order.
-  Trailing outputs (e.g. ``ddsdde``) are discarded.
-* **Unpack ddsdde**: scan trailing returns (after stress + n_state elements)
-  and return the first 2-D array found.
-
-If your UMAT uses a different argument order, supply explicit hooks::
-
-    cc = StressUpdateCrosscheck(
-        fortran,
-        ...,
-        state_to_args=lambda s: (s["ep"], s["alpha"]),
-        parse_umat_return=lambda ret: (ret[0], {"ep": float(ret[2]),
-                                                "alpha": np.asarray(ret[1])}),
-        parse_umat_ddsdde=lambda ret: np.asarray(ret[3]),
-    )
+ReturnMappingCrosscheck — unchanged from Phase 4
+-------------------------------------------------
+``ReturnMappingCrosscheck`` still accepts ``fortran`` + hook kwargs directly
+because it operates at single-step granularity (no Driver loop), so the
+Integrator abstraction adds no value there.
 """
 
 from __future__ import annotations
@@ -84,6 +52,7 @@ import numpy as np
 
 from manforge.core.stress_update import stress_update
 from manforge.verification.comparator import CaseResult, ComparisonResult, Comparator
+from manforge.simulation.integrator import PythonIntegrator
 
 _STRESS_NORM = 1.0  # additive denominator for stress rel-err; avoids 0/0 on unloading
 
@@ -385,30 +354,20 @@ class ReturnMappingCrosscheck(Comparator):
 # ---------------------------------------------------------------------------
 
 class StressUpdateCrosscheck(Comparator):
-    """Compare Python ``stress_update`` and Fortran UMAT over a loading history.
+    """Compare two :class:`~manforge.simulation.integrator.StressIntegrator` implementations
+    over a loading history.
 
-    Drives both implementations through the same multi-step sequence, carrying
-    state forward at every step.
+    Drives both integrators through the same multi-step sequence via a Driver,
+    then compares stress / state / tangent at every step.
 
     Parameters
     ----------
-    fortran : FortranUMAT
-        Wrapping the compiled f2py module.
-    umat_subroutine : str
-        Name of the f2py-callable core-logic subroutine.
-    param_fn : callable
-        ``param_fn(model) -> tuple`` — material parameters in UMAT order.
-    method : {"auto", "numerical_newton", "user_defined"}
-        Python-side solver strategy.  Required; no default.
-    state_to_args : callable, optional
-        Packs state dict into positional UMAT args.  Defaults to
-        ``state_names``-order.
-    parse_umat_return : callable, optional
-        Unpacks f2py return → ``(stress, state_dict)``.
-    parse_umat_ddsdde : callable, optional
-        Unpacks f2py return → ``ddsdde`` ndarray.  When ``None``, tangent
-        comparison is skipped.  Defaults to scanning trailing returns for a
-        2-D array.
+    integrator_a : StressIntegrator
+        Reference implementation (typically a
+        :class:`~manforge.simulation.integrator.PythonIntegrator`).
+    integrator_b : StressIntegrator
+        Candidate implementation (typically a
+        :class:`~manforge.simulation.integrator.FortranIntegrator`).
     stress_tol : float, optional
         Pass threshold for relative stress error (default 1e-6).
     tangent_tol : float, optional
@@ -420,15 +379,22 @@ class StressUpdateCrosscheck(Comparator):
     --------
     ::
 
-        cc = StressUpdateCrosscheck(
-            fortran, umat_subroutine="j2_isotropic_3d",
-            param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
-            method="numerical_newton",
+        from manforge.simulation import PythonIntegrator, FortranIntegrator, StrainDriver
+
+        py_int = PythonIntegrator(model, method="numerical_newton")
+        fc_int = FortranIntegrator(
+            fortran, "j2_isotropic_3d",
+            param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
+            state_names=model.state_names,
+            initial_state=model.initial_state,
+            elastic_stiffness=model.elastic_stiffness,
         )
-        result = cc.run(StrainDriver(), model, load)
+
+        cc = StressUpdateCrosscheck(py_int, fc_int)
+        result = cc.run(StrainDriver(), load)
         assert result.passed
 
-        for cr in cc.iter_run(StrainDriver(), model, load):
+        for cr in cc.iter_run(StrainDriver(), load):
             if not cr.passed:
                 print(f"step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
                 break
@@ -436,25 +402,15 @@ class StressUpdateCrosscheck(Comparator):
 
     def __init__(
         self,
-        fortran,
+        integrator_a,
+        integrator_b,
         *,
-        umat_subroutine: str,
-        param_fn: Callable[[Any], tuple],
-        method: str,
-        state_to_args: Callable[[dict], tuple] | None = None,
-        parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
-        parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
         state_tol: float = 1e-6,
     ) -> None:
-        self.fortran = fortran
-        self.umat_subroutine = umat_subroutine
-        self.param_fn = param_fn
-        self.method = method
-        self.state_to_args = state_to_args
-        self.parse_umat_return = parse_umat_return
-        self.parse_umat_ddsdde = parse_umat_ddsdde
+        self.integrator_a = integrator_a
+        self.integrator_b = integrator_b
         self.stress_tol = stress_tol
         self.tangent_tol = tangent_tol
         self.state_tol = state_tol
@@ -462,7 +418,6 @@ class StressUpdateCrosscheck(Comparator):
     def iter_run(
         self,
         driver,
-        model,
         load,
     ) -> Iterator[CrosscheckCaseResult]:
         """Yield per-step crosscheck results.
@@ -471,79 +426,45 @@ class StressUpdateCrosscheck(Comparator):
         ----------
         driver
             An instantiated driver, e.g. ``StrainDriver()`` or ``StressDriver()``.
-        model : MaterialModel
         load : FieldHistory
 
         Yields
         ------
         CrosscheckCaseResult
         """
-        state_names: list[str] = list(model.state_names)
-        initial_state: dict = model.initial_state()
-        n_state = len(state_names)
+        for sa, sb in zip(
+            driver.iter_run(self.integrator_a, load),
+            driver.iter_run(self.integrator_b, load),
+        ):
+            ra = sa.result
+            rb = sb.result
 
-        _s2a = self.state_to_args if self.state_to_args is not None else (
-            lambda s: _default_state_to_args(s, state_names)
-        )
-        _pur = self.parse_umat_return if self.parse_umat_return is not None else (
-            lambda ret: _default_parse_umat_return(ret, state_names, initial_state)
-        )
-        _pudd: Callable[[tuple], np.ndarray] | None
-        if self.parse_umat_ddsdde is not None:
-            _pudd = self.parse_umat_ddsdde
-        else:
-            _pudd = lambda ret: _default_parse_umat_ddsdde(ret, n_state)
+            py_stress  = np.asarray(ra.stress,  dtype=np.float64)
+            py_state   = {k: np.asarray(v) for k, v in ra.state.items()}
+            py_ddsdde  = np.asarray(ra.ddsdde,  dtype=np.float64)
+            py_dlambda = float(ra.dlambda) if ra.dlambda is not None else float("nan")
 
-        ntens: int = model.stress_state.ntens
-        stress_f = np.zeros(ntens, dtype=np.float64)
-        state_f: dict = model.initial_state()
-        eps_prev = np.zeros(ntens, dtype=np.float64)
-
-        for step in driver.iter_run(model, load, method=self.method):
-            dstran = np.asarray(step.strain, dtype=np.float64) - eps_prev
-            eps_prev = np.asarray(step.strain, dtype=np.float64).copy()
-
-            py_result = step.result
-            py_stress  = np.asarray(py_result.stress,  dtype=np.float64)
-            py_state   = {k: np.asarray(v) for k, v in py_result.state.items()}
-            py_ddsdde  = np.asarray(py_result.ddsdde,  dtype=np.float64)
-            py_dlambda = float(py_result.dlambda)
-
-            state_tup = _s2a(state_f)
-            ret = self.fortran.call(
-                self.umat_subroutine,
-                *self.param_fn(model),
-                stress_f,
-                *state_tup,
-                dstran,
-            )
-            f_stress, state_f = _pur(ret)
-            f_stress = np.asarray(f_stress, dtype=np.float64)
+            f_stress = np.asarray(rb.stress, dtype=np.float64)
+            f_state  = {k: np.asarray(v) for k, v in rb.state.items()}
 
             f_ddsdde: np.ndarray | None = None
             t_err: float | None = None
-            if _pudd is not None:
-                try:
-                    f_ddsdde = np.asarray(_pudd(ret), dtype=np.float64)
-                    t_err = _tangent_rel_err(f_ddsdde, py_ddsdde)
-                except (ValueError, IndexError):
-                    f_ddsdde = None
-                    t_err = None
+            if rb.ddsdde is not None:
+                f_ddsdde = np.asarray(rb.ddsdde, dtype=np.float64)
+                t_err = _tangent_rel_err(f_ddsdde, py_ddsdde)
 
             s_err  = _stress_rel_err(f_stress, py_stress)
-            st_err = _state_rel_err(state_f, py_state)
+            st_err = _state_rel_err(f_state, py_state)
             ok     = _case_passed(s_err, st_err, t_err, self.stress_tol, self.state_tol, self.tangent_tol)
 
-            stress_f = f_stress.copy()
-
             yield CrosscheckCaseResult(
-                index=step.i,
+                index=sa.i,
                 py_stress=py_stress,
                 py_state=py_state,
                 py_ddsdde=py_ddsdde,
                 py_dlambda=py_dlambda,
                 f_stress=f_stress,
-                f_state={k: np.asarray(v) for k, v in state_f.items()},
+                f_state=f_state,
                 f_ddsdde=f_ddsdde,
                 stress_rel_err=s_err,
                 state_rel_err=st_err,
@@ -554,16 +475,15 @@ class StressUpdateCrosscheck(Comparator):
     def run(
         self,
         driver,
-        model,
         load,
     ) -> CrosscheckResult:
-        """Compare Python stress_update and Fortran UMAT over all steps.
+        """Compare both integrators over all steps.
 
         Returns
         -------
         CrosscheckResult
         """
-        base = super().run(driver, model, load)
+        base = super().run(driver, load)
         return CrosscheckResult(
             passed=base.passed,
             n_cases=base.n_cases,

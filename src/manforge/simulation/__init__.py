@@ -6,6 +6,11 @@ from manforge.simulation.driver import (
     UniaxialDriver,   # alias for StrainDriver
     GeneralDriver,    # alias for StrainDriver
 )
+from manforge.simulation.integrator import (
+    StressIntegrator,
+    PythonIntegrator,
+    FortranIntegrator,
+)
 
 __all__ = [
     "FieldType",
@@ -17,4 +22,7 @@ __all__ = [
     "UniaxialDriver",
     "GeneralDriver",
     "DriverStep",
+    "StressIntegrator",
+    "PythonIntegrator",
+    "FortranIntegrator",
 ]

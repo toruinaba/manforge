@@ -24,7 +24,12 @@ from manforge.verification import (
     generate_single_step_cases,
     generate_strain_history,
 )
-from manforge.simulation import StrainDriver, StressDriver
+from manforge.simulation import (
+    StrainDriver,
+    StressDriver,
+    PythonIntegrator,
+    FortranIntegrator,
+)
 from manforge.simulation.types import FieldHistory, FieldType
 
 
@@ -37,12 +42,21 @@ def fortran_j2():
     return FortranUMAT("j2_isotropic_3d")
 
 
-_J2_PARAM_FN = lambda m: (m.E, m.nu, m.sigma_y0, m.H)
-
-
 def _j2_load(model):
     history = generate_strain_history(model)
     return FieldHistory(FieldType.STRAIN, "eps", history)
+
+
+def _make_fc_int(fortran_j2, model):
+    """Build a FortranIntegrator for j2_isotropic_3d."""
+    return FortranIntegrator(
+        fortran_j2,
+        "j2_isotropic_3d",
+        param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
+        state_names=model.state_names,
+        initial_state=model.initial_state,
+        elastic_stiffness=model.elastic_stiffness,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -51,13 +65,11 @@ def _j2_load(model):
 
 def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
     """StrainDriver + tension-unload-compression: numerical_newton vs UMAT."""
-    cc = StressUpdateCrosscheck(
-        fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=_J2_PARAM_FN,
-        method="numerical_newton",
-    )
-    result = cc.run(StrainDriver(), model, _j2_load(model))
+    py_int = PythonIntegrator(model, method="numerical_newton")
+    fc_int = _make_fc_int(fortran_j2, model)
+
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+    result = cc.run(StrainDriver(), _j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
@@ -66,13 +78,11 @@ def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
 
 def test_crosscheck_stress_update_user_defined(fortran_j2, model):
     """StrainDriver + history: user_defined (analytical) vs UMAT."""
-    cc = StressUpdateCrosscheck(
-        fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=_J2_PARAM_FN,
-        method="user_defined",
-    )
-    result = cc.run(StrainDriver(), model, _j2_load(model))
+    py_int = PythonIntegrator(model, method="user_defined")
+    fc_int = _make_fc_int(fortran_j2, model)
+
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+    result = cc.run(StrainDriver(), _j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
@@ -86,13 +96,11 @@ def test_crosscheck_stress_update_stress_driven(fortran_j2, model):
     stress_data[:, 0] = targets
     load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-    cc = StressUpdateCrosscheck(
-        fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=_J2_PARAM_FN,
-        method="numerical_newton",
-    )
-    result = cc.run(StressDriver(), model, load)
+    py_int = PythonIntegrator(model, method="numerical_newton")
+    fc_int = _make_fc_int(fortran_j2, model)
+
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+    result = cc.run(StressDriver(), load)
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
@@ -101,18 +109,20 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
     """iter_run allows early break on first failing step."""
     load = _j2_load(model)
 
-    def bad_param_fn(m):
-        return (m.sigma_y0, m.H, m.E, m.nu)  # intentionally wrong order
-
-    cc = StressUpdateCrosscheck(
+    py_int = PythonIntegrator(model, method="numerical_newton")
+    fc_int = FortranIntegrator(
         fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=bad_param_fn,
-        method="numerical_newton",
+        "j2_isotropic_3d",
+        param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
+        state_names=model.state_names,
+        initial_state=model.initial_state,
+        elastic_stiffness=model.elastic_stiffness,
     )
 
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+
     found_failure = False
-    for cr in cc.iter_run(StrainDriver(), model, load):
+    for cr in cc.iter_run(StrainDriver(), load):
         if not cr.passed:
             found_failure = True
             break
@@ -129,7 +139,7 @@ def test_crosscheck_return_mapping_numerical_newton(fortran_j2, model):
     cc = ReturnMappingCrosscheck(
         fortran_j2,
         umat_subroutine="j2_isotropic_3d",
-        param_fn=_J2_PARAM_FN,
+        param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
         method="numerical_newton",
     )
     result = cc.run(model, generate_single_step_cases(model))
@@ -146,7 +156,7 @@ def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
     cc = ReturnMappingCrosscheck(
         fortran_j2,
         umat_subroutine="j2_isotropic_3d",
-        param_fn=_J2_PARAM_FN,
+        param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
         method="user_defined",
     )
     result = cc.run(model, generate_single_step_cases(model))
@@ -158,28 +168,20 @@ def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
 # Negative cases
 # ---------------------------------------------------------------------------
 
-def test_method_required(fortran_j2, model):
-    """Omitting method raises TypeError (it is a keyword-only required arg)."""
-    load = _j2_load(model)
-
-    with pytest.raises(TypeError):
-        StressUpdateCrosscheck(
-            fortran_j2,
-            umat_subroutine="j2_isotropic_3d",
-            param_fn=_J2_PARAM_FN,
-            # method intentionally omitted
-        )
-
-
 def test_param_fn_order_sensitivity(fortran_j2, model):
     """Passing material params in wrong order produces a failed crosscheck."""
-    cc = StressUpdateCrosscheck(
+    py_int = PythonIntegrator(model, method="numerical_newton")
+    fc_int = FortranIntegrator(
         fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=lambda m: (m.sigma_y0, m.H, m.E, m.nu),  # wrong order
-        method="numerical_newton",
+        "j2_isotropic_3d",
+        param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
+        state_names=model.state_names,
+        initial_state=model.initial_state,
+        elastic_stiffness=model.elastic_stiffness,
     )
-    result = cc.run(StrainDriver(), model, _j2_load(model))
+
+    cc = StressUpdateCrosscheck(py_int, fc_int)
+    result = cc.run(StrainDriver(), _j2_load(model))
 
     assert not result.passed, (
         "Expected crosscheck to fail with wrong param_fn order, "
@@ -219,19 +221,6 @@ class MockKinematicModel:
             "ep": anp.array(0.0),
         }
 
-    def iter_run_steps(self, strain_history):
-        stress = np.zeros(self.ntens)
-        state = self.initial_state()
-        eps_prev = np.zeros(self.ntens)
-        for eps in strain_history:
-            dstran = np.asarray(eps) - eps_prev
-            eps_prev = np.asarray(eps).copy()
-            stress = stress + self.E * dstran
-            alpha = np.asarray(state["alpha"]) + self.H_kin * dstran
-            ep = float(state["ep"]) + self.H_iso * float(np.sum(np.abs(dstran)))
-            state = {"alpha": anp.array(alpha), "ep": anp.array(ep)}
-            yield stress.copy(), state
-
 
 @pytest.fixture
 def mock_fortran():
@@ -251,12 +240,10 @@ def test_crosscheck_multi_state_mock(mock_fortran):
     n_steps = 10
     strain_data = np.zeros((n_steps, ntens))
     strain_data[:, 0] = np.linspace(1e-3, 5e-3, n_steps)
-    load = FieldHistory(FieldType.STRAIN, "eps", strain_data)
 
     # Drive Python side manually (MockKinematicModel is not a full MaterialModel)
-    stress_py_list = []
-    state_py: dict = model.initial_state()
     stress_py = np.zeros(ntens)
+    state_py: dict = model.initial_state()
     eps_prev = np.zeros(ntens)
     for eps in strain_data:
         dstran = eps - eps_prev
@@ -265,28 +252,26 @@ def test_crosscheck_multi_state_mock(mock_fortran):
         alpha = np.asarray(state_py["alpha"]) + model.H_kin * dstran
         ep = float(state_py["ep"]) + model.H_iso * float(np.sum(np.abs(dstran)))
         state_py = {"alpha": anp.array(alpha), "ep": anp.array(ep)}
-        stress_py_list.append(stress_py.copy())
 
-    # Drive Fortran side using default hooks
-    from manforge.verification.umat_crosscheck import (
-        _default_state_to_args, _default_parse_umat_return,
+    # Drive Fortran side via FortranIntegrator using default hooks
+    fc_int = FortranIntegrator(
+        mock_fortran,
+        "mock_kinematic",
+        param_fn=lambda: (model.E, model.H_kin, model.H_iso),
+        state_names=model.state_names,
+        initial_state=model.initial_state,
+        elastic_stiffness=lambda: model.E * np.eye(ntens),
     )
+
+    stress_f = np.zeros(ntens)
     state_f: dict = model.initial_state()
-    stress_f_arr = np.zeros(ntens)
     eps_prev_f = np.zeros(ntens)
     for eps in strain_data:
         dstran = eps - eps_prev_f
         eps_prev_f = eps.copy()
-
-        state_tup = _default_state_to_args(state_f, model.state_names)
-        ret = mock_fortran.call(
-            "mock_kinematic",
-            model.E, model.H_kin, model.H_iso,
-            stress_f_arr, *state_tup, dstran,
-        )
-        stress_f_arr, state_f = _default_parse_umat_return(
-            ret, model.state_names, model.initial_state()
-        )
+        result = fc_int.stress_update(dstran, stress_f, state_f)
+        stress_f = np.asarray(result.stress, dtype=np.float64)
+        state_f = result.state
 
     assert np.asarray(state_f["alpha"]).shape == (ntens,), (
         f"alpha shape mismatch: {np.asarray(state_f['alpha']).shape}"
@@ -295,9 +280,8 @@ def test_crosscheck_multi_state_mock(mock_fortran):
         f"ep should be scalar, got shape {np.asarray(state_f['ep']).shape}"
     )
 
-    stress_py_arr = np.vstack(stress_py_list)
     np.testing.assert_allclose(
-        stress_f_arr, stress_py_arr[-1], rtol=1e-10,
+        stress_f, stress_py, rtol=1e-10,
         err_msg="Fortran and Python stress diverge"
     )
 
