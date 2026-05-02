@@ -54,6 +54,13 @@ class SolverCaseResult(CaseResult):
     trial_rel_err: float = 0.0
     is_plastic_match: bool = True
     elastic_branch_match: bool = True
+    # P2: inner-NR trajectory (a/b mirror result_a/result_b).
+    a_n_iterations: int = 0
+    a_residual_history: list = field(default_factory=list)
+    a_converged: bool = True
+    b_n_iterations: int = 0
+    b_residual_history: list = field(default_factory=list)
+    b_converged: bool = True
 
 
 @dataclass
@@ -200,6 +207,12 @@ class SolverComparison(Comparator):
                 trial_rel_err=trial_rel_err,
                 is_plastic_match=is_plastic_match,
                 elastic_branch_match=elastic_branch_match,
+                a_n_iterations=ra.n_iterations,
+                a_residual_history=list(ra.residual_history),
+                a_converged=ra.converged,
+                b_n_iterations=rb.n_iterations,
+                b_residual_history=list(rb.residual_history),
+                b_converged=rb.converged,
             )
 
     def run(
