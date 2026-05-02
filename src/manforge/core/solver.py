@@ -11,8 +11,15 @@ from manforge.core.residual import (
 )
 
 
-def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
-    """Newton-Raphson solver for the reduced (ntens+1) residual system."""
+def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol,
+                raise_on_nonconverged=True):
+    """Newton-Raphson solver for the reduced (ntens+1) residual system.
+
+    Returns
+    -------
+    tuple
+        ``(stress, state_new, dlambda, n_iterations, residual_history, converged)``
+    """
     ntens = model.ntens
 
     dlambda = anp.array(0.0)
@@ -21,6 +28,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
 
     residual_history = []
     n_iterations = 0
+    f = anp.array(0.0)
 
     for _iteration in range(max_iter):
         state_new = model.update_state(dlambda, stress, state_n)
@@ -31,7 +39,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
         residual_history.append(float(np.abs(float(f))))
 
         if abs(float(f)) < tol:
-            break
+            return stress, state_new, dlambda, n_iterations, residual_history, True
 
         def _f_residual(dl, _stress=stress):
             st = model.update_state(dl, _stress, state_n)
@@ -43,17 +51,24 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol):
         dlambda = dlambda - f / dfddl
         n_iterations += 1
 
-    else:
+    if raise_on_nonconverged:
         raise RuntimeError(
             f"_reduced_nr: NR did not converge in {max_iter} iterations "
             f"(|f| = {float(np.abs(float(f))):.3e}, tol = {tol:.3e})"
         )
 
-    return stress, state_new, dlambda, n_iterations, residual_history
+    return stress, state_new, dlambda, n_iterations, residual_history, False
 
 
-def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
-    """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system."""
+def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol,
+                  raise_on_nonconverged=True):
+    """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
+
+    Returns
+    -------
+    tuple
+        ``(stress, state_new, dlambda, n_iterations, residual_history, converged)``
+    """
     ntens = model.ntens
     residual_fn, n_state, unflatten_fn = make_augmented_residual(
         model, stress_trial, C, state_n
@@ -64,17 +79,23 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
 
     residual_history = []
     n_iterations = 0
+    R = residual_fn(x)
     for _iteration in range(max_iter):
         R = residual_fn(x)
         res_norm = float(np.linalg.norm(np.array(R)))
         residual_history.append(res_norm)
         if res_norm < tol:
-            break
+            stress = x[:ntens]
+            dlambda = float(x[ntens])
+            state_new = unflatten_fn(x[ntens + 1:])
+            return (stress, state_new, anp.array(dlambda),
+                    n_iterations, residual_history, True)
         J = autograd.jacobian(residual_fn)(x)
         dx = np.linalg.solve(np.array(J), np.array(R))
         x = x - anp.array(dx)
         n_iterations += 1
-    else:
+
+    if raise_on_nonconverged:
         raise RuntimeError(
             f"_augmented_nr: NR did not converge in {max_iter} iterations "
             f"(||R||_2 = {float(np.linalg.norm(np.array(R))):.3e}, tol = {tol:.3e})"
@@ -83,7 +104,8 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol):
     stress = x[:ntens]
     dlambda = float(x[ntens])
     state_new = unflatten_fn(x[ntens + 1:])
-    return stress, state_new, anp.array(dlambda), n_iterations, residual_history
+    return (stress, state_new, anp.array(dlambda),
+            n_iterations, residual_history, False)
 
 
 def _select_nr(model):

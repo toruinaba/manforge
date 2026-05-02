@@ -144,6 +144,7 @@ class ReturnMappingResult:
     dlambda: anp.ndarray
     n_iterations: int = 0
     residual_history: list = field(default_factory=list)
+    converged: bool = True
 
 
 @dataclass
@@ -212,6 +213,13 @@ class StressUpdateResult:
             return []
         return self.return_mapping.residual_history
 
+    @property
+    def converged(self) -> bool:
+        """True if the return mapping converged (always True for elastic steps)."""
+        if self.return_mapping is None:
+            return True
+        return self.return_mapping.converged
+
 
 def return_mapping(
     model,
@@ -221,6 +229,7 @@ def return_mapping(
     method: str = "auto",
     max_iter: int = 50,
     tol: float = 1e-10,
+    raise_on_nonconverged: bool = True,
 ) -> ReturnMappingResult:
     """Perform the plastic correction (return mapping) for one load increment.
 
@@ -264,7 +273,8 @@ def return_mapping(
     Raises
     ------
     RuntimeError
-        If the NR iteration does not converge within ``max_iter`` steps.
+        If the NR iteration does not converge within ``max_iter`` steps and
+        ``raise_on_nonconverged=True`` (the default).
     NotImplementedError
         If ``method="user_defined"`` and the model does not implement
         ``user_defined_return_mapping``.
@@ -279,8 +289,8 @@ def return_mapping(
 
     # numerical_newton path
     nr = _select_nr(model)
-    stress, state_new, dlambda, _n_iter, _res_hist = nr(
-        model, stress_trial, C, state_n, max_iter, tol
+    stress, state_new, dlambda, _n_iter, _res_hist, _converged = nr(
+        model, stress_trial, C, state_n, max_iter, tol, raise_on_nonconverged
     )
 
     return ReturnMappingResult(
@@ -289,6 +299,7 @@ def return_mapping(
         dlambda=dlambda,
         n_iterations=_n_iter,
         residual_history=_res_hist,
+        converged=_converged,
     )
 
 
@@ -300,6 +311,7 @@ def stress_update(
     method: str = "auto",
     max_iter: int = 50,
     tol: float = 1e-10,
+    raise_on_nonconverged: bool = True,
 ) -> StressUpdateResult:
     """Perform a complete constitutive stress update for one load increment.
 
@@ -376,7 +388,8 @@ def stress_update(
     # Step 3 — return mapping (plastic correction)
     # ------------------------------------------------------------------
     rm = return_mapping(model, stress_trial, C, state_n, method=method,
-                        max_iter=max_iter, tol=tol)
+                        max_iter=max_iter, tol=tol,
+                        raise_on_nonconverged=raise_on_nonconverged)
 
     # ------------------------------------------------------------------
     # Step 4 — consistent tangent

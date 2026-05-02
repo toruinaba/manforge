@@ -86,9 +86,11 @@ class PythonIntegrator:
         at every step.  Defaults to ``"numerical_newton"``.
     """
 
-    def __init__(self, model, *, method: str = "numerical_newton") -> None:
+    def __init__(self, model, *, method: str = "numerical_newton",
+                 raise_on_nonconverged: bool = True) -> None:
         self._model = model
         self._method = method
+        self._raise_on_nonconverged = raise_on_nonconverged
 
     @property
     def stress_state(self) -> StressState:
@@ -106,7 +108,9 @@ class PythonIntegrator:
 
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
         return _core_stress_update(
-            self._model, strain_inc, stress_n, state_n, method=self._method
+            self._model, strain_inc, stress_n, state_n,
+            method=self._method,
+            raise_on_nonconverged=self._raise_on_nonconverged,
         )
 
 
@@ -250,6 +254,7 @@ class FortranIntegrator:
             dlambda=np.array(_NAN),
             n_iterations=0,
             residual_history=[],
+            converged=True,
         )
         return StressUpdateResult(
             return_mapping=rm,
