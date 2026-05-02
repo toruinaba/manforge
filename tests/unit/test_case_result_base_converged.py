@@ -1,0 +1,84 @@
+"""P3: base CaseResult exposes a/b_converged; ComparisonResult aggregates non-converged counts."""
+import numpy as np
+import pytest
+
+import manforge  # noqa: F401
+from manforge.core.stress_update import stress_update
+from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.simulation import StrainDriver, PythonIntegrator
+from manforge.simulation.types import FieldHistory, FieldType
+from manforge.verification import (
+    CaseResult,
+    ComparisonResult,
+    SolverComparison,
+    StressUpdateCrosscheck,
+    generate_single_step_cases,
+    generate_strain_history,
+)
+
+
+@pytest.fixture
+def model():
+    return J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+
+
+class TestBaseCaseResult:
+    def test_default_converged_true(self):
+        cr = CaseResult(index=0)
+        assert cr.a_converged is True
+        assert cr.b_converged is True
+
+    def test_can_set_false(self):
+        cr = CaseResult(index=0, a_converged=False, b_converged=False)
+        assert cr.a_converged is False
+        assert cr.b_converged is False
+
+
+class TestBaseComparisonResult:
+    def test_default_counters_zero(self):
+        cr = ComparisonResult(passed=True, n_cases=0, n_passed=0)
+        assert cr.n_a_nonconverged == 0
+        assert cr.n_b_nonconverged == 0
+
+
+def _solver(method):
+    def _solve(m, strain_inc, stress_n, state_n):
+        return stress_update(m, np.asarray(strain_inc), np.asarray(stress_n), state_n, method=method)
+    return _solve
+
+
+class TestCounterAggregation:
+    def test_solver_comparison_all_converged(self, model):
+        cs = SolverComparison(_solver("numerical_newton"), _solver("user_defined"))
+        result = cs.run(model, generate_single_step_cases(model))
+        assert result.passed
+        assert result.n_a_nonconverged == 0
+        assert result.n_b_nonconverged == 0
+
+    def test_stress_update_crosscheck_all_converged(self, model):
+        py_a = PythonIntegrator(model, method="numerical_newton")
+        py_b = PythonIntegrator(model, method="user_defined")
+        cc = StressUpdateCrosscheck(py_a, py_b)
+        history = generate_strain_history(model)
+        load = FieldHistory(FieldType.STRAIN, "eps", history)
+        result = cc.run(StrainDriver(), load)
+        assert result.n_a_nonconverged == 0
+        assert result.n_b_nonconverged == 0
+
+    def test_base_run_counts_nonconverged_via_stub(self):
+        """Comparator.run counts a/b_converged=False correctly."""
+        from manforge.verification.comparator import Comparator
+
+        class _Stub(Comparator):
+            def iter_run(self):
+                yield CaseResult(index=0, passed=True,
+                                 a_converged=False, b_converged=True)
+                yield CaseResult(index=1, passed=True,
+                                 a_converged=True, b_converged=False)
+                yield CaseResult(index=2, passed=True,
+                                 a_converged=False, b_converged=False)
+
+        result = _Stub().run()
+        assert result.n_a_nonconverged == 2
+        assert result.n_b_nonconverged == 2
+        assert result.n_cases == 3

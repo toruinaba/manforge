@@ -31,6 +31,10 @@ class CaseResult:
     state_rel_err: dict[str, float] = field(default_factory=dict)
     tangent_rel_err: float | None = None
     passed: bool = False
+    # P3: convergence status for both integrators.  False only when
+    # PythonIntegrator(raise_on_nonconverged=False) hits max_iter.
+    a_converged: bool = True
+    b_converged: bool = True
 
 
 @dataclass
@@ -44,6 +48,9 @@ class ComparisonResult:
     max_state_rel_err: dict[str, float] = field(default_factory=dict)
     max_tangent_rel_err: float | None = None
     cases: list[CaseResult] = field(default_factory=list)
+    # P3: count of non-converged steps per side (default 0 → all converged).
+    n_a_nonconverged: int = 0
+    n_b_nonconverged: int = 0
 
 
 class Comparator(ABC):
@@ -64,6 +71,8 @@ class Comparator(ABC):
         max_t: float | None = None
         max_st: dict[str, float] = {}
         n_passed = 0
+        n_a_nc = 0
+        n_b_nc = 0
 
         for cr in self.iter_run(*args, **kwargs):
             cases.append(cr)
@@ -74,6 +83,10 @@ class Comparator(ABC):
                 max_st[k] = max(max_st.get(k, 0.0), v)
             if cr.passed:
                 n_passed += 1
+            if not cr.a_converged:
+                n_a_nc += 1
+            if not cr.b_converged:
+                n_b_nc += 1
 
         return ComparisonResult(
             passed=n_passed == len(cases),
@@ -83,6 +96,8 @@ class Comparator(ABC):
             max_state_rel_err=max_st,
             max_tangent_rel_err=max_t,
             cases=cases,
+            n_a_nonconverged=n_a_nc,
+            n_b_nonconverged=n_b_nc,
         )
 
     @abstractmethod

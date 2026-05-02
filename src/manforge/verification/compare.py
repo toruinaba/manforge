@@ -55,12 +55,11 @@ class SolverCaseResult(CaseResult):
     is_plastic_match: bool = True
     elastic_branch_match: bool = True
     # P2: inner-NR trajectory (a/b mirror result_a/result_b).
+    # a_converged / b_converged live in base CaseResult (P3).
     a_n_iterations: int = 0
     a_residual_history: list = field(default_factory=list)
-    a_converged: bool = True
     b_n_iterations: int = 0
     b_residual_history: list = field(default_factory=list)
-    b_converged: bool = True
 
 
 @dataclass
@@ -237,6 +236,8 @@ class SolverComparison(Comparator):
         max_st_err: dict[str, float] = {}
         max_trial_err = 0.0
         n_passed = 0
+        n_a_nc = 0
+        n_b_nc = 0
         details = []
 
         for cr in self.iter_run(model, test_cases):
@@ -267,6 +268,10 @@ class SolverComparison(Comparator):
                 max_st_err[key] = max(max_st_err.get(key, 0.0), val)
             if cr.passed:
                 n_passed += 1
+            if not cr.a_converged:
+                n_a_nc += 1
+            if not cr.b_converged:
+                n_b_nc += 1
 
         return SolverComparisonResult(
             passed=n_passed == len(test_cases),
@@ -278,6 +283,8 @@ class SolverComparison(Comparator):
             max_trial_rel_err=max_trial_err,
             cases=cases,
             details=details,
+            n_a_nonconverged=n_a_nc,
+            n_b_nonconverged=n_b_nc,
         )
 
 

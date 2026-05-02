@@ -78,13 +78,12 @@ class CrosscheckCaseResult(CaseResult):
     f_ddsdde: np.ndarray | None = None
     # P2: inner-NR trajectory (a = integrator_a / Python side,
     #     b = integrator_b / Fortran side).  Fortran UMAT default is
-    #     a neutral (0 / [] / True) triple — matches FortranIntegrator.
+    #     a neutral (0 / []) pair — matches FortranIntegrator.
+    # a_converged / b_converged live in base CaseResult (P3).
     a_n_iterations: int = 0
     a_residual_history: list = field(default_factory=list)
-    a_converged: bool = True
     b_n_iterations: int = 0
     b_residual_history: list = field(default_factory=list)
-    b_converged: bool = True
 
 
 @dataclass
@@ -358,6 +357,8 @@ class ReturnMappingCrosscheck(Comparator):
             max_state_rel_err=base.max_state_rel_err,
             max_tangent_rel_err=base.max_tangent_rel_err,
             cases=list(base.cases),  # type: ignore[arg-type]
+            n_a_nonconverged=base.n_a_nonconverged,
+            n_b_nonconverged=base.n_b_nonconverged,
         )
 
 
@@ -510,4 +511,6 @@ class StressUpdateCrosscheck(Comparator):
             max_state_rel_err=base.max_state_rel_err,
             max_tangent_rel_err=base.max_tangent_rel_err,
             cases=list(base.cases),  # type: ignore[arg-type]
+            n_a_nonconverged=base.n_a_nonconverged,
+            n_b_nonconverged=base.n_b_nonconverged,
         )
