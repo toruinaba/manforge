@@ -1,10 +1,10 @@
-"""Tests for the generic compare_solvers utility.
+"""Tests for SolverComparison.
 
 Covers:
 - Identical solvers produce zero error and pass
 - autodiff vs analytical J2 solvers agree within tolerance
 - A wrong solver correctly reports failure
-- compare_solvers works with mixed plastic/elastic test cases
+- SolverComparison works with mixed plastic/elastic test cases
 """
 
 import dataclasses
@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from manforge.core.stress_update import stress_update, StressUpdateResult
-from manforge.verification.compare import compare_solvers, SolverComparisonResult
+from manforge.verification.compare import SolverComparison, SolverComparisonResult
 
 
 def _make_solver(method):
@@ -69,7 +69,8 @@ def test_cases(model):
 def test_identical_solvers_pass(model, test_cases):
     """Comparing a solver to itself gives zero error and passes."""
     solver = _make_solver("numerical_newton")
-    result = compare_solvers(model, solver, solver, test_cases)
+    cs = SolverComparison(solver, solver)
+    result = cs.run(model, test_cases)
 
     assert isinstance(result, SolverComparisonResult)
     assert result.passed
@@ -88,7 +89,8 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
     solver_ad = _make_solver("numerical_newton")
     solver_an = _make_solver("user_defined")
 
-    result = compare_solvers(model, solver_ad, solver_an, test_cases)
+    cs = SolverComparison(solver_ad, solver_an)
+    result = cs.run(model, test_cases)
 
     assert result.passed, (
         f"Solvers disagree: max_stress_err={result.max_stress_rel_err:.3e}, "
@@ -117,9 +119,9 @@ def test_wrong_solver_fails(model, test_cases):
             return dataclasses.replace(r, return_mapping=bad_rm)
         return r
 
-    result = compare_solvers(model, solver_ad, bad_solver, test_cases, stress_tol=1e-6)
+    cs = SolverComparison(solver_ad, bad_solver, stress_tol=1e-6)
+    result = cs.run(model, test_cases)
 
-    # At least the plastic cases should fail
     assert not result.passed
     assert result.n_passed < result.n_cases
 
@@ -131,14 +133,16 @@ def test_wrong_solver_fails(model, test_cases):
 def test_result_details_length(model, test_cases):
     """details list length equals the number of test cases."""
     solver = _make_solver("numerical_newton")
-    result = compare_solvers(model, solver, solver, test_cases)
+    cs = SolverComparison(solver, solver)
+    result = cs.run(model, test_cases)
     assert len(result.details) == len(test_cases)
 
 
 def test_result_details_keys(model, test_cases):
     """Each detail record has the required keys."""
     solver = _make_solver("numerical_newton")
-    result = compare_solvers(model, solver, solver, test_cases)
+    cs = SolverComparison(solver, solver)
+    result = cs.run(model, test_cases)
     required = {
         "case_index", "stress_rel_err", "tangent_rel_err",
         "state_rel_err", "trial_rel_err",
@@ -149,9 +153,39 @@ def test_result_details_keys(model, test_cases):
 
 
 def test_empty_test_cases(model):
-    """compare_solvers with an empty list passes vacuously."""
+    """SolverComparison with an empty list passes vacuously."""
     solver = _make_solver("numerical_newton")
-    result = compare_solvers(model, solver, solver, [])
+    cs = SolverComparison(solver, solver)
+    result = cs.run(model, [])
     assert result.passed
     assert result.n_cases == 0
     assert result.n_passed == 0
+
+
+# ---------------------------------------------------------------------------
+# iter_run — step-by-step generator
+# ---------------------------------------------------------------------------
+
+def test_iter_run_early_break(model, test_cases):
+    """iter_run allows early break on first failing case."""
+    solver_ad = _make_solver("numerical_newton")
+
+    def bad_solver(model, strain_inc, stress_n, state_n):
+        r = stress_update(
+            model, anp.asarray(strain_inc), anp.asarray(stress_n),
+            state_n, method="numerical_newton"
+        )
+        if r.return_mapping is not None:
+            bad_rm = dataclasses.replace(r.return_mapping, stress=r.return_mapping.stress * 1.1)
+            return dataclasses.replace(r, return_mapping=bad_rm)
+        return r
+
+    cs = SolverComparison(solver_ad, bad_solver)
+    found = False
+    for case in cs.iter_run(model, test_cases):
+        if not case.passed:
+            found = True
+            assert case.result_a is not None
+            assert case.result_b is not None
+            break
+    assert found
