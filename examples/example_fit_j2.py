@@ -17,6 +17,7 @@ import numpy as np
 import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.fitting.optimizer import fit_params
 
@@ -41,7 +42,7 @@ rng = np.random.default_rng(42)
 N = 50
 strain_exp = np.linspace(0.0, 5e-3, N)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_exp)
-stress_clean = driver.run(true_model, load).stress[:, 0]
+stress_clean = driver.run(PythonIntegrator(true_model), load).stress[:, 0]
 
 # Add small Gaussian noise (~0.5 MPa std) to simulate measurement scatter
 noise_std = 0.5
@@ -98,7 +99,7 @@ if HAS_MATPLOTLIB:
         E=true_model.E, nu=true_model.nu,
         sigma_y0=fitted_sigma_y0, H=fitted_H,
     )
-    stress_fitted = driver.run(fitted_model, load).stress[:, 0]
+    stress_fitted = driver.run(PythonIntegrator(fitted_model), load).stress[:, 0]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 

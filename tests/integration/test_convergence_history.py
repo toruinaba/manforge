@@ -9,6 +9,7 @@ from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
 
@@ -132,7 +133,7 @@ def test_driver_j2_analytical_history(j2_model):
     """J2 user_defined_return_mapping records n_iterations=1 and 2-entry history."""
     driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(j2_model, load)
+    dr = driver.run(PythonIntegrator(j2_model), load)
 
     for rm in dr.step_results:
         if rm.is_plastic:
@@ -148,7 +149,7 @@ def test_driver_j2_autodiff_has_history(j2_model):
     """With method='numerical_newton', J2 plastic steps record NR history."""
     driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(j2_model, load, method="numerical_newton")
+    dr = driver.run(PythonNumericalIntegrator(j2_model), load)
 
     for rm in dr.step_results:
         if rm.is_plastic:
@@ -163,7 +164,7 @@ def test_driver_j2_autodiff_has_history(j2_model):
 def test_driver_ow_step_results_have_history(ow_model):
     driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(ow_model, load)
+    dr = driver.run(PythonIntegrator(ow_model), load)
 
     for rm in dr.step_results:
         if rm.is_plastic:

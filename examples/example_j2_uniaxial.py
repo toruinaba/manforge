@@ -16,6 +16,7 @@ import numpy as np
 import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import check_tangent
 
@@ -47,7 +48,7 @@ driver = StrainDriver()
 N = 100
 strain_history = np.linspace(0.0, 5e-3, N)   # cumulative ε11
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = driver.run(model, load)
+result = driver.run(PythonIntegrator(model), load)
 stress_history = result.stress[:, 0]   # σ11
 
 # ---------------------------------------------------------------------------

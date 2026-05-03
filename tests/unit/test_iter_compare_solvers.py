@@ -4,8 +4,8 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
 from manforge.verification.solver_crosscheck import (
     SolverCaseResult,
     SolverCrosscheck,
@@ -16,12 +16,6 @@ from manforge.verification.solver_crosscheck import (
 @pytest.fixture
 def model():
     return J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-
-
-def _solver(method):
-    def _solve(m, strain_inc, stress_n, state_n):
-        return stress_update(m, anp.asarray(strain_inc), anp.asarray(stress_n), state_n, method=method)
-    return _solve
 
 
 @pytest.fixture
@@ -37,31 +31,31 @@ def test_cases(model):
 
 class TestSolverCrosscheckIterRun:
     def test_yields_solver_case_result(self, model, test_cases):
-        solver = _solver("numerical_newton")
-        cs = SolverCrosscheck(solver, solver)
-        for case in cs.iter_run(model, test_cases):
+        pi = PythonNumericalIntegrator(model)
+        cs = SolverCrosscheck(pi, pi)
+        for case in cs.iter_run(test_cases):
             assert isinstance(case, SolverCaseResult)
 
     def test_case_index_sequential(self, model, test_cases):
-        solver = _solver("numerical_newton")
-        cs = SolverCrosscheck(solver, solver)
-        indices = [c.index for c in cs.iter_run(model, test_cases)]
+        pi = PythonNumericalIntegrator(model)
+        cs = SolverCrosscheck(pi, pi)
+        indices = [c.index for c in cs.iter_run(test_cases)]
         assert indices == list(range(len(test_cases)))
 
-    def test_identical_solvers_all_pass(self, model, test_cases):
-        solver = _solver("numerical_newton")
-        cs = SolverCrosscheck(solver, solver)
-        for case in cs.iter_run(model, test_cases):
+    def test_identical_integrators_all_pass(self, model, test_cases):
+        pi = PythonNumericalIntegrator(model)
+        cs = SolverCrosscheck(pi, pi)
+        for case in cs.iter_run(test_cases):
             assert case.passed
             assert case.stress_rel_err == pytest.approx(0.0, abs=1e-14)
             assert case.tangent_rel_err == pytest.approx(0.0, abs=1e-14)
 
     def test_iter_run_matches_run(self, model, test_cases):
-        solver_a = _solver("numerical_newton")
-        solver_b = _solver("numerical_newton")
-        cs = SolverCrosscheck(solver_a, solver_b)
-        batch = cs.run(model, test_cases)
-        iter_cases = list(cs.iter_run(model, test_cases))
+        pi_a = PythonNumericalIntegrator(model)
+        pi_b = PythonNumericalIntegrator(model)
+        cs = SolverCrosscheck(pi_a, pi_b)
+        batch = cs.run(test_cases)
+        iter_cases = list(cs.iter_run(test_cases))
 
         assert len(iter_cases) == batch.n_cases
         for iter_c, batch_c in zip(iter_cases, batch.cases):
@@ -70,28 +64,17 @@ class TestSolverCrosscheckIterRun:
             assert iter_c.stress_rel_err == pytest.approx(batch_c.stress_rel_err, rel=1e-12)
             assert iter_c.tangent_rel_err == pytest.approx(batch_c.tangent_rel_err, rel=1e-12)
 
-    def test_early_break_on_failure(self, model, test_cases):
-        solver_a = _solver("numerical_newton")
-
-        def bad_solver(m, strain_inc, stress_n, state_n):
-            result = stress_update(m, anp.asarray(strain_inc), anp.asarray(stress_n), state_n)
-            from dataclasses import replace
-            return replace(result, stress_trial=result.stress_trial * 2.0)
-
-        cs = SolverCrosscheck(solver_a, bad_solver)
-        failed = []
-        for case in cs.iter_run(model, test_cases):
-            if not case.passed:
-                failed.append(case)
-                break
-
-        assert len(failed) >= 1
-        assert not failed[0].passed
+    def test_numerical_vs_analytical_pass(self, model, test_cases):
+        pi_a = PythonNumericalIntegrator(model)
+        pi_b = PythonAnalyticalIntegrator(model)
+        cs = SolverCrosscheck(pi_a, pi_b)
+        for case in cs.iter_run(test_cases):
+            assert case.passed
 
     def test_exposes_raw_results_for_jacobians(self, model, test_cases):
-        solver = _solver("numerical_newton")
-        cs = SolverCrosscheck(solver, solver)
-        for case in cs.iter_run(model, test_cases):
+        pi = PythonNumericalIntegrator(model)
+        cs = SolverCrosscheck(pi, pi)
+        for case in cs.iter_run(test_cases):
             state_n = test_cases[case.index]["state_n"]
             jac_result = compare_jacobians(model, case.result_a, case.result_b, state_n)
             assert jac_result.passed

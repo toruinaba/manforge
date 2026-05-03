@@ -26,7 +26,7 @@ _fortran_dir = os.path.join(os.path.dirname(__file__), "..", "fortran")
 sys.path.insert(0, os.path.abspath(_fortran_dir))
 
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation import StrainDriver, PythonIntegrator, FortranIntegrator
+from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FortranIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import FortranUMAT, StressUpdateCrosscheck, generate_strain_history
 
@@ -61,7 +61,7 @@ load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 #
 #    method: "numerical_newton" | "user_defined" | "auto"
 # ---------------------------------------------------------------------------
-py_int = PythonIntegrator(model, method="numerical_newton")
+py_int = PythonNumericalIntegrator(model)
 fc_int = FortranIntegrator(
     fortran,
     "j2_isotropic_3d",

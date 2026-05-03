@@ -1,4 +1,4 @@
-"""Multi-step crosscheck: ReturnMappingCrosscheck and StressUpdateCrosscheck tests.
+"""Multi-step crosscheck: SolverCrosscheck and StressUpdateCrosscheck tests.
 
 Requires compiled Fortran modules:
     uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
@@ -18,7 +18,7 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 from manforge.verification import (
-    ReturnMappingCrosscheck,
+    SolverCrosscheck,
     StressUpdateCrosscheck,
     FortranUMAT,
     generate_single_step_cases,
@@ -27,7 +27,8 @@ from manforge.verification import (
 from manforge.simulation import (
     StrainDriver,
     StressDriver,
-    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
     FortranIntegrator,
 )
 from manforge.simulation.types import FieldHistory, FieldType
@@ -65,7 +66,7 @@ def _make_fc_int(fortran_j2, model):
 
 def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
     """StrainDriver + tension-unload-compression: numerical_newton vs UMAT."""
-    py_int = PythonIntegrator(model, method="numerical_newton")
+    py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
@@ -78,7 +79,7 @@ def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
 
 def test_crosscheck_stress_update_user_defined(fortran_j2, model):
     """StrainDriver + history: user_defined (analytical) vs UMAT."""
-    py_int = PythonIntegrator(model, method="user_defined")
+    py_int = PythonAnalyticalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
@@ -96,7 +97,7 @@ def test_crosscheck_stress_update_stress_driven(fortran_j2, model):
     stress_data[:, 0] = targets
     load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-    py_int = PythonIntegrator(model, method="numerical_newton")
+    py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
@@ -109,7 +110,7 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
     """iter_run allows early break on first failing step."""
     load = _j2_load(model)
 
-    py_int = PythonIntegrator(model, method="numerical_newton")
+    py_int = PythonNumericalIntegrator(model)
     fc_int = FortranIntegrator(
         fortran_j2,
         "j2_isotropic_3d",
@@ -131,18 +132,15 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
 
 
 # ---------------------------------------------------------------------------
-# return_mapping group — test_cases based, single-step
+# single-step group — SolverCrosscheck with FortranIntegrator
 # ---------------------------------------------------------------------------
 
-def test_crosscheck_return_mapping_numerical_newton(fortran_j2, model):
-    """Single-step cases (elastic/plastic/multiaxial) with numerical_newton."""
-    cc = ReturnMappingCrosscheck(
-        fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
-        method="numerical_newton",
-    )
-    result = cc.run(model, generate_single_step_cases(model))
+def test_crosscheck_single_step_numerical_newton(fortran_j2, model):
+    """Single-step cases (elastic/plastic/multiaxial) with numerical_newton vs UMAT."""
+    py_int = PythonNumericalIntegrator(model)
+    fc_int = _make_fc_int(fortran_j2, model)
+    cs = SolverCrosscheck(py_int, fc_int)
+    result = cs.run(generate_single_step_cases(model))
 
     assert result.passed, (
         f"max_stress_rel_err = {result.max_stress_rel_err:.2e}, "
@@ -151,15 +149,12 @@ def test_crosscheck_return_mapping_numerical_newton(fortran_j2, model):
     assert result.max_stress_rel_err < 1e-6
 
 
-def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
-    """Single-step cases with user_defined (analytical) return mapping."""
-    cc = ReturnMappingCrosscheck(
-        fortran_j2,
-        umat_subroutine="j2_isotropic_3d",
-        param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
-        method="user_defined",
-    )
-    result = cc.run(model, generate_single_step_cases(model))
+def test_crosscheck_single_step_user_defined(fortran_j2, model):
+    """Single-step cases with user_defined (analytical) return mapping vs UMAT."""
+    py_int = PythonAnalyticalIntegrator(model)
+    fc_int = _make_fc_int(fortran_j2, model)
+    cs = SolverCrosscheck(py_int, fc_int)
+    result = cs.run(generate_single_step_cases(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
@@ -170,7 +165,7 @@ def test_crosscheck_return_mapping_user_defined(fortran_j2, model):
 
 def test_param_fn_order_sensitivity(fortran_j2, model):
     """Passing material params in wrong order produces a failed crosscheck."""
-    py_int = PythonIntegrator(model, method="numerical_newton")
+    py_int = PythonNumericalIntegrator(model)
     fc_int = FortranIntegrator(
         fortran_j2,
         "j2_isotropic_3d",

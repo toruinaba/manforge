@@ -2,8 +2,8 @@
 
 Demonstrates all features of the manforge Fortran crosscheck API:
 
-* Part 1 — ReturnMappingCrosscheck  (test_cases list, single-step)
-* Part 2 — StressUpdateCrosscheck   (multi-step, method="user_defined", ddsdde)
+* Part 1 — SolverCrosscheck         (single-step, test_cases list)
+* Part 2 — StressUpdateCrosscheck   (multi-step, analytical integrator, ddsdde)
 * Part 3 — iter_run streaming + early break on failure
 * Part 4 — StressDriver path        (stress-controlled loading)
 * Part 5 — FortranIntegrator        (explicit state_to_args via default hooks,
@@ -30,13 +30,14 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import (
     StrainDriver,
     StressDriver,
-    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
     FortranIntegrator,
 )
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     FortranUMAT,
-    ReturnMappingCrosscheck,
+    SolverCrosscheck,
     StressUpdateCrosscheck,
     generate_single_step_cases,
     generate_strain_history,
@@ -74,32 +75,29 @@ load = FieldHistory(FieldType.STRAIN, "eps", history)
 
 
 # =========================================================================
-# Part 1: ReturnMappingCrosscheck — single-step, test_cases list
+# Part 1: SolverCrosscheck — single-step, test_cases list
 # =========================================================================
 print("=" * 60)
-print("  Part 1: ReturnMappingCrosscheck (test_cases)")
+print("  Part 1: SolverCrosscheck (test_cases, single-step)")
 print("=" * 60)
 
 test_cases = generate_single_step_cases(model)
 print(f"  Generated {len(test_cases)} test cases")
 
-cc1 = ReturnMappingCrosscheck(
-    fortran_j2,
-    umat_subroutine="j2_isotropic_3d",
-    param_fn=lambda m: (m.E, m.nu, m.sigma_y0, m.H),
-    method="numerical_newton",
-)
-result1 = cc1.run(model, test_cases)
+py_int1 = PythonNumericalIntegrator(model)
+fc_int1 = _make_fc_int(fortran_j2)
+cc1 = SolverCrosscheck(py_int1, fc_int1)
+result1 = cc1.run(test_cases)
 
 print(f"  passed       : {result1.passed}  ({result1.n_passed}/{result1.n_cases})")
 print(f"  max stress err: {result1.max_stress_rel_err:.2e}")
 
 for cr in result1.cases:
     ep_err = cr.state_rel_err.get("ep", 0.0)
-    plastic = cr.py_dlambda is not None and cr.py_dlambda > 0
+    plastic = cr.result_a is not None and cr.result_a.is_plastic
     print(
         f"  case {cr.index}: stress_err={cr.stress_rel_err:.1e}  "
-        f"ep_err={ep_err:.1e}  dlambda={cr.py_dlambda:.3e}  "
+        f"ep_err={ep_err:.1e}  "
         f"{'plastic' if plastic else 'elastic'}"
     )
 
@@ -111,10 +109,10 @@ print()
 # Part 2: StressUpdateCrosscheck — method="user_defined" + ddsdde
 # =========================================================================
 print("=" * 60)
-print("  Part 2: StressUpdateCrosscheck (user_defined, ddsdde)")
+print("  Part 2: StressUpdateCrosscheck (analytical, ddsdde)")
 print("=" * 60)
 
-py_int2 = PythonIntegrator(model, method="user_defined")
+py_int2 = PythonAnalyticalIntegrator(model)
 fc_int2 = _make_fc_int(fortran_j2)
 
 cc2 = StressUpdateCrosscheck(py_int2, fc_int2)
@@ -139,7 +137,7 @@ print("=" * 60)
 print("  Part 3: iter_run (streaming / early break)")
 print("=" * 60)
 
-py_int3 = PythonIntegrator(model, method="numerical_newton")
+py_int3 = PythonNumericalIntegrator(model)
 fc_int3 = _make_fc_int(fortran_j2)
 cc3 = StressUpdateCrosscheck(py_int3, fc_int3)
 
@@ -186,7 +184,7 @@ stress_data = np.zeros((len(targets), model.ntens))
 stress_data[:, 0] = targets
 stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-py_int4 = PythonIntegrator(model, method="numerical_newton")
+py_int4 = PythonNumericalIntegrator(model)
 fc_int4 = _make_fc_int(fortran_j2)
 cc4 = StressUpdateCrosscheck(py_int4, fc_int4)
 result4 = cc4.run(StressDriver(), stress_load)

@@ -5,7 +5,11 @@ import pytest
 
 from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.integrator import PythonIntegrator
+from manforge.simulation.integrator import (
+    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
+)
 
 
 @pytest.fixture
@@ -29,7 +33,7 @@ def test_ntens_delegates(model):
 
 
 def test_stress_update_elastic_matches_bare(model):
-    pi = PythonIntegrator(model, method="numerical_newton")
+    pi = PythonNumericalIntegrator(model)
     strain_inc = np.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
     stress_n = np.zeros(model.ntens)
     state_n = model.initial_state()
@@ -42,7 +46,7 @@ def test_stress_update_elastic_matches_bare(model):
 
 
 def test_stress_update_plastic_matches_bare(model):
-    pi = PythonIntegrator(model, method="numerical_newton")
+    pi = PythonNumericalIntegrator(model)
     strain_inc = np.array([5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     stress_n = np.zeros(model.ntens)
     state_n = model.initial_state()
@@ -52,4 +56,17 @@ def test_stress_update_plastic_matches_bare(model):
 
     np.testing.assert_allclose(result_pi.stress, result_bare.stress, rtol=1e-12)
     np.testing.assert_allclose(result_pi.ddsdde, result_bare.ddsdde, rtol=1e-12)
+    assert result_pi.is_plastic == result_bare.is_plastic
+
+
+def test_python_analytical_integrator(model):
+    pi = PythonAnalyticalIntegrator(model)
+    strain_inc = np.array([5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    stress_n = np.zeros(model.ntens)
+    state_n = model.initial_state()
+
+    result_pi = pi.stress_update(strain_inc, stress_n, state_n)
+    result_bare = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+
+    np.testing.assert_allclose(result_pi.stress, result_bare.stress, rtol=1e-12)
     assert result_pi.is_plastic == result_bare.is_plastic

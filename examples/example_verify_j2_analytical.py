@@ -26,6 +26,7 @@ from manforge.core.stress_update import stress_update
 from manforge.core.jacobian import ad_jacobian_blocks
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
 # ---------------------------------------------------------------------------
@@ -145,7 +146,7 @@ driver = StrainDriver()
 N = 30
 strain_history = np.linspace(0.0, 5e-3, N)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-driver_result = driver.run(model, load)
+driver_result = driver.run(PythonIntegrator(model), load)
 
 # Find the first plastic step
 first_plastic = None

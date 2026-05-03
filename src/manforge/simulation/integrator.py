@@ -9,19 +9,26 @@ constitutive implementation:
 * ``elastic_stiffness()``       — (ntens, ntens) stiffness tensor
 * ``stress_update(Δε, σ_n, s_n) → StressUpdateResult``  — one step
 
-Three adapters implement this protocol:
+Four adapters implement this protocol:
 
 :class:`PythonIntegrator`
-    Wraps a :class:`~manforge.core.material.MaterialModel` and a chosen
-    ``method`` ("numerical_newton", "user_defined", "auto").
+    Wraps a :class:`~manforge.core.material.MaterialModel` and uses the
+    ``"auto"`` solver strategy (user-defined hook if present, else
+    numerical Newton-Raphson).
+
+:class:`PythonNumericalIntegrator`
+    Same as ``PythonIntegrator`` but always uses ``"numerical_newton"``.
+
+:class:`PythonAnalyticalIntegrator`
+    Same as ``PythonIntegrator`` but always uses ``"user_defined"``
+    (requires ``model.user_defined_return_mapping`` to be implemented).
 
 :class:`FortranIntegrator`
     Wraps a :class:`~manforge.verification.FortranUMAT` and the four hook
     functions that map between Python state dicts and Fortran argument lists.
 
-Both can be passed wherever a Driver expects a model.  Passing a bare
-``MaterialModel`` directly still works — the Driver auto-wraps it in a
-``PythonIntegrator(model, method=method)``.
+Drivers require a :class:`StressIntegrator` — bare ``MaterialModel`` objects
+are not accepted directly.  Wrap them with one of the Python integrators above.
 """
 
 from __future__ import annotations
@@ -74,22 +81,16 @@ class StressIntegrator:
 # PythonIntegrator
 # ---------------------------------------------------------------------------
 
-class PythonIntegrator:
-    """Wraps a MaterialModel for use with Driver.
+class _PythonIntegratorBase:
+    """Shared implementation for Python-side integrators.
 
-    Parameters
-    ----------
-    model : MaterialModel
-        The constitutive model to wrap.
-    method : str, optional
-        Solver strategy passed to :func:`~manforge.core.stress_update.stress_update`
-        at every step.  Defaults to ``"numerical_newton"``.
+    Subclasses set the ``_method`` class variable to select the solver strategy.
     """
 
-    def __init__(self, model, *, method: str = "numerical_newton",
-                 raise_on_nonconverged: bool = True) -> None:
+    _method: str = "auto"
+
+    def __init__(self, model, *, raise_on_nonconverged: bool = True) -> None:
         self._model = model
-        self._method = method
         self._raise_on_nonconverged = raise_on_nonconverged
 
     @property
@@ -112,6 +113,50 @@ class PythonIntegrator:
             method=self._method,
             raise_on_nonconverged=self._raise_on_nonconverged,
         )
+
+
+class PythonIntegrator(_PythonIntegratorBase):
+    """Wraps a MaterialModel using the ``"auto"`` solver strategy.
+
+    Uses ``model.user_defined_return_mapping`` when available, otherwise
+    falls back to numerical Newton-Raphson.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    raise_on_nonconverged : bool, optional
+        Raise ``RuntimeError`` if NR does not converge (default ``True``).
+    """
+
+    _method = "auto"
+
+
+class PythonNumericalIntegrator(_PythonIntegratorBase):
+    """Wraps a MaterialModel always using numerical Newton-Raphson.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    raise_on_nonconverged : bool, optional
+        Raise ``RuntimeError`` if NR does not converge (default ``True``).
+    """
+
+    _method = "numerical_newton"
+
+
+class PythonAnalyticalIntegrator(_PythonIntegratorBase):
+    """Wraps a MaterialModel always using the user-defined analytical solver.
+
+    Requires ``model.user_defined_return_mapping`` to be implemented.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    raise_on_nonconverged : bool, optional
+        Raise ``RuntimeError`` if NR does not converge (default ``True``).
+    """
+
+    _method = "user_defined"
 
 
 # ---------------------------------------------------------------------------

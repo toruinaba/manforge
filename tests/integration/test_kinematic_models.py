@@ -21,6 +21,7 @@ from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinemat
 from manforge.core.stress_update import stress_update
 from manforge.core.stress_state import PLANE_STRAIN
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification.fd_check import check_tangent
 
@@ -237,7 +238,7 @@ def test_cyclic_loading_driver(km_model):
 
     load = FieldHistory(type=FieldType.STRAIN, name="Strain", data=history)
     result = StrainDriver().run(
-        km_model, load,
+        PythonNumericalIntegrator(km_model), load,
         collect_state={"alpha": FieldType.STRESS, "ep": FieldType.STRAIN},
     )
 

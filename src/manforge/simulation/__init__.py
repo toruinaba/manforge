@@ -3,12 +3,12 @@ from manforge.simulation.driver import (
     DriverBase,
     StrainDriver,
     StressDriver,
-    UniaxialDriver,   # alias for StrainDriver
-    GeneralDriver,    # alias for StrainDriver
 )
 from manforge.simulation.integrator import (
     StressIntegrator,
     PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
     FortranIntegrator,
 )
 
@@ -19,10 +19,10 @@ __all__ = [
     "DriverBase",
     "StrainDriver",
     "StressDriver",
-    "UniaxialDriver",
-    "GeneralDriver",
     "DriverStep",
     "StressIntegrator",
     "PythonIntegrator",
+    "PythonNumericalIntegrator",
+    "PythonAnalyticalIntegrator",
     "FortranIntegrator",
 ]

@@ -28,7 +28,6 @@ from manforge.verification.fortran_registry import (
 from manforge.verification.umat_crosscheck import (
     CrosscheckCaseResult,
     CrosscheckResult,
-    ReturnMappingCrosscheck,
     StressUpdateCrosscheck,
 )
 
@@ -37,7 +36,7 @@ __all__ = [
     "Comparator",
     "CaseResult",
     "ComparisonResult",
-    # Python-vs-Python solver crosscheck
+    # Python-vs-Python or integrator-vs-integrator single-step crosscheck
     "SolverCrosscheck",
     "SolverCaseResult",
     "SolverCrosscheckResult",
@@ -57,9 +56,8 @@ __all__ = [
     "verified_against_fortran",
     "collect_bindings",
     "check_bindings",
-    # Crosscheck harnesses
+    # Multi-step crosscheck harness
     "CrosscheckCaseResult",
     "CrosscheckResult",
-    "ReturnMappingCrosscheck",
     "StressUpdateCrosscheck",
 ]
