@@ -10,7 +10,7 @@ from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     CaseResult,
     ComparisonResult,
-    SolverComparison,
+    SolverCrosscheck,
     StressUpdateCrosscheck,
     generate_single_step_cases,
     generate_strain_history,
@@ -49,7 +49,7 @@ def _solver(method):
 
 class TestCounterAggregation:
     def test_solver_comparison_all_converged(self, model):
-        cs = SolverComparison(_solver("numerical_newton"), _solver("user_defined"))
+        cs = SolverCrosscheck(_solver("numerical_newton"), _solver("user_defined"))
         result = cs.run(model, generate_single_step_cases(model))
         assert result.passed
         assert result.n_a_nonconverged == 0
@@ -67,7 +67,7 @@ class TestCounterAggregation:
 
     def test_base_run_counts_nonconverged_via_stub(self):
         """Comparator.run counts a/b_converged=False correctly."""
-        from manforge.verification.comparator import Comparator
+        from manforge.verification.comparator_base import Comparator
 
         class _Stub(Comparator):
             def iter_run(self):

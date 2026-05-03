@@ -17,7 +17,7 @@ import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.fd_check import check_tangent
+from manforge.verification import check_tangent
 
 try:
     import matplotlib

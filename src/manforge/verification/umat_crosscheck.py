@@ -51,10 +51,16 @@ from typing import Any, Callable
 import numpy as np
 
 from manforge.core.stress_update import stress_update
-from manforge.verification.comparator import CaseResult, ComparisonResult, Comparator
+from manforge.verification.comparator_base import (
+    CaseResult,
+    ComparisonResult,
+    Comparator,
+    _case_passed,
+    _state_rel_err,
+    _stress_rel_err,
+    _tangent_rel_err,
+)
 from manforge.simulation.integrator import PythonIntegrator
-
-_STRESS_NORM = 1.0  # additive denominator for stress rel-err; avoids 0/0 on unloading
 
 
 # ---------------------------------------------------------------------------
@@ -160,48 +166,6 @@ def _default_parse_umat_ddsdde(
 
 
 # ---------------------------------------------------------------------------
-# Error calculation helpers
-# ---------------------------------------------------------------------------
-
-_EPS = 1e-300  # zero-division guard for state/tangent
-
-
-def _stress_rel_err(f_stress: np.ndarray, py_stress: np.ndarray) -> float:
-    return float(np.max(np.abs(f_stress - py_stress) / (np.abs(py_stress) + _STRESS_NORM)))
-
-
-def _state_rel_err(
-    f_state: dict[str, Any],
-    py_state: dict[str, Any],
-) -> dict[str, float]:
-    errs: dict[str, float] = {}
-    for key in py_state:
-        va = np.asarray(py_state[key], dtype=float)
-        vb = np.asarray(f_state.get(key, np.zeros_like(va)), dtype=float)
-        errs[key] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
-    return errs
-
-
-def _tangent_rel_err(f_ddsdde: np.ndarray, py_ddsdde: np.ndarray) -> float:
-    return float(np.max(np.abs(f_ddsdde - py_ddsdde) / (np.abs(py_ddsdde) + _EPS)))
-
-
-def _case_passed(
-    s_err: float,
-    st_errs: dict[str, float],
-    t_err: float | None,
-    stress_tol: float,
-    state_tol: float,
-    tangent_tol: float,
-) -> bool:
-    ok = s_err <= stress_tol
-    ok = ok and all(v <= state_tol for v in st_errs.values())
-    if t_err is not None:
-        ok = ok and t_err <= tangent_tol
-    return ok
-
-
-# ---------------------------------------------------------------------------
 # ReturnMappingCrosscheck
 # ---------------------------------------------------------------------------
 
@@ -247,6 +211,8 @@ class ReturnMappingCrosscheck(Comparator):
                 print(f"case {cr.index} stress_err={cr.stress_rel_err:.2e}")
                 break
     """
+
+    _result_cls = CrosscheckResult
 
     def __init__(
         self,
@@ -337,30 +303,6 @@ class ReturnMappingCrosscheck(Comparator):
                 a_converged=py_su.converged,
             )
 
-    def run(
-        self,
-        model,
-        test_cases: list[dict],
-    ) -> CrosscheckResult:
-        """Compare Python return_mapping and Fortran UMAT across all cases.
-
-        Returns
-        -------
-        CrosscheckResult
-        """
-        base = super().run(model, test_cases)
-        return CrosscheckResult(
-            passed=base.passed,
-            n_cases=base.n_cases,
-            n_passed=base.n_passed,
-            max_stress_rel_err=base.max_stress_rel_err,
-            max_state_rel_err=base.max_state_rel_err,
-            max_tangent_rel_err=base.max_tangent_rel_err,
-            cases=list(base.cases),  # type: ignore[arg-type]
-            n_a_nonconverged=base.n_a_nonconverged,
-            n_b_nonconverged=base.n_b_nonconverged,
-        )
-
 
 # ---------------------------------------------------------------------------
 # StressUpdateCrosscheck
@@ -413,6 +355,8 @@ class StressUpdateCrosscheck(Comparator):
                 break
     """
 
+    _result_cls = CrosscheckResult
+
     def __init__(
         self,
         integrator_a,
@@ -460,11 +404,10 @@ class StressUpdateCrosscheck(Comparator):
             f_stress = np.asarray(rb.stress, dtype=np.float64)
             f_state  = {k: np.asarray(v) for k, v in rb.state.items()}
 
-            f_ddsdde: np.ndarray | None = None
-            t_err: float | None = None
-            if rb.ddsdde is not None:
-                f_ddsdde = np.asarray(rb.ddsdde, dtype=np.float64)
-                t_err = _tangent_rel_err(f_ddsdde, py_ddsdde)
+            f_ddsdde = (
+                np.asarray(rb.ddsdde, dtype=np.float64) if rb.ddsdde is not None else None
+            )
+            t_err = _tangent_rel_err(py_ddsdde, f_ddsdde)
 
             s_err  = _stress_rel_err(f_stress, py_stress)
             st_err = _state_rel_err(f_state, py_state)
@@ -491,26 +434,3 @@ class StressUpdateCrosscheck(Comparator):
                 b_converged=rb.converged,
             )
 
-    def run(
-        self,
-        driver,
-        load,
-    ) -> CrosscheckResult:
-        """Compare both integrators over all steps.
-
-        Returns
-        -------
-        CrosscheckResult
-        """
-        base = super().run(driver, load)
-        return CrosscheckResult(
-            passed=base.passed,
-            n_cases=base.n_cases,
-            n_passed=base.n_passed,
-            max_stress_rel_err=base.max_stress_rel_err,
-            max_state_rel_err=base.max_state_rel_err,
-            max_tangent_rel_err=base.max_tangent_rel_err,
-            cases=list(base.cases),  # type: ignore[arg-type]
-            n_a_nonconverged=base.n_a_nonconverged,
-            n_b_nonconverged=base.n_b_nonconverged,
-        )

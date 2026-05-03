@@ -106,7 +106,10 @@ src/manforge/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── compare.py         # compare_solvers()
+│   ├── comparator_base.py # Comparator ABC + 共有 rel-err ヘルパー
+│   ├── solver_crosscheck.py # SolverCrosscheck / compare_jacobians
+│   ├── umat_crosscheck.py # ReturnMappingCrosscheck / StressUpdateCrosscheck
+│   ├── fortran_registry.py# @verified_against_fortran デコレータ
 │   ├── fd_check.py        # check_tangent()
 │   ├── fortran_bridge.py  # FortranUMAT — f2py ラッパー
 │   └── test_cases.py      # estimate_yield_strain / generate_*
@@ -457,12 +460,12 @@ result = check_tangent(
 print(result.passed, result.max_rel_err)
 ```
 
-### compare_solvers でソルバ同士の比較
+### SolverCrosscheck でソルバ同士の比較
 
 ```python
 import numpy as np
 from manforge.core.stress_update import stress_update
-from manforge.verification.compare import compare_solvers
+from manforge.verification import SolverCrosscheck
 from manforge.verification.test_cases import generate_single_step_cases
 
 def make_solver(method):
@@ -472,33 +475,28 @@ def make_solver(method):
 
 # 弾性・塑性・多軸・剪断ケースを自動生成
 cases = generate_single_step_cases(model)
-result = compare_solvers(
-    model,
-    solver_a=make_solver("numerical_newton"),
-    solver_b=make_solver("user_defined"),
-    test_cases=cases,
+cs = SolverCrosscheck(
+    make_solver("numerical_newton"),
+    make_solver("user_defined"),
 )
+result = cs.run(model, cases)
 print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}")
 ```
 
 `generate_single_step_cases` は `estimate_yield_strain` で降伏ひずみを自動推定し、5 ケース (弾性・塑性・多軸・剪断・プレストレス) を生成する。
 
-`iter_compare_solvers` を使うとケースごとに `SolverCaseResult` を受け取るジェネレータになる。最初の失敗ケースで打ち切って Jacobian 比較などの詳細デバッグが可能:
+`cs.iter_run` を使うとケースごとに `SolverCaseResult` を受け取るジェネレータになる。最初の失敗ケースで打ち切って Jacobian 比較などの詳細デバッグが可能:
 
 ```python
-from manforge.verification.compare import iter_compare_solvers, compare_jacobians
+from manforge.verification import compare_jacobians
 
-for case in iter_compare_solvers(model, solver_a, solver_b, cases):
-    # case.case_index, case.stress_rel_err, case.passed など
+for case in cs.iter_run(model, cases):
     if not case.passed:
-        print(f"Case {case.case_index} failed: stress_err={case.stress_rel_err:.2e}")
-        # result_a / result_b をそのまま compare_jacobians に渡せる
-        state_n = cases[case.case_index]["state_n"]
+        print(f"Case {case.index} failed: stress_err={case.stress_rel_err:.2e}")
+        state_n = cases[case.index]["state_n"]
         jac = compare_jacobians(model, case.result_a, case.result_b, state_n)
         break
 ```
-
-既存の `compare_solvers` はそのまま使える（後方互換）。
 
 ### Fortran UMAT クロス検証
 

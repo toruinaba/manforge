@@ -1,9 +1,4 @@
-"""Unit tests for UMATVerifier and the test_cases module.
-
-These tests do NOT require the compiled Fortran module.  They verify the
-test case generation utilities and the structure of VerificationResult
-using the Python J2 model only.
-"""
+"""Unit tests for the test_cases module (pure-Python, no Fortran needed)."""
 
 import numpy as np
 import pytest
@@ -63,7 +58,7 @@ def test_generate_single_step_cases_count(model):
 
 
 def test_generate_single_step_cases_keys(model):
-    """Each case has the required keys for compare_solvers."""
+    """Each case has the required keys for SolverCrosscheck."""
     cases = generate_single_step_cases(model)
     required = {"strain_inc", "stress_n", "state_n"}
     for case in cases:

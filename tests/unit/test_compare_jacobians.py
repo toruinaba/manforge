@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from manforge.core.stress_update import stress_update
-from manforge.verification.compare import compare_jacobians, JacobianComparisonResult
+from manforge.verification.solver_crosscheck import compare_jacobians, JacobianComparisonResult
 
 
 def _result(model, strain_scale):

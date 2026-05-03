@@ -1,10 +1,10 @@
-"""Tests for SolverComparison.
+"""Tests for SolverCrosscheck.
 
 Covers:
 - Identical solvers produce zero error and pass
 - autodiff vs analytical J2 solvers agree within tolerance
 - A wrong solver correctly reports failure
-- SolverComparison works with mixed plastic/elastic test cases
+- SolverCrosscheck works with mixed plastic/elastic test cases
 """
 
 import dataclasses
@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from manforge.core.stress_update import stress_update, StressUpdateResult
-from manforge.verification.compare import SolverComparison, SolverComparisonResult
+from manforge.verification.solver_crosscheck import SolverCrosscheck, SolverCrosscheckResult
 
 
 def _make_solver(method):
@@ -69,10 +69,10 @@ def test_cases(model):
 def test_identical_solvers_pass(model, test_cases):
     """Comparing a solver to itself gives zero error and passes."""
     solver = _make_solver("numerical_newton")
-    cs = SolverComparison(solver, solver)
+    cs = SolverCrosscheck(solver, solver)
     result = cs.run(model, test_cases)
 
-    assert isinstance(result, SolverComparisonResult)
+    assert isinstance(result, SolverCrosscheckResult)
     assert result.passed
     assert result.n_cases == len(test_cases)
     assert result.n_passed == len(test_cases)
@@ -89,13 +89,13 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
     solver_ad = _make_solver("numerical_newton")
     solver_an = _make_solver("user_defined")
 
-    cs = SolverComparison(solver_ad, solver_an)
+    cs = SolverCrosscheck(solver_ad, solver_an)
     result = cs.run(model, test_cases)
 
     assert result.passed, (
         f"Solvers disagree: max_stress_err={result.max_stress_rel_err:.3e}, "
         f"max_tangent_err={result.max_tangent_rel_err:.3e}\n"
-        f"Details: {result.details}"
+        f"Failed cases: {[c.index for c in result.cases if not c.passed]}"
     )
     assert result.max_stress_rel_err  < 1e-6
     assert result.max_tangent_rel_err < 1e-5
@@ -119,7 +119,7 @@ def test_wrong_solver_fails(model, test_cases):
             return dataclasses.replace(r, return_mapping=bad_rm)
         return r
 
-    cs = SolverComparison(solver_ad, bad_solver, stress_tol=1e-6)
+    cs = SolverCrosscheck(solver_ad, bad_solver, stress_tol=1e-6)
     result = cs.run(model, test_cases)
 
     assert not result.passed
@@ -130,32 +130,35 @@ def test_wrong_solver_fails(model, test_cases):
 # Result structure
 # ---------------------------------------------------------------------------
 
-def test_result_details_length(model, test_cases):
-    """details list length equals the number of test cases."""
+def test_result_cases_length(model, test_cases):
+    """cases list length equals the number of test cases."""
     solver = _make_solver("numerical_newton")
-    cs = SolverComparison(solver, solver)
+    cs = SolverCrosscheck(solver, solver)
     result = cs.run(model, test_cases)
-    assert len(result.details) == len(test_cases)
+    assert len(result.cases) == len(test_cases)
 
 
-def test_result_details_keys(model, test_cases):
-    """Each detail record has the required keys."""
+def test_result_case_fields(model, test_cases):
+    """Each SolverCaseResult has the required attributes."""
+    from manforge.verification.solver_crosscheck import SolverCaseResult
     solver = _make_solver("numerical_newton")
-    cs = SolverComparison(solver, solver)
+    cs = SolverCrosscheck(solver, solver)
     result = cs.run(model, test_cases)
-    required = {
-        "case_index", "stress_rel_err", "tangent_rel_err",
-        "state_rel_err", "trial_rel_err",
-        "is_plastic_match", "elastic_branch_match", "passed",
-    }
-    for d in result.details:
-        assert required <= d.keys()
+    for c in result.cases:
+        assert isinstance(c, SolverCaseResult)
+        assert c.index >= 0
+        assert c.stress_rel_err is not None
+        assert c.tangent_rel_err is not None
+        assert isinstance(c.state_rel_err, dict)
+        assert isinstance(c.is_plastic_match, bool)
+        assert isinstance(c.elastic_branch_match, bool)
+        assert isinstance(c.passed, bool)
 
 
 def test_empty_test_cases(model):
-    """SolverComparison with an empty list passes vacuously."""
+    """SolverCrosscheck with an empty list passes vacuously."""
     solver = _make_solver("numerical_newton")
-    cs = SolverComparison(solver, solver)
+    cs = SolverCrosscheck(solver, solver)
     result = cs.run(model, [])
     assert result.passed
     assert result.n_cases == 0
@@ -180,7 +183,7 @@ def test_iter_run_early_break(model, test_cases):
             return dataclasses.replace(r, return_mapping=bad_rm)
         return r
 
-    cs = SolverComparison(solver_ad, bad_solver)
+    cs = SolverCrosscheck(solver_ad, bad_solver)
     found = False
     for case in cs.iter_run(model, test_cases):
         if not case.passed:
