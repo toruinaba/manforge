@@ -1,4 +1,4 @@
-"""Comparator ABC — shared base for SolverComparison and crosscheck harnesses.
+"""Comparator ABC — shared base for SolverCrosscheck and crosscheck harnesses.
 
 A Comparator holds the static configuration of *what to compare* (ref/cand
 implementations, tolerances) in ``__init__`` and accepts *what to apply it to*
@@ -6,7 +6,7 @@ implementations, tolerances) in ``__init__`` and accepts *what to apply it to*
 
 Concrete subclasses:
 
-* ``SolverComparison``       — two Python solvers vs. shared test_cases
+* ``SolverCrosscheck``        — two Python solvers vs. shared test_cases
 * ``ReturnMappingCrosscheck`` — Python return_mapping vs. Fortran UMAT
 * ``StressUpdateCrosscheck``  — Python stress_update vs. Fortran UMAT (multi-step)
 """

@@ -1,6 +1,6 @@
-"""Solver-vs-solver and Jacobian comparison utilities.
+"""Python-solver-vs-Python-solver crosscheck and Jacobian comparison.
 
-:class:`SolverComparison` compares two Python solvers across a set of
+:class:`SolverCrosscheck` compares two Python solvers across a set of
 independent test cases.  It is a :class:`~manforge.verification.Comparator`
 subclass: configuration (solver_a, solver_b, tolerances) is fixed in
 ``__init__``; ``iter_run(model, test_cases)`` drives the comparison.
@@ -13,8 +13,8 @@ Usage
 -----
 ::
 
-    cs = SolverComparison(solver_a, solver_b)
-    result = cs.run(model, test_cases)        # → ComparisonResult
+    cs = SolverCrosscheck(solver_a, solver_b)
+    result = cs.run(model, test_cases)        # → SolverCrosscheckResult
     for case in cs.iter_run(model, test_cases):   # step-by-step
         if not case.passed:
             break
@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from manforge.verification.comparator import (
+from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
     Comparator,
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class SolverCaseResult(CaseResult):
-    """Per-case result from :class:`SolverComparison`.
+    """Per-case result from :class:`SolverCrosscheck`.
 
     Extends :class:`~manforge.verification.CaseResult` with raw
     :class:`~manforge.core.stress_update.StressUpdateResult` objects so the
@@ -69,8 +69,8 @@ class SolverCaseResult(CaseResult):
 
 
 @dataclass
-class SolverComparisonResult(ComparisonResult):
-    """Aggregate result from :class:`SolverComparison`.
+class SolverCrosscheckResult(ComparisonResult):
+    """Aggregate result from :class:`SolverCrosscheck`.
 
     Extends :class:`~manforge.verification.ComparisonResult` with
     ``max_trial_rel_err``.
@@ -80,10 +80,10 @@ class SolverComparisonResult(ComparisonResult):
 
 
 # ---------------------------------------------------------------------------
-# SolverComparison
+# SolverCrosscheck
 # ---------------------------------------------------------------------------
 
-class SolverComparison(Comparator):
+class SolverCrosscheck(Comparator):
     """Compare two Python solvers across a set of independent test cases.
 
     Parameters
@@ -108,7 +108,7 @@ class SolverComparison(Comparator):
     --------
     ::
 
-        cs = SolverComparison(solver_a, solver_b)
+        cs = SolverCrosscheck(solver_a, solver_b)
         result = cs.run(model, test_cases)
         assert result.passed
 
@@ -120,7 +120,7 @@ class SolverComparison(Comparator):
                 break
     """
 
-    _result_cls = SolverComparisonResult
+    _result_cls = SolverCrosscheckResult
 
     def _aggregate_extra(self, cases):
         return {"max_trial_rel_err": max((c.trial_rel_err for c in cases), default=0.0)}

@@ -1,4 +1,4 @@
-"""Tests for SolverComparison.iter_run and SolverCaseResult."""
+"""Tests for SolverCrosscheck.iter_run and SolverCaseResult."""
 
 import autograd.numpy as anp
 import numpy as np
@@ -6,9 +6,9 @@ import pytest
 
 from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification.compare import (
+from manforge.verification.solver_crosscheck import (
     SolverCaseResult,
-    SolverComparison,
+    SolverCrosscheck,
     compare_jacobians,
 )
 
@@ -35,22 +35,22 @@ def test_cases(model):
     ]
 
 
-class TestSolverComparisonIterRun:
+class TestSolverCrosscheckIterRun:
     def test_yields_solver_case_result(self, model, test_cases):
         solver = _solver("numerical_newton")
-        cs = SolverComparison(solver, solver)
+        cs = SolverCrosscheck(solver, solver)
         for case in cs.iter_run(model, test_cases):
             assert isinstance(case, SolverCaseResult)
 
     def test_case_index_sequential(self, model, test_cases):
         solver = _solver("numerical_newton")
-        cs = SolverComparison(solver, solver)
+        cs = SolverCrosscheck(solver, solver)
         indices = [c.index for c in cs.iter_run(model, test_cases)]
         assert indices == list(range(len(test_cases)))
 
     def test_identical_solvers_all_pass(self, model, test_cases):
         solver = _solver("numerical_newton")
-        cs = SolverComparison(solver, solver)
+        cs = SolverCrosscheck(solver, solver)
         for case in cs.iter_run(model, test_cases):
             assert case.passed
             assert case.stress_rel_err == pytest.approx(0.0, abs=1e-14)
@@ -59,7 +59,7 @@ class TestSolverComparisonIterRun:
     def test_iter_run_matches_run(self, model, test_cases):
         solver_a = _solver("numerical_newton")
         solver_b = _solver("numerical_newton")
-        cs = SolverComparison(solver_a, solver_b)
+        cs = SolverCrosscheck(solver_a, solver_b)
         batch = cs.run(model, test_cases)
         iter_cases = list(cs.iter_run(model, test_cases))
 
@@ -78,7 +78,7 @@ class TestSolverComparisonIterRun:
             from dataclasses import replace
             return replace(result, stress_trial=result.stress_trial * 2.0)
 
-        cs = SolverComparison(solver_a, bad_solver)
+        cs = SolverCrosscheck(solver_a, bad_solver)
         failed = []
         for case in cs.iter_run(model, test_cases):
             if not case.passed:
@@ -90,7 +90,7 @@ class TestSolverComparisonIterRun:
 
     def test_exposes_raw_results_for_jacobians(self, model, test_cases):
         solver = _solver("numerical_newton")
-        cs = SolverComparison(solver, solver)
+        cs = SolverCrosscheck(solver, solver)
         for case in cs.iter_run(model, test_cases):
             state_n = test_cases[case.index]["state_n"]
             jac_result = compare_jacobians(model, case.result_a, case.result_b, state_n)

@@ -51,7 +51,7 @@ from typing import Any, Callable
 import numpy as np
 
 from manforge.core.stress_update import stress_update
-from manforge.verification.comparator import (
+from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
     Comparator,

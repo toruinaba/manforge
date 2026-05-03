@@ -1,14 +1,14 @@
 """Verification utilities for constitutive model validation."""
 
-from manforge.verification.comparator import (
+from manforge.verification.comparator_base import (
     Comparator,
     CaseResult,
     ComparisonResult,
 )
-from manforge.verification.compare import (
-    SolverComparison,
+from manforge.verification.solver_crosscheck import (
+    SolverCrosscheck,
     SolverCaseResult,
-    SolverComparisonResult,
+    SolverCrosscheckResult,
     compare_jacobians,
     JacobianComparisonResult,
 )
@@ -37,10 +37,10 @@ __all__ = [
     "Comparator",
     "CaseResult",
     "ComparisonResult",
-    # Python-vs-Python solver comparison
-    "SolverComparison",
+    # Python-vs-Python solver crosscheck
+    "SolverCrosscheck",
     "SolverCaseResult",
-    "SolverComparisonResult",
+    "SolverCrosscheckResult",
     "compare_jacobians",
     "JacobianComparisonResult",
     # Finite-difference tangent check

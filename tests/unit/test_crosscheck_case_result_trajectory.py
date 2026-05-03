@@ -9,7 +9,7 @@ from manforge.simulation import StrainDriver, PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     StressUpdateCrosscheck,
-    SolverComparison,
+    SolverCrosscheck,
     generate_strain_history,
     generate_single_step_cases,
 )
@@ -80,7 +80,7 @@ class TestCrosscheckTrajectory:
 
 class TestSolverCaseTrajectory:
     def test_solver_case_has_ab_trajectory_fields(self, model):
-        cs = SolverComparison(_solver("numerical_newton"), _solver("user_defined"))
+        cs = SolverCrosscheck(_solver("numerical_newton"), _solver("user_defined"))
         test_cases = generate_single_step_cases(model)
         result = cs.run(model, test_cases)
 
@@ -94,7 +94,7 @@ class TestSolverCaseTrajectory:
             assert case.b_converged is True
 
     def test_numerical_newton_plastic_iter_count(self, model):
-        cs = SolverComparison(_solver("numerical_newton"), _solver("user_defined"))
+        cs = SolverCrosscheck(_solver("numerical_newton"), _solver("user_defined"))
         test_cases = generate_single_step_cases(model)
         result = cs.run(model, test_cases)
 
@@ -104,7 +104,7 @@ class TestSolverCaseTrajectory:
         assert any(c.a_n_iterations >= 1 for c in plastic_cases)
 
     def test_elastic_case_has_zero_iterations(self, model):
-        cs = SolverComparison(_solver("numerical_newton"), _solver("user_defined"))
+        cs = SolverCrosscheck(_solver("numerical_newton"), _solver("user_defined"))
         test_cases = generate_single_step_cases(model)
 
         for case in cs.iter_run(model, test_cases):

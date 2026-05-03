@@ -58,7 +58,7 @@ def test_generate_single_step_cases_count(model):
 
 
 def test_generate_single_step_cases_keys(model):
-    """Each case has the required keys for SolverComparison."""
+    """Each case has the required keys for SolverCrosscheck."""
     cases = generate_single_step_cases(model)
     required = {"strain_inc", "stress_n", "state_n"}
     for case in cases:

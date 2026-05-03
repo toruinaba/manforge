@@ -106,8 +106,8 @@ src/manforge/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── comparator.py      # Comparator ABC + 共有 rel-err ヘルパー
-│   ├── compare.py         # SolverComparison / compare_jacobians
+│   ├── comparator_base.py # Comparator ABC + 共有 rel-err ヘルパー
+│   ├── solver_crosscheck.py # SolverCrosscheck / compare_jacobians
 │   ├── umat_crosscheck.py # ReturnMappingCrosscheck / StressUpdateCrosscheck
 │   ├── fortran_registry.py# @verified_against_fortran デコレータ
 │   ├── fd_check.py        # check_tangent()
@@ -460,12 +460,12 @@ result = check_tangent(
 print(result.passed, result.max_rel_err)
 ```
 
-### SolverComparison でソルバ同士の比較
+### SolverCrosscheck でソルバ同士の比較
 
 ```python
 import numpy as np
 from manforge.core.stress_update import stress_update
-from manforge.verification import SolverComparison
+from manforge.verification import SolverCrosscheck
 from manforge.verification.test_cases import generate_single_step_cases
 
 def make_solver(method):
@@ -475,7 +475,7 @@ def make_solver(method):
 
 # 弾性・塑性・多軸・剪断ケースを自動生成
 cases = generate_single_step_cases(model)
-cs = SolverComparison(
+cs = SolverCrosscheck(
     make_solver("numerical_newton"),
     make_solver("user_defined"),
 )

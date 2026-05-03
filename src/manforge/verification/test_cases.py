@@ -9,7 +9,7 @@ estimate_yield_strain
     Estimate the uniaxial yield strain via bisection on the yield surface.
 generate_single_step_cases
     Generate a set of single-increment test cases for use with
-    :class:`~manforge.verification.SolverComparison`.
+    :class:`~manforge.verification.SolverCrosscheck`.
 generate_strain_history
     Generate a default tension-unload-compression strain history for
     multi-step comparison.
@@ -82,7 +82,7 @@ def generate_single_step_cases(model, eps_y=None) -> list[dict]:
     -------
     list[dict]
         Each dict has keys ``"strain_inc"``, ``"stress_n"``, ``"state_n"``
-        — compatible with :class:`~manforge.verification.SolverComparison`.
+        — compatible with :class:`~manforge.verification.SolverCrosscheck`.
     """
     if eps_y is None:
         eps_y = estimate_yield_strain(model)
