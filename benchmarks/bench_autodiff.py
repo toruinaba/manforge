@@ -66,12 +66,11 @@ def _make_driver_step():
     strain_history = np.zeros((40, 6))
     strain_history[:, 0] = np.linspace(0.0, 5e-3, 40)
 
-    driver = StrainDriver()
     integrator = PythonIntegrator(model)
     load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 
     def run():
-        driver.run(integrator, load)
+        StrainDriver(integrator).run(load)
 
     return run
 

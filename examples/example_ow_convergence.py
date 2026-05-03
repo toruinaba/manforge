@@ -100,9 +100,8 @@ print("=" * 60)
 print("  Part 3: StrainDriver — OW history across loading steps")
 print("=" * 60)
 
-driver = StrainDriver()
 load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-dr = driver.run(PythonIntegrator(ow), load)
+dr = StrainDriver(PythonIntegrator(ow)).run(load)
 
 elastic_count = sum(1 for rm in dr.step_results if not rm.is_plastic)
 plastic_count = sum(1 for rm in dr.step_results if rm.is_plastic)

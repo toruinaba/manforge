@@ -43,12 +43,10 @@ model = J2Isotropic1D(
 # ---------------------------------------------------------------------------
 # Simulation
 # ---------------------------------------------------------------------------
-driver = StrainDriver()
-
 N = 100
 strain_history = np.linspace(0.0, 5e-3, N)   # cumulative ε11
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = driver.run(PythonIntegrator(model), load)
+result = StrainDriver(PythonIntegrator(model)).run(load)
 stress_history = result.stress[:, 0]   # σ11
 
 # ---------------------------------------------------------------------------

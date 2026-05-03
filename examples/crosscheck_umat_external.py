@@ -26,7 +26,7 @@ _fortran_dir = os.path.join(os.path.dirname(__file__), "..", "fortran")
 sys.path.insert(0, os.path.abspath(_fortran_dir))
 
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FortranIntegrator
+from manforge.simulation import PythonNumericalIntegrator, FortranIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import FortranUMAT, StressUpdateCrosscheck, generate_strain_history
 
@@ -76,7 +76,7 @@ cc = StressUpdateCrosscheck(py_int, fc_int)
 # ---------------------------------------------------------------------------
 # 5. Run and inspect the result
 # ---------------------------------------------------------------------------
-result = cc.run(StrainDriver(), load)
+result = cc.run(load)
 
 print(f"passed             : {result.passed}")
 print(f"n_cases            : {result.n_cases}")

@@ -25,16 +25,16 @@ pytestmark = pytest.mark.slow
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def driver():
-    return StrainDriver()
+def driver_factory():
+    return lambda integrator: StrainDriver(integrator)
 
 
 @pytest.fixture
-def synthetic_data(model, driver):
+def synthetic_data(model, driver_factory):
     """Uniaxial strain history and synthetic stress response (σ11 only)."""
     strain = np.linspace(0.0, 5e-3, 40)
     load = FieldHistory(FieldType.STRAIN, "Strain", strain)
-    result = driver.run(PythonIntegrator(model), load)
+    result = driver_factory(PythonIntegrator(model)).run(load)
     return {"strain": strain, "stress": result.stress[:, 0]}
 
 
@@ -42,7 +42,7 @@ def synthetic_data(model, driver):
 # Structure test
 # ---------------------------------------------------------------------------
 
-def test_fit_result_structure(model, driver, synthetic_data):
+def test_fit_result_structure(model, driver_factory, synthetic_data):
     """FitResult has all required fields with correct types."""
     fit_config = {
         "sigma_y0": (220.0, (50.0, 600.0)),
@@ -50,7 +50,7 @@ def test_fit_result_structure(model, driver, synthetic_data):
     }
     fixed = {"E": model.E, "nu": model.nu}
 
-    result = fit_params(model, driver, synthetic_data, fit_config,
+    result = fit_params(model, driver_factory, synthetic_data, fit_config,
                         fixed_params=fixed, method="L-BFGS-B")
 
     assert isinstance(result, FitResult)
@@ -69,7 +69,7 @@ def test_fit_result_structure(model, driver, synthetic_data):
 # Convergence test — L-BFGS-B
 # ---------------------------------------------------------------------------
 
-def test_fit_uniaxial_synthetic(model, driver, synthetic_data):
+def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_data):
     """L-BFGS-B recovers sigma_y0 and H within 10% of true values."""
     fit_config = {
         "sigma_y0": (220.0, (50.0, 600.0)),
@@ -77,7 +77,7 @@ def test_fit_uniaxial_synthetic(model, driver, synthetic_data):
     }
     fixed = {"E": model.E, "nu": model.nu}
 
-    result = fit_params(model, driver, synthetic_data, fit_config,
+    result = fit_params(model, driver_factory, synthetic_data, fit_config,
                         fixed_params=fixed, method="L-BFGS-B")
 
     assert result.residual < 1.0, f"Residual too large: {result.residual:.3e}"
@@ -89,7 +89,7 @@ def test_fit_uniaxial_synthetic(model, driver, synthetic_data):
 # Convergence test — Nelder-Mead
 # ---------------------------------------------------------------------------
 
-def test_fit_nelder_mead(model, driver, synthetic_data):
+def test_fit_nelder_mead(model, driver_factory, synthetic_data):
     """Nelder-Mead also converges to true parameters."""
     fit_config = {
         "sigma_y0": (220.0, (None, None)),
@@ -97,7 +97,7 @@ def test_fit_nelder_mead(model, driver, synthetic_data):
     }
     fixed = {"E": model.E, "nu": model.nu}
 
-    result = fit_params(model, driver, synthetic_data, fit_config,
+    result = fit_params(model, driver_factory, synthetic_data, fit_config,
                         fixed_params=fixed, method="Nelder-Mead")
 
     assert result.residual < 1.0
@@ -108,7 +108,7 @@ def test_fit_nelder_mead(model, driver, synthetic_data):
 # History populated for gradient-based methods
 # ---------------------------------------------------------------------------
 
-def test_fit_history_populated(model, driver, synthetic_data):
+def test_fit_history_populated(model, driver_factory, synthetic_data):
     """History list is non-empty after L-BFGS-B run."""
     fit_config = {
         "sigma_y0": (220.0, (50.0, 600.0)),
@@ -116,11 +116,9 @@ def test_fit_history_populated(model, driver, synthetic_data):
     }
     fixed = {"E": model.E, "nu": model.nu}
 
-    result = fit_params(model, driver, synthetic_data, fit_config,
+    result = fit_params(model, driver_factory, synthetic_data, fit_config,
                         fixed_params=fixed, method="L-BFGS-B")
 
     assert len(result.history) > 0
     assert "sigma_y0" in result.history[0]
     assert "H" in result.history[0]
-
-

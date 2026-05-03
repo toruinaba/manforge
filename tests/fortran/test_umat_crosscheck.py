@@ -70,7 +70,7 @@ def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
-    result = cc.run(StrainDriver(), _j2_load(model))
+    result = cc.run(_j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
@@ -83,7 +83,7 @@ def test_crosscheck_stress_update_user_defined(fortran_j2, model):
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
-    result = cc.run(StrainDriver(), _j2_load(model))
+    result = cc.run(_j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
     assert result.max_stress_rel_err < 1e-6
@@ -101,7 +101,7 @@ def test_crosscheck_stress_update_stress_driven(fortran_j2, model):
     fc_int = _make_fc_int(fortran_j2, model)
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
-    result = cc.run(StressDriver(), load)
+    result = cc.run(load)
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
@@ -123,7 +123,7 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
     cc = StressUpdateCrosscheck(py_int, fc_int)
 
     found_failure = False
-    for cr in cc.iter_run(StrainDriver(), load):
+    for cr in cc.iter_run(load):
         if not cr.passed:
             found_failure = True
             break
@@ -178,7 +178,7 @@ def test_param_fn_order_sensitivity(fortran_j2, model):
     )
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
-    result = cc.run(StrainDriver(), _j2_load(model))
+    result = cc.run(_j2_load(model))
 
     assert not result.passed, (
         "Expected crosscheck to fail with wrong param_fn order, "

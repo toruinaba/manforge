@@ -23,7 +23,7 @@ def residual_sum_of_squares(stress_computed, stress_experiment, weights=None):
     return float(np.sum(sq))
 
 
-def build_objective(model, driver, exp_data, fixed_params=None):
+def build_objective(model, driver_factory, exp_data, fixed_params=None):
     """Build a scalar objective function for use with scipy.optimize.
 
     Parameters
@@ -31,8 +31,10 @@ def build_objective(model, driver, exp_data, fixed_params=None):
     model : MaterialModel
         Template model instance — used to determine the class and stress_state.
         A new instance is constructed each evaluation with the current params.
-    driver : DriverBase
-        Pre-configured driver instance.
+    driver_factory : callable
+        ``driver_factory(integrator) -> DriverBase`` — called once per
+        objective evaluation to construct a driver bound to the current
+        integrator.  Example: ``lambda i: StrainDriver(i)``.
     exp_data : dict
         Must contain ``"strain"`` and ``"stress"``.  Optionally ``"weights"``.
     fixed_params : dict or None
@@ -55,7 +57,8 @@ def build_objective(model, driver, exp_data, fixed_params=None):
     def objective(free_params: dict) -> float:
         all_params = {**fixed, **free_params}
         m = model_cls(stress_state=stress_state, **all_params)
-        result = driver.run(PythonIntegrator(m), load)
+        integrator = PythonIntegrator(m)
+        result = driver_factory(integrator).run(load)
         stress_comp = result.stress
         if stress_exp.ndim == 1:
             stress_comp = stress_comp[:, 0]

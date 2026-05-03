@@ -43,7 +43,7 @@ class FitResult:
 
 def fit_params(
     model,
-    driver,
+    driver_factory,
     exp_data: dict,
     fit_config: dict,
     fixed_params: dict | None = None,
@@ -55,8 +55,10 @@ def fit_params(
     ----------
     model : MaterialModel
         Constitutive model instance.
-    driver : UniaxialDriver or GeneralDriver
-        Loading driver.
+    driver_factory : callable
+        ``driver_factory(integrator) -> DriverBase`` — constructs a driver
+        bound to the given integrator for each objective evaluation.
+        Example: ``lambda i: StrainDriver(i)``.
     exp_data : dict
         ``{"strain": ..., "stress": ..., "weights": ...}``  (weights optional).
     fit_config : dict
@@ -96,7 +98,7 @@ def fit_params(
     ]
 
     # Build objective — accepts a dict of free params
-    obj_fn = build_objective(model, driver, exp_data, fixed_params=fixed)
+    obj_fn = build_objective(model, driver_factory, exp_data, fixed_params=fixed)
 
     history: list[dict] = []
 

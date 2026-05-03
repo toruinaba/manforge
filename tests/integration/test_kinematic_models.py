@@ -237,8 +237,8 @@ def test_cyclic_loading_driver(km_model):
     history[10:, 0] = np.linspace(4e-3, -4e-3, 10)
 
     load = FieldHistory(type=FieldType.STRAIN, name="Strain", data=history)
-    result = StrainDriver().run(
-        PythonNumericalIntegrator(km_model), load,
+    result = StrainDriver(PythonNumericalIntegrator(km_model)).run(
+        load,
         collect_state={"alpha": FieldType.STRESS, "ep": FieldType.STRAIN},
     )
 

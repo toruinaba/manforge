@@ -142,11 +142,10 @@ print("=" * 60)
 print("  Part 3: Driver step-by-step verification")
 print("=" * 60)
 
-driver = StrainDriver()
 N = 30
 strain_history = np.linspace(0.0, 5e-3, N)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-driver_result = driver.run(PythonIntegrator(model), load)
+driver_result = StrainDriver(PythonIntegrator(model)).run(load)
 
 # Find the first plastic step
 first_plastic = None

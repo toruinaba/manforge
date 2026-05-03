@@ -67,7 +67,7 @@ strain_history = np.zeros((100, 6))
 strain_history[:, 0] = np.linspace(0.0, 5e-3, 100)   # ε11 を増加
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
 
-result = StrainDriver().run(PythonIntegrator(model), load)
+result = StrainDriver(PythonIntegrator(model)).run(load)
 print(f"Final σ11: {result.stress[-1, 0]:.1f} MPa")
 ```
 
@@ -192,13 +192,13 @@ from manforge.simulation.types import FieldHistory, FieldType
 strain_history = np.zeros((100, 6))
 strain_history[:, 0] = np.linspace(0, 5e-3, 100)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = StrainDriver().run(PythonIntegrator(model), load)
+result = StrainDriver(PythonIntegrator(model)).run(load)
 result.stress    # np.ndarray (N, ntens) — 各ステップの σ_{n+1}
 result.strain    # np.ndarray (N, ntens)
 
 # 状態変数収集
-result = StrainDriver().run(
-    PythonIntegrator(model), load,
+result = StrainDriver(PythonIntegrator(model)).run(
+    load,
     collect_state={"ep": FieldType.STRAIN}
 )
 result.fields["ep"].data   # np.ndarray (N,) — 等価塑性ひずみ履歴
@@ -207,7 +207,7 @@ result.fields["ep"].data   # np.ndarray (N,) — 等価塑性ひずみ履歴
 stress_target = np.zeros((100, 6))
 stress_target[:, 0] = np.linspace(0, 300.0, 100)
 stress_load = FieldHistory(FieldType.STRESS, "Stress", stress_target)
-result = StressDriver().run(PythonIntegrator(model), stress_load)
+result = StressDriver(PythonIntegrator(model)).run(stress_load)
 ```
 
 Driver は必ず `StressIntegrator` を受け取る。bare `MaterialModel` を渡すと `TypeError` になる。Integrator クラスは 3 種類:
@@ -229,15 +229,15 @@ print(step.dlambda, step.n_iterations)
 
 ```python
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 import numpy as np
 
 load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0, 5e-3, 100))
-driver = StrainDriver()
-integrator = PythonIntegrator(model)
+driver = StrainDriver(PythonIntegrator(model))
 
 # 塑性開始ステップで break
-for step in driver.iter_run(integrator, load):
+for step in driver.iter_run(load):
     # step.i           — 0-based ステップ番号
     # step.strain      — 累積ひずみ (ntens,)
     # step.result      — StressUpdateResult (stress, state, ddsdde, dlambda, ...)
@@ -252,7 +252,6 @@ for step in driver.iter_run(integrator, load):
 
 ```python
 from manforge.simulation.driver import StrainDriver
-from manforge.simulation.driver import StrainDriver
 from manforge.fitting import fit_params
 
 fit_config = {
@@ -260,7 +259,9 @@ fit_config = {
     "H":        (500.0, (0.0,  5000.0)),
 }
 result = fit_params(
-    model, StrainDriver(), exp_data,
+    model,
+    driver_factory=lambda i: StrainDriver(i),
+    exp_data=exp_data,
     fit_config=fit_config,
     fixed_params={"E": 210_000.0, "nu": 0.3},
     method="L-BFGS-B",
@@ -385,7 +386,7 @@ strain_history = np.zeros((150, 6))
 strain_history[:50, 0]  = np.linspace(0, 1e-2, 50)
 strain_history[50:, 0]  = np.linspace(1e-2, -1e-2, 100)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = StrainDriver().run(PythonIntegrator(model_af), load)
+result = StrainDriver(PythonIntegrator(model_af)).run(load)
 ```
 
 飽和 backstress の比較:

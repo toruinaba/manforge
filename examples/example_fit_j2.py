@@ -33,7 +33,7 @@ except ImportError:
 # True model
 # ---------------------------------------------------------------------------
 true_model = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-driver = StrainDriver()
+driver_factory = lambda i: StrainDriver(i)
 
 # ---------------------------------------------------------------------------
 # Generate synthetic "experimental" data
@@ -42,7 +42,7 @@ rng = np.random.default_rng(42)
 N = 50
 strain_exp = np.linspace(0.0, 5e-3, N)
 load = FieldHistory(FieldType.STRAIN, "Strain", strain_exp)
-stress_clean = driver.run(PythonIntegrator(true_model), load).stress[:, 0]
+stress_clean = driver_factory(PythonIntegrator(true_model)).run(load).stress[:, 0]
 
 # Add small Gaussian noise (~0.5 MPa std) to simulate measurement scatter
 noise_std = 0.5
@@ -71,7 +71,7 @@ print("  Running optimisation …")
 
 result = fit_params(
     true_model,
-    driver,
+    driver_factory,
     exp_data,
     fit_config,
     fixed_params=fixed_params,
@@ -99,7 +99,7 @@ if HAS_MATPLOTLIB:
         E=true_model.E, nu=true_model.nu,
         sigma_y0=fitted_sigma_y0, H=fitted_H,
     )
-    stress_fitted = driver.run(PythonIntegrator(fitted_model), load).stress[:, 0]
+    stress_fitted = driver_factory(PythonIntegrator(fitted_model)).run(load).stress[:, 0]
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
