@@ -23,6 +23,7 @@ from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
 deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -101,7 +102,7 @@ print("=" * 60)
 
 driver = StrainDriver()
 load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-dr = driver.run(ow, load)
+dr = driver.run(PythonIntegrator(ow), load)
 
 elastic_count = sum(1 for rm in dr.step_results if not rm.is_plastic)
 plastic_count = sum(1 for rm in dr.step_results if rm.is_plastic)

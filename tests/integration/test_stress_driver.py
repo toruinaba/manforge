@@ -6,6 +6,7 @@ import pytest
 from manforge.core.stress_state import SOLID_3D, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2Isotropic1D
 from manforge.simulation.driver import StressDriver, StrainDriver
+from manforge.simulation.integrator import PythonNumericalIntegrator, PythonAnalyticalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
 
@@ -46,7 +47,7 @@ def test_elastic_strain_matches_compliance(model_3d):
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 0.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     C = np.array(model_3d.elastic_stiffness())
     S = np.linalg.inv(C)
@@ -71,7 +72,7 @@ def test_uniaxial_stress_3d_lateral_strains_negative(model_3d):
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     assert np.all(result.strain[1:, 1] <= 0.0), "ε22 should be non-positive"
     assert np.all(result.strain[1:, 2] <= 0.0), "ε33 should be non-positive"
@@ -84,7 +85,7 @@ def test_uniaxial_stress_3d_off_diagonal_stress_near_zero(model_3d):
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     np.testing.assert_allclose(
         result.stress[:, 1:], 0.0, atol=1e-6,
@@ -99,7 +100,7 @@ def test_uniaxial_stress_3d_sigma11_matches_target(model_3d):
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     np.testing.assert_allclose(
         result.stress[:, 0], stress_history[:, 0], atol=1e-8,
@@ -113,7 +114,7 @@ def test_output_shapes(model_3d):
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0, 200.0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     assert result.stress.shape == (N, 6)
     assert result.strain.shape == (N, 6)
@@ -128,7 +129,7 @@ def test_state_not_collected_by_default(model_3d):
     stress_history = np.zeros((5, 6))
     stress_history[:, 0] = np.linspace(0, 200.0, 5)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history))
+    result = StressDriver().run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
     assert set(result.fields.keys()) == {"Stress", "Strain"}
 
@@ -141,7 +142,7 @@ def test_state_ep_collected_when_requested(model_3d):
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
     result = StressDriver().run(
-        model_3d,
+        PythonNumericalIntegrator(model_3d),
         stress_load(stress_history),
         collect_state={"ep": FieldType.STRAIN},
     )
@@ -163,7 +164,7 @@ def test_strain_driver_collect_state(model_3d):
     strain_history[:, 0] = np.linspace(0.0, 3 * sigma_y0 / E, N)
 
     result = StrainDriver().run(
-        model_3d,
+        PythonNumericalIntegrator(model_3d),
         FieldHistory(FieldType.STRAIN, "Strain", strain_history),
         collect_state={"ep": FieldType.STRAIN},
     )
@@ -194,13 +195,13 @@ def test_consistency_with_strain_driver_1d(model_1d):
 
     # Step 1: strain → stress
     result_strain = StrainDriver().run(
-        model_1d, strain_load(eps_history_1d)
+        PythonNumericalIntegrator(model_1d), strain_load(eps_history_1d)
     )
     sigma_history_2d = result_strain.stress  # (N, 1)
 
     # Step 2: stress → strain via StressDriver
     result_stress = StressDriver().run(
-        model_1d, stress_load(sigma_history_2d)
+        PythonNumericalIntegrator(model_1d), stress_load(sigma_history_2d)
     )
     recovered_strain = result_stress.strain[:, 0]
 
@@ -229,7 +230,7 @@ def test_convergence_failure_raises(model_3d):
 
     driver = StressDriver(max_iter=1)
     with pytest.raises(RuntimeError, match="NR did not converge"):
-        driver.run(model_3d, stress_load(stress_history))
+        driver.run(PythonNumericalIntegrator(model_3d), stress_load(stress_history))
 
 
 def test_strain_driver_general_shape(model):
@@ -238,7 +239,7 @@ def test_strain_driver_general_shape(model):
     strain6 = np.zeros((N, 6))
     strain6[:, 0] = np.linspace(0.0, 5e-3, N)
     load = FieldHistory(FieldType.STRAIN, "Strain", strain6)
-    result = StrainDriver().run(model, load)
+    result = StrainDriver().run(PythonNumericalIntegrator(model), load)
     assert result.stress.shape == (N, 6)
     assert result.stress[-1, 0] > model.sigma_y0
 
@@ -247,15 +248,15 @@ def test_strain_driver_general_shape(model):
 # StressDriver method argument
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("method", ["numerical_newton", "user_defined"])
-def test_stress_driver_method_arg(model_3d, method):
-    """StressDriver.run must accept a method argument and return step_results."""
+@pytest.mark.parametrize("IntegratorCls", [PythonNumericalIntegrator, PythonAnalyticalIntegrator])
+def test_stress_driver_integrator_types(model_3d, IntegratorCls):
+    """StressDriver works with both numerical and analytical integrators."""
     sigma_y0 = model_3d.sigma_y0
     N = 10
     stress_history = np.zeros((N, 6))
     stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-    result = StressDriver().run(model_3d, stress_load(stress_history), method=method)
+    result = StressDriver().run(IntegratorCls(model_3d), stress_load(stress_history))
 
     assert len(result.step_results) == N
     from manforge.core.stress_update import StressUpdateResult

@@ -2,8 +2,9 @@
 
 All drivers share the same interface via :class:`DriverBase`:
 
-* Input  — :class:`~manforge.simulation.types.FieldHistory` containing the
-  prescribed loading history (strain or stress).
+* Input  — a :class:`~manforge.simulation.integrator.StressIntegrator` and a
+  :class:`~manforge.simulation.types.FieldHistory` containing the prescribed
+  loading history (strain or stress).
 * Output — :class:`~manforge.simulation.types.DriverResult` containing
   stress and strain at every step, plus any explicitly requested state
   variables.
@@ -13,10 +14,13 @@ Conventions
 - Stress and strain arrays use the engineering-shear Voigt convention:
     σ, ε = [11, 22, 33, 12, 13, 23]
 - *Cumulative* quantities are the input; increments are computed internally.
-
-Backward-compatibility aliases
--------------------------------
-``UniaxialDriver`` and ``GeneralDriver`` are aliases for :class:`StrainDriver`.
+- Drivers require a :class:`~manforge.simulation.integrator.StressIntegrator`.
+  Wrap bare ``MaterialModel`` objects with
+  :class:`~manforge.simulation.integrator.PythonIntegrator` (auto solver),
+  :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`
+  (numerical Newton-Raphson), or
+  :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`
+  (analytical / user-defined) before passing to a driver.
 """
 
 from __future__ import annotations
@@ -26,23 +30,16 @@ from collections.abc import Iterator
 
 import numpy as np
 
-from manforge.core.stress_update import stress_update
 from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
 
 
-def _as_integrator(model, method: str):
-    """Wrap a bare MaterialModel in PythonIntegrator; pass adapters through unchanged.
-
-    An object is treated as a StressIntegrator adapter (not a bare model) when
-    it already has a ``stress_update`` method that accepts three arguments
-    (strain_inc, stress_n, state_n) — i.e. the integrator's own method rather
-    than the module-level function.  Bare MaterialModels do not define
-    ``stress_update``; they rely on the module-level function.
-    """
-    from manforge.simulation.integrator import PythonIntegrator
-    if hasattr(model, "stress_update") and callable(model.stress_update):
-        return model
-    return PythonIntegrator(model, method=method)
+def _check_integrator(obj) -> None:
+    """Raise TypeError when obj is not a StressIntegrator."""
+    if not (hasattr(obj, "stress_update") and callable(obj.stress_update)):
+        raise TypeError(
+            f"Driver expects a StressIntegrator, got {type(obj).__name__!r}.  "
+            "Wrap a bare MaterialModel with PythonIntegrator(model) first."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -52,28 +49,28 @@ def _as_integrator(model, method: str):
 class DriverBase(ABC):
     """Abstract base for all simulation drivers.
 
-    Subclasses implement :meth:`run` and must accept a
-    :class:`~manforge.simulation.types.FieldHistory` as the loading
-    specification and return a :class:`~manforge.simulation.types.DriverResult`.
+    Subclasses implement :meth:`iter_run` and :meth:`run`.  Both accept a
+    :class:`~manforge.simulation.integrator.StressIntegrator` (not a bare
+    ``MaterialModel``) as their first argument.
     """
 
     @abstractmethod
     def iter_run(
         self,
-        model,
+        integrator,
         load: FieldHistory,
-        *,
-        method: str = "auto",
     ) -> Iterator[DriverStep]:
         """Yield per-step results as a generator.
 
         Parameters
         ----------
-        model : MaterialModel
+        integrator : StressIntegrator
+            Constitutive integrator — use :class:`~manforge.simulation.integrator.PythonIntegrator`,
+            :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`,
+            :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`, or
+            :class:`~manforge.simulation.integrator.FortranIntegrator`.
         load : FieldHistory
             Loading history (same requirements as :meth:`run`).
-        method : str, optional
-            Passed to the underlying stress-update call (default ``"auto"``).
 
         Yields
         ------
@@ -86,7 +83,8 @@ class DriverBase(ABC):
         --------
         Break on plasticity onset::
 
-            for step in driver.iter_run(model, load):
+            integrator = PythonIntegrator(model)
+            for step in driver.iter_run(integrator, load):
                 if step.result.is_plastic:
                     print(f"Plasticity at step {step.i}")
                     break
@@ -94,16 +92,16 @@ class DriverBase(ABC):
 
     def run(
         self,
-        model,
+        integrator,
         load: FieldHistory,
         collect_state: dict[str, FieldType] | None = None,
-        method: str = "auto",
     ) -> DriverResult:
         """Run the loading simulation.
 
         Parameters
         ----------
-        model : MaterialModel or StressIntegrator
+        integrator : StressIntegrator
+            Constitutive integrator.
         load : FieldHistory
             Loading history.  The ``type`` and shape of ``load.data`` must
             match the driver's expectations (see subclass documentation).
@@ -115,18 +113,15 @@ class DriverBase(ABC):
 
             If ``None`` (default), no state variables are collected and
             ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
-        method : str, optional
-            Passed to the underlying stress-update call (default ``"auto"``).
-            Ignored when ``model`` is already a :class:`~manforge.simulation.integrator.StressIntegrator`.
 
         Returns
         -------
         DriverResult
         """
-        integrator = _as_integrator(model, method)
+        _check_integrator(integrator)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(integrator, load, method=method):
+        for step in self.iter_run(integrator, load):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
@@ -154,40 +149,29 @@ class StrainDriver(DriverBase):
     Parameters
     ----------
     (none — stateless, all inputs passed to :meth:`run`)
-
-    Notes
-    -----
-    ``UniaxialDriver`` and ``GeneralDriver`` are aliases for this class.
     """
 
     def iter_run(
         self,
-        model,
+        integrator,
         load: FieldHistory,
-        *,
-        method: str = "auto",
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the strain-controlled loading history.
 
         Parameters
         ----------
-        model : MaterialModel
-            Constitutive model instance.
+        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRAIN``.  ``load.data`` shape:
 
             * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
             * ``(N, ntens)`` — general: all components prescribed.
 
-        method : {"auto", "numerical_newton", "user_defined"}, optional
-            Passed to :func:`~manforge.core.stress_update.stress_update`
-            at every step (default ``"auto"``).
-
         Yields
         ------
         DriverStep
         """
-        integrator = _as_integrator(model, method)
+        _check_integrator(integrator)
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
         ntens = integrator.ntens
@@ -241,25 +225,20 @@ class StressDriver(DriverBase):
 
     def iter_run(
         self,
-        model,
+        integrator,
         load: FieldHistory,
         *,
-        method: str = "auto",
         raise_on_nonconverged: bool = True,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the stress-controlled loading history.
 
         Parameters
         ----------
-        model : MaterialModel
-            Constitutive model instance.
+        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
             tensor (Voigt) at each step.
-        method : {"auto", "numerical_newton", "user_defined"}, optional
-            Passed to :func:`~manforge.core.stress_update.stress_update`
-            at every inner iteration (default ``"auto"``).
         raise_on_nonconverged : bool, optional
             If ``True`` (default), raise :exc:`RuntimeError` when Newton-Raphson
             does not converge.  If ``False``, yield a :class:`DriverStep` with
@@ -276,7 +255,7 @@ class StressDriver(DriverBase):
         RuntimeError
             If NR does not converge and ``raise_on_nonconverged=True``.
         """
-        integrator = _as_integrator(model, method)
+        _check_integrator(integrator)
         stress_history = np.asarray(load.data, dtype=float)
         ntens = integrator.ntens
 
@@ -336,26 +315,21 @@ class StressDriver(DriverBase):
 
     def run(
         self,
-        model,
+        integrator,
         load: FieldHistory,
         collect_state: dict[str, FieldType] | None = None,
-        method: str = "auto",
     ) -> DriverResult:
         """Run the stress-controlled loading history.
 
         Parameters
         ----------
-        model : MaterialModel
-            Constitutive model instance.
+        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
             tensor (Voigt) at each step.
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.
-        method : {"auto", "numerical_newton", "user_defined"}, optional
-            Passed to :func:`~manforge.core.stress_update.stress_update`
-            (default ``"auto"``).
 
         Returns
         -------
@@ -367,10 +341,10 @@ class StressDriver(DriverBase):
             If Newton-Raphson does not converge within ``max_iter`` iterations
             at any step.
         """
-        integrator = _as_integrator(model, method)
+        _check_integrator(integrator)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(integrator, load, method=method, raise_on_nonconverged=True):
+        for step in self.iter_run(integrator, load, raise_on_nonconverged=True):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
@@ -384,13 +358,3 @@ class StressDriver(DriverBase):
             collect_state=collect_state,
         )
 
-
-# ---------------------------------------------------------------------------
-# Backward-compatibility aliases
-# ---------------------------------------------------------------------------
-
-#: Alias for :class:`StrainDriver` (formerly separate uniaxial driver).
-UniaxialDriver = StrainDriver
-
-#: Alias for :class:`StrainDriver` (formerly separate general driver).
-GeneralDriver = StrainDriver

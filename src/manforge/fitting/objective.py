@@ -3,6 +3,7 @@
 import numpy as np
 
 from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.integrator import PythonIntegrator
 
 
 def residual_sum_of_squares(stress_computed, stress_experiment, weights=None):
@@ -54,7 +55,7 @@ def build_objective(model, driver, exp_data, fixed_params=None):
     def objective(free_params: dict) -> float:
         all_params = {**fixed, **free_params}
         m = model_cls(stress_state=stress_state, **all_params)
-        result = driver.run(m, load)
+        result = driver.run(PythonIntegrator(m), load)
         stress_comp = result.stress
         if stress_exp.ndim == 1:
             stress_comp = stress_comp[:, 0]

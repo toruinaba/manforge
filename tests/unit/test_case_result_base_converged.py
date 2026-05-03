@@ -3,9 +3,12 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401
-from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation import StrainDriver, PythonIntegrator
+from manforge.simulation import (
+    StrainDriver,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
+)
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     CaseResult,
@@ -41,23 +44,19 @@ class TestBaseComparisonResult:
         assert cr.n_b_nonconverged == 0
 
 
-def _solver(method):
-    def _solve(m, strain_inc, stress_n, state_n):
-        return stress_update(m, np.asarray(strain_inc), np.asarray(stress_n), state_n, method=method)
-    return _solve
-
-
 class TestCounterAggregation:
     def test_solver_comparison_all_converged(self, model):
-        cs = SolverCrosscheck(_solver("numerical_newton"), _solver("user_defined"))
-        result = cs.run(model, generate_single_step_cases(model))
+        py_a = PythonNumericalIntegrator(model)
+        py_b = PythonAnalyticalIntegrator(model)
+        cs = SolverCrosscheck(py_a, py_b)
+        result = cs.run(generate_single_step_cases(model))
         assert result.passed
         assert result.n_a_nonconverged == 0
         assert result.n_b_nonconverged == 0
 
     def test_stress_update_crosscheck_all_converged(self, model):
-        py_a = PythonIntegrator(model, method="numerical_newton")
-        py_b = PythonIntegrator(model, method="user_defined")
+        py_a = PythonNumericalIntegrator(model)
+        py_b = PythonAnalyticalIntegrator(model)
         cc = StressUpdateCrosscheck(py_a, py_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)

@@ -1,10 +1,11 @@
 """Tests for SolverCrosscheck.
 
 Covers:
-- Identical solvers produce zero error and pass
-- autodiff vs analytical J2 solvers agree within tolerance
-- A wrong solver correctly reports failure
+- Identical integrators produce zero error and pass
+- autodiff vs analytical J2 integrators agree within tolerance
+- A wrong integrator correctly reports failure
 - SolverCrosscheck works with mixed plastic/elastic test cases
+- SolverCrosscheck with FortranIntegrator
 """
 
 import dataclasses
@@ -13,21 +14,10 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import stress_update, StressUpdateResult
+from manforge.core.stress_update import StressUpdateResult
+from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
 from manforge.verification.solver_crosscheck import SolverCrosscheck, SolverCrosscheckResult
-
-
-def _make_solver(method):
-    """Return a solver callable bound to the given method."""
-    def _solve(model, strain_inc, stress_n, state_n):
-        return stress_update(
-            model,
-            anp.asarray(strain_inc),
-            anp.asarray(stress_n),
-            state_n,
-            method=method,
-        )
-    return _solve
 
 
 @pytest.fixture
@@ -63,14 +53,14 @@ def test_cases(model):
 
 
 # ---------------------------------------------------------------------------
-# Identical solver → zero error, always passes
+# Identical integrators → zero error, always passes
 # ---------------------------------------------------------------------------
 
-def test_identical_solvers_pass(model, test_cases):
-    """Comparing a solver to itself gives zero error and passes."""
-    solver = _make_solver("numerical_newton")
-    cs = SolverCrosscheck(solver, solver)
-    result = cs.run(model, test_cases)
+def test_identical_integrators_pass(model, test_cases):
+    """Comparing an integrator to itself gives zero error and passes."""
+    pi = PythonNumericalIntegrator(model)
+    cs = SolverCrosscheck(pi, pi)
+    result = cs.run(test_cases)
 
     assert isinstance(result, SolverCrosscheckResult)
     assert result.passed
@@ -85,12 +75,12 @@ def test_identical_solvers_pass(model, test_cases):
 # ---------------------------------------------------------------------------
 
 def test_autodiff_vs_analytical_pass(model, test_cases):
-    """autodiff and analytical solvers must agree within default tolerances."""
-    solver_ad = _make_solver("numerical_newton")
-    solver_an = _make_solver("user_defined")
+    """autodiff and analytical integrators must agree within default tolerances."""
+    pi_num = PythonNumericalIntegrator(model)
+    pi_ana = PythonAnalyticalIntegrator(model)
 
-    cs = SolverCrosscheck(solver_ad, solver_an)
-    result = cs.run(model, test_cases)
+    cs = SolverCrosscheck(pi_num, pi_ana)
+    result = cs.run(test_cases)
 
     assert result.passed, (
         f"Solvers disagree: max_stress_err={result.max_stress_rel_err:.3e}, "
@@ -102,25 +92,38 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
 
 
 # ---------------------------------------------------------------------------
-# Wrong solver → correctly detected as failure
+# Wrong integrator → correctly detected as failure
 # ---------------------------------------------------------------------------
 
-def test_wrong_solver_fails(model, test_cases):
-    """A solver that returns wrong stress must be flagged as failed."""
-    solver_ad = _make_solver("numerical_newton")
+class _BadIntegrator:
+    """Integrator that multiplies plastic-step stress by 1.1."""
 
-    def bad_solver(model, strain_inc, stress_n, state_n):
-        r = stress_update(
-            model, anp.asarray(strain_inc), anp.asarray(stress_n),
-            state_n, method="numerical_newton"
-        )
+    def __init__(self, model):
+        self._pi = PythonNumericalIntegrator(model)
+        self.stress_state = model.stress_state
+        self.ntens = model.ntens
+
+    def initial_state(self):
+        return self._pi.initial_state()
+
+    def elastic_stiffness(self):
+        return self._pi.elastic_stiffness()
+
+    def stress_update(self, strain_inc, stress_n, state_n):
+        r = self._pi.stress_update(strain_inc, stress_n, state_n)
         if r.return_mapping is not None:
             bad_rm = dataclasses.replace(r.return_mapping, stress=r.return_mapping.stress * 1.1)
             return dataclasses.replace(r, return_mapping=bad_rm)
         return r
 
-    cs = SolverCrosscheck(solver_ad, bad_solver, stress_tol=1e-6)
-    result = cs.run(model, test_cases)
+
+def test_wrong_integrator_fails(model, test_cases):
+    """An integrator that returns wrong stress must be flagged as failed."""
+    pi_good = PythonNumericalIntegrator(model)
+    pi_bad = _BadIntegrator(model)
+
+    cs = SolverCrosscheck(pi_good, pi_bad, stress_tol=1e-6)
+    result = cs.run(test_cases)
 
     assert not result.passed
     assert result.n_passed < result.n_cases
@@ -132,18 +135,18 @@ def test_wrong_solver_fails(model, test_cases):
 
 def test_result_cases_length(model, test_cases):
     """cases list length equals the number of test cases."""
-    solver = _make_solver("numerical_newton")
-    cs = SolverCrosscheck(solver, solver)
-    result = cs.run(model, test_cases)
+    pi = PythonNumericalIntegrator(model)
+    cs = SolverCrosscheck(pi, pi)
+    result = cs.run(test_cases)
     assert len(result.cases) == len(test_cases)
 
 
 def test_result_case_fields(model, test_cases):
     """Each SolverCaseResult has the required attributes."""
     from manforge.verification.solver_crosscheck import SolverCaseResult
-    solver = _make_solver("numerical_newton")
-    cs = SolverCrosscheck(solver, solver)
-    result = cs.run(model, test_cases)
+    pi = PythonNumericalIntegrator(model)
+    cs = SolverCrosscheck(pi, pi)
+    result = cs.run(test_cases)
     for c in result.cases:
         assert isinstance(c, SolverCaseResult)
         assert c.index >= 0
@@ -157,9 +160,9 @@ def test_result_case_fields(model, test_cases):
 
 def test_empty_test_cases(model):
     """SolverCrosscheck with an empty list passes vacuously."""
-    solver = _make_solver("numerical_newton")
-    cs = SolverCrosscheck(solver, solver)
-    result = cs.run(model, [])
+    pi = PythonNumericalIntegrator(model)
+    cs = SolverCrosscheck(pi, pi)
+    result = cs.run([])
     assert result.passed
     assert result.n_cases == 0
     assert result.n_passed == 0
@@ -171,21 +174,12 @@ def test_empty_test_cases(model):
 
 def test_iter_run_early_break(model, test_cases):
     """iter_run allows early break on first failing case."""
-    solver_ad = _make_solver("numerical_newton")
+    pi_good = PythonNumericalIntegrator(model)
+    pi_bad = _BadIntegrator(model)
 
-    def bad_solver(model, strain_inc, stress_n, state_n):
-        r = stress_update(
-            model, anp.asarray(strain_inc), anp.asarray(stress_n),
-            state_n, method="numerical_newton"
-        )
-        if r.return_mapping is not None:
-            bad_rm = dataclasses.replace(r.return_mapping, stress=r.return_mapping.stress * 1.1)
-            return dataclasses.replace(r, return_mapping=bad_rm)
-        return r
-
-    cs = SolverCrosscheck(solver_ad, bad_solver)
+    cs = SolverCrosscheck(pi_good, pi_bad)
     found = False
-    for case in cs.iter_run(model, test_cases):
+    for case in cs.iter_run(test_cases):
         if not case.passed:
             found = True
             assert case.result_a is not None

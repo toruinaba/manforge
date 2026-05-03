@@ -1,21 +1,23 @@
 """Python-solver-vs-Python-solver crosscheck and Jacobian comparison.
 
-:class:`SolverCrosscheck` compares two Python solvers across a set of
-independent test cases.  It is a :class:`~manforge.verification.Comparator`
-subclass: configuration (solver_a, solver_b, tolerances) is fixed in
-``__init__``; ``iter_run(model, test_cases)`` drives the comparison.
-
-A *solver* is any callable with the signature::
-
-    solver(model, strain_inc, stress_n, state_n) -> StressUpdateResult
+:class:`SolverCrosscheck` compares two :class:`~manforge.simulation.integrator.StressIntegrator`
+implementations across a set of independent single-step test cases.  It is a
+:class:`~manforge.verification.Comparator` subclass: configuration
+(integrator_a, integrator_b, tolerances) is fixed in ``__init__``;
+``iter_run(test_cases)`` drives the comparison.
 
 Usage
 -----
 ::
 
-    cs = SolverCrosscheck(solver_a, solver_b)
-    result = cs.run(model, test_cases)        # → SolverCrosscheckResult
-    for case in cs.iter_run(model, test_cases):   # step-by-step
+    from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
+    from manforge.verification import SolverCrosscheck, generate_single_step_cases
+
+    py_a = PythonNumericalIntegrator(model)
+    py_b = PythonAnalyticalIntegrator(model)
+    cs = SolverCrosscheck(py_a, py_b)
+    result = cs.run(test_cases)          # → SolverCrosscheckResult
+    for case in cs.iter_run(test_cases):  # step-by-step
         if not case.passed:
             break
 """
@@ -24,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -60,8 +62,7 @@ class SolverCaseResult(CaseResult):
     trial_rel_err: float = 0.0
     is_plastic_match: bool = True
     elastic_branch_match: bool = True
-    # P2: inner-NR trajectory (a/b mirror result_a/result_b).
-    # a_converged / b_converged live in base CaseResult (P3).
+    # inner-NR trajectory (a/b mirror result_a/result_b)
     a_n_iterations: int = 0
     a_residual_history: list = field(default_factory=list)
     b_n_iterations: int = 0
@@ -84,15 +85,15 @@ class SolverCrosscheckResult(ComparisonResult):
 # ---------------------------------------------------------------------------
 
 class SolverCrosscheck(Comparator):
-    """Compare two Python solvers across a set of independent test cases.
+    """Compare two :class:`~manforge.simulation.integrator.StressIntegrator`
+    implementations across a set of independent single-step test cases.
 
     Parameters
     ----------
-    solver_a : callable
-        Reference solver: ``(model, strain_inc, stress_n, state_n)``
-        → :class:`~manforge.core.stress_update.StressUpdateResult`.
-    solver_b : callable
-        Candidate solver with the same signature.
+    integrator_a : StressIntegrator
+        Reference integrator.
+    integrator_b : StressIntegrator
+        Candidate integrator.
     stress_tol : float, optional
         Per-case pass threshold for relative stress error (default 1e-6).
     tangent_tol : float, optional
@@ -108,12 +109,17 @@ class SolverCrosscheck(Comparator):
     --------
     ::
 
-        cs = SolverCrosscheck(solver_a, solver_b)
-        result = cs.run(model, test_cases)
+        from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
+        from manforge.verification import SolverCrosscheck, generate_single_step_cases
+
+        py_a = PythonNumericalIntegrator(model)
+        py_b = PythonAnalyticalIntegrator(model)
+        cs = SolverCrosscheck(py_a, py_b)
+        result = cs.run(generate_single_step_cases(model))
         assert result.passed
 
-        # Step-by-step with early break
-        for case in cs.iter_run(model, test_cases):
+        # Step-by-step with early break + Jacobian inspection
+        for case in cs.iter_run(generate_single_step_cases(model)):
             if not case.passed:
                 jac = compare_jacobians(model, case.result_a, case.result_b,
                                         test_cases[case.index]["state_n"])
@@ -127,8 +133,8 @@ class SolverCrosscheck(Comparator):
 
     def __init__(
         self,
-        solver_a: Callable,
-        solver_b: Callable,
+        integrator_a,
+        integrator_b,
         *,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
@@ -136,8 +142,8 @@ class SolverCrosscheck(Comparator):
         check_state: bool = True,
         check_is_plastic: bool = True,
     ) -> None:
-        self.solver_a = solver_a
-        self.solver_b = solver_b
+        self.integrator_a = integrator_a
+        self.integrator_b = integrator_b
         self.stress_tol = stress_tol
         self.tangent_tol = tangent_tol
         self.state_tol = state_tol
@@ -146,14 +152,12 @@ class SolverCrosscheck(Comparator):
 
     def iter_run(
         self,
-        model,
         test_cases: list,
     ) -> Iterator[SolverCaseResult]:
         """Yield per-case comparison results.
 
         Parameters
         ----------
-        model : MaterialModel
         test_cases : list[dict]
             Each dict must have ``"strain_inc"``, ``"stress_n"``, ``"state_n"``.
 
@@ -166,8 +170,8 @@ class SolverCrosscheck(Comparator):
             stress_n   = case["stress_n"]
             state_n    = case["state_n"]
 
-            ra = self.solver_a(model, strain_inc, stress_n, state_n)
-            rb = self.solver_b(model, strain_inc, stress_n, state_n)
+            ra = self.integrator_a.stress_update(strain_inc, stress_n, state_n)
+            rb = self.integrator_b.stress_update(strain_inc, stress_n, state_n)
 
             stress_a = np.asarray(ra.stress, dtype=float)
             stress_b = np.asarray(rb.stress, dtype=float)
@@ -252,9 +256,9 @@ def compare_jacobians(
     ----------
     model : MaterialModel
     result_a : StressUpdateResult
-        First result (e.g. from ``method="numerical_newton"``).
+        First result (e.g. from ``PythonNumericalIntegrator``).
     result_b : StressUpdateResult
-        Second result (e.g. from ``method="user_defined"``).
+        Second result (e.g. from ``PythonAnalyticalIntegrator``).
     state_n : dict
         Initial state at the start of the step (before the increment).
     rtol : float, optional

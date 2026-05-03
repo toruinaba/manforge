@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.fitting.optimizer import fit_params, FitResult
 
@@ -33,7 +34,7 @@ def synthetic_data(model, driver):
     """Uniaxial strain history and synthetic stress response (σ11 only)."""
     strain = np.linspace(0.0, 5e-3, 40)
     load = FieldHistory(FieldType.STRAIN, "Strain", strain)
-    result = driver.run(model, load)
+    result = driver.run(PythonIntegrator(model), load)
     return {"strain": strain, "stress": result.stress[:, 0]}
 
 

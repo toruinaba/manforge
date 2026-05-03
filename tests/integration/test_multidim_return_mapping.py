@@ -20,6 +20,7 @@ from manforge.core.stress_update import stress_update
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
 from manforge.simulation.driver import StrainDriver
+from manforge.simulation.integrator import PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification.fd_check import check_tangent
 
@@ -205,7 +206,7 @@ def test_uniaxial_driver_plane_strain(pe_model):
     """StrainDriver (uniaxial) works with a PLANE_STRAIN model."""
     eps_history = np.linspace(0, 5e-3, 20)
     load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
-    result = StrainDriver().run(pe_model, load)
+    result = StrainDriver().run(PythonNumericalIntegrator(pe_model), load)
     assert result.stress.shape == (20, 4)
     # σ11 must increase monotonically for hardening material
     assert np.all(np.diff(result.stress[:, 0]) >= 0)
@@ -217,7 +218,7 @@ def test_general_driver_plane_strain_shapes(pe_model):
     strain_history = np.zeros((N, 4))
     strain_history[:, 0] = np.linspace(0, 5e-3, N)  # ramp eps_11
     load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-    result = StrainDriver().run(pe_model, load)
+    result = StrainDriver().run(PythonNumericalIntegrator(pe_model), load)
     assert result.stress.shape == (N, 4)
 
 
@@ -226,7 +227,7 @@ def test_plane_strain_sigma33_nonzero(pe_model):
     eps_history = np.zeros((10, 4))
     eps_history[:, 0] = np.linspace(0, 5e-3, 10)  # ramp eps_11 only
     load = FieldHistory(FieldType.STRAIN, "Strain", eps_history)
-    result = StrainDriver().run(pe_model, load)
+    result = StrainDriver().run(PythonNumericalIntegrator(pe_model), load)
     # sigma_33 (index 2) must be non-zero due to plane-strain lateral constraint
     assert np.any(np.abs(result.stress[:, 2]) > 1.0), \
         f"sigma_33 unexpectedly near zero: {result.stress[:, 2]}"
