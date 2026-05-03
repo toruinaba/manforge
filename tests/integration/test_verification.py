@@ -10,7 +10,7 @@ import autograd.numpy as anp
 import pytest
 
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
-from manforge.verification.fortran_bridge import FortranUMAT
+from manforge.verification import FortranUMAT
 
 
 # ---------------------------------------------------------------------------

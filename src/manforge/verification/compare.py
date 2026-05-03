@@ -28,12 +28,18 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from manforge.verification.comparator import CaseResult, ComparisonResult, Comparator
+from manforge.verification.comparator import (
+    CaseResult,
+    ComparisonResult,
+    Comparator,
+    _array_rel_err,
+    _state_rel_err,
+    _stress_rel_err,
+    _tangent_rel_err,
+)
 
 if TYPE_CHECKING:
     from manforge.core.stress_update import StressUpdateResult
-
-_EPS = 1e-300  # zero-division guard — no physical meaning
 
 
 # ---------------------------------------------------------------------------
@@ -67,12 +73,10 @@ class SolverComparisonResult(ComparisonResult):
     """Aggregate result from :class:`SolverComparison`.
 
     Extends :class:`~manforge.verification.ComparisonResult` with
-    ``max_trial_rel_err`` and a legacy ``details`` list for backwards
-    compatibility with existing tests that inspect ``result.details``.
+    ``max_trial_rel_err``.
     """
 
     max_trial_rel_err: float = 0.0
-    details: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -99,10 +103,6 @@ class SolverComparison(Comparator):
         Whether to include state error in pass/fail (default True).
     check_is_plastic : bool, optional
         Fail the case when ``is_plastic`` flags disagree (default True).
-    check_residual_history : bool, optional
-        Include ``residual_history_a/b`` in ``details`` records (default False).
-    check_n_iterations : bool, optional
-        Include ``n_iterations_a/b`` in ``details`` records (default False).
 
     Examples
     --------
@@ -120,6 +120,11 @@ class SolverComparison(Comparator):
                 break
     """
 
+    _result_cls = SolverComparisonResult
+
+    def _aggregate_extra(self, cases):
+        return {"max_trial_rel_err": max((c.trial_rel_err for c in cases), default=0.0)}
+
     def __init__(
         self,
         solver_a: Callable,
@@ -130,8 +135,6 @@ class SolverComparison(Comparator):
         state_tol: float = 1e-6,
         check_state: bool = True,
         check_is_plastic: bool = True,
-        check_residual_history: bool = False,
-        check_n_iterations: bool = False,
     ) -> None:
         self.solver_a = solver_a
         self.solver_b = solver_b
@@ -140,8 +143,6 @@ class SolverComparison(Comparator):
         self.state_tol = state_tol
         self.check_state = check_state
         self.check_is_plastic = check_is_plastic
-        self.check_residual_history = check_residual_history
-        self.check_n_iterations = check_n_iterations
 
     def iter_run(
         self,
@@ -168,26 +169,24 @@ class SolverComparison(Comparator):
             ra = self.solver_a(model, strain_inc, stress_n, state_n)
             rb = self.solver_b(model, strain_inc, stress_n, state_n)
 
-            stress_a  = np.asarray(ra.stress,  dtype=float)
-            stress_b  = np.asarray(rb.stress,  dtype=float)
-            ddsdde_a  = np.asarray(ra.ddsdde,  dtype=float)
-            ddsdde_b  = np.asarray(rb.ddsdde,  dtype=float)
-            trial_a   = np.asarray(ra.stress_trial, dtype=float)
-            trial_b   = np.asarray(rb.stress_trial, dtype=float)
+            stress_a = np.asarray(ra.stress, dtype=float)
+            stress_b = np.asarray(rb.stress, dtype=float)
+            trial_a  = np.asarray(ra.stress_trial, dtype=float)
+            trial_b  = np.asarray(rb.stress_trial, dtype=float)
 
-            stress_rel_err  = float(np.max(np.abs(stress_b  - stress_a)  / (np.abs(stress_a)  + _EPS)))
-            tangent_rel_err = float(np.max(np.abs(ddsdde_b  - ddsdde_a)  / (np.abs(ddsdde_a)  + _EPS)))
-            trial_rel_err   = float(np.max(np.abs(trial_b   - trial_a)   / (np.abs(trial_a)   + _EPS)))
+            stress_rel_err  = _stress_rel_err(stress_a, stress_b)
+            tangent_rel_err = _tangent_rel_err(
+                np.asarray(ra.ddsdde, dtype=float),
+                np.asarray(rb.ddsdde, dtype=float),
+            ) or 0.0
+            trial_rel_err   = _array_rel_err(trial_a, trial_b)
 
             is_plastic_match     = bool(ra.is_plastic == rb.is_plastic)
             elastic_branch_match = bool((ra.return_mapping is None) == (rb.return_mapping is None))
 
-            state_rel_err: dict[str, float] = {}
-            if self.check_state:
-                for key in ra.state:
-                    va = np.asarray(ra.state[key], dtype=float)
-                    vb = np.asarray(rb.state.get(key, np.zeros_like(va)), dtype=float)
-                    state_rel_err[key] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
+            state_rel_err: dict[str, float] = (
+                _state_rel_err(ra.state, rb.state) if self.check_state else {}
+            )
 
             case_passed = stress_rel_err <= self.stress_tol and tangent_rel_err <= self.tangent_tol
             if self.check_state and state_rel_err:
@@ -213,79 +212,6 @@ class SolverComparison(Comparator):
                 b_residual_history=list(rb.residual_history),
                 b_converged=rb.converged,
             )
-
-    def run(
-        self,
-        model,
-        test_cases: list,
-    ) -> SolverComparisonResult:
-        """Compare solvers across all test cases and return aggregate result.
-
-        Parameters
-        ----------
-        model : MaterialModel
-        test_cases : list[dict]
-
-        Returns
-        -------
-        SolverComparisonResult
-        """
-        cases: list[SolverCaseResult] = []
-        max_s_err = 0.0
-        max_t_err = 0.0
-        max_st_err: dict[str, float] = {}
-        max_trial_err = 0.0
-        n_passed = 0
-        n_a_nc = 0
-        n_b_nc = 0
-        details = []
-
-        for cr in self.iter_run(model, test_cases):
-            cases.append(cr)
-
-            rec: dict = {
-                "case_index":           cr.index,
-                "stress_rel_err":       cr.stress_rel_err,
-                "tangent_rel_err":      cr.tangent_rel_err,
-                "state_rel_err":        cr.state_rel_err,
-                "trial_rel_err":        cr.trial_rel_err,
-                "is_plastic_match":     cr.is_plastic_match,
-                "elastic_branch_match": cr.elastic_branch_match,
-                "passed":               cr.passed,
-            }
-            if self.check_n_iterations:
-                rec["n_iterations_a"] = cr.result_a.n_iterations
-                rec["n_iterations_b"] = cr.result_b.n_iterations
-            if self.check_residual_history:
-                rec["residual_history_a"] = cr.result_a.residual_history
-                rec["residual_history_b"] = cr.result_b.residual_history
-            details.append(rec)
-
-            max_s_err    = max(max_s_err,    cr.stress_rel_err or 0.0)
-            max_t_err    = max(max_t_err,    cr.tangent_rel_err or 0.0)
-            max_trial_err = max(max_trial_err, cr.trial_rel_err)
-            for key, val in cr.state_rel_err.items():
-                max_st_err[key] = max(max_st_err.get(key, 0.0), val)
-            if cr.passed:
-                n_passed += 1
-            if not cr.a_converged:
-                n_a_nc += 1
-            if not cr.b_converged:
-                n_b_nc += 1
-
-        return SolverComparisonResult(
-            passed=n_passed == len(test_cases),
-            n_cases=len(test_cases),
-            n_passed=n_passed,
-            max_stress_rel_err=max_s_err,
-            max_tangent_rel_err=max_t_err,
-            max_state_rel_err=max_st_err,
-            max_trial_rel_err=max_trial_err,
-            cases=cases,
-            details=details,
-            n_a_nonconverged=n_a_nc,
-            n_b_nonconverged=n_b_nc,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +288,7 @@ def compare_jacobians(
     for name in _SCALAR_BLOCKS:
         va = np.asarray(getattr(jac_a, name), dtype=float)
         vb = np.asarray(getattr(jac_b, name), dtype=float)
-        block_errs[name] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
+        block_errs[name] = _array_rel_err(va, vb)
 
     for name in _DICT_BLOCKS:
         da = getattr(jac_a, name)
@@ -372,7 +298,7 @@ def compare_jacobians(
         for key in da:
             va = np.asarray(da[key], dtype=float)
             vb = np.asarray(db.get(key, np.zeros_like(va)), dtype=float)
-            block_errs[f"{name}::{key}"] = float(np.max(np.abs(vb - va) / (np.abs(va) + _EPS)))
+            block_errs[f"{name}::{key}"] = _array_rel_err(va, vb)
 
     max_err = max(block_errs.values()) if block_errs else 0.0
 

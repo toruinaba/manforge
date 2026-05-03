@@ -95,7 +95,7 @@ def test_autodiff_vs_analytical_pass(model, test_cases):
     assert result.passed, (
         f"Solvers disagree: max_stress_err={result.max_stress_rel_err:.3e}, "
         f"max_tangent_err={result.max_tangent_rel_err:.3e}\n"
-        f"Details: {result.details}"
+        f"Failed cases: {[c.index for c in result.cases if not c.passed]}"
     )
     assert result.max_stress_rel_err  < 1e-6
     assert result.max_tangent_rel_err < 1e-5
@@ -130,26 +130,29 @@ def test_wrong_solver_fails(model, test_cases):
 # Result structure
 # ---------------------------------------------------------------------------
 
-def test_result_details_length(model, test_cases):
-    """details list length equals the number of test cases."""
+def test_result_cases_length(model, test_cases):
+    """cases list length equals the number of test cases."""
     solver = _make_solver("numerical_newton")
     cs = SolverComparison(solver, solver)
     result = cs.run(model, test_cases)
-    assert len(result.details) == len(test_cases)
+    assert len(result.cases) == len(test_cases)
 
 
-def test_result_details_keys(model, test_cases):
-    """Each detail record has the required keys."""
+def test_result_case_fields(model, test_cases):
+    """Each SolverCaseResult has the required attributes."""
+    from manforge.verification.compare import SolverCaseResult
     solver = _make_solver("numerical_newton")
     cs = SolverComparison(solver, solver)
     result = cs.run(model, test_cases)
-    required = {
-        "case_index", "stress_rel_err", "tangent_rel_err",
-        "state_rel_err", "trial_rel_err",
-        "is_plastic_match", "elastic_branch_match", "passed",
-    }
-    for d in result.details:
-        assert required <= d.keys()
+    for c in result.cases:
+        assert isinstance(c, SolverCaseResult)
+        assert c.index >= 0
+        assert c.stress_rel_err is not None
+        assert c.tangent_rel_err is not None
+        assert isinstance(c.state_rel_err, dict)
+        assert isinstance(c.is_plastic_match, bool)
+        assert isinstance(c.elastic_branch_match, bool)
+        assert isinstance(c.passed, bool)
 
 
 def test_empty_test_cases(model):

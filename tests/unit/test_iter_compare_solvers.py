@@ -61,14 +61,14 @@ class TestSolverComparisonIterRun:
         solver_b = _solver("numerical_newton")
         cs = SolverComparison(solver_a, solver_b)
         batch = cs.run(model, test_cases)
-        cases = list(cs.iter_run(model, test_cases))
+        iter_cases = list(cs.iter_run(model, test_cases))
 
-        assert len(cases) == batch.n_cases
-        for case, detail in zip(cases, batch.details):
-            assert case.index == detail["case_index"]
-            assert case.passed == detail["passed"]
-            assert case.stress_rel_err == pytest.approx(detail["stress_rel_err"], rel=1e-12)
-            assert case.tangent_rel_err == pytest.approx(detail["tangent_rel_err"], rel=1e-12)
+        assert len(iter_cases) == batch.n_cases
+        for iter_c, batch_c in zip(iter_cases, batch.cases):
+            assert iter_c.index == batch_c.index
+            assert iter_c.passed == batch_c.passed
+            assert iter_c.stress_rel_err == pytest.approx(batch_c.stress_rel_err, rel=1e-12)
+            assert iter_c.tangent_rel_err == pytest.approx(batch_c.tangent_rel_err, rel=1e-12)
 
     def test_early_break_on_failure(self, model, test_cases):
         solver_a = _solver("numerical_newton")

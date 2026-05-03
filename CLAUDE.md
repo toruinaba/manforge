@@ -91,7 +91,7 @@ JAX autodiff computes yield function gradients and the Hessian needed for the ta
 - `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
-- `verification/compare.py`: `compare_solvers` (batch) and `iter_compare_solvers` (generator, yields `SolverCaseResult` per case — exposes raw `result_a`/`result_b` for direct use with `compare_jacobians`).
+- `verification/compare.py`: `SolverComparison` (a `Comparator` subclass). `run(model, test_cases)` returns `SolverComparisonResult`; `iter_run` yields one `SolverCaseResult` per case with raw `result_a`/`result_b` for direct use with `compare_jacobians`.
 
 ### StressState and dimensionality
 
