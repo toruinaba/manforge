@@ -139,7 +139,8 @@ def test_crosscheck_single_step_numerical_newton(fortran_j2, model):
     """Single-step cases (elastic/plastic/multiaxial) with numerical_newton vs UMAT."""
     py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
-    cs = SolverCrosscheck(py_int, fc_int)
+    # FortranIntegrator returns is_plastic=None — skip that check
+    cs = SolverCrosscheck(py_int, fc_int, check_is_plastic=False)
     result = cs.run(generate_single_step_cases(model))
 
     assert result.passed, (
@@ -153,7 +154,8 @@ def test_crosscheck_single_step_user_defined(fortran_j2, model):
     """Single-step cases with user_defined (analytical) return mapping vs UMAT."""
     py_int = PythonAnalyticalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
-    cs = SolverCrosscheck(py_int, fc_int)
+    # FortranIntegrator returns is_plastic=None — skip that check
+    cs = SolverCrosscheck(py_int, fc_int, check_is_plastic=False)
     result = cs.run(generate_single_step_cases(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
