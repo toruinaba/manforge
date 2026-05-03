@@ -5,7 +5,6 @@ import pytest
 import manforge  # noqa: F401
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import (
-    StrainDriver,
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
 )
@@ -30,7 +29,7 @@ class TestCrosscheckTrajectory:
         cc = StressUpdateCrosscheck(py_int_a, py_int_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
-        result = cc.run(StrainDriver(), load)
+        result = cc.run(load)
 
         assert result.passed
         for cr in result.cases:
@@ -47,7 +46,7 @@ class TestCrosscheckTrajectory:
         cc = StressUpdateCrosscheck(py_int_a, py_int_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
-        result = cc.run(StrainDriver(), load)
+        result = cc.run(load)
 
         plastic_cases = [cr for cr in result.cases
                          if cr.py_dlambda is not None and cr.py_dlambda > 0]
@@ -65,7 +64,7 @@ class TestCrosscheckTrajectory:
         elastic_strain[0, 0] = 1e-6
         elastic_strain[1, 0] = 2e-6
         load = FieldHistory(FieldType.STRAIN, "eps", elastic_strain)
-        for cr in cc.iter_run(StrainDriver(), load):
+        for cr in cc.iter_run(load):
             assert cr.a_converged is True
 
 

@@ -131,9 +131,8 @@ def test_augmented_nr_quadratic_convergence(ow_model):
 
 def test_driver_j2_analytical_history(j2_model):
     """J2 user_defined_return_mapping records n_iterations=1 and 2-entry history."""
-    driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(PythonIntegrator(j2_model), load)
+    dr = StrainDriver(PythonIntegrator(j2_model)).run(load)
 
     for rm in dr.step_results:
         if rm.is_plastic:
@@ -147,9 +146,8 @@ def test_driver_j2_analytical_history(j2_model):
 
 def test_driver_j2_autodiff_has_history(j2_model):
     """With method='numerical_newton', J2 plastic steps record NR history."""
-    driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(PythonNumericalIntegrator(j2_model), load)
+    dr = StrainDriver(PythonNumericalIntegrator(j2_model)).run(load)
 
     for rm in dr.step_results:
         if rm.is_plastic:
@@ -162,9 +160,8 @@ def test_driver_j2_autodiff_has_history(j2_model):
 
 @pytest.mark.slow
 def test_driver_ow_step_results_have_history(ow_model):
-    driver = StrainDriver()
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
-    dr = driver.run(PythonIntegrator(ow_model), load)
+    dr = StrainDriver(PythonIntegrator(ow_model)).run(load)
 
     for rm in dr.step_results:
         if rm.is_plastic:

@@ -28,8 +28,6 @@ sys.path.insert(0, os.path.abspath(_fortran_dir))
 
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import (
-    StrainDriver,
-    StressDriver,
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
     FortranIntegrator,
@@ -116,7 +114,7 @@ py_int2 = PythonAnalyticalIntegrator(model)
 fc_int2 = _make_fc_int(fortran_j2)
 
 cc2 = StressUpdateCrosscheck(py_int2, fc_int2)
-result2 = cc2.run(StrainDriver(), load)
+result2 = cc2.run(load)
 
 print(f"  passed           : {result2.passed}  ({result2.n_passed}/{result2.n_cases} steps)")
 print(f"  max stress err   : {result2.max_stress_rel_err:.2e}")
@@ -142,7 +140,7 @@ fc_int3 = _make_fc_int(fortran_j2)
 cc3 = StressUpdateCrosscheck(py_int3, fc_int3)
 
 print("  Normal run (printing every 5th step):")
-for cr in cc3.iter_run(StrainDriver(), load):
+for cr in cc3.iter_run(load):
     if cr.index % 5 == 0:
         print(
             f"    step {cr.index:2d}: stress_err={cr.stress_rel_err:.1e}  "
@@ -161,7 +159,7 @@ fc_int3_bad = FortranIntegrator(
 )
 cc3_bad = StressUpdateCrosscheck(py_int3, fc_int3_bad)
 first_fail_index = None
-for cr in cc3_bad.iter_run(StrainDriver(), load):
+for cr in cc3_bad.iter_run(load):
     if not cr.passed:
         first_fail_index = cr.index
         print(f"    First failure at step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
@@ -187,7 +185,7 @@ stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 py_int4 = PythonNumericalIntegrator(model)
 fc_int4 = _make_fc_int(fortran_j2)
 cc4 = StressUpdateCrosscheck(py_int4, fc_int4)
-result4 = cc4.run(StressDriver(), stress_load)
+result4 = cc4.run(stress_load)
 
 print(f"  passed        : {result4.passed}  ({result4.n_passed}/{result4.n_cases} steps)")
 print(f"  max stress err: {result4.max_stress_rel_err:.2e}")

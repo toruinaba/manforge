@@ -1,8 +1,11 @@
 """Multi-step crosscheck: two StressIntegrators over a loading history.
 
 :class:`StressUpdateCrosscheck` is a :class:`~manforge.verification.Comparator`
-subclass that drives two integrators through the same loading sequence via a
-Driver, then compares stress / state / tangent at every step.
+subclass that drives two integrators through the same loading sequence, then
+compares stress / state / tangent at every step.  The driver type is determined
+automatically from ``load.type``: :class:`~manforge.simulation.StrainDriver` for
+``FieldType.STRAIN`` and :class:`~manforge.simulation.StressDriver` for
+``FieldType.STRESS``.
 
 Phase 5 workflow
 ----------------
@@ -10,7 +13,7 @@ Phase 5 workflow
 
     from manforge.verification import StressUpdateCrosscheck, FortranUMAT
     from manforge.simulation import (
-        StrainDriver, PythonNumericalIntegrator, FortranIntegrator,
+        PythonNumericalIntegrator, FortranIntegrator,
     )
     from manforge.simulation.types import FieldHistory, FieldType
     import numpy as np
@@ -30,7 +33,7 @@ Phase 5 workflow
     )
 
     cc = StressUpdateCrosscheck(py_int, fc_int)
-    result = cc.run(StrainDriver(), load)
+    result = cc.run(load)
     assert result.passed
     print(f"max stress rel error = {result.max_stress_rel_err:.2e}")
 
@@ -50,6 +53,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from manforge.simulation.driver import StrainDriver, StressDriver
+from manforge.simulation.types import FieldType
 from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
@@ -103,8 +108,9 @@ class StressUpdateCrosscheck(Comparator):
     """Compare two :class:`~manforge.simulation.integrator.StressIntegrator` implementations
     over a loading history.
 
-    Drives both integrators through the same multi-step sequence via a Driver,
-    then compares stress / state / tangent at every step.
+    Drives both integrators through the same multi-step sequence and compares
+    stress / state / tangent at every step.  The driver type is selected
+    automatically from ``load.type`` at :meth:`run` / :meth:`iter_run` time.
 
     Parameters
     ----------
@@ -120,13 +126,17 @@ class StressUpdateCrosscheck(Comparator):
         Pass threshold for relative tangent error (default 1e-5).
     state_tol : float, optional
         Pass threshold for per state-variable relative error (default 1e-6).
+    stress_driver_kwargs : dict or None, optional
+        Extra keyword arguments forwarded to :class:`~manforge.simulation.StressDriver`
+        when the load is stress-controlled (e.g. ``{"max_iter": 30, "tol": 1e-10}``).
+        Ignored for strain-controlled loads.
 
     Examples
     --------
     ::
 
         from manforge.simulation import (
-            PythonNumericalIntegrator, FortranIntegrator, StrainDriver,
+            PythonNumericalIntegrator, FortranIntegrator,
         )
 
         py_int = PythonNumericalIntegrator(model)
@@ -139,10 +149,10 @@ class StressUpdateCrosscheck(Comparator):
         )
 
         cc = StressUpdateCrosscheck(py_int, fc_int)
-        result = cc.run(StrainDriver(), load)
+        result = cc.run(load)
         assert result.passed
 
-        for cr in cc.iter_run(StrainDriver(), load):
+        for cr in cc.iter_run(load):
             if not cr.passed:
                 print(f"step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
                 break
@@ -158,34 +168,43 @@ class StressUpdateCrosscheck(Comparator):
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
         state_tol: float = 1e-6,
+        stress_driver_kwargs: dict | None = None,
     ) -> None:
         self.integrator_a = integrator_a
         self.integrator_b = integrator_b
         self.stress_tol = stress_tol
         self.tangent_tol = tangent_tol
         self.state_tol = state_tol
+        self._stress_driver_kwargs = stress_driver_kwargs or {}
+
+    def _driver_for(self, integrator, load):
+        if load.type == FieldType.STRAIN:
+            return StrainDriver(integrator)
+        if load.type == FieldType.STRESS:
+            return StressDriver(integrator, **self._stress_driver_kwargs)
+        raise ValueError(f"Unsupported load.type: {load.type!r}")
 
     def iter_run(
         self,
-        driver,
         load,
     ) -> Iterator[CrosscheckCaseResult]:
         """Yield per-step crosscheck results.
 
         Parameters
         ----------
-        driver
-            An instantiated driver, e.g. ``StrainDriver()`` or ``StressDriver()``.
         load : FieldHistory
+            Loading history.  ``load.type`` determines whether
+            :class:`~manforge.simulation.StrainDriver` or
+            :class:`~manforge.simulation.StressDriver` is used internally.
 
         Yields
         ------
         CrosscheckCaseResult
         """
-        for sa, sb in zip(
-            driver.iter_run(self.integrator_a, load),
-            driver.iter_run(self.integrator_b, load),
-        ):
+        da = self._driver_for(self.integrator_a, load)
+        db = self._driver_for(self.integrator_b, load)
+
+        for sa, sb in zip(da.iter_run(load), db.iter_run(load)):
             ra = sa.result
             rb = sb.result
 

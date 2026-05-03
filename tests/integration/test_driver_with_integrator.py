@@ -28,10 +28,8 @@ def strain_load(model):
 
 def test_strain_driver_numerical_vs_analytical(model, strain_load):
     """PythonNumericalIntegrator and PythonAnalyticalIntegrator give consistent results."""
-    driver = StrainDriver()
-
-    result_num = driver.run(PythonNumericalIntegrator(model), strain_load)
-    result_ana = driver.run(PythonAnalyticalIntegrator(model), strain_load)
+    result_num = StrainDriver(PythonNumericalIntegrator(model)).run(strain_load)
+    result_ana = StrainDriver(PythonAnalyticalIntegrator(model)).run(strain_load)
 
     np.testing.assert_allclose(result_num.stress, result_ana.stress, rtol=1e-6)
     np.testing.assert_allclose(result_num.strain, result_ana.strain, rtol=1e-12)
@@ -40,11 +38,9 @@ def test_strain_driver_numerical_vs_analytical(model, strain_load):
 
 def test_strain_driver_iter_run_numerical_vs_analytical(model, strain_load):
     """iter_run produces consistent steps for numerical and analytical integrators."""
-    driver = StrainDriver()
-
     for step_num, step_ana in zip(
-        driver.iter_run(PythonNumericalIntegrator(model), strain_load),
-        driver.iter_run(PythonAnalyticalIntegrator(model), strain_load),
+        StrainDriver(PythonNumericalIntegrator(model)).iter_run(strain_load),
+        StrainDriver(PythonAnalyticalIntegrator(model)).iter_run(strain_load),
     ):
         np.testing.assert_allclose(step_num.result.stress, step_ana.result.stress, rtol=1e-6)
         assert step_num.result.is_plastic == step_ana.result.is_plastic
@@ -58,9 +54,8 @@ def test_stress_driver_numerical_vs_analytical(model):
     stress_data[:, 0] = targets
     load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-    driver = StressDriver()
-    result_num = driver.run(PythonNumericalIntegrator(model), load)
-    result_ana = driver.run(PythonAnalyticalIntegrator(model), load)
+    result_num = StressDriver(PythonNumericalIntegrator(model)).run(load)
+    result_ana = StressDriver(PythonAnalyticalIntegrator(model)).run(load)
 
     np.testing.assert_allclose(result_num.stress, result_ana.stress, rtol=1e-6, atol=1e-6)
     np.testing.assert_allclose(result_num.strain, result_ana.strain, rtol=1e-6, atol=1e-12)
@@ -68,15 +63,13 @@ def test_stress_driver_numerical_vs_analytical(model):
 
 def test_driver_raises_on_bare_model(model, strain_load):
     """Driver raises TypeError when given a bare MaterialModel."""
-    driver = StrainDriver()
     with pytest.raises(TypeError, match="StressIntegrator"):
-        driver.run(model, strain_load)
+        StrainDriver(model)
 
 
 def test_python_integrator_auto_method(model, strain_load):
     """PythonIntegrator (auto) produces same results as numerical newton for J2 model."""
-    driver = StrainDriver()
-    result_auto = driver.run(PythonIntegrator(model), strain_load)
-    result_num  = driver.run(PythonNumericalIntegrator(model), strain_load)
+    result_auto = StrainDriver(PythonIntegrator(model)).run(strain_load)
+    result_num  = StrainDriver(PythonNumericalIntegrator(model)).run(strain_load)
 
     np.testing.assert_allclose(result_auto.stress, result_num.stress, rtol=1e-6)

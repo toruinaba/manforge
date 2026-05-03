@@ -5,7 +5,6 @@ import pytest
 import manforge  # noqa: F401
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import (
-    StrainDriver,
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
 )
@@ -60,7 +59,7 @@ class TestCounterAggregation:
         cc = StressUpdateCrosscheck(py_a, py_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
-        result = cc.run(StrainDriver(), load)
+        result = cc.run(load)
         assert result.n_a_nonconverged == 0
         assert result.n_b_nonconverged == 0
 

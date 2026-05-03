@@ -2,9 +2,10 @@
 
 All drivers share the same interface via :class:`DriverBase`:
 
-* Input  — a :class:`~manforge.simulation.integrator.StressIntegrator` and a
+* Input  — the driver holds a :class:`~manforge.simulation.integrator.StressIntegrator`
+  (passed at construction) and receives a
   :class:`~manforge.simulation.types.FieldHistory` containing the prescribed
-  loading history (strain or stress).
+  loading history (strain or stress) at each :meth:`run` / :meth:`iter_run` call.
 * Output — :class:`~manforge.simulation.types.DriverResult` containing
   stress and strain at every step, plus any explicitly requested state
   variables.
@@ -14,8 +15,8 @@ Conventions
 - Stress and strain arrays use the engineering-shear Voigt convention:
     σ, ε = [11, 22, 33, 12, 13, 23]
 - *Cumulative* quantities are the input; increments are computed internally.
-- Drivers require a :class:`~manforge.simulation.integrator.StressIntegrator`.
-  Wrap bare ``MaterialModel`` objects with
+- Drivers require a :class:`~manforge.simulation.integrator.StressIntegrator`
+  at construction time.  Wrap bare ``MaterialModel`` objects with
   :class:`~manforge.simulation.integrator.PythonIntegrator` (auto solver),
   :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`
   (numerical Newton-Raphson), or
@@ -49,26 +50,29 @@ def _check_integrator(obj) -> None:
 class DriverBase(ABC):
     """Abstract base for all simulation drivers.
 
-    Subclasses implement :meth:`iter_run` and :meth:`run`.  Both accept a
-    :class:`~manforge.simulation.integrator.StressIntegrator` (not a bare
-    ``MaterialModel``) as their first argument.
+    Parameters
+    ----------
+    integrator : StressIntegrator
+        Constitutive integrator — use
+        :class:`~manforge.simulation.integrator.PythonIntegrator`,
+        :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`,
+        :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`, or
+        :class:`~manforge.simulation.integrator.FortranIntegrator`.
     """
+
+    def __init__(self, integrator) -> None:
+        _check_integrator(integrator)
+        self.integrator = integrator
 
     @abstractmethod
     def iter_run(
         self,
-        integrator,
         load: FieldHistory,
     ) -> Iterator[DriverStep]:
         """Yield per-step results as a generator.
 
         Parameters
         ----------
-        integrator : StressIntegrator
-            Constitutive integrator — use :class:`~manforge.simulation.integrator.PythonIntegrator`,
-            :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`,
-            :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`, or
-            :class:`~manforge.simulation.integrator.FortranIntegrator`.
         load : FieldHistory
             Loading history (same requirements as :meth:`run`).
 
@@ -83,8 +87,8 @@ class DriverBase(ABC):
         --------
         Break on plasticity onset::
 
-            integrator = PythonIntegrator(model)
-            for step in driver.iter_run(integrator, load):
+            driver = StrainDriver(PythonIntegrator(model))
+            for step in driver.iter_run(load):
                 if step.result.is_plastic:
                     print(f"Plasticity at step {step.i}")
                     break
@@ -92,16 +96,14 @@ class DriverBase(ABC):
 
     def run(
         self,
-        integrator,
         load: FieldHistory,
+        *,
         collect_state: dict[str, FieldType] | None = None,
     ) -> DriverResult:
         """Run the loading simulation.
 
         Parameters
         ----------
-        integrator : StressIntegrator
-            Constitutive integrator.
         load : FieldHistory
             Loading history.  The ``type`` and shape of ``load.data`` must
             match the driver's expectations (see subclass documentation).
@@ -118,16 +120,15 @@ class DriverBase(ABC):
         -------
         DriverResult
         """
-        _check_integrator(integrator)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(integrator, load):
+        for step in self.iter_run(load):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
             np.stack(strain_rows)
             if strain_rows
-            else np.zeros((0, integrator.ntens))
+            else np.zeros((0, self.integrator.ntens))
         )
         return DriverResult(
             step_results=step_results,
@@ -148,19 +149,18 @@ class StrainDriver(DriverBase):
 
     Parameters
     ----------
-    (none — stateless, all inputs passed to :meth:`run`)
+    integrator : StressIntegrator
+        Constitutive integrator.
     """
 
     def iter_run(
         self,
-        integrator,
         load: FieldHistory,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the strain-controlled loading history.
 
         Parameters
         ----------
-        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRAIN``.  ``load.data`` shape:
 
@@ -171,7 +171,7 @@ class StrainDriver(DriverBase):
         ------
         DriverStep
         """
-        _check_integrator(integrator)
+        integrator = self.integrator
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
         ntens = integrator.ntens
@@ -212,6 +212,8 @@ class StressDriver(DriverBase):
 
     Parameters
     ----------
+    integrator : StressIntegrator
+        Constitutive integrator.
     max_iter : int, optional
         Maximum Newton-Raphson iterations per step (default 20).
     tol : float, optional
@@ -219,13 +221,13 @@ class StressDriver(DriverBase):
         (default 1e-8).
     """
 
-    def __init__(self, max_iter: int = 20, tol: float = 1e-8):
+    def __init__(self, integrator, *, max_iter: int = 20, tol: float = 1e-8):
+        super().__init__(integrator)
         self.max_iter = max_iter
         self.tol = tol
 
     def iter_run(
         self,
-        integrator,
         load: FieldHistory,
         *,
         raise_on_nonconverged: bool = True,
@@ -234,7 +236,6 @@ class StressDriver(DriverBase):
 
         Parameters
         ----------
-        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
@@ -255,7 +256,7 @@ class StressDriver(DriverBase):
         RuntimeError
             If NR does not converge and ``raise_on_nonconverged=True``.
         """
-        _check_integrator(integrator)
+        integrator = self.integrator
         stress_history = np.asarray(load.data, dtype=float)
         ntens = integrator.ntens
 
@@ -315,15 +316,14 @@ class StressDriver(DriverBase):
 
     def run(
         self,
-        integrator,
         load: FieldHistory,
+        *,
         collect_state: dict[str, FieldType] | None = None,
     ) -> DriverResult:
         """Run the stress-controlled loading history.
 
         Parameters
         ----------
-        integrator : StressIntegrator
         load : FieldHistory
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
@@ -341,20 +341,18 @@ class StressDriver(DriverBase):
             If Newton-Raphson does not converge within ``max_iter`` iterations
             at any step.
         """
-        _check_integrator(integrator)
         step_results = []
         strain_rows = []
-        for step in self.iter_run(integrator, load, raise_on_nonconverged=True):
+        for step in self.iter_run(load, raise_on_nonconverged=True):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
             np.stack(strain_rows)
             if strain_rows
-            else np.zeros((0, integrator.ntens))
+            else np.zeros((0, self.integrator.ntens))
         )
         return DriverResult(
             step_results=step_results,
             strain=strain_out,
             collect_state=collect_state,
         )
-
