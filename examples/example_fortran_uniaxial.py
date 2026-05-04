@@ -2,7 +2,7 @@
 
 Demonstrates the production workflow:
   1. Define a Python model (J2Isotropic3D).
-  2. Load a compiled Fortran UMAT with FortranUMAT.
+  2. Load a compiled Fortran UMAT with FortranModule.
   3. Build a FortranIntegrator with from_model() — no manual param_fn needed.
   4. Drive both Python and Fortran integrators with StressDriver and compare strains.
 
@@ -32,7 +32,7 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import FortranIntegrator, StressDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranUMAT
+from manforge.verification import FortranModule
 
 try:
     import matplotlib
@@ -55,7 +55,7 @@ model = J2Isotropic3D(
 # ---------------------------------------------------------------------------
 # Load compiled Fortran UMAT
 # ---------------------------------------------------------------------------
-fortran = FortranUMAT("j2_isotropic_3d")
+fortran = FortranModule("j2_isotropic_3d")
 
 # ---------------------------------------------------------------------------
 # Integrators

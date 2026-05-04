@@ -20,7 +20,7 @@ class FortranBinding:
     Parameters
     ----------
     subroutine:
-        Exact subroutine name as passed to :meth:`FortranUMAT.call`.
+        Exact subroutine name as passed to :meth:`FortranModule.call`.
     test:
         Pytest node id of the test that verifies this binding
         (e.g. ``"tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness"``).
@@ -107,7 +107,7 @@ def check_bindings(
     model:
         An instantiated :class:`MaterialModel`.
     fortran:
-        A :class:`FortranUMAT` instance (module must be importable).
+        A :class:`FortranModule` instance (module must be importable).
     cases:
         ``{method_name: (py_args, fortran_args)}``.
         *py_args* is passed to ``getattr(model, method_name)(*py_args)``.

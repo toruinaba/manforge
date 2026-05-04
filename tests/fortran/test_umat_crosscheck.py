@@ -20,7 +20,7 @@ pytestmark = pytest.mark.fortran
 from manforge.verification import (
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
-    FortranUMAT,
+    FortranModule,
     generate_strain_history,
 )
 from manforge.simulation import (
@@ -39,7 +39,7 @@ from manforge.simulation.types import FieldHistory, FieldType
 
 @pytest.fixture
 def fortran_j2():
-    return FortranUMAT("j2_isotropic_3d")
+    return FortranModule("j2_isotropic_3d")
 
 
 def _j2_load(model):
@@ -255,7 +255,7 @@ def mock_fortran():
         reason="mock_kinematic not compiled -- run: "
                "uv run manforge build fortran/mock_kinematic.f90 --name mock_kinematic",
     )
-    return FortranUMAT("mock_kinematic")
+    return FortranModule("mock_kinematic")
 
 
 def test_crosscheck_multi_state_mock(mock_fortran):

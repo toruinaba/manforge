@@ -1,6 +1,6 @@
 """Fortran UMAT bridge for cross-validation.
 
-Provides :class:`FortranUMAT`, a thin wrapper around an f2py-compiled Fortran
+Provides :class:`FortranModule`, a thin wrapper around an f2py-compiled Fortran
 module.  Its sole responsibility is float64 type conversion — it has no
 knowledge of the Python-side ``MaterialModel`` and no auto-detection logic.
 
@@ -8,10 +8,10 @@ Usage
 -----
 ::
 
-    from manforge.verification import FortranUMAT
+    from manforge.verification import FortranModule
     import numpy as np
 
-    fortran = FortranUMAT("j2_isotropic_3d")
+    fortran = FortranModule("j2_isotropic_3d")
 
     # Call any subroutine by name — same pattern for _run and sub-components
     stress_f, ep_f, ddsdde_f = fortran.call(
@@ -51,7 +51,7 @@ def _ensure_float64(args):
     return out
 
 
-class FortranUMAT:
+class FortranModule:
     """Thin wrapper around an f2py-compiled Fortran module.
 
     Handles float64 type conversion only.  Has no knowledge of the Python-side

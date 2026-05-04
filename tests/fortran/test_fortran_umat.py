@@ -1,6 +1,6 @@
 """Cross-validation: Fortran J2 UMAT vs. Python return_mapping.
 
-Uses FortranUMAT.call to invoke compiled subroutines and compares results
+Uses FortranModule.call to invoke compiled subroutines and compares results
 explicitly against the Python reference implementation.
 
 The compiled module must be built before running:
@@ -22,7 +22,7 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification import FortranUMAT
+from manforge.verification import FortranModule
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ from manforge.verification import FortranUMAT
 
 @pytest.fixture
 def fortran():
-    return FortranUMAT("j2_isotropic_3d")
+    return FortranModule("j2_isotropic_3d")
 
 
 # ---------------------------------------------------------------------------

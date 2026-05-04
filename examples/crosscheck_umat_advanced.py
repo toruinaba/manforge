@@ -34,7 +34,7 @@ from manforge.simulation import (
 )
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
-    FortranUMAT,
+    FortranModule,
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
     generate_strain_history,
@@ -47,7 +47,7 @@ from manforge.core.jacobian import ad_jacobian_blocks
 # ---------------------------------------------------------------------------
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
-fortran_j2 = FortranUMAT("j2_isotropic_3d")
+fortran_j2 = FortranModule("j2_isotropic_3d")
 
 
 def _make_fc_int(fortran):
@@ -243,7 +243,7 @@ print("  Part 5: FortranIntegrator (mock_kinematic, ndarray state)")
 print("=" * 60)
 
 try:
-    fortran_mock = FortranUMAT("mock_kinematic")
+    fortran_mock = FortranModule("mock_kinematic")
 except ModuleNotFoundError:
     print("  mock_kinematic not compiled — skipping Part 5.")
     print("  Compile with: uv run manforge build fortran/mock_kinematic.f90 --name mock_kinematic")

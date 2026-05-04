@@ -24,7 +24,7 @@ Four adapters implement this protocol:
     (requires ``model.user_defined_return_mapping`` to be implemented).
 
 :class:`FortranIntegrator`
-    Wraps a :class:`~manforge.verification.FortranUMAT` and the four hook
+    Wraps a :class:`~manforge.verification.FortranModule` and the four hook
     functions that map between Python state dicts and Fortran argument lists.
 
 Drivers require a :class:`StressIntegrator` — bare ``MaterialModel`` objects
@@ -291,8 +291,8 @@ class FortranIntegrator:
 
     Parameters
     ----------
-    fortran : FortranUMAT
-        f2py module wrapper (from :class:`~manforge.verification.FortranUMAT`).
+    fortran : FortranModule
+        f2py module wrapper (from :class:`~manforge.verification.FortranModule`).
     subroutine : str
         Name of the f2py-callable core-logic subroutine.
     stress_state : StressState, optional
@@ -402,7 +402,7 @@ class FortranIntegrator:
 
         Parameters
         ----------
-        fortran : FortranUMAT
+        fortran : FortranModule
         subroutine : str
             f2py-callable subroutine name.
         model : MaterialModel
@@ -414,7 +414,7 @@ class FortranIntegrator:
         ::
 
             model = J2Isotropic3D(E=210e3, nu=0.3, sigma_y0=250.0, H=1e3)
-            fortran = FortranUMAT("j2_isotropic_3d")
+            fortran = FortranModule("j2_isotropic_3d")
             fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
 
             # Override param_fn when Fortran argument order differs:

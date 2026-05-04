@@ -13,7 +13,7 @@ the UMAT is compiled:
 
 In a real external project the user would replace:
     - J2Isotropic3D  →  MyModel (their Python model)
-    - FortranUMAT("j2_isotropic_3d")  →  FortranUMAT("my_umat")
+    - FortranModule("j2_isotropic_3d")  →  FortranModule("my_umat")
     - subroutine "j2_isotropic_3d"  →  "my_umat_core"
     - (optional) param_fn=...  →  only when Fortran argument order differs from
       model.param_names.  Omit if they match (the convention).
@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath(_fortran_dir))
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import PythonNumericalIntegrator, FortranIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranUMAT, CrosscheckStrainDriver, generate_strain_history
+from manforge.verification import FortranModule, CrosscheckStrainDriver, generate_strain_history
 
 # ---------------------------------------------------------------------------
 # 1. Define (or import) your Python model
@@ -39,7 +39,7 @@ model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 # ---------------------------------------------------------------------------
 # 2. Load your compiled Fortran UMAT module
 # ---------------------------------------------------------------------------
-fortran = FortranUMAT("j2_isotropic_3d")
+fortran = FortranModule("j2_isotropic_3d")
 
 # ---------------------------------------------------------------------------
 # 3. Build a strain loading history

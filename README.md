@@ -114,7 +114,7 @@ src/manforge/
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_registry.py# @verified_against_fortran デコレータ
 │   ├── fd_check.py        # check_tangent()
-│   ├── fortran_bridge.py  # FortranUMAT — f2py ラッパー
+│   ├── fortran_bridge.py  # FortranModule — f2py ラッパー
 │   └── test_cases.py      # estimate_yield_strain / generate_*
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換
@@ -510,7 +510,7 @@ for cr in cc.iter_run(load):
 **Fortran ワークフロー**:
 
 1. **Build** — `.f90` を f2py でコンパイルして importable モジュールを生成
-2. **Load** — `FortranUMAT("module_name")` でロード (`uv run manforge list` で確認)
+2. **Load** — `FortranModule("module_name")` でロード (`uv run manforge list` で確認)
 3. **Integrate** — `FortranIntegrator.from_model(fortran, subroutine, model)` でドライバ互換に
 4. **Crosscheck** — `CrosscheckStrainDriver(py_int, fc_int)` で Python 実装と step 毎に照合
 
@@ -520,10 +520,10 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import FortranIntegrator, StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranUMAT, CrosscheckStrainDriver
+from manforge.verification import FortranModule, CrosscheckStrainDriver
 
 model   = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-fortran = FortranUMAT("j2_isotropic_3d")  # importable module name, not a file path
+fortran = FortranModule("j2_isotropic_3d")  # importable module name, not a file path
 
 # --- Production: run the UMAT via StrainDriver ---
 fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
@@ -539,12 +539,12 @@ cr = cc.run(load)
 assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 ```
 
-コンポーネント単位での比較 (`FortranUMAT.call` を直接使う場合):
+コンポーネント単位での比較 (`FortranModule.call` を直接使う場合):
 
 ```python
-from manforge.verification import FortranUMAT
+from manforge.verification import FortranModule
 
-fortran = FortranUMAT("j2_isotropic_3d")
+fortran = FortranModule("j2_isotropic_3d")
 dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 stress_f, ep_f, ddsdde_f = fortran.call(
     "j2_isotropic_3d",

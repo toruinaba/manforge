@@ -24,7 +24,7 @@ pytestmark = pytest.mark.fortran
 import autograd.numpy as anp
 from manforge.core.stress_state import SOLID_3D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-from manforge.verification import FortranUMAT
+from manforge.verification import FortranModule
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ _MOCK_MODULE = pytest.importorskip(
 def test_param_names_match_fortran_arg_order(model_fn, module_name, subroutine):
     """model.param_names order == first N Fortran dummy argument names."""
     model = model_fn()
-    fortran = FortranUMAT(module_name)
+    fortran = FortranModule(module_name)
     dummy_args = _extract_dummy_args(fortran.module, subroutine)
 
     n = len(model.param_names)

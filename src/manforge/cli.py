@@ -165,10 +165,10 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(f"  sys.path.insert(0, '{output_dir}')")
     print(f"  import {module_name}")
     print()
-    print("Or with FortranUMAT:")
-    print(f"  from manforge.verification import FortranUMAT")
+    print("Or with FortranModule:")
+    print(f"  from manforge.verification import FortranModule")
     print(f"  import sys; sys.path.insert(0, '{output_dir}')")
-    print(f"  umat = FortranUMAT('{module_name}')")
+    print(f"  umat = FortranModule('{module_name}')")
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
