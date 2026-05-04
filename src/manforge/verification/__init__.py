@@ -25,10 +25,11 @@ from manforge.verification.fortran_registry import (
     collect_bindings,
     check_bindings,
 )
-from manforge.verification.umat_crosscheck import (
+from manforge.verification.crosscheck_driver import (
     CrosscheckCaseResult,
     CrosscheckResult,
-    StressUpdateCrosscheck,
+    CrosscheckStrainDriver,
+    CrosscheckStressDriver,
 )
 
 __all__ = [
@@ -59,5 +60,6 @@ __all__ = [
     # Multi-step crosscheck harness
     "CrosscheckCaseResult",
     "CrosscheckResult",
-    "StressUpdateCrosscheck",
+    "CrosscheckStrainDriver",
+    "CrosscheckStressDriver",
 ]

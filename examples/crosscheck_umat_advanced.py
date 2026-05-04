@@ -3,7 +3,7 @@
 Demonstrates all features of the manforge Fortran crosscheck API:
 
 * Part 1 — SolverCrosscheck         (single-step, test_cases list)
-* Part 2 — StressUpdateCrosscheck   (multi-step, analytical integrator, ddsdde)
+* Part 2 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
 * Part 3 — iter_run streaming + early break on failure
 * Part 4 — StressDriver path        (stress-controlled loading)
 * Part 5 — FortranIntegrator        (explicit state_to_args via default hooks,
@@ -36,7 +36,8 @@ from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     FortranUMAT,
     SolverCrosscheck,
-    StressUpdateCrosscheck,
+    CrosscheckStrainDriver,
+    CrosscheckStressDriver,
     generate_single_step_cases,
     generate_strain_history,
 )
@@ -104,16 +105,16 @@ print()
 
 
 # =========================================================================
-# Part 2: StressUpdateCrosscheck — method="user_defined" + ddsdde
+# Part 2: CrosscheckStrainDriver — method="user_defined" + ddsdde
 # =========================================================================
 print("=" * 60)
-print("  Part 2: StressUpdateCrosscheck (analytical, ddsdde)")
+print("  Part 2: CrosscheckStrainDriver (analytical, ddsdde)")
 print("=" * 60)
 
 py_int2 = PythonAnalyticalIntegrator(model)
 fc_int2 = _make_fc_int(fortran_j2)
 
-cc2 = StressUpdateCrosscheck(py_int2, fc_int2)
+cc2 = CrosscheckStrainDriver(py_int2, fc_int2)
 result2 = cc2.run(load)
 
 print(f"  passed           : {result2.passed}  ({result2.n_passed}/{result2.n_cases} steps)")
@@ -137,7 +138,7 @@ print("=" * 60)
 
 py_int3 = PythonNumericalIntegrator(model)
 fc_int3 = _make_fc_int(fortran_j2)
-cc3 = StressUpdateCrosscheck(py_int3, fc_int3)
+cc3 = CrosscheckStrainDriver(py_int3, fc_int3)
 
 print("  Normal run (printing every 5th step):")
 for cr in cc3.iter_run(load):
@@ -157,7 +158,7 @@ fc_int3_bad = FortranIntegrator(
     initial_state=model.initial_state,
     elastic_stiffness=model.elastic_stiffness,
 )
-cc3_bad = StressUpdateCrosscheck(py_int3, fc_int3_bad)
+cc3_bad = CrosscheckStrainDriver(py_int3, fc_int3_bad)
 first_fail_index = None
 for cr in cc3_bad.iter_run(load):
     if not cr.passed:
@@ -173,7 +174,7 @@ print()
 # Part 4: StressDriver — stress-controlled path
 # =========================================================================
 print("=" * 60)
-print("  Part 4: StressUpdateCrosscheck (StressDriver, stress-controlled)")
+print("  Part 4: CrosscheckStressDriver (stress-controlled)")
 print("=" * 60)
 
 sigma_max = 1.5 * model.sigma_y0
@@ -184,7 +185,7 @@ stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
 py_int4 = PythonNumericalIntegrator(model)
 fc_int4 = _make_fc_int(fortran_j2)
-cc4 = StressUpdateCrosscheck(py_int4, fc_int4)
+cc4 = CrosscheckStressDriver(py_int4, fc_int4)
 result4 = cc4.run(stress_load)
 
 print(f"  passed        : {result4.passed}  ({result4.n_passed}/{result4.n_cases} steps)")

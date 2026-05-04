@@ -1,4 +1,4 @@
-"""External user example: StressUpdateCrosscheck with a custom model and UMAT.
+"""External user example: CrosscheckStrainDriver with a custom model and UMAT.
 
 This script demonstrates how an external user (pip-installed manforge) would
 validate their own Python constitutive model against a compiled Fortran UMAT.
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.abspath(_fortran_dir))
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import PythonNumericalIntegrator, FortranIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranUMAT, StressUpdateCrosscheck, generate_strain_history
+from manforge.verification import FortranUMAT, CrosscheckStrainDriver, generate_strain_history
 
 # ---------------------------------------------------------------------------
 # 1. Define (or import) your Python model
@@ -71,7 +71,7 @@ fc_int = FortranIntegrator(
     elastic_stiffness=model.elastic_stiffness,
 )
 
-cc = StressUpdateCrosscheck(py_int, fc_int)
+cc = CrosscheckStrainDriver(py_int, fc_int)
 
 # ---------------------------------------------------------------------------
 # 5. Run and inspect the result

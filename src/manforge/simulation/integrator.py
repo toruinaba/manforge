@@ -193,7 +193,7 @@ class FortranIntegrator:
         (e.g. ``model.elastic_stiffness``) or the array value directly.
     param_fn : callable
         ``param_fn() -> tuple`` — material parameters in UMAT positional order.
-        Note: unlike ``ReturnMappingCrosscheck`` / ``StressUpdateCrosscheck``,
+        Note: unlike ``CrosscheckStrainDriver`` / ``CrosscheckStressDriver``,
         this takes *no* ``model`` argument — parameters are fully captured at
         construction time.
     state_names : list[str]
@@ -208,7 +208,8 @@ class FortranIntegrator:
         ``parse_umat_ddsdde(ret) -> ndarray`` extracts the consistent tangent
         from the f2py return tuple.  When ``None``, the tangent is read from
         the first 2-D array found in the trailing returns (same as the default
-        hook used by :class:`~manforge.verification.StressUpdateCrosscheck`).
+        hook used by :class:`~manforge.verification.CrosscheckStrainDriver` /
+        :class:`~manforge.verification.CrosscheckStressDriver`).
 
     Notes
     -----
@@ -311,7 +312,7 @@ class FortranIntegrator:
 
 
 # ---------------------------------------------------------------------------
-# Default hook helpers (mirrors those in umat_crosscheck.py)
+# Default hook helpers (mirrors those in crosscheck_driver.py)
 # ---------------------------------------------------------------------------
 
 def _default_state_to_args(state: dict[str, Any], state_names: list[str]) -> tuple:

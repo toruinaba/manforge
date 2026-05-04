@@ -13,7 +13,7 @@ from manforge.verification import (
     CaseResult,
     ComparisonResult,
     SolverCrosscheck,
-    StressUpdateCrosscheck,
+    CrosscheckStrainDriver,
     generate_single_step_cases,
     generate_strain_history,
 )
@@ -56,7 +56,7 @@ class TestCounterAggregation:
     def test_stress_update_crosscheck_all_converged(self, model):
         py_a = PythonNumericalIntegrator(model)
         py_b = PythonAnalyticalIntegrator(model)
-        cc = StressUpdateCrosscheck(py_a, py_b)
+        cc = CrosscheckStrainDriver(py_a, py_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
         result = cc.run(load)

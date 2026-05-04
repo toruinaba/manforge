@@ -111,7 +111,7 @@ src/manforge/
 ├── verification/
 │   ├── comparator_base.py # Comparator ABC + 共有 rel-err ヘルパー
 │   ├── solver_crosscheck.py # SolverCrosscheck / compare_jacobians
-│   ├── umat_crosscheck.py # StressUpdateCrosscheck
+│   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_registry.py# @verified_against_fortran デコレータ
 │   ├── fd_check.py        # check_tangent()
 │   ├── fortran_bridge.py  # FortranUMAT — f2py ラッパー

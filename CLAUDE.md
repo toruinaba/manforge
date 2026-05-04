@@ -92,6 +92,7 @@ JAX autodiff computes yield function gradients and the Hessian needed for the ta
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
 - `verification/solver_crosscheck.py`: `SolverCrosscheck` (a `Comparator` subclass). `run(model, test_cases)` returns `SolverCrosscheckResult`; `iter_run` yields one `SolverCaseResult` per case with raw `result_a`/`result_b` for direct use with `compare_jacobians`.
+- `verification/crosscheck_driver.py`: `CrosscheckStrainDriver` / `CrosscheckStressDriver` (both `Comparator` subclasses, multi-step). Mirror `StrainDriver` / `StressDriver` respectively. `CrosscheckStressDriver.__init__` accepts `max_iter` / `tol` directly (no dict wrapper). `iter_run(load)` yields `CrosscheckCaseResult` per step; `run(load)` returns `CrosscheckResult`.
 
 ### StressState and dimensionality
 

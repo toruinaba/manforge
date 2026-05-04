@@ -10,7 +10,7 @@ from manforge.simulation import (
 )
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
-    StressUpdateCrosscheck,
+    CrosscheckStrainDriver,
     SolverCrosscheck,
     generate_strain_history,
     generate_single_step_cases,
@@ -26,7 +26,7 @@ class TestCrosscheckTrajectory:
     def test_stress_update_case_has_ab_trajectory_fields(self, model):
         py_int_a = PythonNumericalIntegrator(model)
         py_int_b = PythonAnalyticalIntegrator(model)
-        cc = StressUpdateCrosscheck(py_int_a, py_int_b)
+        cc = CrosscheckStrainDriver(py_int_a, py_int_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
         result = cc.run(load)
@@ -43,7 +43,7 @@ class TestCrosscheckTrajectory:
     def test_numerical_newton_plastic_step_has_nonzero_iterations(self, model):
         py_int_a = PythonNumericalIntegrator(model)
         py_int_b = PythonAnalyticalIntegrator(model)
-        cc = StressUpdateCrosscheck(py_int_a, py_int_b)
+        cc = CrosscheckStrainDriver(py_int_a, py_int_b)
         history = generate_strain_history(model)
         load = FieldHistory(FieldType.STRAIN, "eps", history)
         result = cc.run(load)
@@ -56,7 +56,7 @@ class TestCrosscheckTrajectory:
     def test_nonconverged_a_converged_flag_propagates(self, model):
         py_int_a = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
         py_int_b = PythonAnalyticalIntegrator(model)
-        cc = StressUpdateCrosscheck(py_int_a, py_int_b)
+        cc = CrosscheckStrainDriver(py_int_a, py_int_b)
 
         # Verify via direct iter_run using a tiny single-step load
         # (elastic only — converged=True expected)

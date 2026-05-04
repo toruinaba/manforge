@@ -7,8 +7,8 @@ implementations, tolerances) in ``__init__`` and accepts *what to apply it to*
 Concrete subclasses:
 
 * ``SolverCrosscheck``        — two Python solvers vs. shared test_cases
-* ``ReturnMappingCrosscheck`` — Python return_mapping vs. Fortran UMAT
-* ``StressUpdateCrosscheck``  — Python stress_update vs. Fortran UMAT (multi-step)
+* ``CrosscheckStrainDriver``  — two integrators over a strain-controlled history
+* ``CrosscheckStressDriver``  — two integrators over a stress-controlled history
 """
 
 from __future__ import annotations

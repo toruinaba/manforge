@@ -1,4 +1,4 @@
-"""Multi-step crosscheck: SolverCrosscheck and StressUpdateCrosscheck tests.
+"""Multi-step crosscheck: SolverCrosscheck and CrosscheckStrainDriver / CrosscheckStressDriver tests.
 
 Requires compiled Fortran modules:
     uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
@@ -19,7 +19,8 @@ pytestmark = pytest.mark.fortran
 
 from manforge.verification import (
     SolverCrosscheck,
-    StressUpdateCrosscheck,
+    CrosscheckStrainDriver,
+    CrosscheckStressDriver,
     FortranUMAT,
     generate_single_step_cases,
     generate_strain_history,
@@ -69,7 +70,7 @@ def test_crosscheck_stress_update_numerical_newton(fortran_j2, model):
     py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
-    cc = StressUpdateCrosscheck(py_int, fc_int)
+    cc = CrosscheckStrainDriver(py_int, fc_int)
     result = cc.run(_j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
@@ -82,7 +83,7 @@ def test_crosscheck_stress_update_user_defined(fortran_j2, model):
     py_int = PythonAnalyticalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
-    cc = StressUpdateCrosscheck(py_int, fc_int)
+    cc = CrosscheckStrainDriver(py_int, fc_int)
     result = cc.run(_j2_load(model))
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
@@ -100,7 +101,7 @@ def test_crosscheck_stress_update_stress_driven(fortran_j2, model):
     py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
 
-    cc = StressUpdateCrosscheck(py_int, fc_int)
+    cc = CrosscheckStressDriver(py_int, fc_int)
     result = cc.run(load)
 
     assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
@@ -120,7 +121,7 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
         elastic_stiffness=model.elastic_stiffness,
     )
 
-    cc = StressUpdateCrosscheck(py_int, fc_int)
+    cc = CrosscheckStrainDriver(py_int, fc_int)
 
     found_failure = False
     for cr in cc.iter_run(load):
@@ -177,7 +178,7 @@ def test_param_fn_order_sensitivity(fortran_j2, model):
         elastic_stiffness=model.elastic_stiffness,
     )
 
-    cc = StressUpdateCrosscheck(py_int, fc_int)
+    cc = CrosscheckStrainDriver(py_int, fc_int)
     result = cc.run(_j2_load(model))
 
     assert not result.passed, (
