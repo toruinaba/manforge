@@ -59,14 +59,7 @@ except ModuleNotFoundError:
 
 def _make_fc_int(fortran):
     """Build a FortranIntegrator for j2_isotropic_3d."""
-    return FortranIntegrator(
-        fortran,
-        "j2_isotropic_3d",
-        param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
-        state_names=model.state_names,
-        initial_state=model.initial_state,
-        elastic_stiffness=model.elastic_stiffness,
-    )
+    return FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
 
 
 history = generate_strain_history(model)
@@ -119,13 +112,13 @@ for cr in cc2.iter_run(load):
 
 print()
 print("  Early-break demo (wrong param_fn → detect first failing step):")
-fc_int2_bad = FortranIntegrator(
+# Override param_fn to pass parameters in the wrong order — shows that
+# from_model() lets you override any auto-derived argument.
+fc_int2_bad = FortranIntegrator.from_model(
     fortran_j2,
     "j2_isotropic_3d",
+    model,
     param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
-    state_names=model.state_names,
-    initial_state=model.initial_state,
-    elastic_stiffness=model.elastic_stiffness,
 )
 cc2_bad = CrosscheckStrainDriver(py_int2, fc_int2_bad)
 first_fail_index = None
@@ -268,6 +261,7 @@ if fortran_mock is not None:
     from manforge.core.stress_state import SOLID_3D
 
     class MockModel:
+        param_names = ["E", "H_kin", "H_iso"]
         state_names = ["alpha", "ep"]
         stress_state = SOLID_3D
 
@@ -302,13 +296,12 @@ if fortran_mock is not None:
         alpha_ref  = alpha_ref + mock_model.H_kin * dstran
         ep_ref     = ep_ref + mock_model.H_iso * float(np.sum(np.abs(dstran)))
 
-    # Fortran side via FortranIntegrator (default hooks handle ndarray alpha + scalar ep)
-    fc_mock = FortranIntegrator(
+    # Fortran side via FortranIntegrator (default hooks handle ndarray alpha + scalar ep).
+    # MockModel has no elastic_stiffness method, so we supply it explicitly.
+    fc_mock = FortranIntegrator.from_model(
         fortran_mock,
         "mock_kinematic",
-        param_fn=lambda: (mock_model.E, mock_model.H_kin, mock_model.H_iso),
-        state_names=mock_model.state_names,
-        initial_state=mock_model.initial_state,
+        mock_model,
         elastic_stiffness=lambda: mock_model.E * np.eye(ntens),
     )
 

@@ -507,31 +507,51 @@ for cr in cc.iter_run(load):
 
 ### Fortran UMAT クロス検証
 
+**Fortran ワークフロー**:
+
+1. **Build** — `.f90` を f2py でコンパイルして importable モジュールを生成
+2. **Load** — `FortranUMAT("module_name")` でロード (`uv run manforge list` で確認)
+3. **Integrate** — `FortranIntegrator.from_model(fortran, subroutine, model)` でドライバ互換に
+4. **Crosscheck** — `CrosscheckStrainDriver(py_int, fc_int)` で Python 実装と step 毎に照合
+
 ```python
 import numpy as np
 from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.simulation import FortranIntegrator, StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification import FortranUMAT
+from manforge.simulation.types import FieldHistory, FieldType
+from manforge.verification import FortranUMAT, CrosscheckStrainDriver
 
 model   = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-fortran = FortranUMAT("j2_isotropic_3d")
+fortran = FortranUMAT("j2_isotropic_3d")  # importable module name, not a file path
 
+# --- Production: run the UMAT via StrainDriver ---
+fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
+strain_data = np.zeros((50, model.ntens))
+strain_data[:, 0] = np.linspace(0.0, 5e-3, 50)
+load = FieldHistory(FieldType.STRAIN, "eps", strain_data)
+result = StrainDriver(fc_int).run(load)
+
+# --- Crosscheck: validate against Python implementation ---
+py_int = PythonIntegrator(model)
+cc = CrosscheckStrainDriver(py_int, fc_int)
+cr = cc.run(load)
+assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
+```
+
+コンポーネント単位での比較 (`FortranUMAT.call` を直接使う場合):
+
+```python
+from manforge.verification import FortranUMAT
+
+fortran = FortranUMAT("j2_isotropic_3d")
+dstran  = np.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 stress_f, ep_f, ddsdde_f = fortran.call(
     "j2_isotropic_3d",
     model.E, model.nu, model.sigma_y0, model.H,
     np.zeros(6), 0.0, dstran,
 )
-result_py = PythonIntegrator(model).stress_update(dstran, np.zeros(6), model.initial_state())
-np.testing.assert_allclose(np.array(result_py.stress), stress_f, rtol=1e-6)
-```
-
-コンポーネント単位での比較も同じパターン:
-
-```python
-C_f  = fortran.call("j2_isotropic_3d_elastic_stiffness", model.E, model.nu)
-C_py = model.elastic_stiffness()
-np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
+C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", model.E, model.nu)
 ```
 
 ビルド:
@@ -539,6 +559,7 @@ np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 ```bash
 uv sync --extra fortran
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run manforge list   # 確認
 # または: make fortran-build-umat  /  make docker-test
 ```
 
@@ -611,10 +632,22 @@ make test-all          # 全スイート
 |-----------|------|
 | `examples/example_j2_uniaxial.py` | 単軸引張シミュレーション + tangent 検証 + stress-strain プロット |
 | `examples/example_fit_j2.py` | 合成データへの J2 パラメータフィッティング + 収束履歴プロット |
+| `examples/example_ow_convergence.py` | J2 / OW kinematic の NR 残差履歴で二次収束検証 |
+| `examples/example_verify_j2_analytical.py` | analytical return mapping vs AD jacobian ブロック照合 |
+| `examples/example_fortran_uniaxial.py` | **Fortran UMAT** を StrainDriver で回す最小 production 例 (要コンパイル) |
+| `examples/crosscheck_umat_external.py` | **Fortran UMAT** crosscheck 最小例 — 外部ユーザ視点 |
+| `examples/crosscheck_umat_advanced.py` | **Fortran UMAT** crosscheck 全機能ツアー (strain/stress driver, iter_run, jacobian) |
 
 ```bash
 uv run python examples/example_j2_uniaxial.py
 uv run python examples/example_fit_j2.py
+uv run python examples/example_ow_convergence.py
+uv run python examples/example_verify_j2_analytical.py
+
+# Fortran examples (require: uv run manforge build ...)
+uv run python examples/example_fortran_uniaxial.py
+uv run python examples/crosscheck_umat_external.py
+uv run python examples/crosscheck_umat_advanced.py
 ```
 
 ---
