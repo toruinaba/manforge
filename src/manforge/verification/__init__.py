@@ -10,7 +10,7 @@ from manforge.verification.jacobian_compare import (
     JacobianComparisonResult,
 )
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
-from manforge.verification.fortran_bridge import FortranUMAT
+from manforge.verification.fortran_bridge import FortranModule
 from manforge.verification.test_cases import (
     estimate_yield_strain,
     generate_strain_history,
@@ -40,7 +40,7 @@ __all__ = [
     "check_tangent",
     "TangentCheckResult",
     # Fortran interface
-    "FortranUMAT",
+    "FortranModule",
     # Test case generation
     "estimate_yield_strain",
     "generate_strain_history",

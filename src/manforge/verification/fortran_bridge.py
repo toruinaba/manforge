@@ -1,6 +1,6 @@
 """Fortran UMAT bridge for cross-validation.
 
-Provides :class:`FortranUMAT`, a thin wrapper around an f2py-compiled Fortran
+Provides :class:`FortranModule`, a thin wrapper around an f2py-compiled Fortran
 module.  Its sole responsibility is float64 type conversion — it has no
 knowledge of the Python-side ``MaterialModel`` and no auto-detection logic.
 
@@ -8,10 +8,10 @@ Usage
 -----
 ::
 
-    from manforge.verification import FortranUMAT
+    from manforge.verification import FortranModule
     import numpy as np
 
-    fortran = FortranUMAT("j2_isotropic_3d")
+    fortran = FortranModule("j2_isotropic_3d")
 
     # Call any subroutine by name — same pattern for _run and sub-components
     stress_f, ep_f, ddsdde_f = fortran.call(
@@ -51,7 +51,7 @@ def _ensure_float64(args):
     return out
 
 
-class FortranUMAT:
+class FortranModule:
     """Thin wrapper around an f2py-compiled Fortran module.
 
     Handles float64 type conversion only.  Has no knowledge of the Python-side
@@ -60,17 +60,28 @@ class FortranUMAT:
     Parameters
     ----------
     module_name : str
-        Name of the f2py-compiled Python module (must be importable, e.g.
-        after ``make fortran-build-umat``).
+        Name of the f2py-compiled Python module — **not a file path**.
+        This is the importable module name produced by
+        ``uv run manforge build <source>.f90 --name <module_name>``.
+        Run ``uv run manforge list`` to see which modules are available.
 
     Raises
     ------
     ModuleNotFoundError
-        If *module_name* cannot be imported.
+        If *module_name* cannot be imported.  Build the module first with
+        ``uv run manforge build fortran/<source>.f90 --name <module_name>``,
+        or run ``uv run manforge list`` to see already-compiled modules.
     """
 
     def __init__(self, module_name: str):
-        self._mod = importlib.import_module(module_name)
+        try:
+            self._mod = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                f"f2py module {module_name!r} is not importable.\n"
+                f"Build it with:  uv run manforge build fortran/<source>.f90 --name {module_name}\n"
+                f"Or run:         uv run manforge list   (to see compiled modules)"
+            ) from exc
 
     @property
     def module(self):

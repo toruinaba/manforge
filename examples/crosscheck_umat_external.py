@@ -13,9 +13,10 @@ the UMAT is compiled:
 
 In a real external project the user would replace:
     - J2Isotropic3D  →  MyModel (their Python model)
-    - FortranUMAT("j2_isotropic_3d")  →  FortranUMAT("my_umat")
+    - FortranModule("j2_isotropic_3d")  →  FortranModule("my_umat")
     - subroutine "j2_isotropic_3d"  →  "my_umat_core"
-    - param_fn=...  →  the parameter order of their own Fortran subroutine
+    - (optional) param_fn=...  →  only when Fortran argument order differs from
+      model.param_names.  Omit if they match (the convention).
 """
 
 import sys
@@ -28,7 +29,7 @@ sys.path.insert(0, os.path.abspath(_fortran_dir))
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import PythonNumericalIntegrator, FortranIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranUMAT, CrosscheckStrainDriver, generate_strain_history
+from manforge.verification import FortranModule, CrosscheckStrainDriver, generate_strain_history
 
 # ---------------------------------------------------------------------------
 # 1. Define (or import) your Python model
@@ -38,14 +39,7 @@ model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 # ---------------------------------------------------------------------------
 # 2. Load your compiled Fortran UMAT module
 # ---------------------------------------------------------------------------
-try:
-    fortran = FortranUMAT("j2_isotropic_3d")
-except ModuleNotFoundError:
-    raise SystemExit(
-        "Fortran module not found.  Compile it first:\n"
-        "  uv run manforge build fortran/abaqus_stubs.f90 "
-        "fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d"
-    )
+fortran = FortranModule("j2_isotropic_3d")
 
 # ---------------------------------------------------------------------------
 # 3. Build a strain loading history
@@ -62,14 +56,10 @@ load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 #    method: "numerical_newton" | "user_defined" | "auto"
 # ---------------------------------------------------------------------------
 py_int = PythonNumericalIntegrator(model)
-fc_int = FortranIntegrator(
-    fortran,
-    "j2_isotropic_3d",
-    param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
-    state_names=model.state_names,
-    initial_state=model.initial_state,
-    elastic_stiffness=model.elastic_stiffness,
-)
+# from_model() fills param_fn, state_names, initial_state, elastic_stiffness,
+# and stress_state from model attributes.  Pass param_fn= explicitly only when
+# your Fortran subroutine uses a different argument order than model.param_names.
+fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
 
 cc = CrosscheckStrainDriver(py_int, fc_int)
 

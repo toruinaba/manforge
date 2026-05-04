@@ -76,7 +76,7 @@ All three options produce `j2_isotropic_3d.cpython-*.so` (Linux) or `.pyd` (Wind
 | `j2_isotropic_3d_elastic_stiffness` | Standalone elastic stiffness for component checks |
 
 f2py module name = Python model name: `j2_isotropic_3d`. This pattern extends
-naturally to future models: `FortranUMAT("j2_kinematic_3d")`, etc.
+naturally to future models: `FortranModule("j2_kinematic_3d")`, etc.
 
 ---
 
@@ -130,7 +130,7 @@ NTENS = 6 for 3D full stress state (NDI=3, NSHR=3).
 
 ## Cross-validation with Python
 
-`FortranUMAT` wraps the f2py module with automatic float64 conversion.
+`FortranModule` wraps the f2py module with automatic float64 conversion.
 All subroutines — the full routine and any sub-component — are called through
 the same `call(name, *args)` pattern.
 
@@ -138,10 +138,10 @@ the same `call(name, *args)` pattern.
 import numpy as np
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.stress_update import stress_update
-from manforge.verification import FortranUMAT
+from manforge.verification import FortranModule
 
 model   = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-fortran = FortranUMAT("j2_isotropic_3d")
+fortran = FortranModule("j2_isotropic_3d")
 ```
 
 ### Full routine comparison
