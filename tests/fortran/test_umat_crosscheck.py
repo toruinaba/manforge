@@ -137,7 +137,7 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
 def _make_single_step_cases(model):
     """Build single-step test cases spanning elastic and plastic regimes."""
     from manforge.verification.test_cases import estimate_yield_strain
-    from manforge.core.stress_update import stress_update as _su
+    from manforge.simulation.integrator import PythonIntegrator as _PyInt
     eps_y = estimate_yield_strain(model)
     ntens = model.ntens
     ndi = model.stress_state.ndi
@@ -158,7 +158,7 @@ def _make_single_step_cases(model):
         de = np.zeros(ntens); de[ndi] = 3.0 * eps_y
         cases.append({"strain_inc": de, "stress_n": z.copy(), "state_n": dict(state_0)})
     pre_de = np.zeros(ntens); pre_de[0] = 3.0 * eps_y
-    _pre = _su(model, pre_de, np.zeros(ntens), model.initial_state())
+    _pre = _PyInt(model).stress_update(pre_de, np.zeros(ntens), model.initial_state())
     de2 = np.zeros(ntens); de2[0] = 2.0 * eps_y
     cases.append({"strain_inc": de2, "stress_n": np.array(_pre.stress),
                   "state_n": {k: np.asarray(v) for k, v in _pre.state.items()}})

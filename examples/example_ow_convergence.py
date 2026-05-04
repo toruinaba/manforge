@@ -19,11 +19,10 @@ import jax.numpy as jnp
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
+from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
 deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -37,8 +36,7 @@ print("  Part 1: J2Isotropic3D — reduced hardening (scalar NR)")
 print("=" * 60)
 
 j2 = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-result_j2 = stress_update(j2, deps, jnp.zeros(6), j2.initial_state(),
-                           method="numerical_newton")
+result_j2 = PythonNumericalIntegrator(j2).stress_update(deps, jnp.zeros(6), j2.initial_state())
 
 print(f"  is_plastic       : {result_j2.is_plastic}")
 print(f"  n_iterations     : {result_j2.n_iterations}")
@@ -60,7 +58,7 @@ print("  Part 2: OWKinematic3D — augmented hardening (augmented NR)")
 print("=" * 60)
 
 ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=50_000.0, gamma=500.0)
-result_ow = stress_update(ow, deps, jnp.zeros(6), ow.initial_state())
+result_ow = PythonIntegrator(ow).stress_update(deps, jnp.zeros(6), ow.initial_state())
 
 history = result_ow.residual_history
 print(f"  is_plastic       : {result_ow.is_plastic}")

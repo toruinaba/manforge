@@ -72,7 +72,7 @@ print()
 # ---------------------------------------------------------------------------
 print("Tangent check — elastic domain:")
 result_e = check_tangent(
-    model,
+    PythonIntegrator(model),
     jnp.zeros(1),
     model.initial_state(),
     jnp.array([1e-5]),
@@ -82,7 +82,7 @@ print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
 
 print("Tangent check — plastic domain (uniaxial):")
 result_p = check_tangent(
-    model,
+    PythonIntegrator(model),
     jnp.zeros(1),
     model.initial_state(),
     jnp.array([2e-3]),

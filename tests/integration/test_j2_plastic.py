@@ -13,7 +13,7 @@ import numpy as np
 import autograd.numpy as anp
 import pytest
 
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def test_plastic_stress_uniaxial(model, lame_constants):
     stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
-    _r = stress_update(model, strain_inc, stress_n, state_n)
+    _r = PythonIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     stress_new, state_new = _r.stress, _r.state
 
     # Correct analytic Δλ: use vonmises of the triaxial trial stress
@@ -65,8 +65,8 @@ def test_plastic_ep_updated(model):
     strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    state_new = stress_update(
-        model, strain_inc, anp.zeros(6), state_n
+    state_new = PythonIntegrator(model).stress_update(
+        strain_inc, anp.zeros(6), state_n
     ).state
 
     assert float(state_new["ep"]) > 0.0
@@ -90,8 +90,8 @@ def test_plastic_ep_matches_dlambda(model, lame_constants):
     sigma_vm_trial = 2.0 * mu * deps11
     dlambda_analytic = (sigma_vm_trial - sigma_y0) / (3.0 * mu + H)
 
-    state_new = stress_update(
-        model, strain_inc, anp.zeros(6), state_n
+    state_new = PythonIntegrator(model).stress_update(
+        strain_inc, anp.zeros(6), state_n
     ).state
 
     np.testing.assert_allclose(float(state_new["ep"]), dlambda_analytic, rtol=1e-6)
@@ -103,7 +103,7 @@ def test_plastic_yield_consistency(model):
     strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_n = model.initial_state()
 
-    _r = stress_update(model, strain_inc, anp.zeros(6), state_n)
+    _r = PythonIntegrator(model).stress_update(strain_inc, anp.zeros(6), state_n)
     stress_new, state_new = _r.stress, _r.state
 
     f_final = model.yield_function(stress_new, state_new)
@@ -116,8 +116,8 @@ def test_plastic_ddsdde_differs_from_C(model):
     deps11 = 2e-3
     strain_inc = anp.array([deps11, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    ddsdde = stress_update(
-        model, strain_inc, anp.zeros(6), model.initial_state()
+    ddsdde = PythonIntegrator(model).stress_update(
+        strain_inc, anp.zeros(6), model.initial_state()
     ).ddsdde
 
     assert not np.allclose(np.asarray(ddsdde), np.asarray(C), atol=1.0), \

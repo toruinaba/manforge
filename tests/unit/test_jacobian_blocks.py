@@ -5,8 +5,8 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import stress_update
 from manforge.core.jacobian import ad_jacobian_blocks, JacobianBlocks
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.models.af_kinematic import AFKinematic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 
@@ -24,7 +24,7 @@ def ow_model():
 def _plastic_result(model, strain_scale=3e-3):
     deps = (lambda _a: (_a.__setitem__(0, strain_scale), _a)[1])(np.zeros(model.ntens))
     state0 = model.initial_state()
-    return stress_update(model, deps, anp.zeros(model.ntens), state0), state0
+    return PythonIntegrator(model).stress_update(deps, anp.zeros(model.ntens), state0), state0
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ class TestReducedBlocks:
     def test_elastic_step_raises_no_error(self, model):
         deps = anp.array([1e-4, 0, 0, 0, 0, 0])
         state0 = model.initial_state()
-        result = stress_update(model, deps, anp.zeros(6), state0)
+        result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), state0)
         # elastic step: dlambda=0, stress_trial==stress, but jacobian should still work
         jac = ad_jacobian_blocks(model, result, state0)
         assert isinstance(jac, JacobianBlocks)
@@ -151,26 +151,24 @@ class TestAugmentedBlocks:
 
 class TestReturnMappingResultPath:
     def test_with_explicit_stress_trial(self, model):
-        from manforge.core.stress_update import return_mapping
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
         st = C @ deps
-        rm = return_mapping(model, st, C, state0)
+        rm = PythonIntegrator(model).return_mapping(st, C, state0)
         jac = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
         assert isinstance(jac, JacobianBlocks)
         assert jac.dstress_dsigma.shape == (model.ntens, model.ntens)
 
     def test_matches_stress_update_result(self, model):
-        from manforge.core.stress_update import return_mapping
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
         st = C @ deps
-        rm = return_mapping(model, st, C, state0)
+        rm = PythonIntegrator(model).return_mapping(st, C, state0)
         jac_rm = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
 
-        su = stress_update(model, deps, anp.zeros(model.ntens), state0)
+        su = PythonIntegrator(model).stress_update(deps, anp.zeros(model.ntens), state0)
         jac_su = ad_jacobian_blocks(model, su, state0)
 
         np.testing.assert_allclose(
@@ -178,10 +176,9 @@ class TestReturnMappingResultPath:
         )
 
     def test_missing_stress_trial_raises(self, model):
-        from manforge.core.stress_update import return_mapping
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
         C = model.elastic_stiffness()
-        rm = return_mapping(model, C @ deps, C, state0)
+        rm = PythonIntegrator(model).return_mapping(C @ deps, C, state0)
         with pytest.raises(ValueError, match="stress_trial must be provided"):
             ad_jacobian_blocks(model, rm, state0)

@@ -167,12 +167,12 @@ print()
 # --- 3b: ad_jacobian_blocks で個々のブロックを直接取り出す ---
 # compare_jacobians を使わず、1 つの結果から JacobianBlocks を取得して
 # 各微分項を個別に参照したい場合。
-from manforge.core.stress_update import stress_update as _su
+from manforge.simulation.integrator import PythonIntegrator as _PyInt
 
 deps_plastic = np.zeros(model.ntens)
 deps_plastic[0] = 5e-3          # 十分に塑性域
 state_n_base = model.initial_state()
-result_plastic = _su(model, deps_plastic, np.zeros(model.ntens), state_n_base)
+result_plastic = _PyInt(model).stress_update(deps_plastic, np.zeros(model.ntens), state_n_base)
 
 print("  3b: ad_jacobian_blocks — individual block access")
 jac = ad_jacobian_blocks(model, result_plastic, state_n_base)
@@ -202,7 +202,7 @@ ow_model = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=5_000.0, gamma
 deps_ow = np.zeros(ow_model.ntens)
 deps_ow[0] = 5e-3
 state_n_ow = ow_model.initial_state()
-result_ow = _su(ow_model, deps_ow, np.zeros(ow_model.ntens), state_n_ow)
+result_ow = _PyInt(ow_model).stress_update(deps_ow, np.zeros(ow_model.ntens), state_n_ow)
 
 print("  3b-2: augmented model (OWKinematic3D) — state residual blocks")
 jac_ow = ad_jacobian_blocks(ow_model, result_ow, state_n_ow)

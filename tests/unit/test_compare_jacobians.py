@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
 from manforge.verification.jacobian_compare import compare_jacobians, JacobianComparisonResult
 
 
@@ -11,7 +11,7 @@ def _result(model, strain_scale):
     deps = np.zeros(model.ntens)
     deps[0] = strain_scale
     state0 = model.initial_state()
-    return stress_update(model, deps, np.zeros(model.ntens), state0), state0
+    return PythonIntegrator(model).stress_update(deps, np.zeros(model.ntens), state0), state0
 
 
 class TestCompareJacobiansJ2:
@@ -31,8 +31,10 @@ class TestCompareJacobiansJ2:
         """Jacobian blocks of autodiff and analytical solvers must agree < 1e-10."""
         r_ad, state0 = _result(model, 3e-3)
         r_an, _ = _result(model, 3e-3)
-        r_an_ud = stress_update(model, np.array([3e-3] + [0.0] * (model.ntens - 1)),
-                                np.zeros(model.ntens), state0, method="user_defined")
+        r_an_ud = PythonAnalyticalIntegrator(model).stress_update(
+            np.array([3e-3] + [0.0] * (model.ntens - 1)),
+            np.zeros(model.ntens), state0,
+        )
         out = compare_jacobians(model, r_ad, r_an_ud, state0, rtol=1e-8)
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
