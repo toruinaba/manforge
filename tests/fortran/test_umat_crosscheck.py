@@ -49,14 +49,7 @@ def _j2_load(model):
 
 def _make_fc_int(fortran_j2, model):
     """Build a FortranIntegrator for j2_isotropic_3d."""
-    return FortranIntegrator(
-        fortran_j2,
-        "j2_isotropic_3d",
-        param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
-        state_names=model.state_names,
-        initial_state=model.initial_state,
-        elastic_stiffness=model.elastic_stiffness,
-    )
+    return FortranIntegrator.from_model(fortran_j2, "j2_isotropic_3d", model)
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +103,11 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
     load = _j2_load(model)
 
     py_int = PythonNumericalIntegrator(model)
-    fc_int = FortranIntegrator(
+    fc_int = FortranIntegrator.from_model(
         fortran_j2,
         "j2_isotropic_3d",
+        model,
         param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
-        state_names=model.state_names,
-        initial_state=model.initial_state,
-        elastic_stiffness=model.elastic_stiffness,
     )
 
     cc = CrosscheckStrainDriver(py_int, fc_int)
@@ -208,13 +199,11 @@ def test_crosscheck_single_step_user_defined(fortran_j2, model):
 def test_param_fn_order_sensitivity(fortran_j2, model):
     """Passing material params in wrong order produces a failed crosscheck."""
     py_int = PythonNumericalIntegrator(model)
-    fc_int = FortranIntegrator(
+    fc_int = FortranIntegrator.from_model(
         fortran_j2,
         "j2_isotropic_3d",
+        model,
         param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
-        state_names=model.state_names,
-        initial_state=model.initial_state,
-        elastic_stiffness=model.elastic_stiffness,
     )
 
     cc = CrosscheckStrainDriver(py_int, fc_int)
@@ -291,12 +280,10 @@ def test_crosscheck_multi_state_mock(mock_fortran):
         state_py = {"alpha": anp.array(alpha), "ep": anp.array(ep)}
 
     # Drive Fortran side via FortranIntegrator using default hooks
-    fc_int = FortranIntegrator(
+    fc_int = FortranIntegrator.from_model(
         mock_fortran,
         "mock_kinematic",
-        param_fn=lambda: (model.E, model.H_kin, model.H_iso),
-        state_names=model.state_names,
-        initial_state=model.initial_state,
+        model,
         elastic_stiffness=lambda: model.E * np.eye(ntens),
     )
 

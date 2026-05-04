@@ -372,6 +372,83 @@ class FortranIntegrator:
             else lambda ret: _default_parse_umat_ddsdde(ret, n_state)
         )
 
+    @classmethod
+    def from_model(
+        cls,
+        fortran,
+        subroutine: str,
+        model,
+        *,
+        stress_state: StressState | None = None,
+        param_fn: Callable[[], tuple] | None = None,
+        state_names: list[str] | None = None,
+        initial_state=None,
+        elastic_stiffness=None,
+        state_to_args: Callable[[dict], tuple] | None = None,
+        parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
+        parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
+    ) -> "FortranIntegrator":
+        """Build a FortranIntegrator from a MaterialModel.
+
+        Fills ``param_fn``, ``state_names``, ``initial_state``,
+        ``elastic_stiffness``, and ``stress_state`` from *model* attributes.
+        Any kwarg passed explicitly overrides the auto-derived value.
+
+        ``param_fn`` is auto-generated as
+        ``lambda: tuple(getattr(model, n) for n in model.param_names)``,
+        matching the convention that Fortran UMAT argument order equals
+        ``model.param_names`` order.  Pass an explicit ``param_fn`` when the
+        Fortran subroutine uses a different argument order.
+
+        Parameters
+        ----------
+        fortran : FortranUMAT
+        subroutine : str
+            f2py-callable subroutine name.
+        model : MaterialModel
+            Must have ``param_names``, ``state_names``, ``initial_state``,
+            ``elastic_stiffness``, and ``stress_state`` attributes.
+
+        Examples
+        --------
+        ::
+
+            model = J2Isotropic3D(E=210e3, nu=0.3, sigma_y0=250.0, H=1e3)
+            fortran = FortranUMAT("j2_isotropic_3d")
+            fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
+
+            # Override param_fn when Fortran argument order differs:
+            fc_int = FortranIntegrator.from_model(
+                fortran, "j2_isotropic_3d", model,
+                param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
+            )
+        """
+        names = list(model.param_names)
+        _param_fn = param_fn if param_fn is not None else (
+            lambda: tuple(getattr(model, n) for n in names)
+        )
+        _state_names = state_names if state_names is not None else list(model.state_names)
+        _initial_state = initial_state if initial_state is not None else model.initial_state
+        _elastic_stiffness = (
+            elastic_stiffness if elastic_stiffness is not None else model.elastic_stiffness
+        )
+        _stress_state = (
+            stress_state if stress_state is not None
+            else getattr(model, "stress_state", SOLID_3D)
+        )
+        return cls(
+            fortran,
+            subroutine,
+            stress_state=_stress_state,
+            param_fn=_param_fn,
+            state_names=_state_names,
+            initial_state=_initial_state,
+            elastic_stiffness=_elastic_stiffness,
+            state_to_args=state_to_args,
+            parse_umat_return=parse_umat_return,
+            parse_umat_ddsdde=parse_umat_ddsdde,
+        )
+
     @property
     def ntens(self) -> int:
         return self.stress_state.ntens

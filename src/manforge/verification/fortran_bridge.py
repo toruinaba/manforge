@@ -60,17 +60,28 @@ class FortranUMAT:
     Parameters
     ----------
     module_name : str
-        Name of the f2py-compiled Python module (must be importable, e.g.
-        after ``make fortran-build-umat``).
+        Name of the f2py-compiled Python module — **not a file path**.
+        This is the importable module name produced by
+        ``uv run manforge build <source>.f90 --name <module_name>``.
+        Run ``uv run manforge list`` to see which modules are available.
 
     Raises
     ------
     ModuleNotFoundError
-        If *module_name* cannot be imported.
+        If *module_name* cannot be imported.  Build the module first with
+        ``uv run manforge build fortran/<source>.f90 --name <module_name>``,
+        or run ``uv run manforge list`` to see already-compiled modules.
     """
 
     def __init__(self, module_name: str):
-        self._mod = importlib.import_module(module_name)
+        try:
+            self._mod = importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                f"f2py module {module_name!r} is not importable.\n"
+                f"Build it with:  uv run manforge build fortran/<source>.f90 --name {module_name}\n"
+                f"Or run:         uv run manforge list   (to see compiled modules)"
+            ) from exc
 
     @property
     def module(self):
