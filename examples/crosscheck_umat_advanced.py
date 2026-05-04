@@ -2,9 +2,9 @@
 
 Demonstrates all features of the manforge Fortran crosscheck API:
 
-* Part 1 — SolverCrosscheck         (single-step, test_cases list)
-* Part 2 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
-* Part 3 — iter_run streaming + early break on failure
+* Part 1 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
+* Part 2 — iter_run streaming + early break on failure
+* Part 3 — Jacobian inspection      (compare_jacobians / ad_jacobian_blocks)
 * Part 4 — StressDriver path        (stress-controlled loading)
 * Part 5 — FortranIntegrator        (explicit state_to_args via default hooks,
                                      for non-standard UMAT with ndarray state)
@@ -35,12 +35,12 @@ from manforge.simulation import (
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     FortranUMAT,
-    SolverCrosscheck,
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
-    generate_single_step_cases,
     generate_strain_history,
+    compare_jacobians,
 )
+from manforge.core.jacobian import ad_jacobian_blocks
 
 # ---------------------------------------------------------------------------
 # Shared setup
@@ -74,74 +74,43 @@ load = FieldHistory(FieldType.STRAIN, "eps", history)
 
 
 # =========================================================================
-# Part 1: SolverCrosscheck — single-step, test_cases list
+# Part 1: CrosscheckStrainDriver — method="user_defined" + ddsdde
 # =========================================================================
 print("=" * 60)
-print("  Part 1: SolverCrosscheck (test_cases, single-step)")
+print("  Part 1: CrosscheckStrainDriver (analytical, ddsdde)")
 print("=" * 60)
 
-test_cases = generate_single_step_cases(model)
-print(f"  Generated {len(test_cases)} test cases")
-
-py_int1 = PythonNumericalIntegrator(model)
+py_int1 = PythonAnalyticalIntegrator(model)
 fc_int1 = _make_fc_int(fortran_j2)
-cc1 = SolverCrosscheck(py_int1, fc_int1)
-result1 = cc1.run(test_cases)
 
-print(f"  passed       : {result1.passed}  ({result1.n_passed}/{result1.n_cases})")
-print(f"  max stress err: {result1.max_stress_rel_err:.2e}")
+cc1 = CrosscheckStrainDriver(py_int1, fc_int1)
+result1 = cc1.run(load)
 
-for cr in result1.cases:
-    ep_err = cr.state_rel_err.get("ep", 0.0)
-    plastic = cr.result_a is not None and cr.result_a.is_plastic
-    print(
-        f"  case {cr.index}: stress_err={cr.stress_rel_err:.1e}  "
-        f"ep_err={ep_err:.1e}  "
-        f"{'plastic' if plastic else 'elastic'}"
-    )
+print(f"  passed           : {result1.passed}  ({result1.n_passed}/{result1.n_cases} steps)")
+print(f"  max stress err   : {result1.max_stress_rel_err:.2e}")
+if result1.max_tangent_rel_err is not None:
+    print(f"  max tangent err  : {result1.max_tangent_rel_err:.2e}")
+ep_max = result1.max_state_rel_err.get("ep", None)
+if ep_max is not None:
+    print(f"  max ep err       : {ep_max:.2e}")
 
 assert result1.passed, f"Part 1 failed: max_stress_rel_err={result1.max_stress_rel_err:.2e}"
 print()
 
 
 # =========================================================================
-# Part 2: CrosscheckStrainDriver — method="user_defined" + ddsdde
+# Part 2: iter_run — step streaming + early break
 # =========================================================================
 print("=" * 60)
-print("  Part 2: CrosscheckStrainDriver (analytical, ddsdde)")
+print("  Part 2: iter_run (streaming / early break)")
 print("=" * 60)
 
-py_int2 = PythonAnalyticalIntegrator(model)
+py_int2 = PythonNumericalIntegrator(model)
 fc_int2 = _make_fc_int(fortran_j2)
-
 cc2 = CrosscheckStrainDriver(py_int2, fc_int2)
-result2 = cc2.run(load)
-
-print(f"  passed           : {result2.passed}  ({result2.n_passed}/{result2.n_cases} steps)")
-print(f"  max stress err   : {result2.max_stress_rel_err:.2e}")
-if result2.max_tangent_rel_err is not None:
-    print(f"  max tangent err  : {result2.max_tangent_rel_err:.2e}")
-ep_max = result2.max_state_rel_err.get("ep", None)
-if ep_max is not None:
-    print(f"  max ep err       : {ep_max:.2e}")
-
-assert result2.passed, f"Part 2 failed: max_stress_rel_err={result2.max_stress_rel_err:.2e}"
-print()
-
-
-# =========================================================================
-# Part 3: iter_run — step streaming + early break
-# =========================================================================
-print("=" * 60)
-print("  Part 3: iter_run (streaming / early break)")
-print("=" * 60)
-
-py_int3 = PythonNumericalIntegrator(model)
-fc_int3 = _make_fc_int(fortran_j2)
-cc3 = CrosscheckStrainDriver(py_int3, fc_int3)
 
 print("  Normal run (printing every 5th step):")
-for cr in cc3.iter_run(load):
+for cr in cc2.iter_run(load):
     if cr.index % 5 == 0:
         print(
             f"    step {cr.index:2d}: stress_err={cr.stress_rel_err:.1e}  "
@@ -150,7 +119,7 @@ for cr in cc3.iter_run(load):
 
 print()
 print("  Early-break demo (wrong param_fn → detect first failing step):")
-fc_int3_bad = FortranIntegrator(
+fc_int2_bad = FortranIntegrator(
     fortran_j2,
     "j2_isotropic_3d",
     param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
@@ -158,9 +127,9 @@ fc_int3_bad = FortranIntegrator(
     initial_state=model.initial_state,
     elastic_stiffness=model.elastic_stiffness,
 )
-cc3_bad = CrosscheckStrainDriver(py_int3, fc_int3_bad)
+cc2_bad = CrosscheckStrainDriver(py_int2, fc_int2_bad)
 first_fail_index = None
-for cr in cc3_bad.iter_run(load):
+for cr in cc2_bad.iter_run(load):
     if not cr.passed:
         first_fail_index = cr.index
         print(f"    First failure at step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
@@ -168,6 +137,86 @@ for cr in cc3_bad.iter_run(load):
 
 assert first_fail_index is not None, "Expected at least one failing step with wrong param_fn"
 print()
+
+
+# =========================================================================
+# Part 3: Jacobian inspection — compare_jacobians / ad_jacobian_blocks
+# =========================================================================
+print("=" * 60)
+print("  Part 3: Jacobian inspection")
+print("=" * 60)
+
+# --- 3a: compare_jacobians で 2 つの結果のブロック誤差を取得 ---
+# CrosscheckCaseResult は result_a / result_b / state_n を保持しているので、
+# 失敗ステップや検証したいステップで直接呼べる。
+py_int3a = PythonNumericalIntegrator(model)
+cc3a = CrosscheckStrainDriver(py_int3a, PythonAnalyticalIntegrator(model))
+print("  3a: compare_jacobians (numerical_newton vs analytical, plastic step)")
+for cr in cc3a.iter_run(load):
+    if cr.result_a is not None and cr.result_a.is_plastic:
+        jac_cmp = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
+        print(f"     passed      : {jac_cmp.passed}")
+        print(f"     max_rel_err : {jac_cmp.max_rel_err:.2e}")
+        print(f"     blocks      :")
+        for name, err in sorted(jac_cmp.blocks.items()):
+            print(f"       {name:<30s}: {err:.2e}")
+        break
+
+print()
+
+# --- 3b: ad_jacobian_blocks で個々のブロックを直接取り出す ---
+# compare_jacobians を使わず、1 つの結果から JacobianBlocks を取得して
+# 各微分項を個別に参照したい場合。
+from manforge.core.stress_update import stress_update as _su
+
+deps_plastic = np.zeros(model.ntens)
+deps_plastic[0] = 5e-3          # 十分に塑性域
+state_n_base = model.initial_state()
+result_plastic = _su(model, deps_plastic, np.zeros(model.ntens), state_n_base)
+
+print("  3b: ad_jacobian_blocks — individual block access")
+jac = ad_jacobian_blocks(model, result_plastic, state_n_base)
+
+# 応力残差の σ 偏微分ブロック（ntens × ntens）
+print(f"     dstress_dsigma  shape : {np.asarray(jac.dstress_dsigma).shape}")
+# 降伏面の σ 勾配（ntens,）— 法線ベクトル
+print(f"     dyield_dsigma   shape : {np.asarray(jac.dyield_dsigma).shape}")
+# Δλ に対する降伏感度（スカラー）
+print(f"     dyield_ddlambda       : {float(jac.dyield_ddlambda):.6f}")
+# state ブロック（reduced model では None; augmented では dict）
+print(f"     dstate_dstate         : {jac.dstate_dstate!r}")
+# 完全 Jacobian 行列（ntens+1 × ntens+1）
+print(f"     full matrix shape     : {np.asarray(jac.full).shape}")
+print()
+
+# --- 3b-2: augmented モデル (OWKinematic3D) での残差 Jacobian state ブロック ---
+# reduced モデルでは None だった dstress_dstate / dstate_dstate が
+# augmented モデルでは状態変数名をキーとする dict になる。
+# フィールド名の意味（"dstress" はすべて応力残差 R_σ の微分）:
+#   dstress_dstate['alpha']         = ∂R_σ / ∂q_alpha   (ntens × ntens)
+#   dstate_dstate['alpha']['alpha'] = ∂R_{q_alpha} / ∂q_alpha  (backstress 残差の自己微分)
+#   dstate_dsigma['alpha']          = ∂R_{q_alpha} / ∂σ
+from manforge.models.ow_kinematic import OWKinematic3D
+
+ow_model = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=5_000.0, gamma=50.0)
+deps_ow = np.zeros(ow_model.ntens)
+deps_ow[0] = 5e-3
+state_n_ow = ow_model.initial_state()
+result_ow = _su(ow_model, deps_ow, np.zeros(ow_model.ntens), state_n_ow)
+
+print("  3b-2: augmented model (OWKinematic3D) — state residual blocks")
+jac_ow = ad_jacobian_blocks(ow_model, result_ow, state_n_ow)
+# ∂R_σ/∂q_alpha — 応力残差 の backstress 微分 (ntens × ntens)
+print(f"     dstress_dstate['alpha'] shape         : {np.asarray(jac_ow.dstress_dstate['alpha']).shape}")
+# ∂R_{q_alpha}/∂q_alpha — backstress 残差の自己微分 (ntens × ntens)
+print(f"     dstate_dstate['alpha']['alpha'] shape : {np.asarray(jac_ow.dstate_dstate['alpha']['alpha']).shape}")
+# ∂R_{q_alpha}/∂σ — backstress 残差の応力微分 (ntens × ntens)
+print(f"     dstate_dsigma['alpha'] shape          : {np.asarray(jac_ow.dstate_dsigma['alpha']).shape}")
+# full: ntens+1+n_state = 6+1+(6+1) = 14
+print(f"     full matrix shape                     : {np.asarray(jac_ow.full).shape}")
+print()
+
+assert jac_cmp.passed, f"Part 3a failed: max_rel_err={jac_cmp.max_rel_err:.2e}"
 
 
 # =========================================================================
@@ -201,7 +250,7 @@ print()
 
 
 # =========================================================================
-# Part 5: FortranIntegrator — ndarray state (alpha, ep) via default hooks
+# Part 4: FortranIntegrator — ndarray state (alpha, ep) via default hooks
 # =========================================================================
 print("=" * 60)
 print("  Part 5: FortranIntegrator (mock_kinematic, ndarray state)")

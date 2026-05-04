@@ -110,7 +110,7 @@ src/manforge/
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
 │   ├── comparator_base.py # Comparator ABC + 共有 rel-err ヘルパー
-│   ├── solver_crosscheck.py # SolverCrosscheck / compare_jacobians
+│   ├── jacobian_compare.py# compare_jacobians / JacobianComparisonResult
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_registry.py# @verified_against_fortran デコレータ
 │   ├── fd_check.py        # check_tangent()
@@ -475,35 +475,37 @@ result = check_tangent(
 print(result.passed, result.max_rel_err)
 ```
 
-### SolverCrosscheck でソルバ同士の比較
+### CrosscheckStrainDriver でソルバ同士の比較
+
+`CrosscheckStrainDriver` は 2 つの `StressIntegrator` を同じロード履歴で走らせて各ステップを比較する。単一ステップ比較には 1 行の `FieldHistory` と `initial_stress`/`initial_state` kwarg を使う:
 
 ```python
+import numpy as np
 from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
-from manforge.verification import SolverCrosscheck
-from manforge.verification.test_cases import generate_single_step_cases
+from manforge.simulation.types import FieldHistory, FieldType
+from manforge.verification import CrosscheckStrainDriver, generate_strain_history
 
-# 弾性・塑性・多軸・剪断ケースを自動生成
-cases = generate_single_step_cases(model)
-cs = SolverCrosscheck(
+# Multi-step comparison
+history = generate_strain_history(model)
+load = FieldHistory(FieldType.STRAIN, "eps", history)
+cc = CrosscheckStrainDriver(
     PythonNumericalIntegrator(model),
     PythonAnalyticalIntegrator(model),
 )
-result = cs.run(cases)
+result = cc.run(load)
 print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}")
 ```
 
-`generate_single_step_cases` は `estimate_yield_strain` で降伏ひずみを自動推定し、5 ケース (弾性・塑性・多軸・剪断・プレストレス) を生成する。
-
-`cs.iter_run` を使うとケースごとに `SolverCaseResult` を受け取るジェネレータになる。最初の失敗ケースで打ち切って Jacobian 比較などの詳細デバッグが可能:
+`iter_run` を使うとステップごとに `CrosscheckCaseResult` を受け取るジェネレータになる。失敗ステップで打ち切り、`compare_jacobians` で Jacobian ブロックレベルの詳細デバッグが可能:
 
 ```python
 from manforge.verification import compare_jacobians
 
-for case in cs.iter_run(cases):
-    if not case.passed:
-        print(f"Case {case.index} failed: stress_err={case.stress_rel_err:.2e}")
-        state_n = cases[case.index]["state_n"]
-        jac = compare_jacobians(model, case.result_a, case.result_b, state_n)
+for cr in cc.iter_run(load):
+    if not cr.passed:
+        print(f"Step {cr.index} failed: stress_err={cr.stress_rel_err:.2e}")
+        jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
+        print(jac.blocks)
         break
 ```
 

@@ -1,4 +1,4 @@
-"""P2: CrosscheckCaseResult / SolverCaseResult expose inner-NR trajectory fields."""
+"""P2: CrosscheckCaseResult exposes inner-NR trajectory fields."""
 import numpy as np
 import pytest
 
@@ -11,9 +11,7 @@ from manforge.simulation import (
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     CrosscheckStrainDriver,
-    SolverCrosscheck,
     generate_strain_history,
-    generate_single_step_cases,
 )
 
 
@@ -68,39 +66,3 @@ class TestCrosscheckTrajectory:
             assert cr.a_converged is True
 
 
-class TestSolverCaseTrajectory:
-    def test_solver_case_has_ab_trajectory_fields(self, model):
-        cs = SolverCrosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model))
-        test_cases = generate_single_step_cases(model)
-        result = cs.run(test_cases)
-
-        assert result.passed
-        for case in result.cases:
-            assert isinstance(case.a_n_iterations, int)
-            assert isinstance(case.b_n_iterations, int)
-            assert isinstance(case.a_residual_history, list)
-            assert isinstance(case.b_residual_history, list)
-            assert case.a_converged is True
-            assert case.b_converged is True
-
-    def test_numerical_newton_plastic_iter_count(self, model):
-        cs = SolverCrosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model))
-        test_cases = generate_single_step_cases(model)
-        result = cs.run(test_cases)
-
-        plastic_cases = [c for c in result.cases
-                         if c.result_a is not None and c.result_a.is_plastic]
-        assert len(plastic_cases) > 0
-        assert any(c.a_n_iterations >= 1 for c in plastic_cases)
-
-    def test_elastic_case_has_zero_iterations(self, model):
-        cs = SolverCrosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model))
-        test_cases = generate_single_step_cases(model)
-
-        for case in cs.iter_run(test_cases):
-            if case.result_a is not None and not case.result_a.is_plastic:
-                assert case.a_n_iterations == 0
-                assert case.a_residual_history == []
-                assert case.b_n_iterations == 0
-                assert case.b_residual_history == []
-                break
