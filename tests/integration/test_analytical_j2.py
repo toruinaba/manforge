@@ -209,7 +209,7 @@ def test_method_analytical_raises_if_no_hooks():
             self.nu = 0.3
             self.sigma_y0 = 250.0
 
-        def elastic_stiffness(self):
+        def elastic_stiffness(self, state=None):
             mu = self.E / (2.0 * (1.0 + self.nu))
             lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
             return self.isotropic_C(lam, mu)

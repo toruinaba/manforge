@@ -82,7 +82,7 @@ class StressUpdateResult:
 
     return_mapping: "ReturnMappingResult | None"
     ddsdde: anp.ndarray
-    stress_trial: anp.ndarray
+    stress_trial: "anp.ndarray | None"
     is_plastic: "bool | None"
     _state_n: dict = field(repr=False)
 

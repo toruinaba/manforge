@@ -13,7 +13,7 @@ class _Stub3D(MaterialModel3D):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self):
+    def elastic_stiffness(self, state=None):
         raise NotImplementedError
 
     def yield_function(self, stress, state):
@@ -28,7 +28,7 @@ class _StubPS(MaterialModelPS):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self):
+    def elastic_stiffness(self, state=None):
         raise NotImplementedError
 
     def yield_function(self, stress, state):
@@ -43,7 +43,7 @@ class _Stub1D(MaterialModel1D):
     param_names = []
     state_names = []
 
-    def elastic_stiffness(self):
+    def elastic_stiffness(self, state=None):
         raise NotImplementedError
 
     def yield_function(self, stress, state):
@@ -63,7 +63,7 @@ class _StubWithParams(MaterialModel3D):
         self.a = a
         self.b = b
 
-    def elastic_stiffness(self):
+    def elastic_stiffness(self, state=None):
         raise NotImplementedError
 
     def yield_function(self, stress, state):

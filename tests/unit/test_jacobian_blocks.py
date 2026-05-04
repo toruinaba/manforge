@@ -153,9 +153,9 @@ class TestReturnMappingResultPath:
     def test_with_explicit_stress_trial(self, model):
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(state0)
         st = C @ deps
-        rm = PythonIntegrator(model).return_mapping(st, C, state0)
+        rm = PythonIntegrator(model).return_mapping(st, state0)
         jac = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
         assert isinstance(jac, JacobianBlocks)
         assert jac.dstress_dsigma.shape == (model.ntens, model.ntens)
@@ -163,9 +163,9 @@ class TestReturnMappingResultPath:
     def test_matches_stress_update_result(self, model):
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(state0)
         st = C @ deps
-        rm = PythonIntegrator(model).return_mapping(st, C, state0)
+        rm = PythonIntegrator(model).return_mapping(st, state0)
         jac_rm = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
 
         su = PythonIntegrator(model).stress_update(deps, anp.zeros(model.ntens), state0)
@@ -178,7 +178,7 @@ class TestReturnMappingResultPath:
     def test_missing_stress_trial_raises(self, model):
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
         state0 = model.initial_state()
-        C = model.elastic_stiffness()
-        rm = PythonIntegrator(model).return_mapping(C @ deps, C, state0)
+        C = model.elastic_stiffness(state0)
+        rm = PythonIntegrator(model).return_mapping(C @ deps, state0)
         with pytest.raises(ValueError, match="stress_trial must be provided"):
             ad_jacobian_blocks(model, rm, state0)

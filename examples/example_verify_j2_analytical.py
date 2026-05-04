@@ -38,8 +38,8 @@ from manforge.simulation.types import FieldHistory, FieldType
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
 mu = model.E / (2.0 * (1.0 + model.nu))
-C = model.elastic_stiffness()
 state0 = model.initial_state()
+C = model.elastic_stiffness(state0)
 
 
 # =========================================================================

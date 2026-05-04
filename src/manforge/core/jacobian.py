@@ -55,22 +55,21 @@ def ad_jacobian_blocks(
                 "stress_trial=... explicitly."
             )
     ntens = model.ntens
-    C = model.elastic_stiffness()
 
     _blocks_fn = (
         _jacobian_blocks_augmented
         if model.hardening_type == "augmented"
         else _jacobian_blocks_reduced
     )
-    return _blocks_fn(model, stress, state, dlambda, stress_trial, C, state_n, ntens)
+    return _blocks_fn(model, stress, state, dlambda, stress_trial, state_n, ntens)
 
 
 def _jacobian_blocks_reduced(
-    model, stress, state, dlambda, stress_trial, C, state_n, ntens
+    model, stress, state, dlambda, stress_trial, state_n, ntens
 ):
     from manforge.core.residual import make_reduced_residual
 
-    residual_fn = make_reduced_residual(model, stress_trial, C, state_n)
+    residual_fn = make_reduced_residual(model, stress_trial, state_n)
     x_conv = anp.concatenate([anp.array(stress), anp.array([float(dlambda)])])
     J = autograd.jacobian(residual_fn)(x_conv)
 
@@ -89,12 +88,12 @@ def _jacobian_blocks_reduced(
 
 
 def _jacobian_blocks_augmented(
-    model, stress, state, dlambda, stress_trial, C, state_n, ntens
+    model, stress, state, dlambda, stress_trial, state_n, ntens
 ):
     from manforge.core.residual import make_augmented_residual
 
     residual_fn, n_state, unflatten_fn = make_augmented_residual(
-        model, stress_trial, C, state_n
+        model, stress_trial, state_n
     )
 
     flat_state, _ = _flatten_state(state)

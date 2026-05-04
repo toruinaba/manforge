@@ -27,13 +27,7 @@ Strain-controlled example
                            np.linspace([0]*6, [1e-3,0,0,0,0,0], 20))
 
     py_int = PythonNumericalIntegrator(model)
-    fc_int = FortranIntegrator(
-        fortran, "my_model_core",
-        param_fn=lambda: (model.E, model.nu, model.sigma_y0, model.H),
-        state_names=model.state_names,
-        initial_state=model.initial_state,
-        elastic_stiffness=model.elastic_stiffness,
-    )
+    fc_int = FortranIntegrator.from_model(fortran, "my_model_core", model)
 
     cc = CrosscheckStrainDriver(py_int, fc_int)
     result = cc.run(load)

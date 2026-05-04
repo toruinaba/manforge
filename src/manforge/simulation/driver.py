@@ -296,11 +296,14 @@ class StressDriver(DriverBase):
                    else {k: np.asarray(v) for k, v in initial_state.items()})
         eps_total = np.zeros(ntens)
 
-        C = integrator.elastic_stiffness()
-        S = np.linalg.inv(np.array(C))
-
         for i in range(stress_history.shape[0]):
             sigma_target = np.array(stress_history[i])
+            if hasattr(integrator, "elastic_stiffness"):
+                C = integrator.elastic_stiffness(state_n)
+                S = np.linalg.inv(np.array(C))
+            else:
+                rm0 = integrator.stress_update(np.zeros(ntens), stress_n, state_n)
+                S = np.linalg.inv(np.array(rm0.ddsdde))
             deps = S @ (sigma_target - stress_n)
 
             converged = False

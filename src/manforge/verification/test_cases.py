@@ -34,8 +34,8 @@ def estimate_yield_strain(model) -> float:
         Approximate yield strain in the ``e_1`` direction.
     """
     ntens = model.ntens
-    C = model.elastic_stiffness()
     state_0 = model.initial_state()
+    C = model.elastic_stiffness(state_0)
 
     e1 = (lambda _a: (_a.__setitem__(0, 1.0), _a)[1])(np.zeros(ntens))
     sigma_unit = C @ e1

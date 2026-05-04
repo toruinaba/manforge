@@ -112,7 +112,7 @@ def test_fortran_vs_python_plastic_multiaxial(fortran, model):
 def test_elastic_stiffness_vs_python(fortran, model):
     """Elastic stiffness sub-component: Fortran matches Python to near machine precision."""
     C_f = fortran.call("j2_isotropic_3d_elastic_stiffness", model.E, model.nu)
-    C_py = model.elastic_stiffness()
+    C_py = model.elastic_stiffness(model.initial_state())
 
     np.testing.assert_allclose(np.array(C_py), np.array(C_f), rtol=1e-12)
 

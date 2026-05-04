@@ -290,12 +290,10 @@ if fortran_mock is not None:
         ep_ref     = ep_ref + mock_model.H_iso * float(np.sum(np.abs(dstran)))
 
     # Fortran side via FortranIntegrator (default hooks handle ndarray alpha + scalar ep).
-    # MockModel has no elastic_stiffness method, so we supply it explicitly.
     fc_mock = FortranIntegrator.from_model(
         fortran_mock,
         "mock_kinematic",
         mock_model,
-        elastic_stiffness=lambda: mock_model.E * np.eye(ntens),
     )
 
     stress_f = np.zeros(ntens)

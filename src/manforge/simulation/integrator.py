@@ -112,8 +112,8 @@ class _PythonIntegratorBase:
     def initial_state(self) -> dict:
         return self._model.initial_state()
 
-    def elastic_stiffness(self) -> np.ndarray:
-        return self._model.elastic_stiffness()
+    def elastic_stiffness(self, state=None) -> np.ndarray:
+        return self._model.elastic_stiffness(state)
 
     def _try_user_return_mapping(self, stress_trial, C, state_n):
         """Attempt user_defined_return_mapping; return ReturnMappingResult or None."""
@@ -145,7 +145,7 @@ class _PythonIntegratorBase:
             )
         return None
 
-    def return_mapping(self, stress_trial, C, state_n) -> ReturnMappingResult:
+    def return_mapping(self, stress_trial, state_n) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one load increment.
 
         Projects the elastic trial stress back onto the yield surface.
@@ -156,18 +156,17 @@ class _PythonIntegratorBase:
         ----------
         stress_trial : array-like, shape (ntens,)
             Elastic trial stress σ_trial = σ_n + C Δε.
-        C : array-like, shape (ntens, ntens)
-            Elastic stiffness tensor.
         state_n : dict
             Internal state at the beginning of the increment.
         """
-        rm = self._try_user_return_mapping(stress_trial, C, state_n)
+        C_n = self._model.elastic_stiffness(state_n)
+        rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
         if rm is not None:
             return rm
 
         nr = _select_nr(self._model)
         stress, state_new, dlambda, n_iter, res_hist, converged = nr(
-            self._model, stress_trial, C, state_n,
+            self._model, stress_trial, state_n,
             self._max_iter, self._tol, self._raise_on_nonconverged,
         )
         return ReturnMappingResult(
@@ -184,22 +183,22 @@ class _PythonIntegratorBase:
 
         Executes: elastic trial → yield check → return mapping → consistent tangent.
         """
-        C = self._model.elastic_stiffness()
-        stress_trial = stress_n + C @ strain_inc
+        C_n = self._model.elastic_stiffness(state_n)
+        stress_trial = stress_n + C_n @ strain_inc
 
         f_trial = self._model.yield_function(stress_trial, state_n)
         if f_trial <= 0.0:
             return StressUpdateResult(
                 return_mapping=None,
-                ddsdde=C,
+                ddsdde=C_n,
                 stress_trial=stress_trial,
                 is_plastic=False,
                 _state_n=state_n,
             )
 
-        rm = self.return_mapping(stress_trial, C, state_n)
+        rm = self.return_mapping(stress_trial, state_n)
 
-        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C)
+        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n)
         if ddsdde is None:
             tangent_fn = _select_tangent(self._model)
             ddsdde = tangent_fn(
@@ -300,9 +299,6 @@ class FortranIntegrator:
     initial_state : callable or dict
         Either a no-arg callable returning a state dict (e.g.
         ``model.initial_state``) or the dict value directly.
-    elastic_stiffness : callable or ndarray
-        Either a no-arg callable returning the (ntens, ntens) stiffness matrix
-        (e.g. ``model.elastic_stiffness``) or the array value directly.
     param_fn : callable
         ``param_fn() -> tuple`` — material parameters in UMAT positional order.
         Note: unlike ``CrosscheckStrainDriver`` / ``CrosscheckStressDriver``,
@@ -327,8 +323,12 @@ class FortranIntegrator:
     -----
     Fortran UMATs do not expose a per-step ``is_plastic`` flag or ``dlambda``.
     The resulting :class:`~manforge.core.stress_update.StressUpdateResult` will
-    have ``is_plastic=None`` and ``dlambda=nan``.  Driver loops that gate on
-    ``step.result.is_plastic`` should guard with ``if result.is_plastic is True``.
+    have ``is_plastic=None``, ``dlambda=nan``, and ``stress_trial=None``.
+    Driver loops that gate on ``step.result.is_plastic`` should guard with
+    ``if result.is_plastic is True``.  ``stress_trial`` is not reconstructed on
+    the Python side — the UMAT is treated as a closed verification target.
+    ``ddsdde`` is taken entirely from the UMAT output; if ``parse_umat_ddsdde``
+    raises, the exception propagates (no Python fallback).
     """
 
     def __init__(
@@ -338,7 +338,6 @@ class FortranIntegrator:
         *,
         stress_state: StressState = SOLID_3D,
         initial_state,
-        elastic_stiffness,
         param_fn: Callable[[], tuple],
         state_names: list[str],
         state_to_args: Callable[[dict], tuple] | None = None,
@@ -349,7 +348,6 @@ class FortranIntegrator:
         self._subroutine = subroutine
         self.stress_state = stress_state
         self._initial_state = initial_state
-        self._elastic_stiffness = elastic_stiffness
         self._param_fn = param_fn
         self._state_names = list(state_names)
 
@@ -383,16 +381,15 @@ class FortranIntegrator:
         param_fn: Callable[[], tuple] | None = None,
         state_names: list[str] | None = None,
         initial_state=None,
-        elastic_stiffness=None,
         state_to_args: Callable[[dict], tuple] | None = None,
         parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
         parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
     ) -> "FortranIntegrator":
         """Build a FortranIntegrator from a MaterialModel.
 
-        Fills ``param_fn``, ``state_names``, ``initial_state``,
-        ``elastic_stiffness``, and ``stress_state`` from *model* attributes.
-        Any kwarg passed explicitly overrides the auto-derived value.
+        Fills ``param_fn``, ``state_names``, ``initial_state``, and
+        ``stress_state`` from *model* attributes.  Any kwarg passed explicitly
+        overrides the auto-derived value.
 
         ``param_fn`` is auto-generated as
         ``lambda: tuple(getattr(model, n) for n in model.param_names)``,
@@ -407,7 +404,7 @@ class FortranIntegrator:
             f2py-callable subroutine name.
         model : MaterialModel
             Must have ``param_names``, ``state_names``, ``initial_state``,
-            ``elastic_stiffness``, and ``stress_state`` attributes.
+            and ``stress_state`` attributes.
 
         Examples
         --------
@@ -429,9 +426,6 @@ class FortranIntegrator:
         )
         _state_names = state_names if state_names is not None else list(model.state_names)
         _initial_state = initial_state if initial_state is not None else model.initial_state
-        _elastic_stiffness = (
-            elastic_stiffness if elastic_stiffness is not None else model.elastic_stiffness
-        )
         _stress_state = (
             stress_state if stress_state is not None
             else getattr(model, "stress_state", SOLID_3D)
@@ -443,7 +437,6 @@ class FortranIntegrator:
             param_fn=_param_fn,
             state_names=_state_names,
             initial_state=_initial_state,
-            elastic_stiffness=_elastic_stiffness,
             state_to_args=state_to_args,
             parse_umat_return=parse_umat_return,
             parse_umat_ddsdde=parse_umat_ddsdde,
@@ -455,9 +448,6 @@ class FortranIntegrator:
 
     def initial_state(self) -> dict:
         return _resolve_callable_or_value(self._initial_state)
-
-    def elastic_stiffness(self) -> np.ndarray:
-        return np.asarray(_resolve_callable_or_value(self._elastic_stiffness), dtype=np.float64)
 
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
         strain_inc = np.asarray(strain_inc, dtype=np.float64)
@@ -474,14 +464,7 @@ class FortranIntegrator:
 
         f_stress, f_state = self._pur(ret)
         f_stress = np.asarray(f_stress, dtype=np.float64)
-
-        try:
-            ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
-        except (ValueError, IndexError):
-            ddsdde = self.elastic_stiffness()
-
-        C = self.elastic_stiffness()
-        stress_trial = stress_n + C @ strain_inc
+        ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
 
         rm = ReturnMappingResult(
             stress=f_stress,
@@ -494,7 +477,7 @@ class FortranIntegrator:
         return StressUpdateResult(
             return_mapping=rm,
             ddsdde=ddsdde,
-            stress_trial=stress_trial,
+            stress_trial=None,
             is_plastic=None,
             _state_n=state_n,
         )

@@ -517,7 +517,7 @@ def test_reduced_without_update_state_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self):
+            def elastic_stiffness(self, state=None):
                 pass
 
             def yield_function(self, stress, state):
@@ -532,7 +532,7 @@ def test_augmented_without_state_residual_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self):
+            def elastic_stiffness(self, state=None):
                 pass
 
             def yield_function(self, stress, state):
@@ -547,7 +547,7 @@ def test_invalid_hardening_type_raises():
             param_names = []
             state_names = []
 
-            def elastic_stiffness(self):
+            def elastic_stiffness(self, state=None):
                 pass
 
             def yield_function(self, stress, state):
