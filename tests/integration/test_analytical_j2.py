@@ -2,18 +2,22 @@
 
 Covers:
 - plastic_corrector and analytical_tangent as standalone methods
-- method="user_defined" vs method="numerical_newton" agreement
-- method="auto" selects the analytical path
-- check_tangent with method="user_defined" (FD verification of closed-form tangent)
-- method="user_defined" raises NotImplementedError on a model without hooks
+- PythonAnalyticalIntegrator vs PythonNumericalIntegrator agreement
+- PythonIntegrator (auto) selects the analytical path
+- check_tangent with PythonAnalyticalIntegrator (FD verification of closed-form tangent)
+- PythonAnalyticalIntegrator raises NotImplementedError on a model without hooks
 """
 
 import numpy as np
 import autograd.numpy as anp
 import pytest
 
-from manforge.core.stress_update import stress_update
 from manforge.core.material import MaterialModel3D
+from manforge.simulation.integrator import (
+    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
+)
 from manforge.verification.fd_check import check_tangent
 
 
@@ -26,13 +30,13 @@ def test_plastic_corrector_elastic_path_not_called(model):
 
     When return_mapping detects an elastic step (f_trial ≤ 0), it returns
     before calling plastic_corrector.  This test verifies the elastic step
-    still works under method='user_defined'.
+    still works under PythonAnalyticalIntegrator.
     """
     strain_inc = anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])  # tiny, stays elastic
     stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
-    _r = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    _r = PythonAnalyticalIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
     C = model.elastic_stiffness()
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
@@ -71,7 +75,7 @@ def test_plastic_corrector_dlambda_positive(model):
 
 
 # ---------------------------------------------------------------------------
-# method="user_defined" vs method="numerical_newton" — stress and state
+# PythonAnalyticalIntegrator vs PythonNumericalIntegrator — stress and state
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
@@ -81,14 +85,14 @@ def test_plastic_corrector_dlambda_positive(model):
     [1e-3, 5e-4, 2e-4, 1e-3, 5e-4, 2e-4],      # mixed
 ])
 def test_analytical_stress_matches_autodiff(model, strain_inc_vec):
-    """method='user_defined' stress must match method='numerical_newton' to tight tolerance."""
+    """PythonAnalyticalIntegrator stress must match PythonNumericalIntegrator to tight tolerance."""
     strain_inc = anp.array(strain_inc_vec)
     stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
-    _r_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton")
+    _r_ad = PythonNumericalIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     s_ad, st_ad = _r_ad.stress, _r_ad.state
-    _r_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    _r_an = PythonAnalyticalIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     s_an, st_an = _r_an.stress, _r_an.state
 
     np.testing.assert_allclose(
@@ -102,19 +106,19 @@ def test_analytical_stress_matches_autodiff_nonzero_initial_stress(model):
     """Works correctly from a pre-stressed state."""
     # First step to build up pre-stress
     strain_inc1 = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    _r1 = stress_update(model, strain_inc1, anp.zeros(6), model.initial_state())
+    _r1 = PythonIntegrator(model).stress_update(strain_inc1, anp.zeros(6), model.initial_state())
     s1, st1 = _r1.stress, _r1.state
 
     # Second plastic step
     strain_inc2 = anp.array([1e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    s_ad = stress_update(model, strain_inc2, s1, st1, method="numerical_newton").stress
-    s_an = stress_update(model, strain_inc2, s1, st1, method="user_defined").stress
+    s_ad = PythonNumericalIntegrator(model).stress_update(strain_inc2, s1, st1).stress
+    s_an = PythonAnalyticalIntegrator(model).stress_update(strain_inc2, s1, st1).stress
 
     np.testing.assert_allclose(np.asarray(s_an), np.asarray(s_ad), atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# method="user_defined" vs method="numerical_newton" — tangent
+# PythonAnalyticalIntegrator vs PythonNumericalIntegrator — tangent
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
@@ -128,8 +132,8 @@ def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
     stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
-    D_ad = stress_update(model, strain_inc, stress_n, state_n, method="numerical_newton").ddsdde
-    D_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined").ddsdde
+    D_ad = PythonNumericalIntegrator(model).stress_update(strain_inc, stress_n, state_n).ddsdde
+    D_an = PythonAnalyticalIntegrator(model).stress_update(strain_inc, stress_n, state_n).ddsdde
 
     rel_err = anp.abs(D_an - D_ad) / (anp.abs(D_ad) + 1.0)
     assert float(anp.max(rel_err)) < 1e-5, \
@@ -137,18 +141,18 @@ def test_analytical_tangent_matches_autodiff(model, strain_inc_vec):
 
 
 # ---------------------------------------------------------------------------
-# method="auto" uses the analytical path when available
+# PythonIntegrator (auto) uses the analytical path when available
 # ---------------------------------------------------------------------------
 
 def test_method_auto_uses_analytical(model):
-    """method='auto' should use plastic_corrector when it returns non-None."""
+    """PythonIntegrator should use plastic_corrector when it returns non-None."""
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     stress_n = anp.zeros(6)
     state_n = model.initial_state()
 
-    _r_auto = stress_update(model, strain_inc, stress_n, state_n, method="auto")
+    _r_auto = PythonIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     s_auto, D_auto = _r_auto.stress, _r_auto.ddsdde
-    _r_an = stress_update(model, strain_inc, stress_n, state_n, method="user_defined")
+    _r_an = PythonAnalyticalIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     s_an, D_an = _r_an.stress, _r_an.ddsdde
 
     np.testing.assert_allclose(np.asarray(s_auto), np.asarray(s_an), atol=1e-12,
@@ -164,11 +168,10 @@ def test_method_auto_uses_analytical(model):
 def test_analytical_tangent_fd_check_elastic(model):
     """Elastic step: analytical tangent = C = FD tangent."""
     result = check_tangent(
-        model,
+        PythonAnalyticalIntegrator(model),
         anp.zeros(6),
         model.initial_state(),
         anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
@@ -181,11 +184,10 @@ def test_analytical_tangent_fd_check_elastic(model):
 def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
     """Plastic step: analytical tangent passes finite-difference check."""
     result = check_tangent(
-        model,
+        PythonAnalyticalIntegrator(model),
         anp.zeros(6),
         model.initial_state(),
         anp.array(strain_inc_vec),
-        method="user_defined",
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
@@ -195,7 +197,7 @@ def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
 # ---------------------------------------------------------------------------
 
 def test_method_analytical_raises_if_no_hooks():
-    """method='user_defined' raises NotImplementedError for a model without hooks."""
+    """PythonAnalyticalIntegrator raises NotImplementedError for a model without hooks."""
 
     class MinimalModel(MaterialModel3D):
         param_names = ["E", "nu", "sigma_y0"]
@@ -222,14 +224,9 @@ def test_method_analytical_raises_if_no_hooks():
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
     with pytest.raises(NotImplementedError):
-        stress_update(minimal_model, strain_inc, anp.zeros(6), {}, method="user_defined")
-
-
-def test_method_invalid_raises_value_error(model):
-    """Unrecognised method string raises ValueError."""
-    with pytest.raises(ValueError, match="method must be"):
-        stress_update(model, anp.zeros(6), anp.zeros(6), model.initial_state(),
-                       method="wrong")
+        PythonAnalyticalIntegrator(minimal_model).stress_update(
+            strain_inc, anp.zeros(6), {}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +244,9 @@ def test_j2_fd_tangent(model, initial_state, strain_inc_vec, stress_n_fn, descri
     """J2 consistent tangent (numerical NR path) matches central-difference FD."""
     stress_n = stress_n_fn(model)
     state_n = model.initial_state() if stress_n[0] == 0.0 else initial_state
-    result = check_tangent(model, stress_n, state_n, anp.array(strain_inc_vec))
+    result = check_tangent(
+        PythonNumericalIntegrator(model), stress_n, state_n, anp.array(strain_inc_vec)
+    )
     assert result.passed, (
         f"[{description}] FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
     )

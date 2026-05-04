@@ -4,8 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from manforge.core.stress_update import stress_update
-
 
 @dataclass
 class TangentCheckResult:
@@ -18,9 +16,9 @@ class TangentCheckResult:
     rel_err_matrix: np.ndarray
 
 
-def _fd_tangent(model, strain_inc, stress_n, state_n, eps=1e-7, method="auto"):
+def _fd_tangent(integrator, strain_inc, stress_n, state_n, eps=1e-7):
     """Compute DDSDDE by central finite differences."""
-    ntens = model.ntens
+    ntens = integrator.ntens
     ddsdde_fd = np.zeros((ntens, ntens))
     strain_inc = np.array(strain_inc)
     stress_n = np.array(stress_n)
@@ -29,19 +27,40 @@ def _fd_tangent(model, strain_inc, stress_n, state_n, eps=1e-7, method="auto"):
         e_j = np.zeros(ntens)
         e_j[j] = 1.0
         col = (
-            np.array(stress_update(model, strain_inc + eps * e_j, stress_n, state_n, method=method).stress)
-            - np.array(stress_update(model, strain_inc - eps * e_j, stress_n, state_n, method=method).stress)
+            np.array(integrator.stress_update(strain_inc + eps * e_j, stress_n, state_n).stress)
+            - np.array(integrator.stress_update(strain_inc - eps * e_j, stress_n, state_n).stress)
         ) / (2.0 * eps)
         ddsdde_fd[:, j] = col
 
     return ddsdde_fd
 
 
-def check_tangent(model, stress, state, strain_inc, eps=1e-7, tol=1e-5,
-                  denom_offset=1e-2, method="auto") -> TangentCheckResult:
-    """Compare AD consistent tangent against central-difference approximation."""
-    ddsdde_ad = np.array(stress_update(model, strain_inc, stress, state, method=method).ddsdde)
-    ddsdde_fd = _fd_tangent(model, strain_inc, stress, state, eps=eps, method=method)
+def check_tangent(integrator, stress, state, strain_inc, eps=1e-7, tol=1e-5,
+                  denom_offset=1e-2) -> TangentCheckResult:
+    """Compare AD consistent tangent against central-difference approximation.
+
+    Parameters
+    ----------
+    integrator : StressIntegrator
+        Constitutive integrator — use
+        :class:`~manforge.simulation.integrator.PythonIntegrator` (auto),
+        :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`, or
+        :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`.
+    stress : array-like, shape (ntens,)
+        Stress state at which to evaluate the tangent.
+    state : dict
+        Internal state at which to evaluate the tangent.
+    strain_inc : array-like, shape (ntens,)
+        Strain increment for the evaluation point.
+    eps : float, optional
+        Finite-difference step size (default 1e-7).
+    tol : float, optional
+        Relative-error tolerance for the pass/fail check (default 1e-5).
+    denom_offset : float, optional
+        Offset added to the denominator to avoid division by zero (default 1e-2).
+    """
+    ddsdde_ad = np.array(integrator.stress_update(strain_inc, stress, state).ddsdde)
+    ddsdde_fd = _fd_tangent(integrator, strain_inc, stress, state, eps=eps)
 
     rel_err_matrix = np.abs(ddsdde_ad - ddsdde_fd) / (np.abs(ddsdde_fd) + denom_offset)
     max_rel_err = float(np.max(rel_err_matrix))

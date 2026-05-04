@@ -36,14 +36,13 @@ from __future__ import annotations
 import math
 from typing import Any, Callable
 
+import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.stress_update import (
-    ReturnMappingResult,
-    StressUpdateResult,
-    stress_update as _core_stress_update,
-)
+from manforge.core.stress_update import ReturnMappingResult, StressUpdateResult
 from manforge.core.stress_state import StressState, SOLID_3D
+from manforge.core.solver import _select_nr
+from manforge.core.tangent import _select_tangent
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +88,17 @@ class _PythonIntegratorBase:
 
     _method: str = "auto"
 
-    def __init__(self, model, *, raise_on_nonconverged: bool = True) -> None:
+    def __init__(
+        self,
+        model,
+        *,
+        max_iter: int = 50,
+        tol: float = 1e-10,
+        raise_on_nonconverged: bool = True,
+    ) -> None:
         self._model = model
+        self._max_iter = max_iter
+        self._tol = tol
         self._raise_on_nonconverged = raise_on_nonconverged
 
     @property
@@ -107,11 +115,103 @@ class _PythonIntegratorBase:
     def elastic_stiffness(self) -> np.ndarray:
         return self._model.elastic_stiffness()
 
+    def _try_user_return_mapping(self, stress_trial, C, state_n):
+        """Attempt user_defined_return_mapping; return ReturnMappingResult or None."""
+        if self._method == "numerical_newton":
+            return None
+        rm = self._model.user_defined_return_mapping(stress_trial, C, state_n)
+        if rm is not None:
+            return rm
+        if self._method == "user_defined":
+            raise NotImplementedError(
+                f"{type(self._model).__name__} does not implement "
+                "user_defined_return_mapping; cannot use PythonAnalyticalIntegrator."
+            )
+        return None
+
+    def _try_user_tangent(self, rm, stress_n, state_n, C):
+        """Attempt user_defined_tangent; return ddsdde array or None."""
+        if self._method == "numerical_newton":
+            return None
+        ddsdde = self._model.user_defined_tangent(
+            rm.stress, rm.state, rm.dlambda, C, state_n
+        )
+        if ddsdde is not None:
+            return ddsdde
+        if self._method == "user_defined":
+            raise NotImplementedError(
+                f"{type(self._model).__name__} does not implement "
+                "user_defined_tangent; cannot use PythonAnalyticalIntegrator."
+            )
+        return None
+
+    def return_mapping(self, stress_trial, C, state_n) -> ReturnMappingResult:
+        """Perform the plastic correction (return mapping) for one load increment.
+
+        Projects the elastic trial stress back onto the yield surface.
+        Does NOT compute the consistent tangent — call :meth:`stress_update`
+        for the complete constitutive integration including the tangent.
+
+        Parameters
+        ----------
+        stress_trial : array-like, shape (ntens,)
+            Elastic trial stress σ_trial = σ_n + C Δε.
+        C : array-like, shape (ntens, ntens)
+            Elastic stiffness tensor.
+        state_n : dict
+            Internal state at the beginning of the increment.
+        """
+        rm = self._try_user_return_mapping(stress_trial, C, state_n)
+        if rm is not None:
+            return rm
+
+        nr = _select_nr(self._model)
+        stress, state_new, dlambda, n_iter, res_hist, converged = nr(
+            self._model, stress_trial, C, state_n,
+            self._max_iter, self._tol, self._raise_on_nonconverged,
+        )
+        return ReturnMappingResult(
+            stress=stress,
+            state=state_new,
+            dlambda=dlambda,
+            n_iterations=n_iter,
+            residual_history=res_hist,
+            converged=converged,
+        )
+
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
-        return _core_stress_update(
-            self._model, strain_inc, stress_n, state_n,
-            method=self._method,
-            raise_on_nonconverged=self._raise_on_nonconverged,
+        """Perform a complete constitutive stress update for one load increment.
+
+        Executes: elastic trial → yield check → return mapping → consistent tangent.
+        """
+        C = self._model.elastic_stiffness()
+        stress_trial = stress_n + C @ strain_inc
+
+        f_trial = self._model.yield_function(stress_trial, state_n)
+        if f_trial <= 0.0:
+            return StressUpdateResult(
+                return_mapping=None,
+                ddsdde=C,
+                stress_trial=stress_trial,
+                is_plastic=False,
+                _state_n=state_n,
+            )
+
+        rm = self.return_mapping(stress_trial, C, state_n)
+
+        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C)
+        if ddsdde is None:
+            tangent_fn = _select_tangent(self._model)
+            ddsdde = tangent_fn(
+                self._model, rm.stress, rm.state, rm.dlambda, stress_n, state_n
+            )
+
+        return StressUpdateResult(
+            return_mapping=rm,
+            ddsdde=ddsdde,
+            stress_trial=stress_trial,
+            is_plastic=True,
+            _state_n=state_n,
         )
 
 
@@ -124,6 +224,10 @@ class PythonIntegrator(_PythonIntegratorBase):
     Parameters
     ----------
     model : MaterialModel
+    max_iter : int, optional
+        Maximum Newton-Raphson iterations (default 50).
+    tol : float, optional
+        NR convergence tolerance (default 1e-10).
     raise_on_nonconverged : bool, optional
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """
@@ -137,6 +241,10 @@ class PythonNumericalIntegrator(_PythonIntegratorBase):
     Parameters
     ----------
     model : MaterialModel
+    max_iter : int, optional
+        Maximum Newton-Raphson iterations (default 50).
+    tol : float, optional
+        NR convergence tolerance (default 1e-10).
     raise_on_nonconverged : bool, optional
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """
@@ -152,6 +260,10 @@ class PythonAnalyticalIntegrator(_PythonIntegratorBase):
     Parameters
     ----------
     model : MaterialModel
+    max_iter : int, optional
+        Maximum Newton-Raphson iterations (default 50, ignored for analytical solver).
+    tol : float, optional
+        NR convergence tolerance (default 1e-10, ignored for analytical solver).
     raise_on_nonconverged : bool, optional
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """

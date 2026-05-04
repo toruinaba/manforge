@@ -22,11 +22,14 @@ import numpy as np
 import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.core.stress_update import stress_update
 from manforge.core.jacobian import ad_jacobian_blocks
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
+from manforge.simulation.integrator import (
+    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
+)
 from manforge.simulation.types import FieldHistory, FieldType
 
 # ---------------------------------------------------------------------------
@@ -50,10 +53,10 @@ deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 stress_n = jnp.zeros(6)
 
 # --- numerical (Newton-Raphson) ---
-result_ad = stress_update(model, deps, stress_n, state0, method="numerical_newton")
+result_ad = PythonNumericalIntegrator(model).stress_update(deps, stress_n, state0)
 
 # --- analytical (user-defined closed-form) ---
-result_an = stress_update(model, deps, stress_n, state0, method="user_defined")
+result_an = PythonAnalyticalIntegrator(model).stress_update(deps, stress_n, state0)
 
 # Compare stress
 npt.assert_allclose(result_ad.stress, result_an.stress, rtol=1e-10)

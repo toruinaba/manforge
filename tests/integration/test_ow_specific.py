@@ -14,7 +14,7 @@ import autograd.numpy as anp
 
 from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinematic1D
 from manforge.models.af_kinematic import AFKinematic3D
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def test_backstress_saturation():
     state_n = model.initial_state()
     for _ in range(200):
         deps = (lambda _a: (_a.__setitem__(0, 5e-4), _a)[1])(np.zeros(6))
-        _r = stress_update(model, deps, stress_n, state_n)
+        _r = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
         stress_n, state_n = _r.stress, _r.state
 
     alpha = state_n["alpha"]
@@ -71,8 +71,8 @@ def test_ow_approaches_af_for_small_alpha():
     af_model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     deps = (lambda _a: (_a.__setitem__(0, 3e-4), _a)[1])(np.zeros(6))  # very small step — near linear regime
 
-    stress_ow = stress_update(ow_model, deps, anp.zeros(6), ow_model.initial_state()).stress
-    stress_af = stress_update(af_model, deps, anp.zeros(6), af_model.initial_state()).stress
+    stress_ow = PythonIntegrator(ow_model).stress_update(deps, anp.zeros(6), ow_model.initial_state()).stress
+    stress_af = PythonIntegrator(af_model).stress_update(deps, anp.zeros(6), af_model.initial_state()).stress
 
     np.testing.assert_allclose(
         np.array(stress_ow), np.array(stress_af), rtol=0.10,

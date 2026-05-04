@@ -26,12 +26,11 @@ Usage
 
 Compare results explicitly against the Python reference::
 
-    from manforge.core.stress_update import stress_update
+    from manforge.simulation.integrator import PythonNumericalIntegrator
     import numpy as np
 
-    result = stress_update(
-        model, np.array(dstran), np.zeros(6), model.initial_state()
-    )
+    integrator = PythonNumericalIntegrator(model)
+    result = integrator.stress_update(np.array(dstran), np.zeros(6), model.initial_state())
     stress_py, ddsdde_py = result.stress, result.ddsdde
     np.testing.assert_allclose(np.array(stress_py), stress_f, rtol=1e-6)
 """

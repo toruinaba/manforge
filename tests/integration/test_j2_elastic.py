@@ -3,7 +3,7 @@
 import numpy as np
 import autograd.numpy as anp
 
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------
@@ -15,7 +15,7 @@ def test_elastic_stress_update(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _r = stress_update(model, strain_inc, anp.zeros(6), initial_state)
+    _r = PythonIntegrator(model).stress_update(strain_inc, anp.zeros(6), initial_state)
     stress_new, state_new, ddsdde = _r.stress, _r.state, _r.ddsdde
 
     expected_stress = C @ strain_inc
@@ -27,8 +27,8 @@ def test_elastic_tangent_equals_C(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    ddsdde = stress_update(
-        model, strain_inc, anp.zeros(6), initial_state
+    ddsdde = PythonIntegrator(model).stress_update(
+        strain_inc, anp.zeros(6), initial_state
     ).ddsdde
 
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
@@ -38,8 +38,8 @@ def test_elastic_state_unchanged(model, initial_state):
     """Internal state must not change in an elastic step."""
     strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    state_new = stress_update(
-        model, strain_inc, anp.zeros(6), initial_state
+    state_new = PythonIntegrator(model).stress_update(
+        strain_inc, anp.zeros(6), initial_state
     ).state
 
     np.testing.assert_allclose(np.asarray(state_new["ep"]), np.asarray(initial_state["ep"]))
@@ -50,7 +50,7 @@ def test_elastic_multiaxial(model, initial_state):
     C = model.elastic_stiffness()
     strain_inc = anp.array([5e-6, 3e-6, -2e-6, 1e-6, 0.0, 0.0])
 
-    _r = stress_update(model, strain_inc, anp.zeros(6), initial_state)
+    _r = PythonIntegrator(model).stress_update(strain_inc, anp.zeros(6), initial_state)
     stress_new, ddsdde = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(C @ strain_inc), rtol=1e-10)
@@ -66,7 +66,7 @@ def test_elastic_from_prestress(model):
     state_n = model.initial_state()
     strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    _r = stress_update(model, strain_inc, stress_n, state_n)
+    _r = PythonIntegrator(model).stress_update(strain_inc, stress_n, state_n)
     stress_new, ddsdde = _r.stress, _r.ddsdde
 
     np.testing.assert_allclose(np.asarray(stress_new), np.asarray(stress_n + C @ strain_inc), rtol=1e-10)

@@ -82,9 +82,10 @@ def _make_driver_step():
 def _make_augmented_nr():
     import numpy as np
     from manforge.models.ow_kinematic import OWKinematic3D
-    from manforge.core.stress_update import stress_update
+    from manforge.simulation.integrator import PythonIntegrator
 
     model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
+    integrator = PythonIntegrator(model)
     deps = np.zeros(6)
     deps[0] = 5e-4
 
@@ -92,7 +93,7 @@ def _make_augmented_nr():
         stress_n = np.zeros(6)
         state_n = model.initial_state()
         for _ in range(200):
-            r = stress_update(model, deps, stress_n, state_n)
+            r = integrator.stress_update(deps, stress_n, state_n)
             stress_n = np.asarray(r.stress)
             state_n = {k: np.asarray(v) for k, v in r.state.items()}
 
@@ -106,16 +107,16 @@ def _make_augmented_nr():
 def _make_fd_tangent():
     import numpy as np
     from manforge.models.j2_isotropic import J2Isotropic3D
+    from manforge.simulation.integrator import PythonIntegrator
     from manforge.verification.fd_check import check_tangent
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    integrator = PythonIntegrator(model)
     stress0 = np.zeros(6)
     state0 = model.initial_state()
-    # first push into plastic range
-    from manforge.core.stress_update import stress_update
     deps_plastic = np.zeros(6)
     deps_plastic[0] = 2e-3
-    r = stress_update(model, deps_plastic, stress0, state0)
+    r = integrator.stress_update(deps_plastic, stress0, state0)
     stress1 = np.asarray(r.stress)
     state1 = {k: np.asarray(v) for k, v in r.state.items()}
 
@@ -123,7 +124,7 @@ def _make_fd_tangent():
     deps2[0] = 5e-4
 
     def run():
-        check_tangent(model, stress1, state1, deps2)
+        check_tangent(integrator, stress1, state1, deps2)
 
     return run
 

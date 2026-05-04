@@ -5,11 +5,14 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.core.stress_update import stress_update
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
+from manforge.simulation.integrator import (
+    PythonIntegrator,
+    PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator,
+)
 from manforge.simulation.types import FieldHistory, FieldType
 
 
@@ -29,7 +32,7 @@ def ow_model():
 
 def test_elastic_step_no_history(j2_model):
     deps = anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state())
+    result = PythonIntegrator(j2_model).stress_update(deps, anp.zeros(6), j2_model.initial_state())
     assert result.is_plastic is False
     assert result.n_iterations == 0
     assert result.residual_history == []
@@ -41,8 +44,9 @@ def test_elastic_step_no_history(j2_model):
 
 def test_analytical_path_history(j2_model):
     deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state(),
-                            method="user_defined")
+    result = PythonAnalyticalIntegrator(j2_model).stress_update(
+        deps, anp.zeros(6), j2_model.initial_state()
+    )
     assert result.is_plastic is True
     assert result.n_iterations == 1
     assert len(result.residual_history) == 2
@@ -55,8 +59,9 @@ def test_analytical_path_history(j2_model):
 
 def test_scalar_nr_records_history(j2_model):
     deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state(),
-                            method="numerical_newton")
+    result = PythonNumericalIntegrator(j2_model).stress_update(
+        deps, anp.zeros(6), j2_model.initial_state()
+    )
     assert result.is_plastic is True
     assert result.n_iterations >= 1
     assert len(result.residual_history) == result.n_iterations + 1
@@ -66,15 +71,17 @@ def test_scalar_nr_records_history(j2_model):
 def test_j2_linear_converges_in_one_step(j2_model):
     """J2 with linear isotropic hardening is exact in one Newton step."""
     deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state(),
-                            method="numerical_newton")
+    result = PythonNumericalIntegrator(j2_model).stress_update(
+        deps, anp.zeros(6), j2_model.initial_state()
+    )
     assert result.n_iterations == 1
 
 
 def test_scalar_nr_residual_decreasing(j2_model):
     deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = stress_update(j2_model, deps, anp.zeros(6), j2_model.initial_state(),
-                            method="numerical_newton")
+    result = PythonNumericalIntegrator(j2_model).stress_update(
+        deps, anp.zeros(6), j2_model.initial_state()
+    )
     history = result.residual_history
     for i in range(1, len(history)):
         assert history[i] < history[i - 1]
@@ -86,7 +93,7 @@ def test_scalar_nr_residual_decreasing(j2_model):
 
 def test_augmented_nr_records_history(ow_model):
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
-    result = stress_update(ow_model, deps, anp.zeros(6), ow_model.initial_state())
+    result = PythonIntegrator(ow_model).stress_update(deps, anp.zeros(6), ow_model.initial_state())
     assert result.is_plastic is True
     assert result.n_iterations >= 1
     assert len(result.residual_history) == result.n_iterations + 1
@@ -96,7 +103,7 @@ def test_augmented_nr_records_history(ow_model):
 def test_augmented_nr_residual_eventually_decreasing(ow_model):
     """Augmented NR converges; the final residual must be smaller than the first."""
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
-    result = stress_update(ow_model, deps, anp.zeros(6), ow_model.initial_state())
+    result = PythonIntegrator(ow_model).stress_update(deps, anp.zeros(6), ow_model.initial_state())
     history = result.residual_history
     assert history[-1] < history[0]
 
@@ -104,7 +111,7 @@ def test_augmented_nr_residual_eventually_decreasing(ow_model):
 def test_augmented_nr_quadratic_convergence(ow_model):
     """OWKinematic produces enough NR iterations to observe quadratic convergence."""
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
-    result = stress_update(ow_model, deps, anp.zeros(6), ow_model.initial_state())
+    result = PythonIntegrator(ow_model).stress_update(deps, anp.zeros(6), ow_model.initial_state())
     history = result.residual_history
 
     # Need at least 3 points for a local convergence order estimate
@@ -145,7 +152,7 @@ def test_driver_j2_analytical_history(j2_model):
 
 
 def test_driver_j2_autodiff_has_history(j2_model):
-    """With method='numerical_newton', J2 plastic steps record NR history."""
+    """With PythonNumericalIntegrator, J2 plastic steps record NR history."""
     load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
     dr = StrainDriver(PythonNumericalIntegrator(j2_model)).run(load)
 
