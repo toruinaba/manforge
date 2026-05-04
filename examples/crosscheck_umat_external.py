@@ -39,14 +39,7 @@ model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 # ---------------------------------------------------------------------------
 # 2. Load your compiled Fortran UMAT module
 # ---------------------------------------------------------------------------
-try:
-    fortran = FortranUMAT("j2_isotropic_3d")
-except ModuleNotFoundError:
-    raise SystemExit(
-        "Fortran module not found.  Compile it first:\n"
-        "  uv run manforge build fortran/abaqus_stubs.f90 "
-        "fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d"
-    )
+fortran = FortranUMAT("j2_isotropic_3d")
 
 # ---------------------------------------------------------------------------
 # 3. Build a strain loading history

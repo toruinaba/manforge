@@ -47,14 +47,7 @@ from manforge.core.jacobian import ad_jacobian_blocks
 # ---------------------------------------------------------------------------
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
-try:
-    fortran_j2 = FortranUMAT("j2_isotropic_3d")
-except ModuleNotFoundError:
-    raise SystemExit(
-        "j2_isotropic_3d not found.  Compile first:\n"
-        "  uv run manforge build fortran/abaqus_stubs.f90 "
-        "fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d"
-    )
+fortran_j2 = FortranUMAT("j2_isotropic_3d")
 
 
 def _make_fc_int(fortran):
