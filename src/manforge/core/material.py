@@ -41,12 +41,8 @@ class MaterialModel(ABC):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         # Skip intermediate abstract classes (MaterialModel3D, MaterialModelPS, etc.)
-        # that have not yet implemented elastic_stiffness and yield_function.
-        # Note: __abstractmethods__ is set by ABCMeta *after* __init_subclass__ runs,
-        # so we cannot rely on it here. Instead we check whether the two genuinely
-        # abstract methods are still unimplemented.
-        if (cls.elastic_stiffness is MaterialModel.elastic_stiffness or
-                cls.yield_function is MaterialModel.yield_function):
+        # that have not yet implemented yield_function.
+        if cls.yield_function is MaterialModel.yield_function:
             return
         ht = cls.hardening_type
         if ht not in ("reduced", "augmented"):
@@ -90,15 +86,31 @@ class MaterialModel(ABC):
     # Abstract interface — must be implemented by subclasses
     # ------------------------------------------------------------------
 
-    @abstractmethod
-    def elastic_stiffness(self) -> anp.ndarray:
+    def elastic_stiffness(self, state=None) -> anp.ndarray:
         """Return the elastic stiffness tensor in Voigt notation.
+
+        The base-class implementation raises NotImplementedError.  Concrete
+        stress-state base classes (MaterialModel3D, MaterialModelPS,
+        MaterialModel1D) provide a default that computes C from ``self.E``
+        and ``self.nu`` via :meth:`isotropic_C`.  Override this method to
+        implement state-dependent elastic stiffness (e.g. damage plasticity).
+
+        Parameters
+        ----------
+        state : dict or None
+            Current internal state.  Ignored by the default isotropic
+            implementation; damage/YU models use it to scale E.
 
         Returns
         -------
         anp.ndarray, shape (ntens, ntens)
             Elastic stiffness C (σ = C : ε, engineering shear convention).
         """
+        raise NotImplementedError(
+            f"{type(self).__name__}.elastic_stiffness() is not implemented. "
+            "Subclass MaterialModel3D, MaterialModelPS, or MaterialModel1D to "
+            "get a default isotropic implementation, or override this method."
+        )
 
     @abstractmethod
     def yield_function(
@@ -487,6 +499,18 @@ class MaterialModel3D(MaterialModel):
         idx = anp.array([0, 1, 2, 3])
         return C6[anp.ix_(idx, idx)]
 
+    def elastic_stiffness(self, state=None) -> anp.ndarray:
+        """Default isotropic elastic stiffness from self.E and self.nu."""
+        if not (hasattr(self, "E") and hasattr(self, "nu")):
+            raise NotImplementedError(
+                f"{type(self).__name__}.elastic_stiffness: default implementation "
+                "requires self.E and self.nu — override for anisotropic or "
+                "parameter-less models."
+            )
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+        return self.isotropic_C(lam, mu)
+
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.stress_state.identity_np
@@ -582,6 +606,18 @@ class MaterialModelPS(MaterialModel):
         C_cc = C4[2, 2]
         return C_rr - anp.outer(C_rc, C_rc) / C_cc
 
+    def elastic_stiffness(self, state=None) -> anp.ndarray:
+        """Default plane-stress isotropic elastic stiffness from self.E and self.nu."""
+        if not (hasattr(self, "E") and hasattr(self, "nu")):
+            raise NotImplementedError(
+                f"{type(self).__name__}.elastic_stiffness: default implementation "
+                "requires self.E and self.nu — override for anisotropic or "
+                "parameter-less models."
+            )
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+        return self.isotropic_C(lam, mu)
+
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.stress_state.identity_np  # [1, 1, 0]
@@ -659,6 +695,18 @@ class MaterialModel1D(MaterialModel):
         """
         E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
         return anp.array([[E]])
+
+    def elastic_stiffness(self, state=None) -> anp.ndarray:
+        """Default 1D isotropic elastic stiffness [[E]] from self.E and self.nu."""
+        if not (hasattr(self, "E") and hasattr(self, "nu")):
+            raise NotImplementedError(
+                f"{type(self).__name__}.elastic_stiffness: default implementation "
+                "requires self.E and self.nu — override for anisotropic or "
+                "parameter-less models."
+            )
+        mu = self.E / (2.0 * (1.0 + self.nu))
+        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
+        return self.isotropic_C(lam, mu)
 
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor [[1/3]] for ntens=1."""

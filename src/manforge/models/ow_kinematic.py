@@ -128,12 +128,6 @@ class OWKinematic3D(MaterialModel3D):
             "ep": anp.array(0.0),
         }
 
-    def elastic_stiffness(self) -> anp.ndarray:
-        """Isotropic elastic stiffness tensor."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
-
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
@@ -218,12 +212,6 @@ class OWKinematicPS(MaterialModelPS):
             "ep": anp.array(0.0),
         }
 
-    def elastic_stiffness(self) -> anp.ndarray:
-        """Plane-stress isotropic stiffness (3×3 condensed)."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
-
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = stress - state["alpha"]
@@ -290,12 +278,6 @@ class OWKinematic1D(MaterialModel1D):
             "alpha": anp.zeros(self.ntens),
             "ep": anp.array(0.0),
         }
-
-    def elastic_stiffness(self) -> anp.ndarray:
-        """1D elastic stiffness [[E]]."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""

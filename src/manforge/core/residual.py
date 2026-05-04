@@ -46,7 +46,7 @@ def _unflatten_state(vec, shapes: list) -> dict:
 # Residual builders
 # ---------------------------------------------------------------------------
 
-def make_reduced_residual(model, stress_trial, C, state_n):
+def make_reduced_residual(model, stress_trial, state_n):
     """Build the residual function for reduced-system models."""
     ntens = model.ntens
 
@@ -54,15 +54,16 @@ def make_reduced_residual(model, stress_trial, C, state_n):
         sig = x[:ntens]
         dl = x[ntens]
         st = model.update_state(dl, sig, state_n)
+        C_new = model.elastic_stiffness(st)
         n = autograd.grad(lambda s: model.yield_function(s, st))(sig)
-        R_stress = sig - stress_trial + dl * (C @ n)
+        R_stress = sig - stress_trial + dl * (C_new @ n)
         R_yield = model.yield_function(sig, st)
         return anp.concatenate([R_stress, anp.atleast_1d(R_yield)])
 
     return residual_fn
 
 
-def make_augmented_residual(model, stress_trial, C, state_n):
+def make_augmented_residual(model, stress_trial, state_n):
     """Build the augmented residual function for implicit-state models."""
     ntens = model.ntens
 
@@ -78,9 +79,10 @@ def make_augmented_residual(model, stress_trial, C, state_n):
         q_flat = x[ntens + 1:]
         state_new = unflatten_fn(q_flat)
 
+        C_new = model.elastic_stiffness(state_new)
         n = autograd.grad(lambda s: model.yield_function(s, state_new))(sig)
 
-        R_stress = sig - stress_trial + dlambda * (C @ n)
+        R_stress = sig - stress_trial + dlambda * (C_new @ n)
         R_yield = model.yield_function(sig, state_new)
 
         R_state_dict = model.state_residual(state_new, dlambda, sig, state_n)

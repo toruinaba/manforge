@@ -13,30 +13,30 @@ def j2():
 
 
 def _build_plastic_trial(j2):
-    """Return (stress_trial, C, state_n) clearly in the plastic regime."""
-    C = j2.elastic_stiffness()
+    """Return (stress_trial, state_n) clearly in the plastic regime."""
+    state_n = j2.initial_state()
     stress_trial = anp.array([500.0, 0.0, 0.0, 0.0, 0.0, 0.0])  # f_trial > 0
-    return stress_trial, C, j2.initial_state()
+    return stress_trial, state_n
 
 
 class TestRaiseOnNonconverged:
     def test_default_raises(self, j2):
-        st, C, s_n = _build_plastic_trial(j2)
+        st, s_n = _build_plastic_trial(j2)
         with pytest.raises(RuntimeError, match="did not converge"):
-            PythonNumericalIntegrator(j2, max_iter=0).return_mapping(st, C, s_n)
+            PythonNumericalIntegrator(j2, max_iter=0).return_mapping(st, s_n)
 
     def test_false_returns_nonconverged_result(self, j2):
-        st, C, s_n = _build_plastic_trial(j2)
+        st, s_n = _build_plastic_trial(j2)
         result = PythonNumericalIntegrator(
             j2, max_iter=0, raise_on_nonconverged=False
-        ).return_mapping(st, C, s_n)
+        ).return_mapping(st, s_n)
         assert result.converged is False
         assert result.n_iterations == 0
         assert isinstance(result.residual_history, list)
 
     def test_converged_case_has_flag_true(self, j2):
-        st, C, s_n = _build_plastic_trial(j2)
-        result = PythonNumericalIntegrator(j2).return_mapping(st, C, s_n)
+        st, s_n = _build_plastic_trial(j2)
+        result = PythonNumericalIntegrator(j2).return_mapping(st, s_n)
         assert result.converged is True
 
     def test_stress_update_elastic_always_converged(self, j2):

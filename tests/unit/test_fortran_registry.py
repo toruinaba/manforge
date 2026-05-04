@@ -78,11 +78,3 @@ def test_abstract_base_has_no_fortran_bindings():
 
 def test_j2_concrete_has_fortran_bindings():
     assert hasattr(J2Isotropic3D, "_fortran_bindings")
-    assert "elastic_stiffness" in J2Isotropic3D._fortran_bindings
-
-
-def test_j2_elastic_stiffness_binding_fields():
-    binding = J2Isotropic3D._fortran_bindings["elastic_stiffness"]
-    assert binding.subroutine == "j2_isotropic_3d_elastic_stiffness"
-    assert binding.test is not None
-    assert "test_j2_bindings" in binding.test

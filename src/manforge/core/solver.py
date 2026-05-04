@@ -11,7 +11,7 @@ from manforge.core.residual import (
 )
 
 
-def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol,
+def _reduced_nr(model, stress_trial, state_n, max_iter, tol,
                 raise_on_nonconverged=True):
     """Newton-Raphson solver for the reduced (ntens+1) residual system.
 
@@ -32,8 +32,9 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol,
 
     for _iteration in range(max_iter):
         state_new = model.update_state(dlambda, stress, state_n)
+        C_new = model.elastic_stiffness(state_new)
         n = autograd.grad(lambda s: model.yield_function(s, state_new))(stress)
-        stress = stress_trial - dlambda * (C @ n)
+        stress = stress_trial - dlambda * (C_new @ n)
         state_new = model.update_state(dlambda, stress, state_n)
         f = model.yield_function(stress, state_new)
         residual_history.append(float(np.abs(float(f))))
@@ -44,7 +45,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol,
         def _f_residual(dl, _stress=stress):
             st = model.update_state(dl, _stress, state_n)
             nn = autograd.grad(lambda s: model.yield_function(s, st))(_stress)
-            s_upd = stress_trial - dl * (C @ nn)
+            s_upd = stress_trial - dl * (model.elastic_stiffness(st) @ nn)
             return model.yield_function(s_upd, st)
 
         dfddl = autograd.grad(_f_residual)(dlambda)
@@ -60,7 +61,7 @@ def _reduced_nr(model, stress_trial, C, state_n, max_iter, tol,
     return stress, state_new, dlambda, n_iterations, residual_history, False
 
 
-def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol,
+def _augmented_nr(model, stress_trial, state_n, max_iter, tol,
                   raise_on_nonconverged=True):
     """Newton-Raphson solver for the augmented (ntens+1+n_state) residual system.
 
@@ -71,7 +72,7 @@ def _augmented_nr(model, stress_trial, C, state_n, max_iter, tol,
     """
     ntens = model.ntens
     residual_fn, n_state, unflatten_fn = make_augmented_residual(
-        model, stress_trial, C, state_n
+        model, stress_trial, state_n
     )
 
     flat_state_n, _ = _flatten_state(state_n)

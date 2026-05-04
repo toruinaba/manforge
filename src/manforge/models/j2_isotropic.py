@@ -84,16 +84,6 @@ class J2Isotropic3D(MaterialModel3D):
     # Material physics — reduced hardening (hardening_type = "reduced")
     # ------------------------------------------------------------------
 
-    @verified_against_fortran(
-        "j2_isotropic_3d_elastic_stiffness",
-        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
-    )
-    def elastic_stiffness(self) -> anp.ndarray:
-        """Isotropic elastic stiffness tensor."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
-
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
@@ -225,12 +215,6 @@ class J2IsotropicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def elastic_stiffness(self) -> anp.ndarray:
-        """Plane-stress isotropic stiffness (3×3 condensed)."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
-
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
@@ -279,12 +263,6 @@ class J2Isotropic1D(MaterialModel1D):
     # ------------------------------------------------------------------
     # Material physics — reduced hardening (hardening_type = "reduced")
     # ------------------------------------------------------------------
-
-    def elastic_stiffness(self) -> anp.ndarray:
-        """1D elastic stiffness [[E]]."""
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""

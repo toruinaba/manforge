@@ -284,7 +284,6 @@ def test_crosscheck_multi_state_mock(mock_fortran):
         mock_fortran,
         "mock_kinematic",
         model,
-        elastic_stiffness=lambda: model.E * np.eye(ntens),
     )
 
     stress_f = np.zeros(ntens)
