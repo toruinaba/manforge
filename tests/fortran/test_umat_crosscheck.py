@@ -1,4 +1,4 @@
-"""Multi-step crosscheck: SolverCrosscheck and CrosscheckStrainDriver / CrosscheckStressDriver tests.
+"""Multi-step crosscheck: CrosscheckStrainDriver / CrosscheckStressDriver tests.
 
 Requires compiled Fortran modules:
     uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
@@ -18,11 +18,9 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 from manforge.verification import (
-    SolverCrosscheck,
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
     FortranUMAT,
-    generate_single_step_cases,
     generate_strain_history,
 )
 from manforge.simulation import (
@@ -133,33 +131,74 @@ def test_iter_crosscheck_stress_update_breakable(fortran_j2, model):
 
 
 # ---------------------------------------------------------------------------
-# single-step group — SolverCrosscheck with FortranIntegrator
+# single-step group — CrosscheckStrainDriver with 1-step FieldHistory
 # ---------------------------------------------------------------------------
+
+def _make_single_step_cases(model):
+    """Build single-step test cases spanning elastic and plastic regimes."""
+    from manforge.verification.test_cases import estimate_yield_strain
+    from manforge.core.stress_update import stress_update as _su
+    eps_y = estimate_yield_strain(model)
+    ntens = model.ntens
+    ndi = model.stress_state.ndi
+    nshr = model.stress_state.nshr
+    state_0 = dict(model.initial_state())
+    z = np.zeros(ntens)
+    cases = []
+    de = np.zeros(ntens); de[0] = 0.5 * eps_y
+    cases.append({"strain_inc": de, "stress_n": z.copy(), "state_n": dict(state_0)})
+    de = np.zeros(ntens); de[0] = 5.0 * eps_y
+    cases.append({"strain_inc": de, "stress_n": z.copy(), "state_n": dict(state_0)})
+    if ndi >= 2:
+        de = np.zeros(ntens); de[0] = 3.0 * eps_y; de[1] = -1.5 * eps_y
+        if ndi >= 3:
+            de[2] = -1.5 * eps_y
+        cases.append({"strain_inc": de, "stress_n": z.copy(), "state_n": dict(state_0)})
+    if nshr >= 1:
+        de = np.zeros(ntens); de[ndi] = 3.0 * eps_y
+        cases.append({"strain_inc": de, "stress_n": z.copy(), "state_n": dict(state_0)})
+    pre_de = np.zeros(ntens); pre_de[0] = 3.0 * eps_y
+    _pre = _su(model, pre_de, np.zeros(ntens), model.initial_state())
+    de2 = np.zeros(ntens); de2[0] = 2.0 * eps_y
+    cases.append({"strain_inc": de2, "stress_n": np.array(_pre.stress),
+                  "state_n": {k: np.asarray(v) for k, v in _pre.state.items()}})
+    return cases
+
+
+def _run_single_step_crosscheck(py_int, fc_int, model):
+    """Drive each single-step case through CrosscheckStrainDriver."""
+    cc = CrosscheckStrainDriver(py_int, fc_int)
+    failures = []
+    for case in _make_single_step_cases(model):
+        data = case["strain_inc"][np.newaxis]  # shape (1, ntens)
+        load = FieldHistory(FieldType.STRAIN, "eps", data)
+        for cr in cc.iter_run(load, initial_stress=case["stress_n"],
+                              initial_state=case["state_n"]):
+            if not cr.passed:
+                failures.append((case, cr))
+    return failures
+
 
 def test_crosscheck_single_step_numerical_newton(fortran_j2, model):
     """Single-step cases (elastic/plastic/multiaxial) with numerical_newton vs UMAT."""
     py_int = PythonNumericalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
-    # FortranIntegrator returns is_plastic=None — skip that check
-    cs = SolverCrosscheck(py_int, fc_int, check_is_plastic=False)
-    result = cs.run(generate_single_step_cases(model))
-
-    assert result.passed, (
-        f"max_stress_rel_err = {result.max_stress_rel_err:.2e}, "
-        f"failed cases: {[c.index for c in result.cases if not c.passed]}"
+    failures = _run_single_step_crosscheck(py_int, fc_int, model)
+    assert not failures, (
+        f"{len(failures)} case(s) failed: "
+        f"max stress_rel_err = {max(cr.stress_rel_err for _, cr in failures):.2e}"
     )
-    assert result.max_stress_rel_err < 1e-6
 
 
 def test_crosscheck_single_step_user_defined(fortran_j2, model):
     """Single-step cases with user_defined (analytical) return mapping vs UMAT."""
     py_int = PythonAnalyticalIntegrator(model)
     fc_int = _make_fc_int(fortran_j2, model)
-    # FortranIntegrator returns is_plastic=None — skip that check
-    cs = SolverCrosscheck(py_int, fc_int, check_is_plastic=False)
-    result = cs.run(generate_single_step_cases(model))
-
-    assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
+    failures = _run_single_step_crosscheck(py_int, fc_int, model)
+    assert not failures, (
+        f"{len(failures)} case(s) failed: "
+        f"max stress_rel_err = {max(cr.stress_rel_err for _, cr in failures):.2e}"
+    )
 
 
 # ---------------------------------------------------------------------------

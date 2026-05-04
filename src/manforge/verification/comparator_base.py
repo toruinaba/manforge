@@ -1,12 +1,11 @@
-"""Comparator ABC — shared base for SolverCrosscheck and crosscheck harnesses.
+"""Comparator ABC — shared base for crosscheck harnesses.
 
 A Comparator holds the static configuration of *what to compare* (ref/cand
 implementations, tolerances) in ``__init__`` and accepts *what to apply it to*
-(model, test_cases, driver+load) as arguments to ``iter_run`` / ``run``.
+(driver+load) as arguments to ``iter_run`` / ``run``.
 
 Concrete subclasses:
 
-* ``SolverCrosscheck``        — two Python solvers vs. shared test_cases
 * ``CrosscheckStrainDriver``  — two integrators over a strain-controlled history
 * ``CrosscheckStressDriver``  — two integrators over a stress-controlled history
 """

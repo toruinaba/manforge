@@ -53,19 +53,30 @@ Stress-controlled example
 
 Single-step comparison
 ----------------------
-Use :class:`~manforge.verification.SolverCrosscheck` with a
-:class:`~manforge.simulation.FortranIntegrator` as one of the two integrators::
+Use :class:`CrosscheckStrainDriver` with a one-row
+:class:`~manforge.simulation.types.FieldHistory` and the
+``initial_stress`` / ``initial_state`` kwargs to compare a prestressed
+single step::
 
-    cs = SolverCrosscheck(PythonNumericalIntegrator(model), fc_int)
-    result = cs.run(generate_single_step_cases(model))
+    load = FieldHistory(FieldType.STRAIN, "eps", case["strain_inc"][np.newaxis])
+    cc = CrosscheckStrainDriver(py_int, fc_int)
+    for cr in cc.iter_run(load, initial_stress=case["stress_n"],
+                          initial_state=case["state_n"]):
+        assert cr.passed
+        # Jacobian inspection on failure:
+        # jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from manforge.core.stress_update import StressUpdateResult
 
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.types import FieldType
@@ -89,6 +100,19 @@ class CrosscheckCaseResult(CaseResult):
 
     Extends :class:`~manforge.verification.CaseResult` with raw Python- and
     Fortran-side outputs for inspection.
+
+    Attributes
+    ----------
+    result_a : StressUpdateResult or None
+        Raw result from integrator_a.  Pass to
+        :func:`~manforge.verification.compare_jacobians` with ``result_b``
+        and ``state_n`` to diagnose Jacobian-level differences.
+    result_b : StressUpdateResult or None
+        Raw result from integrator_b.
+    state_n : dict or None
+        State dict at the *start* of this step (integrator_a side).
+        Required as the ``state_n`` argument to
+        :func:`~manforge.verification.compare_jacobians`.
     """
 
     py_stress: np.ndarray | None = None
@@ -98,6 +122,9 @@ class CrosscheckCaseResult(CaseResult):
     f_stress: np.ndarray | None = None
     f_state: dict | None = None
     f_ddsdde: np.ndarray | None = None
+    result_a: StressUpdateResult | None = None
+    result_b: StressUpdateResult | None = None
+    state_n: dict | None = None
     a_n_iterations: int = 0
     a_residual_history: list = field(default_factory=list)
     b_n_iterations: int = 0
@@ -151,7 +178,14 @@ class _CrosscheckDriverBase(Comparator):
     def _iter_driver(self, driver, load, **kwargs):
         raise NotImplementedError
 
-    def iter_run(self, load, **kwargs) -> Iterator[CrosscheckCaseResult]:
+    def iter_run(
+        self,
+        load,
+        *,
+        initial_stress=None,
+        initial_state=None,
+        **kwargs,
+    ) -> Iterator[CrosscheckCaseResult]:
         if load.type != self._expected_field_type:
             complement = (
                 "CrosscheckStressDriver"
@@ -168,9 +202,27 @@ class _CrosscheckDriverBase(Comparator):
         da = self._make_driver(self.integrator_a)
         db = self._make_driver(self.integrator_b)
 
+        # Copy initial_state so both drivers start from independent objects.
+        init_state_a = ({k: np.asarray(v) for k, v in initial_state.items()}
+                        if initial_state is not None else None)
+        init_state_b = ({k: np.asarray(v) for k, v in initial_state.items()}
+                        if initial_state is not None else None)
+        init_stress_a = (np.array(initial_stress, dtype=float)
+                         if initial_stress is not None else None)
+        init_stress_b = (np.array(initial_stress, dtype=float)
+                         if initial_stress is not None else None)
+
+        # state_n tracks integrator_a's state at the *start* of each step.
+        if initial_state is not None:
+            step_state_n = {k: np.asarray(v) for k, v in initial_state.items()}
+        else:
+            step_state_n = self.integrator_a.initial_state()
+
         for sa, sb in zip(
-            self._iter_driver(da, load, **kwargs),
-            self._iter_driver(db, load, **kwargs),
+            self._iter_driver(da, load, initial_stress=init_stress_a,
+                              initial_state=init_state_a, **kwargs),
+            self._iter_driver(db, load, initial_stress=init_stress_b,
+                              initial_state=init_state_b, **kwargs),
         ):
             ra = sa.result
             rb = sb.result
@@ -192,6 +244,9 @@ class _CrosscheckDriverBase(Comparator):
             st_err = _state_rel_err(f_state, py_state)
             ok     = _case_passed(s_err, st_err, t_err, self.stress_tol, self.state_tol, self.tangent_tol)
 
+            current_state_n = step_state_n
+            step_state_n = {k: np.asarray(v) for k, v in ra.state.items()}
+
             yield CrosscheckCaseResult(
                 index=sa.i,
                 py_stress=py_stress,
@@ -201,6 +256,9 @@ class _CrosscheckDriverBase(Comparator):
                 f_stress=f_stress,
                 f_state=f_state,
                 f_ddsdde=f_ddsdde,
+                result_a=ra,
+                result_b=rb,
+                state_n=current_state_n,
                 stress_rel_err=s_err,
                 state_rel_err=st_err,
                 tangent_rel_err=t_err,
@@ -260,7 +318,7 @@ class CrosscheckStrainDriver(_CrosscheckDriverBase):
         return StrainDriver(integrator)
 
     def _iter_driver(self, driver, load, **kwargs):
-        return driver.iter_run(load)
+        return driver.iter_run(load, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +397,8 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         load,
         *,
         raise_on_nonconverged: bool = True,
+        initial_stress=None,
+        initial_state=None,
     ) -> Iterator[CrosscheckCaseResult]:
         """Yield per-step crosscheck results.
 
@@ -350,9 +410,18 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         raise_on_nonconverged : bool, optional
             Forwarded to :meth:`~manforge.simulation.StressDriver.iter_run`
             (default ``True``).
+        initial_stress : array-like or None, optional
+            Stress tensor at the start of the loading history (default zero).
+        initial_state : dict or None, optional
+            State dict at the start of the loading history (default integrator initial state).
 
         Yields
         ------
         CrosscheckCaseResult
         """
-        yield from super().iter_run(load, raise_on_nonconverged=raise_on_nonconverged)
+        yield from super().iter_run(
+            load,
+            raise_on_nonconverged=raise_on_nonconverged,
+            initial_stress=initial_stress,
+            initial_state=initial_state,
+        )

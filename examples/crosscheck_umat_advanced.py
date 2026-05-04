@@ -2,11 +2,10 @@
 
 Demonstrates all features of the manforge Fortran crosscheck API:
 
-* Part 1 — SolverCrosscheck         (single-step, test_cases list)
-* Part 2 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
-* Part 3 — iter_run streaming + early break on failure
-* Part 4 — StressDriver path        (stress-controlled loading)
-* Part 5 — FortranIntegrator        (explicit state_to_args via default hooks,
+* Part 1 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
+* Part 2 — iter_run streaming + early break on failure
+* Part 3 — StressDriver path        (stress-controlled loading)
+* Part 4 — FortranIntegrator        (explicit state_to_args via default hooks,
                                      for non-standard UMAT with ndarray state)
 
 Requires compiled Fortran modules:
@@ -35,10 +34,8 @@ from manforge.simulation import (
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     FortranUMAT,
-    SolverCrosscheck,
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
-    generate_single_step_cases,
     generate_strain_history,
 )
 
@@ -74,74 +71,43 @@ load = FieldHistory(FieldType.STRAIN, "eps", history)
 
 
 # =========================================================================
-# Part 1: SolverCrosscheck — single-step, test_cases list
+# Part 1: CrosscheckStrainDriver — method="user_defined" + ddsdde
 # =========================================================================
 print("=" * 60)
-print("  Part 1: SolverCrosscheck (test_cases, single-step)")
+print("  Part 1: CrosscheckStrainDriver (analytical, ddsdde)")
 print("=" * 60)
 
-test_cases = generate_single_step_cases(model)
-print(f"  Generated {len(test_cases)} test cases")
-
-py_int1 = PythonNumericalIntegrator(model)
+py_int1 = PythonAnalyticalIntegrator(model)
 fc_int1 = _make_fc_int(fortran_j2)
-cc1 = SolverCrosscheck(py_int1, fc_int1)
-result1 = cc1.run(test_cases)
 
-print(f"  passed       : {result1.passed}  ({result1.n_passed}/{result1.n_cases})")
-print(f"  max stress err: {result1.max_stress_rel_err:.2e}")
+cc1 = CrosscheckStrainDriver(py_int1, fc_int1)
+result1 = cc1.run(load)
 
-for cr in result1.cases:
-    ep_err = cr.state_rel_err.get("ep", 0.0)
-    plastic = cr.result_a is not None and cr.result_a.is_plastic
-    print(
-        f"  case {cr.index}: stress_err={cr.stress_rel_err:.1e}  "
-        f"ep_err={ep_err:.1e}  "
-        f"{'plastic' if plastic else 'elastic'}"
-    )
+print(f"  passed           : {result1.passed}  ({result1.n_passed}/{result1.n_cases} steps)")
+print(f"  max stress err   : {result1.max_stress_rel_err:.2e}")
+if result1.max_tangent_rel_err is not None:
+    print(f"  max tangent err  : {result1.max_tangent_rel_err:.2e}")
+ep_max = result1.max_state_rel_err.get("ep", None)
+if ep_max is not None:
+    print(f"  max ep err       : {ep_max:.2e}")
 
 assert result1.passed, f"Part 1 failed: max_stress_rel_err={result1.max_stress_rel_err:.2e}"
 print()
 
 
 # =========================================================================
-# Part 2: CrosscheckStrainDriver — method="user_defined" + ddsdde
+# Part 2: iter_run — step streaming + early break
 # =========================================================================
 print("=" * 60)
-print("  Part 2: CrosscheckStrainDriver (analytical, ddsdde)")
+print("  Part 2: iter_run (streaming / early break)")
 print("=" * 60)
 
-py_int2 = PythonAnalyticalIntegrator(model)
+py_int2 = PythonNumericalIntegrator(model)
 fc_int2 = _make_fc_int(fortran_j2)
-
 cc2 = CrosscheckStrainDriver(py_int2, fc_int2)
-result2 = cc2.run(load)
-
-print(f"  passed           : {result2.passed}  ({result2.n_passed}/{result2.n_cases} steps)")
-print(f"  max stress err   : {result2.max_stress_rel_err:.2e}")
-if result2.max_tangent_rel_err is not None:
-    print(f"  max tangent err  : {result2.max_tangent_rel_err:.2e}")
-ep_max = result2.max_state_rel_err.get("ep", None)
-if ep_max is not None:
-    print(f"  max ep err       : {ep_max:.2e}")
-
-assert result2.passed, f"Part 2 failed: max_stress_rel_err={result2.max_stress_rel_err:.2e}"
-print()
-
-
-# =========================================================================
-# Part 3: iter_run — step streaming + early break
-# =========================================================================
-print("=" * 60)
-print("  Part 3: iter_run (streaming / early break)")
-print("=" * 60)
-
-py_int3 = PythonNumericalIntegrator(model)
-fc_int3 = _make_fc_int(fortran_j2)
-cc3 = CrosscheckStrainDriver(py_int3, fc_int3)
 
 print("  Normal run (printing every 5th step):")
-for cr in cc3.iter_run(load):
+for cr in cc2.iter_run(load):
     if cr.index % 5 == 0:
         print(
             f"    step {cr.index:2d}: stress_err={cr.stress_rel_err:.1e}  "
@@ -150,7 +116,7 @@ for cr in cc3.iter_run(load):
 
 print()
 print("  Early-break demo (wrong param_fn → detect first failing step):")
-fc_int3_bad = FortranIntegrator(
+fc_int2_bad = FortranIntegrator(
     fortran_j2,
     "j2_isotropic_3d",
     param_fn=lambda: (model.sigma_y0, model.H, model.E, model.nu),  # wrong order
@@ -158,12 +124,16 @@ fc_int3_bad = FortranIntegrator(
     initial_state=model.initial_state,
     elastic_stiffness=model.elastic_stiffness,
 )
-cc3_bad = CrosscheckStrainDriver(py_int3, fc_int3_bad)
+cc2_bad = CrosscheckStrainDriver(py_int2, fc_int2_bad)
 first_fail_index = None
-for cr in cc3_bad.iter_run(load):
+for cr in cc2_bad.iter_run(load):
     if not cr.passed:
         first_fail_index = cr.index
         print(f"    First failure at step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
+        # Jacobian inspection available on failure:
+        # from manforge.verification import compare_jacobians
+        # jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
+        # print(jac.blocks)
         break
 
 assert first_fail_index is not None, "Expected at least one failing step with wrong param_fn"
@@ -171,10 +141,10 @@ print()
 
 
 # =========================================================================
-# Part 4: StressDriver — stress-controlled path
+# Part 3: StressDriver — stress-controlled path
 # =========================================================================
 print("=" * 60)
-print("  Part 4: CrosscheckStressDriver (stress-controlled)")
+print("  Part 3: CrosscheckStressDriver (stress-controlled)")
 print("=" * 60)
 
 sigma_max = 1.5 * model.sigma_y0
@@ -183,34 +153,34 @@ stress_data = np.zeros((len(targets), model.ntens))
 stress_data[:, 0] = targets
 stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-py_int4 = PythonNumericalIntegrator(model)
-fc_int4 = _make_fc_int(fortran_j2)
-cc4 = CrosscheckStressDriver(py_int4, fc_int4)
-result4 = cc4.run(stress_load)
+py_int3 = PythonNumericalIntegrator(model)
+fc_int3 = _make_fc_int(fortran_j2)
+cc3 = CrosscheckStressDriver(py_int3, fc_int3)
+result3 = cc3.run(stress_load)
 
-print(f"  passed        : {result4.passed}  ({result4.n_passed}/{result4.n_cases} steps)")
-print(f"  max stress err: {result4.max_stress_rel_err:.2e}")
-for cr in result4.cases:
+print(f"  passed        : {result3.passed}  ({result3.n_passed}/{result3.n_cases} steps)")
+print(f"  max stress err: {result3.max_stress_rel_err:.2e}")
+for cr in result3.cases:
     print(
         f"  step {cr.index}: σ11_py={cr.py_stress[0]:.1f} MPa  "
         f"err={cr.stress_rel_err:.1e}"
     )
 
-assert result4.passed, f"Part 4 failed: max_stress_rel_err={result4.max_stress_rel_err:.2e}"
+assert result3.passed, f"Part 3 failed: max_stress_rel_err={result3.max_stress_rel_err:.2e}"
 print()
 
 
 # =========================================================================
-# Part 5: FortranIntegrator — ndarray state (alpha, ep) via default hooks
+# Part 4: FortranIntegrator — ndarray state (alpha, ep) via default hooks
 # =========================================================================
 print("=" * 60)
-print("  Part 5: FortranIntegrator (mock_kinematic, ndarray state)")
+print("  Part 4: FortranIntegrator (mock_kinematic, ndarray state)")
 print("=" * 60)
 
 try:
     fortran_mock = FortranUMAT("mock_kinematic")
 except ModuleNotFoundError:
-    print("  mock_kinematic not compiled — skipping Part 5.")
+    print("  mock_kinematic not compiled — skipping Part 4.")
     print("  Compile with: uv run manforge build fortran/mock_kinematic.f90 --name mock_kinematic")
     fortran_mock = None
 

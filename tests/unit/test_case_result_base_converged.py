@@ -12,9 +12,7 @@ from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
     CaseResult,
     ComparisonResult,
-    SolverCrosscheck,
     CrosscheckStrainDriver,
-    generate_single_step_cases,
     generate_strain_history,
 )
 
@@ -44,15 +42,6 @@ class TestBaseComparisonResult:
 
 
 class TestCounterAggregation:
-    def test_solver_comparison_all_converged(self, model):
-        py_a = PythonNumericalIntegrator(model)
-        py_b = PythonAnalyticalIntegrator(model)
-        cs = SolverCrosscheck(py_a, py_b)
-        result = cs.run(generate_single_step_cases(model))
-        assert result.passed
-        assert result.n_a_nonconverged == 0
-        assert result.n_b_nonconverged == 0
-
     def test_stress_update_crosscheck_all_converged(self, model):
         py_a = PythonNumericalIntegrator(model)
         py_b = PythonAnalyticalIntegrator(model)

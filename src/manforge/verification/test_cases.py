@@ -7,17 +7,12 @@ Functions
 ---------
 estimate_yield_strain
     Estimate the uniaxial yield strain via bisection on the yield surface.
-generate_single_step_cases
-    Generate a set of single-increment test cases for use with
-    :class:`~manforge.verification.SolverCrosscheck`.
 generate_strain_history
     Generate a default tension-unload-compression strain history for
     multi-step comparison.
 """
 
 import numpy as np
-
-from manforge.core.stress_update import stress_update
 
 
 def estimate_yield_strain(model) -> float:
@@ -66,73 +61,6 @@ def estimate_yield_strain(model) -> float:
 
     return (eps_lo + eps_hi) / 2.0
 
-
-def generate_single_step_cases(model, eps_y=None) -> list[dict]:
-    """Generate single-increment test cases spanning elastic and plastic regimes.
-
-    Parameters
-    ----------
-    model : MaterialModel
-        Constitutive model instance.
-    eps_y : float, optional
-        Characteristic yield strain.  If *None*, estimated via
-        :func:`estimate_yield_strain`.
-
-    Returns
-    -------
-    list[dict]
-        Each dict has keys ``"strain_inc"``, ``"stress_n"``, ``"state_n"``
-        — compatible with :class:`~manforge.verification.SolverCrosscheck`.
-    """
-    if eps_y is None:
-        eps_y = estimate_yield_strain(model)
-
-    ntens = model.ntens
-    ndi   = model.stress_state.ndi
-    nshr  = model.stress_state.nshr
-    state_0 = dict(model.initial_state())
-    zero_stress = np.zeros(ntens)
-
-    cases = []
-
-    # Case 1: Elastic uniaxial
-    de = np.zeros(ntens)
-    de[0] = 0.5 * eps_y
-    cases.append({"strain_inc": de, "stress_n": zero_stress.copy(), "state_n": dict(state_0)})
-
-    # Case 2: Plastic uniaxial
-    de = np.zeros(ntens)
-    de[0] = 5.0 * eps_y
-    cases.append({"strain_inc": de, "stress_n": zero_stress.copy(), "state_n": dict(state_0)})
-
-    # Case 3: Plastic multiaxial
-    if ndi >= 2:
-        de = np.zeros(ntens)
-        de[0] = 3.0 * eps_y
-        de[1] = -1.5 * eps_y
-        if ndi >= 3:
-            de[2] = -1.5 * eps_y
-        cases.append({"strain_inc": de, "stress_n": zero_stress.copy(), "state_n": dict(state_0)})
-
-    # Case 4: Shear-dominant
-    if nshr >= 1:
-        de = np.zeros(ntens)
-        de[ndi] = 3.0 * eps_y
-        cases.append({"strain_inc": de, "stress_n": zero_stress.copy(), "state_n": dict(state_0)})
-
-    # Case 5: Pre-stressed starting state
-    prestress_de = (lambda _a: (_a.__setitem__(0, 3.0 * eps_y), _a)[1])(np.zeros(ntens))
-    _pre = stress_update(model, prestress_de, np.zeros(ntens), model.initial_state())
-    stress_pre, state_pre = _pre.stress, _pre.state
-    de2 = np.zeros(ntens)
-    de2[0] = 2.0 * eps_y
-    cases.append({
-        "strain_inc": de2,
-        "stress_n":   np.array(stress_pre),
-        "state_n":    {k: np.asarray(v) for k, v in state_pre.items()},
-    })
-
-    return cases
 
 
 def generate_strain_history(model, eps_y=None) -> np.ndarray:

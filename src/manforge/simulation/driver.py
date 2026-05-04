@@ -99,6 +99,8 @@ class DriverBase(ABC):
         load: FieldHistory,
         *,
         collect_state: dict[str, FieldType] | None = None,
+        initial_stress=None,
+        initial_state=None,
     ) -> DriverResult:
         """Run the loading simulation.
 
@@ -115,6 +117,12 @@ class DriverBase(ABC):
 
             If ``None`` (default), no state variables are collected and
             ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
+        initial_stress : array-like or None, optional
+            Stress tensor at the start of the loading history.  If ``None``
+            (default), the initial stress is zero.
+        initial_state : dict or None, optional
+            State dict at the start of the loading history.  If ``None``
+            (default), the integrator's initial state is used.
 
         Returns
         -------
@@ -122,7 +130,7 @@ class DriverBase(ABC):
         """
         step_results = []
         strain_rows = []
-        for step in self.iter_run(load):
+        for step in self.iter_run(load, initial_stress=initial_stress, initial_state=initial_state):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
@@ -156,6 +164,9 @@ class StrainDriver(DriverBase):
     def iter_run(
         self,
         load: FieldHistory,
+        *,
+        initial_stress=None,
+        initial_state=None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the strain-controlled loading history.
 
@@ -166,6 +177,12 @@ class StrainDriver(DriverBase):
 
             * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
             * ``(N, ntens)`` — general: all components prescribed.
+        initial_stress : array-like or None, optional
+            Stress tensor at the start of the loading history.  If ``None``
+            (default), the initial stress is zero.
+        initial_state : dict or None, optional
+            State dict at the start of the loading history.  If ``None``
+            (default), the integrator's initial state is used.
 
         Yields
         ------
@@ -176,8 +193,10 @@ class StrainDriver(DriverBase):
         uniaxial = data.ndim == 1
         ntens = integrator.ntens
 
-        stress_n = np.zeros(ntens)
-        state_n = integrator.initial_state()
+        stress_n = (np.zeros(ntens) if initial_stress is None
+                    else np.array(initial_stress, dtype=float))
+        state_n = (integrator.initial_state() if initial_state is None
+                   else {k: np.asarray(v) for k, v in initial_state.items()})
 
         for i in range(len(data)):
             if uniaxial:
@@ -231,6 +250,8 @@ class StressDriver(DriverBase):
         load: FieldHistory,
         *,
         raise_on_nonconverged: bool = True,
+        initial_stress=None,
+        initial_state=None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the stress-controlled loading history.
 
@@ -245,6 +266,15 @@ class StressDriver(DriverBase):
             does not converge.  If ``False``, yield a :class:`DriverStep` with
             ``converged=False`` instead; internal state is *not* advanced for
             that step, so the caller should ``break`` immediately.
+        initial_stress : array-like or None, optional
+            Stress tensor at the start of the loading history.  If ``None``
+            (default), the initial stress is zero.  Note: ``strain`` in the
+            yielded :class:`~manforge.simulation.types.DriverStep` represents
+            the cumulative strain increment from this prestressed state, not
+            from the undeformed configuration.
+        initial_state : dict or None, optional
+            State dict at the start of the loading history.  If ``None``
+            (default), the integrator's initial state is used.
 
         Yields
         ------
@@ -260,8 +290,10 @@ class StressDriver(DriverBase):
         stress_history = np.asarray(load.data, dtype=float)
         ntens = integrator.ntens
 
-        stress_n = np.zeros(ntens)
-        state_n = integrator.initial_state()
+        stress_n = (np.zeros(ntens) if initial_stress is None
+                    else np.array(initial_stress, dtype=float))
+        state_n = (integrator.initial_state() if initial_state is None
+                   else {k: np.asarray(v) for k, v in initial_state.items()})
         eps_total = np.zeros(ntens)
 
         C = integrator.elastic_stiffness()
@@ -319,6 +351,8 @@ class StressDriver(DriverBase):
         load: FieldHistory,
         *,
         collect_state: dict[str, FieldType] | None = None,
+        initial_stress=None,
+        initial_state=None,
     ) -> DriverResult:
         """Run the stress-controlled loading history.
 
@@ -330,6 +364,10 @@ class StressDriver(DriverBase):
             tensor (Voigt) at each step.
         collect_state : dict[str, FieldType] or None, optional
             State variables to include in the result.
+        initial_stress : array-like or None, optional
+            Stress tensor at the start of the loading history (default zero).
+        initial_state : dict or None, optional
+            State dict at the start of the loading history (default integrator initial state).
 
         Returns
         -------
@@ -343,7 +381,8 @@ class StressDriver(DriverBase):
         """
         step_results = []
         strain_rows = []
-        for step in self.iter_run(load, raise_on_nonconverged=True):
+        for step in self.iter_run(load, raise_on_nonconverged=True,
+                                  initial_stress=initial_stress, initial_state=initial_state):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
