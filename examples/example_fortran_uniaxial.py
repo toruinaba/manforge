@@ -60,7 +60,7 @@ fortran = FortranModule("j2_isotropic_3d")
 # ---------------------------------------------------------------------------
 # Integrators
 #   from_model() auto-fills param_fn, state_names, initial_state,
-#   elastic_stiffness, and stress_state from model attributes.
+#   and stress_state from model attributes.
 #   Pass param_fn explicitly only when the Fortran argument order differs.
 # ---------------------------------------------------------------------------
 py_int = PythonIntegrator(model)

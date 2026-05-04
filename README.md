@@ -138,12 +138,14 @@ src/manforge/
 
 必須メソッドは `hardening_type` によって異なる:
 
-| `hardening_type` | 必須メソッド |
-|-----------------|-------------|
-| `"reduced"` (デフォルト) | `elastic_stiffness`, `yield_function`, `update_state` |
-| `"augmented"` | `elastic_stiffness`, `yield_function`, `state_residual` |
+| `hardening_type` | 必須メソッド | 省略可能メソッド |
+|-----------------|-------------|----------------|
+| `"reduced"` (デフォルト) | `yield_function`, `update_state` | `elastic_stiffness` |
+| `"augmented"` | `yield_function`, `state_residual` | `elastic_stiffness` |
 
-`__init_subclass__` がクラス定義時にこれを検証するため、抜け漏れは `TypeError` として即座に報告される。
+`elastic_stiffness(self, state=None)` は `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D` 基底クラスに等方性デフォルト実装が用意されており、`self.E` と `self.nu` を持つモデルなら実装不要。状態依存の弾性剛性 (損傷塑性など) を持つモデルのみ override する。
+
+`__init_subclass__` がクラス定義時に `yield_function` の実装を検証するため、抜け漏れは `TypeError` として即座に報告される。
 
 共通の演算子メソッド (`_vonmises`, `_dev`, `isotropic_C`, `_I_vol`, `_I_dev`) は基底クラスが応力状態に合わせた分岐なし実装を提供する。
 
@@ -160,7 +162,7 @@ integrator = PythonIntegrator(model)
 result = integrator.stress_update(strain_inc, stress_n, state_n)
 result.stress         # 収束応力 σ_{n+1}
 result.ddsdde         # consistent tangent dσ/dΔε
-result.stress_trial   # 試行応力 σ_trial = σ_n + C Δε
+result.stress_trial   # 試行応力 σ_trial = σ_n + C Δε  (FortranIntegrator では None)
 result.dlambda        # 塑性乗数 Δλ (弾性ステップでは 0)
 result.is_plastic     # True = 塑性ステップ
 result.n_iterations   # NR 反復数
@@ -287,17 +289,14 @@ class MyModel(MaterialModel3D):
         super().__init__()   # デフォルト SOLID_3D
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
 
-    def elastic_stiffness(self):
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
-
     def yield_function(self, stress, state):
         return self._vonmises(stress) - (self.sigma_y0 + self.H * state["ep"])
 
     def update_state(self, dlambda, stress, state):
         return {"ep": state["ep"] + dlambda}
 ```
+
+`elastic_stiffness` は `self.E` と `self.nu` から自動生成されるため省略可能。状態依存の弾性剛性を持つ場合は `elastic_stiffness(self, state=None)` を override する。
 
 参照実装: `src/manforge/models/j2_isotropic.py`
 
@@ -342,11 +341,6 @@ class MyImplicitModel(MaterialModel3D):
 
     def initial_state(self):
         return {"alpha": anp.zeros(self.ntens), "ep": anp.array(0.0)}
-
-    def elastic_stiffness(self):
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
 
     def yield_function(self, stress, state):
         xi = stress - state["alpha"]

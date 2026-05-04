@@ -56,9 +56,9 @@ load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 #    method: "numerical_newton" | "user_defined" | "auto"
 # ---------------------------------------------------------------------------
 py_int = PythonNumericalIntegrator(model)
-# from_model() fills param_fn, state_names, initial_state, elastic_stiffness,
-# and stress_state from model attributes.  Pass param_fn= explicitly only when
-# your Fortran subroutine uses a different argument order than model.param_names.
+# from_model() fills param_fn, state_names, initial_state, and stress_state from
+# model attributes.  Pass param_fn= explicitly only when your Fortran subroutine
+# uses a different argument order than model.param_names.
 fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
 
 cc = CrosscheckStrainDriver(py_int, fc_int)
