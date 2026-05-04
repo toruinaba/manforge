@@ -80,7 +80,7 @@ print(f"Final σ11: {result.stress[-1, 0]:.1f} MPa")
 ```
 manforge
 ├── Material layer  (core/material.py)         定義: 降伏関数・硬化則・弾性テンソル
-├── Solver layer    (core/stress_update.py …)  実行: return mapping / consistent tangent
+├── Solver layer    (simulation/integrator.py …) 実行: return mapping / consistent tangent
 └── Application     (simulation/ fitting/ …)   使用: ドライバ / フィッティング / 検証
 ```
 
@@ -89,7 +89,7 @@ src/manforge/
 ├── core/
 │   ├── stress_state.py    # StressState (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material.py        # MaterialModel ABC + MaterialModel3D/PS/1D
-│   ├── stress_update.py   # stress_update / return_mapping — NR ソルバ統合
+│   ├── stress_update.py   # ReturnMappingResult / StressUpdateResult — 戻り値 dataclass
 │   ├── solver.py          # _reduced_nr / _augmented_nr
 │   ├── tangent.py         # consistent tangent (implicit differentiation)
 │   ├── residual.py        # make_reduced_residual / make_augmented_residual
@@ -104,7 +104,7 @@ src/manforge/
 ├── simulation/
 │   ├── types.py           # FieldType / FieldHistory / DriverResult
 │   ├── driver.py          # StrainDriver / StressDriver
-│   └── integrator.py      # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator / FortranIntegrator
+│   └── integrator.py      # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator / FortranIntegrator — アルゴリズム本体を保持
 ├── fitting/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
@@ -149,13 +149,15 @@ src/manforge/
 
 ### Stress Update
 
-`stress_update` が完全な構成積分 (elastic trial → yield check → return mapping → consistent tangent) を実行する。`return_mapping` は tangent を含まない plastic correction のみの API。
+`integrator.stress_update` が完全な構成積分 (elastic trial → yield check → return mapping → consistent tangent) を実行する。`integrator.return_mapping` は tangent を含まない plastic correction のみの API。
 
 ```python
-from manforge.core.stress_update import stress_update, return_mapping
+from manforge.simulation.integrator import PythonIntegrator
+
+integrator = PythonIntegrator(model)
 
 # 完全な構成積分 (tangent 含む)
-result = stress_update(model, strain_inc, stress_n, state_n)
+result = integrator.stress_update(strain_inc, stress_n, state_n)
 result.stress         # 収束応力 σ_{n+1}
 result.ddsdde         # consistent tangent dσ/dΔε
 result.stress_trial   # 試行応力 σ_trial = σ_n + C Δε
@@ -165,19 +167,13 @@ result.n_iterations   # NR 反復数
 result.residual_history  # 各反復の残差ノルム
 
 # 塑性補正のみ (tangent を計算しない)
-rm = return_mapping(model, stress_trial, C, state_n)
+rm = integrator.return_mapping(stress_trial, C, state_n)
 rm.stress    # 収束応力
 rm.state     # 収束状態
 rm.dlambda   # Δλ
 ```
 
-`method` 引数でソルバ経路を選択できる:
-
-| `method` | return mapping | consistent tangent |
-|----------|---------------|-------------------|
-| `"auto"` (デフォルト) | `user_defined_return_mapping` があれば使用、なければ NR | `user_defined_tangent` があれば使用、なければ autodiff |
-| `"numerical_newton"` | 常に NR+autodiff | 常に autodiff |
-| `"user_defined"` | `user_defined_return_mapping` が必須 (なければ `NotImplementedError`) | `user_defined_tangent` が必須 |
+ソルバ経路は Integrator クラスで選択する (§Driver の表を参照)。`PythonIntegrator` が通常用途 (`user_defined` があれば使用、なければ NR)、`PythonNumericalIntegrator` が NR 固定、`PythonAnalyticalIntegrator` が閉形式解固定。
 
 ### Driver
 
@@ -439,10 +435,10 @@ class MyModel(MaterialModel3D):
 
 ```python
 import numpy.testing as npt
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.core.jacobian import ad_jacobian_blocks
 
-result = stress_update(model, deps, stress_n, state_n)
+result = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
 jac = ad_jacobian_blocks(model, result, state_n)
 
 # フロー方向 ∂f/∂σ を自分の解析式と照合
@@ -466,12 +462,12 @@ jac.dstate_dstate["alpha"]["ep"]  # ∂R_alpha/∂ep, shape (ntens, 1)
 
 ```python
 from manforge.verification.fd_check import check_tangent
+from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
 
-result = check_tangent(
-    model, stress_n, state_n,
-    strain_inc,
-    method="auto",   # "numerical_newton" / "user_defined" も指定可
-)
+# method="auto" 相当 (user_defined があれば使用、なければ NR)
+result = check_tangent(PythonIntegrator(model), stress_n, state_n, strain_inc)
+# 解析接線を FD と比較する場合
+result = check_tangent(PythonAnalyticalIntegrator(model), stress_n, state_n, strain_inc)
 print(result.passed, result.max_rel_err)
 ```
 
@@ -514,7 +510,7 @@ for cr in cc.iter_run(load):
 ```python
 import numpy as np
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.core.stress_update import stress_update
+from manforge.simulation.integrator import PythonIntegrator
 from manforge.verification import FortranUMAT
 
 model   = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
@@ -526,7 +522,7 @@ stress_f, ep_f, ddsdde_f = fortran.call(
     model.E, model.nu, model.sigma_y0, model.H,
     np.zeros(6), 0.0, dstran,
 )
-result_py = stress_update(model, dstran, np.zeros(6), model.initial_state())
+result_py = PythonIntegrator(model).stress_update(dstran, np.zeros(6), model.initial_state())
 np.testing.assert_allclose(np.array(result_py.stress), stress_f, rtol=1e-6)
 ```
 
