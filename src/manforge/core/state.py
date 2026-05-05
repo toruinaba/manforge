@@ -21,7 +21,8 @@ by ``MaterialModel.__init_subclass__`` if the user does not declare it.  When
 declared as ``Implicit``, σ is included as an NR unknown.  The ``implicit_stress``
 flag has been removed — use ``stress = Implicit(shape=NTENS)`` instead.
 
-User methods receive and return ``State`` objects that include ``state.stress``.
+User methods receive state arguments as :class:`State` dict-wrappers.
+Access state variables with bracket notation: ``state["stress"]``, ``state["alpha"]``.
 
 Returning residuals / updates
 ------------------------------
@@ -39,8 +40,8 @@ or ``StateUpdate`` (explicit), giving a concise return idiom::
 The framework validates the returned list at the call boundary via
 ``_validate_state_items``.
 
-``State`` is a thin, immutable dict-wrapper with ``__getattr__`` access.
-It is created at ``make_state`` call boundaries so that autograd traces
+``State`` is a thin dict-wrapper that carries field-ordering metadata.
+It is created at ``_wrap_state`` call boundaries so that autograd traces
 through the raw dict values unchanged.
 """
 
@@ -326,15 +327,17 @@ def collect_state_fields(cls) -> dict[str, StateField]:
 # ---------------------------------------------------------------------------
 
 class State:
-    """Immutable dict-wrapper providing attribute-style access to state variables.
+    """Dict-wrapper carrying field-ordering metadata for state variables.
 
-    Wraps the internal ``dict[str, array]`` so that user code can write
-    ``state.alpha`` instead of ``state["alpha"]``.  The internal dict is
-    preserved unchanged, so autograd traces through the raw array values
-    without modification.
+    Wraps the internal ``dict[str, array]`` and preserves declaration-order
+    field names in ``_fields``.  The internal dict is preserved unchanged so
+    autograd traces through the raw array values without modification.
 
-    ``State`` objects are created at the ``make_state`` call boundary and
-    are never mutated.
+    Access state variables with bracket notation: ``state["stress"]``,
+    ``state["alpha"]``.  Attribute-style dot access is not supported.
+
+    ``State`` objects are created at ``_wrap_state`` call boundaries and
+    are never mutated by the framework.
     """
 
     __slots__ = ("_data", "_fields")
@@ -342,14 +345,6 @@ class State:
     def __init__(self, data: dict, fields: tuple):
         object.__setattr__(self, "_data", data)
         object.__setattr__(self, "_fields", fields)
-
-    def __getattr__(self, name: str):
-        try:
-            return self._data[name]
-        except KeyError:
-            raise AttributeError(
-                f"State has no field {name!r}. Available: {list(self._fields)}"
-            )
 
     def __getitem__(self, key: str):
         return self._data[key]
@@ -372,9 +367,6 @@ class State:
     def as_dict(self) -> dict:
         """Return the underlying dict (no copy — values are shared)."""
         return self._data
-
-    def __setattr__(self, name, value):
-        raise AttributeError("State is immutable")
 
     def __repr__(self):
         return f"State({self._data!r})"

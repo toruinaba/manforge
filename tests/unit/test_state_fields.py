@@ -307,27 +307,10 @@ def test_validate_state_items_extra_raises():
 # State wrapper
 # ---------------------------------------------------------------------------
 
-def test_state_getattr():
-    s = State({"alpha": np.zeros(6), "ep": np.array(0.0)}, ("alpha", "ep"))
-    assert np.allclose(s.alpha, np.zeros(6))
-    assert float(s.ep) == 0.0
-
-
 def test_state_getitem():
-    s = State({"ep": np.array(1.0)}, ("ep",))
+    s = State({"alpha": np.zeros(6), "ep": np.array(1.0)}, ("alpha", "ep"))
+    assert np.allclose(s["alpha"], np.zeros(6))
     assert float(s["ep"]) == 1.0
-
-
-def test_state_getattr_missing_raises_attribute_error():
-    s = State({"ep": np.array(0.0)}, ("ep",))
-    with pytest.raises(AttributeError, match="no field 'alpha'"):
-        _ = s.alpha
-
-
-def test_state_is_immutable():
-    s = State({"ep": np.array(0.0)}, ("ep",))
-    with pytest.raises(AttributeError):
-        s.ep = np.array(1.0)
 
 
 def test_state_as_dict_returns_same_object():
@@ -351,7 +334,7 @@ def test_state_identity_no_copy():
     arr = np.zeros(6)
     data = {"alpha": arr}
     s = State(data, ("alpha",))
-    assert s.alpha is arr
+    assert s["alpha"] is arr
 
 
 # ---------------------------------------------------------------------------
@@ -389,8 +372,8 @@ def test_make_state_all_keys_required():
     model = _AlphaEP(SOLID_3D)
     s = model.make_state(stress=np.zeros(6), alpha=np.zeros(6), ep=np.array(0.0))
     assert isinstance(s, State)
-    assert np.allclose(s.alpha, np.zeros(6))
-    assert np.allclose(s.stress, np.zeros(6))
+    assert np.allclose(s["alpha"], np.zeros(6))
+    assert np.allclose(s["stress"], np.zeros(6))
 
 
 def test_make_state_missing_raises():
