@@ -45,8 +45,9 @@ Rearranged as a residual (the form used by ``state_residual``):
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
 Because ‖α_{n+1}‖ appears nonlinearly, this cannot be solved for α_{n+1} in
-closed form.  Setting ``hardening_type = 'augmented'`` activates the augmented
-Newton-Raphson path and the augmented consistent tangent automatically.
+closed form.  Setting ``implicit_state_names = state_names`` and
+``implicit_stress = True`` activates the vector Newton-Raphson path and
+the correct consistent tangent automatically.
 
 Saturation backstress
 ---------------------
@@ -74,7 +75,7 @@ Notes
   (same limit as standard AF).
 * The plastic increment is always solved via the augmented NR using
   ``state_residual``.  No ``update_state`` is defined because
-  ``hardening_type = 'augmented'`` does not require one.
+  ``implicit_state_names`` does not require one.
 """
 
 import autograd.numpy as anp
@@ -87,7 +88,7 @@ class OWKinematic3D(MaterialModel3D):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`.
-    Uses the augmented residual path (``hardening_type = 'augmented'``) because the
+    Uses the vector NR path (``implicit_state_names = state_names``) because the
     backward-Euler discretisation of the Ohno-Wang evolution equation is genuinely
     implicit.
 
@@ -108,7 +109,8 @@ class OWKinematic3D(MaterialModel3D):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
@@ -142,9 +144,8 @@ class OWKinematic3D(MaterialModel3D):
         ``σ − α_{n+1}`` for full backward-Euler consistency with the flow
         direction used in the stress residual equation.
 
-        Required because ``hardening_type = 'augmented'``, which activates the
-        augmented (ntens+1+n_state) Newton-Raphson solver and the augmented
-        consistent tangent automatically.
+        Required because ``implicit_state_names = state_names``, which activates
+        the vector Newton-Raphson solver and the correct consistent tangent.
         """
         alpha_new = state_new["alpha"]
 
@@ -173,7 +174,7 @@ class OWKinematicPS(MaterialModelPS):
     :class:`~manforge.core.material.MaterialModelPS` (including the
     missing-component correction in ``_vonmises``).
 
-    Uses the augmented residual path (``hardening_type = 'augmented'``).
+    Uses the vector NR path (``implicit_state_names = state_names``).
 
     Parameters
     ----------
@@ -192,7 +193,8 @@ class OWKinematicPS(MaterialModelPS):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 
@@ -241,7 +243,7 @@ class OWKinematic1D(MaterialModel1D):
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
 
-    Uses the augmented residual path (``hardening_type = 'augmented'``).
+    Uses the vector NR path (``implicit_state_names = state_names``).
 
     Parameters
     ----------
@@ -259,7 +261,8 @@ class OWKinematic1D(MaterialModel1D):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     state_names = ["alpha", "ep"]
 

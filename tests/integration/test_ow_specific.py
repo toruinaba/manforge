@@ -1,7 +1,7 @@
 """OW (Ohno-Wang) model-specific tests.
 
 These tests cover physics unique to the OW model:
-- hardening_type == "augmented" for all variants
+- implicit_state_names == ["alpha", "ep"] and implicit_stress == True for all variants
 - Backstress saturation: ‖α‖_vm → √(C_k / γ)  under monotonic loading
 - gamma=0 limit gives physically correct OW-to-Prager reduction
 - OW approaches AF for small plastic strains (near linear regime)
@@ -18,19 +18,25 @@ from manforge.simulation.integrator import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------
-# hardening_type detection
+# API detection: all OW states are implicit, σ included in NR
 # ---------------------------------------------------------------------------
 
-def test_hardening_type_ow3d():
-    assert OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
+def test_implicit_state_names_ow3d():
+    m = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
+    assert m.implicit_state_names == ["alpha", "ep"]
+    assert m.implicit_stress is True
 
 
-def test_hardening_type_owps():
-    assert OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
+def test_implicit_state_names_owps():
+    m = OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
+    assert m.implicit_state_names == ["alpha", "ep"]
+    assert m.implicit_stress is True
 
 
-def test_hardening_type_ow1d():
-    assert OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0).hardening_type == "augmented"
+def test_implicit_state_names_ow1d():
+    m = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
+    assert m.implicit_state_names == ["alpha", "ep"]
+    assert m.implicit_stress is True
 
 
 # ---------------------------------------------------------------------------

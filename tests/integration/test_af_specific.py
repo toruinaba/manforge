@@ -2,7 +2,7 @@ import numpy as np
 """AF (Armstrong-Frederick) model-specific tests.
 
 Covers physics unique to the AF model:
-- hardening_type == "reduced" for all variants
+- implicit_state_names == [] (all states explicit) for all variants
 - gamma=0 gives purely linear kinematic backstress (positive axial component)
 """
 
@@ -14,19 +14,19 @@ from manforge.simulation.integrator import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------
-# hardening_type detection
+# API detection: all AF states are explicit (no implicit_state_names)
 # ---------------------------------------------------------------------------
 
-def test_hardening_type_af3d():
-    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "reduced"
+def test_implicit_state_names_af3d():
+    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
 
 
-def test_hardening_type_afps():
-    assert AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "reduced"
+def test_implicit_state_names_afps():
+    assert AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
 
 
-def test_hardening_type_af1d():
-    assert AFKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "reduced"
+def test_implicit_state_names_af1d():
+    assert AFKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
 
 
 # ---------------------------------------------------------------------------

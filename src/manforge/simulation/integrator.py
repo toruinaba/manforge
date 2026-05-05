@@ -41,8 +41,8 @@ import numpy as np
 
 from manforge.core.stress_update import ReturnMappingResult, StressUpdateResult
 from manforge.core.stress_state import StressState, SOLID_3D
-from manforge.core.solver import _select_nr
-from manforge.core.tangent import _select_tangent
+from manforge.core.solver import _numerical_newton
+from manforge.core.tangent import consistent_tangent
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +164,7 @@ class _PythonIntegratorBase:
         if rm is not None:
             return rm
 
-        nr = _select_nr(self._model)
-        stress, state_new, dlambda, n_iter, res_hist, converged = nr(
+        stress, state_new, dlambda, n_iter, res_hist, converged = _numerical_newton(
             self._model, stress_trial, state_n,
             self._max_iter, self._tol, self._raise_on_nonconverged,
         )
@@ -200,8 +199,7 @@ class _PythonIntegratorBase:
 
         ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n)
         if ddsdde is None:
-            tangent_fn = _select_tangent(self._model)
-            ddsdde = tangent_fn(
+            ddsdde = consistent_tangent(
                 self._model, rm.stress, rm.state, rm.dlambda, stress_n, state_n
             )
 

@@ -1,16 +1,16 @@
-"""Tests for the augmented (ntens+1+n_state) residual system.
+"""Tests for the implicit-state (ntens+1+n_state) residual system.
 
-The augmented system treats state variables as independent unknowns, enabling
-models with implicit hardening laws where state_new cannot be expressed in
-closed form as a function of (dlambda, stress, state_n).
+The implicit-state system treats state variables as independent NR unknowns,
+enabling models with implicit hardening laws where state_new cannot be
+expressed in closed form as a function of (dlambda, stress, state_n).
 
 Key verifications
 -----------------
-- hardening_type detection via class variable
-- Augmented NR produces the same converged solution as the reduced NR path
-  (validated by recasting the AF model as an augmented model whose residual
-  equations are algebraically identical to the reduced update)
-- FD tangent vs AD tangent agreement for the augmented path
+- implicit_state_names / implicit_stress API detection via class variable
+- Implicit NR produces the same converged solution as the explicit NR path
+  (validated by recasting the AF model as an implicit model whose residual
+  equations are algebraically identical to the explicit update)
+- FD tangent vs AD tangent agreement for the implicit path
 - Yield surface consistency after plastic steps
 - Correct dimensionality handling (3D, PLANE_STRAIN, PLANE_STRESS)
 """
@@ -50,23 +50,28 @@ def implicit_ps_model():
 
 
 # ---------------------------------------------------------------------------
-# hardening_type detection
+# API detection: explicit vs implicit state names
 # ---------------------------------------------------------------------------
 
-def test_hardening_type_j2_is_reduced(model):
-    assert model.hardening_type == "reduced"
+def test_j2_has_no_implicit_states(model):
+    assert model.implicit_state_names == []
+    assert model.implicit_stress is False
 
 
-def test_hardening_type_af_is_reduced():
-    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).hardening_type == "reduced"
+def test_af_has_no_implicit_states():
+    m = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
+    assert m.implicit_state_names == []
+    assert m.implicit_stress is False
 
 
-def test_hardening_type_augmented_af_is_augmented(implicit_model):
-    assert implicit_model.hardening_type == "augmented"
+def test_implicit_af_has_implicit_states(implicit_model):
+    assert implicit_model.implicit_state_names == ["alpha", "ep"]
+    assert implicit_model.implicit_stress is True
 
 
-def test_hardening_type_augmented_ps_is_augmented(implicit_ps_model):
-    assert implicit_ps_model.hardening_type == "augmented"
+def test_implicit_ps_has_implicit_states(implicit_ps_model):
+    assert implicit_ps_model.implicit_state_names == ["alpha", "ep"]
+    assert implicit_ps_model.implicit_stress is True
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +277,10 @@ def test_augmented_tangent_matches_reduced_3d(af_model, implicit_model, deps_vec
 # PLANE_STRAIN stress state
 # ---------------------------------------------------------------------------
 
-def test_hardening_type_augmented_pe_is_augmented():
-    assert _AFKinematicImplicitPE().hardening_type == "augmented"
+def test_implicit_pe_has_implicit_states():
+    m = _AFKinematicImplicitPE()
+    assert m.implicit_state_names == ["alpha", "ep"]
+    assert m.implicit_stress is True
 
 
 def test_augmented_yield_consistency_plane_strain():

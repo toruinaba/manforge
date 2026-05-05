@@ -1,7 +1,7 @@
-"""AF kinematic hardening models recast as augmented (implicit) residual systems.
+"""AF kinematic hardening models recast as implicit residual systems.
 
-These are test doubles used to validate the augmented NR machinery. Mathematically
-identical to the corresponding reduced-path models at convergence.
+These are test doubles used to validate the vector NR machinery. Mathematically
+identical to the corresponding explicit-path models at convergence.
 
 The explicit update for alpha is:
     alpha_new = (alpha_n + C_k * dlambda * n_hat) / (1 + gamma * dlambda)
@@ -20,7 +20,8 @@ from manforge.core.stress_state import PLANE_STRAIN
 class _AFKinematicImplicit3D(AFKinematic3D):
     """AF kinematic 3D model with hardening expressed as an implicit residual."""
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -38,7 +39,8 @@ class _AFKinematicImplicit3D(AFKinematic3D):
 class _AFKinematicImplicitPS(AFKinematicPS):
     """Plane-stress variant of the implicit AF model."""
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -56,7 +58,8 @@ class _AFKinematicImplicitPS(AFKinematicPS):
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
-    hardening_type = "augmented"
+    implicit_state_names = ["alpha", "ep"]
+    implicit_stress = True
 
     def __init__(self):
         super().__init__(stress_state=PLANE_STRAIN,
