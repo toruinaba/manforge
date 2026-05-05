@@ -47,7 +47,7 @@ Notes
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.state import Explicit
+from manforge.core.state import Explicit, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
@@ -75,7 +75,7 @@ class AFKinematic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Explicit(shape="ntens", doc="backstress tensor")
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = SOLID_3D, *,
@@ -105,7 +105,7 @@ class AFKinematic3D(MaterialModel3D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
 
 
 class AFKinematicPS(MaterialModelPS):
@@ -136,7 +136,7 @@ class AFKinematicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Explicit(shape="ntens", doc="backstress tensor")
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = PLANE_STRESS, *,
@@ -161,7 +161,7 @@ class AFKinematicPS(MaterialModelPS):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
 
 
 class AFKinematic1D(MaterialModel1D):
@@ -190,7 +190,7 @@ class AFKinematic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Explicit(shape="ntens", doc="backstress tensor")
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
@@ -215,4 +215,4 @@ class AFKinematic1D(MaterialModel1D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]

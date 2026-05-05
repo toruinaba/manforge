@@ -88,7 +88,7 @@ class J2Isotropic3D(MaterialModel3D):
 
     def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
-        return {"ep": state["ep"] + dlambda}
+        return [self.ep(state["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
@@ -219,7 +219,7 @@ class J2IsotropicPS(MaterialModelPS):
 
     def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
-        return {"ep": state["ep"] + dlambda}
+        return [self.ep(state["ep"] + dlambda)]
 
 
 class J2Isotropic1D(MaterialModel1D):
@@ -268,7 +268,7 @@ class J2Isotropic1D(MaterialModel1D):
 
     def update_state(self, dlambda, stress, state) -> dict:
         """Δep = Δλ (von Mises associative flow)."""
-        return {"ep": state["ep"] + dlambda}
+        return [self.ep(state["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks

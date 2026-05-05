@@ -7,6 +7,7 @@ import numpy as np
 from manforge.core.residual import (
     make_nr_residual,
     _flatten_state,
+    _normalise_update,
 )
 
 
@@ -55,12 +56,15 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
     n_iterations = 0
     f = anp.array(0.0)
 
+    model_name = type(model).__name__
+    explicit_keys = set(model.state_names)  # all explicit for scalar NR
+
     for _iteration in range(max_iter):
-        state_new = model.update_state(dlambda, stress, state_n)
+        state_new = _normalise_update(model.update_state(dlambda, stress, state_n), explicit_keys, model_name)
         C_new = model.elastic_stiffness(state_new)
         n = autograd.grad(lambda s: model.yield_function(s, state_new))(stress)
         stress = anp.array(stress_trial) - dlambda * (C_new @ n)
-        state_new = model.update_state(dlambda, stress, state_n)
+        state_new = _normalise_update(model.update_state(dlambda, stress, state_n), explicit_keys, model_name)
         f = model.yield_function(stress, state_new)
         residual_history.append(float(np.abs(float(f))))
 
@@ -68,7 +72,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
             return stress, state_new, dlambda, n_iterations, residual_history, True
 
         def _f_residual(dl, _stress=stress):
-            st = model.update_state(dl, _stress, state_n)
+            st = _normalise_update(model.update_state(dl, _stress, state_n), explicit_keys, model_name)
             nn = autograd.grad(lambda s: model.yield_function(s, st))(_stress)
             s_upd = anp.array(stress_trial) - dl * (model.elastic_stiffness(st) @ nn)
             return model.yield_function(s_upd, st)
@@ -137,13 +141,17 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
 
     # Extract results from x.
     dlambda_val = x[_dl_idx]
+    vr_model_name = type(model).__name__
 
     if do_implicit_stress:
         stress = x[:ntens]
     else:
         q_imp = unflatten_implicit(x[_q_sl]) if n_implicit > 0 else {}
         if explicit_keys:
-            q_exp = model.update_state(dlambda_val, anp.array(stress_trial), state_n)
+            q_exp = _normalise_update(
+                model.update_state(dlambda_val, anp.array(stress_trial), state_n),
+                explicit_keys, vr_model_name,
+            )
             q_full = {**q_imp, **q_exp}
         else:
             q_full = q_imp if q_imp else dict(state_n)
@@ -153,7 +161,9 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
 
     q_imp = unflatten_implicit(x[_q_sl]) if n_implicit > 0 else {}
     if explicit_keys:
-        q_exp = model.update_state(dlambda_val, stress, state_n)
+        q_exp = _normalise_update(
+            model.update_state(dlambda_val, stress, state_n), explicit_keys, vr_model_name,
+        )
         state_new = {**q_imp, **q_exp}
     else:
         state_new = q_imp if q_imp else dict(state_n)

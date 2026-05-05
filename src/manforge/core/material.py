@@ -401,32 +401,54 @@ class MaterialModel(ABC):
         data = _make(required, f"{type(self).__name__}.make_state", kwargs)
         return State(data, tuple(self.state_names))
 
-    def make_residual(self, **kwargs) -> dict:
-        """Assemble the implicit-state residual dict from keyword arguments.
+    def stress_residual(
+        self,
+        stress: anp.ndarray,
+        dlambda: anp.ndarray,
+        state: dict,
+        stress_trial: anp.ndarray,
+        state_n: dict,
+    ) -> anp.ndarray:
+        """Stress residual of the return-mapping system.
 
-        Only the keys in :attr:`implicit_state_names` are required.  Extra or
-        missing keys raise ``TypeError``.
+        Default implementation (associative flow rule)::
+
+            R_stress = σ − σ_trial + Δλ · C(q) · ∂f/∂σ
+
+        where C = elastic_stiffness(q) and f = yield_function.  Override to
+        implement non-associative flow (separate plastic potential g ≠ f)::
+
+            n = autograd.grad(lambda s: self.plastic_potential(s, state))(stress)
+            return stress - stress_trial + dlambda * (C @ n)
+
+        Note: the ``implicit_stress = False`` path derives σ via a fixed-point
+        step assuming the default associative formula.  If you override this
+        method, set ``implicit_stress = True`` so that the full vector NR is
+        used and the override is applied consistently.
+
+        Parameters
+        ----------
+        stress : anp.ndarray, shape (ntens,)
+            Current stress σ_{n+1} within the NR iteration.
+        dlambda : anp.ndarray, scalar
+            Plastic multiplier increment Δλ.
+        state : dict
+            Current state q_{n+1} (implicit keys as NR unknowns, explicit keys
+            populated from ``update_state``).
+        stress_trial : anp.ndarray, shape (ntens,)
+            Elastic trial stress.
+        state_n : dict
+            State at the beginning of the increment (unused by default, but
+            exposed for models that need it — e.g. damage recovery).
 
         Returns
         -------
-        dict
+        anp.ndarray, shape (ntens,)
         """
-        required = set(self.implicit_state_names)
-        return _make(required, f"{type(self).__name__}.make_residual", kwargs)
-
-    def make_update(self, **kwargs) -> dict:
-        """Assemble the explicit-state update dict from keyword arguments.
-
-        Only the keys in the explicit subset of :attr:`state_names` are
-        required (i.e. ``set(state_names) - set(implicit_state_names)``).
-        Extra or missing keys raise ``TypeError``.
-
-        Returns
-        -------
-        dict
-        """
-        explicit = set(self.state_names) - set(self.implicit_state_names)
-        return _make(explicit, f"{type(self).__name__}.make_update", kwargs)
+        import autograd
+        C = self.elastic_stiffness(state)
+        n = autograd.grad(lambda s: self.yield_function(s, state))(stress)
+        return stress - stress_trial + dlambda * (C @ n)
 
     def _vonmises(self, stress: anp.ndarray) -> anp.ndarray:
         """Von Mises equivalent stress with missing-component correction.

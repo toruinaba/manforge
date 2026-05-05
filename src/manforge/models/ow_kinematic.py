@@ -81,7 +81,7 @@ Notes
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel1D, MaterialModel3D, MaterialModelPS
-from manforge.core.state import Implicit
+from manforge.core.state import Implicit, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
@@ -111,7 +111,7 @@ class OWKinematic3D(MaterialModel3D):
 
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape="ntens", doc="backstress tensor")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = SOLID_3D, *,
@@ -154,7 +154,7 @@ class OWKinematic3D(MaterialModel3D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematicPS(MaterialModelPS):
@@ -185,7 +185,7 @@ class OWKinematicPS(MaterialModelPS):
 
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape="ntens", doc="backstress tensor")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = PLANE_STRESS, *,
@@ -217,7 +217,7 @@ class OWKinematicPS(MaterialModelPS):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematic1D(MaterialModel1D):
@@ -246,7 +246,7 @@ class OWKinematic1D(MaterialModel1D):
 
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape="ntens", doc="backstress tensor")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
@@ -278,4 +278,4 @@ class OWKinematic1D(MaterialModel1D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]

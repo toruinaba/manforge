@@ -1,10 +1,14 @@
-"""Tests for StateField descriptors, State wrapper, and make_* factories.
+"""Tests for StateField descriptors, State wrapper, and validation utilities.
 
 Covers:
 - Field collection via MRO (base→derived, subclass overrides parent)
-- Shape resolution: "ntens" → (ntens,), scalar, explicit tuple
-- make_state / make_residual / make_update key validation
+- Shape resolution: NTENS sentinel, scalar, explicit tuple, int
+- "ntens" string input raises TypeError (migration)
+- StateField.__call__ produces StateResidual / StateUpdate
+- _validate_state_items boundary validation
 - State attribute access and immutability
+- _make helper
+- make_state on a real model
 - Migration error: non-empty list state_names / implicit_state_names raise TypeError
 """
 
@@ -12,7 +16,10 @@ import numpy as np
 import pytest
 import autograd.numpy as anp
 
-from manforge.core.state import Implicit, Explicit, StateField, collect_state_fields, State, _make
+from manforge.core.state import (
+    Implicit, Explicit, StateField, collect_state_fields, State, _make, NTENS,
+    StateResidual, StateUpdate, _validate_state_items,
+)
 from manforge.core.material import MaterialModel3D, MaterialModel1D
 from manforge.core.stress_state import SOLID_3D, UNIAXIAL_1D
 
@@ -30,37 +37,39 @@ class _EP(MaterialModel3D):
         return anp.array(0.0)
 
     def update_state(self, dlambda, stress, state):
-        return {"ep": state["ep"] + dlambda}
+        return [self.ep(state["ep"] + dlambda)]
 
 
 class _AlphaEP(MaterialModel3D):
     """alpha (Implicit) and ep (Explicit) mixed model."""
     param_names = []
-    alpha = Implicit(shape="ntens", doc="backstress")
+    alpha = Implicit(shape=NTENS, doc="backstress")
     ep = Explicit(shape=(), doc="plastic strain")
 
     def yield_function(self, stress, state):
         return anp.array(0.0)
 
     def update_state(self, dlambda, stress, state):
-        return {"ep": state["ep"] + dlambda}
+        return [self.ep(state["ep"] + dlambda)]
 
     def state_residual(self, state_new, dlambda, stress, state_n):
-        return {"alpha": state_new["alpha"] - state_n["alpha"]}
+        return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
 class _AllImplicit(MaterialModel3D):
     """Both alpha and ep implicit."""
     param_names = []
-    alpha = Implicit(shape="ntens")
+    alpha = Implicit(shape=NTENS)
     ep = Implicit(shape=())
 
     def yield_function(self, stress, state):
         return anp.array(0.0)
 
     def state_residual(self, state_new, dlambda, stress, state_n):
-        return {"alpha": state_new["alpha"] - state_n["alpha"],
-                "ep": state_new["ep"] - state_n["ep"]}
+        return [
+            self.alpha(state_new["alpha"] - state_n["alpha"]),
+            self.ep(state_new["ep"] - state_n["ep"]),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +106,10 @@ def test_mro_override_explicit_to_implicit():
         ep = Implicit(shape=(), doc="overridden to implicit")
 
         def state_residual(self, state_new, dlambda, stress, state_n):
-            return {
-                "alpha": state_new["alpha"] - state_n["alpha"],
-                "ep": state_new["ep"] - state_n["ep"],
-            }
+            return [
+                self.alpha(state_new["alpha"] - state_n["alpha"]),
+                self.ep(state_new["ep"] - state_n["ep"]),
+            ]
 
     assert _Override.implicit_state_names == ["alpha", "ep"]
     assert _Override.state_names == ["alpha", "ep"]
@@ -109,10 +118,10 @@ def test_mro_override_explicit_to_implicit():
 def test_mro_override_implicit_to_explicit():
     """Subclass can override a parent Implicit field with Explicit."""
     class _Override(_AllImplicit):
-        alpha = Explicit(shape="ntens", doc="overridden to explicit")
+        alpha = Explicit(shape=NTENS, doc="overridden to explicit")
 
         def update_state(self, dlambda, stress, state):
-            return {"alpha": state["alpha"]}
+            return [self.alpha(state["alpha"])]
 
     assert _Override.implicit_state_names == ["ep"]
     assert _Override.state_names == ["alpha", "ep"]
@@ -122,14 +131,20 @@ def test_mro_override_implicit_to_explicit():
 # Shape resolution
 # ---------------------------------------------------------------------------
 
-def test_ntens_shape_resolves_to_6_for_solid_3d():
-    f = Implicit(shape="ntens")
+def test_ntens_sentinel_resolves_to_6_for_solid_3d():
+    f = Implicit(shape=NTENS)
     assert f.resolve_shape(ntens=6) == (6,)
 
 
-def test_ntens_shape_resolves_to_1_for_1d():
-    f = Explicit(shape="ntens")
+def test_ntens_sentinel_resolves_to_1_for_1d():
+    f = Explicit(shape=NTENS)
     assert f.resolve_shape(ntens=1) == (1,)
+
+
+def test_ntens_string_raises_typeerror():
+    """The old 'ntens' magic string must raise TypeError with migration hint."""
+    with pytest.raises(TypeError, match="NTENS sentinel"):
+        Implicit(shape="ntens")
 
 
 def test_scalar_shape_resolves_to_empty_tuple():
@@ -168,6 +183,106 @@ def test_initial_state_uses_field_shapes():
     state = model.initial_state()
     assert np.asarray(state["alpha"]).shape == (6,)
     assert np.asarray(state["ep"]).shape == ()
+
+
+# ---------------------------------------------------------------------------
+# StateField.__call__ (kind dispatch)
+# ---------------------------------------------------------------------------
+
+def test_implicit_field_call_returns_state_residual():
+    model = _AllImplicit(SOLID_3D)
+    result = model.alpha(np.zeros(6))
+    assert isinstance(result, StateResidual)
+    assert result.name == "alpha"
+    assert np.allclose(result.value, np.zeros(6))
+
+
+def test_explicit_field_call_returns_state_update():
+    model = _EP(SOLID_3D)
+    result = model.ep(np.array(0.1))
+    assert isinstance(result, StateUpdate)
+    assert result.name == "ep"
+    assert float(result.value) == pytest.approx(0.1)
+
+
+def test_field_call_name_set_from_class_declaration():
+    """__set_name__ must populate the name attribute correctly."""
+    model = _AlphaEP(SOLID_3D)
+    assert _AlphaEP.state_fields["alpha"].name == "alpha"
+    assert _AlphaEP.state_fields["ep"].name == "ep"
+
+
+def test_state_residual_is_frozen():
+    r = StateResidual(name="alpha", value=np.zeros(6))
+    with pytest.raises(Exception):
+        r.name = "other"
+
+
+def test_state_update_is_frozen():
+    u = StateUpdate(name="ep", value=np.array(0.0))
+    with pytest.raises(Exception):
+        u.name = "other"
+
+
+def test_field_call_without_set_name_raises():
+    """A StateField not declared as a class attribute raises RuntimeError."""
+    f = Implicit(shape=())
+    with pytest.raises(RuntimeError, match="__set_name__"):
+        f(np.array(0.0))
+
+
+# ---------------------------------------------------------------------------
+# _validate_state_items boundary validator
+# ---------------------------------------------------------------------------
+
+def test_validate_state_items_normal_residual():
+    model = _AllImplicit(SOLID_3D)
+    items = [model.alpha(np.ones(6)), model.ep(np.array(0.5))]
+    result = _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "TestModel")
+    assert set(result.keys()) == {"alpha", "ep"}
+    assert np.allclose(result["alpha"], np.ones(6))
+
+
+def test_validate_state_items_wrong_type_update_in_residual():
+    """StateUpdate items returned where StateResidual expected → TypeError."""
+    model = _EP(SOLID_3D)
+    items = [model.ep(np.array(0.5))]  # StateUpdate, not StateResidual
+    with pytest.raises(TypeError, match="StateResidual"):
+        _validate_state_items(items, {"ep"}, StateResidual, "state_residual", "TestModel")
+
+
+def test_validate_state_items_wrong_type_residual_in_update():
+    """StateResidual items returned where StateUpdate expected → TypeError."""
+    model = _AllImplicit(SOLID_3D)
+    items = [model.alpha(np.zeros(6))]  # StateResidual, not StateUpdate
+    with pytest.raises(TypeError, match="StateUpdate"):
+        _validate_state_items(items, {"alpha"}, StateUpdate, "update_state", "TestModel")
+
+
+def test_validate_state_items_not_list_raises():
+    with pytest.raises(TypeError, match="must return a list"):
+        _validate_state_items({"alpha": np.zeros(6)}, {"alpha"}, StateResidual, "state_residual", "M")
+
+
+def test_validate_state_items_duplicate_raises():
+    model = _AllImplicit(SOLID_3D)
+    items = [model.alpha(np.zeros(6)), model.alpha(np.zeros(6))]
+    with pytest.raises(ValueError, match="duplicate"):
+        _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "M")
+
+
+def test_validate_state_items_missing_raises():
+    model = _AllImplicit(SOLID_3D)
+    items = [model.alpha(np.zeros(6))]  # ep missing
+    with pytest.raises(ValueError, match="missing"):
+        _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "M")
+
+
+def test_validate_state_items_extra_raises():
+    model = _AllImplicit(SOLID_3D)
+    items = [model.alpha(np.zeros(6)), model.ep(np.array(0.0))]
+    with pytest.raises(ValueError, match="unexpected"):
+        _validate_state_items(items, {"alpha"}, StateResidual, "state_residual", "M")
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +364,7 @@ def test_make_both_missing_and_extra_raises():
 
 
 # ---------------------------------------------------------------------------
-# make_state / make_residual / make_update on a real model
+# make_state on a real model
 # ---------------------------------------------------------------------------
 
 def test_make_state_all_keys_required():
@@ -263,30 +378,6 @@ def test_make_state_missing_raises():
     model = _AlphaEP(SOLID_3D)
     with pytest.raises(TypeError, match="missing keys"):
         model.make_state(alpha=np.zeros(6))
-
-
-def test_make_residual_implicit_keys_only():
-    model = _AlphaEP(SOLID_3D)
-    r = model.make_residual(alpha=np.zeros(6))
-    assert list(r.keys()) == ["alpha"]
-
-
-def test_make_residual_extra_key_raises():
-    model = _AlphaEP(SOLID_3D)
-    with pytest.raises(TypeError, match="unexpected keys"):
-        model.make_residual(alpha=np.zeros(6), ep=np.array(0.0))
-
-
-def test_make_update_explicit_keys_only():
-    model = _AlphaEP(SOLID_3D)
-    r = model.make_update(ep=np.array(0.0))
-    assert list(r.keys()) == ["ep"]
-
-
-def test_make_update_extra_key_raises():
-    model = _AlphaEP(SOLID_3D)
-    with pytest.raises(TypeError, match="unexpected keys"):
-        model.make_update(ep=np.array(0.0), alpha=np.zeros(6))
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +394,7 @@ def test_list_state_names_non_empty_raises():
                 return anp.array(0.0)
 
             def update_state(self, dlambda, stress, state):
-                return {"ep": state["ep"] + dlambda}
+                return [self.ep(state["ep"] + dlambda)]
 
 
 def test_list_implicit_state_names_non_empty_raises():
@@ -311,13 +402,13 @@ def test_list_implicit_state_names_non_empty_raises():
         class Bad(MaterialModel3D):
             param_names = []
             implicit_state_names = ["alpha"]
-            alpha = Implicit(shape="ntens")
+            alpha = Implicit(shape=NTENS)
 
             def yield_function(self, stress, state):
                 return anp.array(0.0)
 
             def state_residual(self, state_new, dlambda, stress, state_n):
-                return {"alpha": state_new["alpha"]}
+                return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
 def test_empty_list_state_names_allowed():

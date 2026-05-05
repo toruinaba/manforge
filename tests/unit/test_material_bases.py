@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.state import NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
@@ -531,7 +532,7 @@ def test_implicit_state_without_state_residual_raises():
     with pytest.raises(TypeError, match="state_residual"):
         class Bad(MaterialModel3D):
             param_names = []
-            alpha = Implicit(shape="ntens")
+            alpha = Implicit(shape=NTENS)
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -600,7 +601,7 @@ def test_list_implicit_state_names_raises():
         class Bad(MaterialModel3D):
             param_names = []
             implicit_state_names = ["alpha"]
-            alpha = Implicit(shape="ntens")
+            alpha = Implicit(shape=NTENS)
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -617,7 +618,7 @@ def test_mixed_implicit_explicit_requires_both_methods():
     from manforge.core.state import Implicit, Explicit
     class OK(MaterialModel3D):
         param_names = []
-        alpha = Implicit(shape="ntens")
+        alpha = Implicit(shape=NTENS)
         ep = Explicit(shape=())
 
         def elastic_stiffness(self, state=None):
@@ -627,10 +628,10 @@ def test_mixed_implicit_explicit_requires_both_methods():
             pass
 
         def update_state(self, dlambda, stress, state):
-            return {"ep": state["ep"] + dlambda}
+            return [self.ep(state["ep"] + dlambda)]
 
         def state_residual(self, state_new, dlambda, stress, state_n):
-            return {"alpha": state_new["alpha"] - state_n["alpha"]}
+            return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
     assert OK.implicit_state_names == ["alpha"]
     assert OK.implicit_stress is False
@@ -641,7 +642,7 @@ def test_all_implicit_states_no_update_state_needed():
     from manforge.core.state import Implicit
     class OKImplicit(MaterialModel3D):
         param_names = []
-        alpha = Implicit(shape="ntens")
+        alpha = Implicit(shape=NTENS)
         ep = Implicit(shape=())
 
         def elastic_stiffness(self, state=None):
@@ -651,7 +652,7 @@ def test_all_implicit_states_no_update_state_needed():
             pass
 
         def state_residual(self, state_new, dlambda, stress, state_n):
-            return {"alpha": anp.array(0.0), "ep": anp.array(0.0)}
+            return [self.alpha(anp.array(0.0)), self.ep(anp.array(0.0))]
 
     assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}
 

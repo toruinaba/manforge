@@ -53,32 +53,51 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
 ```python
-from manforge.core import Implicit, Explicit
+from manforge.core import Implicit, Explicit, NTENS
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0"]
-    ep    = Explicit(shape=(),      doc="equivalent plastic strain")
-    alpha = Implicit(shape="ntens", doc="backstress tensor")
+    ep    = Explicit(shape=(),   doc="equivalent plastic strain")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
     implicit_stress = True   # σ also an NR unknown
 ```
 
 - `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
 - `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
-- `shape` accepts `"ntens"` (resolves to `(ntens,)` at construction), `()` (scalar), an `int`, or a tuple.
+- `shape` accepts `NTENS` (resolves to `(ntens,)` at construction time), `()` (scalar), an `int`, or a tuple. The string `"ntens"` is no longer accepted — use `NTENS` instead.
 - `state_names` and `implicit_state_names` are derived automatically from the field declarations by `__init_subclass__`; hand-declaring them as non-empty lists raises `TypeError` with a migration hint.
 - `implicit_stress: bool = False` — if `True`, σ is also an NR unknown (fully-coupled vector NR). Default: σ derived from Δλ each iteration.
 
 `__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
 
+The NR system consists of 3 residual equations. The base class provides default implementations for two of them; users only need to override when customising physics:
+- `stress_residual(stress, dlambda, state, stress_trial, state_n)` → shape `(ntens,)`. Default: associative flow `σ − σ_trial + Δλ·C·∂f/∂σ`. Override for non-associative flow rules.
+- `yield_function(stress, state)` → scalar (≤0 = elastic). **Must be implemented.**
+- `state_residual(state_new, dlambda, stress, state_n)` → list of `StateResidual` items. Required when any state is `Implicit`.
+
 Required methods depend on which states are explicit vs implicit:
 - `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
 - `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- `update_state(dlambda, stress, state)` → dict with only the **explicit** state keys. Required whenever any state is `Explicit`. Scalar NR on Δλ when all states are explicit and `implicit_stress = False`.
-- `state_residual(state_new, dlambda, stress, state_n)` → dict with only the **implicit** state keys. Required whenever any state is `Implicit`. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
+- `update_state(dlambda, stress, state)` → `list[StateUpdate]` with only the **explicit** state keys. Required whenever any state is `Explicit`. Scalar NR on Δλ when all states are explicit and `implicit_stress = False`.
+- `state_residual(state_new, dlambda, stress, state_n)` → `list[StateResidual]` with only the **implicit** state keys. Required whenever any state is `Implicit`. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
+
+Use `StateField.__call__` to wrap return values (produces `StateResidual` or `StateUpdate` depending on field kind):
+
+```python
+def state_residual(self, state_new, dlambda, stress, state_n):
+    ...
+    return [self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
+
+def update_state(self, dlambda, stress, state):
+    ...
+    return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate
+```
+
+The framework validates the list at the boundary: wrong kind (`StateResidual` where `StateUpdate` expected), duplicate names, missing or extra fields all raise `TypeError` / `ValueError` immediately.
 
 The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models with a closed-form update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
 
-Factory helpers on the base class (`make_state(**kwargs)`, `make_residual(**kwargs)`, `make_update(**kwargs)`) assemble state/residual/update dicts with strict key validation. Missing or unexpected keys raise `TypeError` at the call site (before any autograd trace).
+Factory helper on the base class: `make_state(**kwargs)` assembles a full `State` wrapper with strict key validation (used for initial-state construction and prestress).
 
 `hardening_type` is no longer used and raises `TypeError` with a migration hint if declared. List-based `state_names = ["ep"]` also raises `TypeError` (use `ep = Explicit(shape=())` instead).
 
