@@ -70,7 +70,7 @@ class MyModel(MaterialModel3D):
 
 `__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
 
-User methods are unified on `State` arguments — stress is accessed via `state["stress"]` (or `state.stress`) like any other state:
+User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
 
 - `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.** Old 2-arg signature `yield_function(self, stress, state)` raises `TypeError`.
 - `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit** state keys (excluding stress, unless user declares `stress = Explicit` and wants custom update). Required whenever any non-stress state is `Explicit`. Old signature `update_state(self, dlambda, stress, state)` raises `TypeError`.
@@ -150,7 +150,7 @@ For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 
 
 ### State variables
 
-State is `dict[str, anp.ndarray]` at the framework boundary (solver inputs/outputs, `ReturnMappingResult.state`, driver results). Inside `update_state` / `state_residual` the framework may also pass a `State` dict-wrapper (from `manforge.core.state`) that provides attribute-style access (`state.alpha` equivalent to `state["alpha"]`) while preserving the dict internally for autograd compatibility. `State` is immutable — assignment raises `AttributeError`.
+State is `dict[str, anp.ndarray]` at the framework boundary (solver inputs/outputs, `ReturnMappingResult.state`, driver results). Inside `update_state` / `state_residual` the framework passes a `State` dict-wrapper (from `manforge.core.state`) that preserves declaration-order field metadata while supporting bracket access (`state["alpha"]`) with autograd compatibility. Use bracket notation consistently — dot access (`state.alpha`) is not supported.
 
 ### Fortran UMAT
 

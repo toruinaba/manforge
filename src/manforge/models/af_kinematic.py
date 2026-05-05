@@ -15,7 +15,7 @@ ep    : equivalent plastic strain (scalar, ≥ 0)
 
 Yield function
 --------------
-f(state) = σ_vm(state.stress − state.alpha) − σ_y0
+f(state) = σ_vm(state["stress"] − state["alpha"]) − σ_y0
 
 where σ_vm is the von Mises equivalent stress of the *relative* stress.
 

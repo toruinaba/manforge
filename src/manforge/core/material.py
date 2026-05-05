@@ -33,9 +33,10 @@ class MaterialModel(ABC):
     Declare ``stress = Implicit(shape=NTENS)`` to include σ as an NR unknown
     (replaces the removed ``implicit_stress = True`` flag).
 
-    User methods receive a ``State`` object for all state arguments (including
-    ``state.stress``).  The ``stress`` argument has been removed from
-    ``yield_function``, ``update_state``, and ``state_residual``.
+    User methods receive a ``State`` dict-wrapper for all state arguments.
+    Access state variables with bracket notation: ``state["stress"]``.
+    The ``stress`` argument has been removed from ``yield_function``,
+    ``update_state``, and ``state_residual``.
 
     Required methods depend on which states are explicit vs implicit:
 
@@ -166,9 +167,9 @@ class MaterialModel(ABC):
             if len(params) >= 3 and params[1] == "stress" and params[2] == "state":
                 raise TypeError(
                     f"{cls.__name__}: yield_function(self, stress, state) is no longer accepted. "
-                    "Update to yield_function(self, state) and access stress via state.stress:\n"
+                    "Update to yield_function(self, state) and access stress via state[\"stress\"]:\n"
                     "    def yield_function(self, state):\n"
-                    "        xi = state.stress - state.alpha\n"
+                    "        xi = state[\"stress\"] - state[\"alpha\"]\n"
                     "        return self._vonmises(xi) - self.sigma_y0"
                 )
         # Reject old update_state(self, dlambda, stress, state) signature.
@@ -180,7 +181,7 @@ class MaterialModel(ABC):
                     f"{cls.__name__}: update_state(self, dlambda, stress, state) is no longer accepted. "
                     "Update to update_state(self, dlambda, state_n, state_trial):\n"
                     "    def update_state(self, dlambda, state_n, state_trial):\n"
-                    "        stress = state_trial.stress\n"
+                    "        stress = state_trial[\"stress\"]\n"
                     "        ..."
                 )
         # Reject old state_residual(self, state_new, dlambda, stress, state_n) signature.
@@ -193,7 +194,7 @@ class MaterialModel(ABC):
                     "is no longer accepted. Update to state_residual(self, state_new, dlambda, "
                     "state_n, state_trial):\n"
                     "    def state_residual(self, state_new, dlambda, state_n, state_trial):\n"
-                    "        stress = state_new.stress\n"
+                    "        stress = state_new[\"stress\"]\n"
                     "        ..."
                 )
         # Collect StateField descriptors from MRO and derive state_names / implicit_state_names.
@@ -275,7 +276,7 @@ class MaterialModel(ABC):
         Parameters
         ----------
         state : State or dict
-            Current state including ``state.stress`` (Voigt notation) and all
+            Current state including ``state["stress"]`` (Voigt notation) and all
             internal state variables.
 
         Returns
@@ -306,7 +307,7 @@ class MaterialModel(ABC):
         state_n : State or dict
             State at the beginning of the increment.
         state_trial : State or dict
-            Trial state (``state_trial.stress`` is the elastic trial stress).
+            Trial state (``state_trial["stress"]`` is the elastic trial stress).
 
         Returns
         -------
@@ -347,7 +348,7 @@ class MaterialModel(ABC):
         state_n : State or dict
             State at the beginning of the increment.
         state_trial : State or dict
-            Trial state (``state_trial.stress`` is the elastic trial stress).
+            Trial state (``state_trial["stress"]`` is the elastic trial stress).
 
         Returns
         -------
@@ -493,8 +494,7 @@ class MaterialModel(ABC):
         dlambda : scalar
             Plastic multiplier increment Δλ.
         state_trial : State or dict
-            Trial state; ``state_trial["stress"]`` is the fixed elastic
-            predictor σ_trial.
+            Trial state; ``state_trial["stress"]`` is the fixed elastic predictor σ_trial.
 
         Returns
         -------
@@ -534,8 +534,7 @@ class MaterialModel(ABC):
         state_n : State or dict
             State at the beginning of the increment (unused by default).
         state_trial : State or dict
-            Trial state; ``state_trial["stress"]`` is the framework-pre-computed
-            associative σ iterate.
+            Trial state; ``state_trial["stress"]`` is the framework-pre-computed associative σ iterate.
 
         Returns
         -------
