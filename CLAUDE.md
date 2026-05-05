@@ -50,20 +50,37 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 **1. Material model layer** — `src/manforge/core/material.py`
 
-`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. Two class-level attributes control the NR unknown set:
+`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
-- `implicit_state_names: list[str] = []` — names of state variables treated as independent NR unknowns (must be a subset of `state_names`). Default `[]` → all states are explicit.
-- `implicit_stress: bool = False` — if `True`, σ is also included as an independent NR unknown (gives the fully-coupled vector NR). Default `False` → σ is derived from Δλ via the consistency condition each iteration.
+```python
+from manforge.core import Implicit, Explicit
+
+class MyModel(MaterialModel3D):
+    param_names = ["E", "nu", "sigma_y0"]
+    ep    = Explicit(shape=(),      doc="equivalent plastic strain")
+    alpha = Implicit(shape="ntens", doc="backstress tensor")
+    implicit_stress = True   # σ also an NR unknown
+```
+
+- `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
+- `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
+- `shape` accepts `"ntens"` (resolves to `(ntens,)` at construction), `()` (scalar), an `int`, or a tuple.
+- `state_names` and `implicit_state_names` are derived automatically from the field declarations by `__init_subclass__`; hand-declaring them as non-empty lists raises `TypeError` with a migration hint.
+- `implicit_stress: bool = False` — if `True`, σ is also an NR unknown (fully-coupled vector NR). Default: σ derived from Δλ each iteration.
+
+`__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
 
 Required methods depend on which states are explicit vs implicit:
 - `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
 - `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- `update_state(dlambda, stress, state)` → dict with only the **explicit** state keys (`state_names − implicit_state_names`). Required whenever any state is explicit. Scalar NR on Δλ when `implicit_state_names = []` and `implicit_stress = False`.
-- `state_residual(state_new, dlambda, stress, state_n)` → dict with only the **implicit** state keys (`implicit_state_names`). Required whenever any state is implicit. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
+- `update_state(dlambda, stress, state)` → dict with only the **explicit** state keys. Required whenever any state is `Explicit`. Scalar NR on Δλ when all states are explicit and `implicit_stress = False`.
+- `state_residual(state_new, dlambda, stress, state_n)` → dict with only the **implicit** state keys. Required whenever any state is `Implicit`. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
 
-The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models that have a closed-form explicit update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
+The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models with a closed-form update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
 
-`hardening_type` is no longer used and raises `TypeError` with a migration hint if declared.
+Factory helpers on the base class (`make_state(**kwargs)`, `make_residual(**kwargs)`, `make_update(**kwargs)`) assemble state/residual/update dicts with strict key validation. Missing or unexpected keys raise `TypeError` at the call site (before any autograd trace).
+
+`hardening_type` is no longer used and raises `TypeError` with a migration hint if declared. List-based `state_names = ["ep"]` also raises `TypeError` (use `ep = Explicit(shape=())` instead).
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
@@ -113,7 +130,7 @@ For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 
 
 ### State variables
 
-State is `dict[str, anp.ndarray]`, e.g. `{"ep": 0.05}` for equivalent plastic strain.
+State is `dict[str, anp.ndarray]` at the framework boundary (solver inputs/outputs, `ReturnMappingResult.state`, driver results). Inside `update_state` / `state_residual` the framework may also pass a `State` dict-wrapper (from `manforge.core.state`) that provides attribute-style access (`state.alpha` equivalent to `state["alpha"]`) while preserving the dict internally for autograd compatibility. `State` is immutable — assignment raises `AttributeError`.
 
 ### Fortran UMAT
 

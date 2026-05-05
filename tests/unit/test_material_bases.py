@@ -511,12 +511,12 @@ def test_1d_I_dev_projects_to_deviatoric():
 # ---------------------------------------------------------------------------
 
 def test_explicit_state_without_update_state_raises():
-    """Model with explicit states (implicit_state_names=[]) must implement update_state."""
+    """Model with an Explicit field but no update_state must raise TypeError."""
+    from manforge.core.state import Explicit
     with pytest.raises(TypeError, match="update_state"):
         class Bad(MaterialModel3D):
             param_names = []
-            state_names = ["ep"]
-            implicit_state_names = []
+            ep = Explicit(shape=())
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -526,12 +526,12 @@ def test_explicit_state_without_update_state_raises():
 
 
 def test_implicit_state_without_state_residual_raises():
-    """Model with implicit states must implement state_residual."""
+    """Model with an Implicit field but no state_residual must raise TypeError."""
+    from manforge.core.state import Implicit
     with pytest.raises(TypeError, match="state_residual"):
         class Bad(MaterialModel3D):
             param_names = []
-            state_names = ["alpha"]
-            implicit_state_names = ["alpha"]
+            alpha = Implicit(shape="ntens")
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -546,7 +546,6 @@ def test_hardening_type_attribute_raises():
         class Bad(MaterialModel3D):
             hardening_type = "augmented"
             param_names = []
-            state_names = []
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -560,9 +559,27 @@ def test_hardening_type_attribute_raises():
 
 def test_hardening_type_reduced_hint():
     """hardening_type='reduced' gives hint to remove the attribute."""
+    from manforge.core.state import Explicit
     with pytest.raises(TypeError, match="implicit_state_names=\\[\\] is the default"):
         class Bad(MaterialModel3D):
             hardening_type = "reduced"
+            param_names = []
+            ep = Explicit(shape=())
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, stress, state):
+                pass
+
+            def update_state(self, dlambda, stress, state):
+                return {"ep": state["ep"] + dlambda}
+
+
+def test_list_state_names_raises():
+    """Declaring non-empty list state_names raises TypeError with migration hint."""
+    with pytest.raises(TypeError, match="list-based state_names has been removed"):
+        class Bad(MaterialModel3D):
             param_names = []
             state_names = ["ep"]
 
@@ -576,13 +593,14 @@ def test_hardening_type_reduced_hint():
                 return {"ep": state["ep"] + dlambda}
 
 
-def test_implicit_state_names_not_in_state_names_raises():
-    """implicit_state_names containing unknown keys must raise TypeError."""
-    with pytest.raises(TypeError, match="not in state_names"):
+def test_list_implicit_state_names_raises():
+    """Declaring non-empty list implicit_state_names raises TypeError with migration hint."""
+    from manforge.core.state import Implicit
+    with pytest.raises(TypeError, match="list-based implicit_state_names has been removed"):
         class Bad(MaterialModel3D):
             param_names = []
-            state_names = ["ep"]
-            implicit_state_names = ["alpha"]  # "alpha" not in state_names
+            implicit_state_names = ["alpha"]
+            alpha = Implicit(shape="ntens")
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -596,10 +614,11 @@ def test_implicit_state_names_not_in_state_names_raises():
 
 def test_mixed_implicit_explicit_requires_both_methods():
     """Partial implicit (some explicit, some implicit) requires both methods."""
+    from manforge.core.state import Implicit, Explicit
     class OK(MaterialModel3D):
         param_names = []
-        state_names = ["alpha", "ep"]
-        implicit_state_names = ["alpha"]  # ep is explicit
+        alpha = Implicit(shape="ntens")
+        ep = Explicit(shape=())
 
         def elastic_stiffness(self, state=None):
             pass
@@ -619,10 +638,11 @@ def test_mixed_implicit_explicit_requires_both_methods():
 
 def test_all_implicit_states_no_update_state_needed():
     """Model with all states implicit does not need update_state."""
+    from manforge.core.state import Implicit
     class OKImplicit(MaterialModel3D):
         param_names = []
-        state_names = ["alpha", "ep"]
-        implicit_state_names = ["alpha", "ep"]
+        alpha = Implicit(shape="ntens")
+        ep = Implicit(shape=())
 
         def elastic_stiffness(self, state=None):
             pass
@@ -636,11 +656,10 @@ def test_all_implicit_states_no_update_state_needed():
     assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}
 
 
-def test_no_state_names_no_methods_needed():
-    """Model with empty state_names needs neither update_state nor state_residual."""
+def test_no_state_fields_no_methods_needed():
+    """Model with no StateField declarations needs neither update_state nor state_residual."""
     class OKStateless(MaterialModel3D):
         param_names = []
-        state_names = []
 
         def elastic_stiffness(self, state=None):
             pass
@@ -648,6 +667,7 @@ def test_no_state_names_no_methods_needed():
         def yield_function(self, stress, state):
             pass
 
+    assert OKStateless.state_names == []
     assert OKStateless.implicit_state_names == []
 
 

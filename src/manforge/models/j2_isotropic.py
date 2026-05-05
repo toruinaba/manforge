@@ -25,6 +25,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.state import Explicit
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 from manforge.core.stress_update import ReturnMappingResult
 from manforge.verification.fortran_registry import verified_against_fortran
@@ -33,7 +34,7 @@ from manforge.verification.fortran_registry import verified_against_fortran
 class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
-    ``hardening_type = "reduced"``: implements ``update_state`` which
+    Uses the scalar NR path (all states explicit): implements ``update_state`` which
     returns the updated state directly in closed form (Δep = Δλ).
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
@@ -70,7 +71,7 @@ class J2Isotropic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    state_names = ["ep"]
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
@@ -79,10 +80,6 @@ class J2Isotropic3D(MaterialModel3D):
         self.nu = nu
         self.sigma_y0 = sigma_y0
         self.H = H
-
-    # ------------------------------------------------------------------
-    # Material physics — reduced hardening (hardening_type = "reduced")
-    # ------------------------------------------------------------------
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
@@ -178,7 +175,7 @@ class J2Isotropic3D(MaterialModel3D):
 class J2IsotropicPS(MaterialModelPS):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
-    ``hardening_type = "reduced"``: implements ``update_state``
+    Uses the scalar NR path (all states explicit): implements ``update_state``
     (Δep = Δλ). Uses the autodiff return-mapping path (``method="auto"``).
     A closed-form plane-stress corrector (which requires an iterative σ33 = 0
     enforcement loop) is not yet implemented.
@@ -205,7 +202,7 @@ class J2IsotropicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    state_names = ["ep"]
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, H: float):
@@ -228,7 +225,7 @@ class J2IsotropicPS(MaterialModelPS):
 class J2Isotropic1D(MaterialModel1D):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
-    ``hardening_type = "reduced"``: implements ``update_state``
+    Uses the scalar NR path (all states explicit): implements ``update_state``
     (Δep = Δλ). Provides closed-form ``user_defined_return_mapping`` and
     ``user_defined_tangent`` using the 1D radial return mapping.
 
@@ -250,7 +247,7 @@ class J2Isotropic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    state_names = ["ep"]
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
