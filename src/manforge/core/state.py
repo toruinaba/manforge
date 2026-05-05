@@ -225,6 +225,52 @@ class StateUpdate:
 
 
 # ---------------------------------------------------------------------------
+# DlambdaResidual / DlambdaField — optional Δλ row override
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DlambdaResidual:
+    """Optional override for the Δλ row of the NR residual.
+
+    Produced by ``self.dlambda(R)`` inside ``state_residual``.  If present in
+    the returned list, the framework uses this as the Δλ row instead of the
+    default ``model.yield_function(state) = 0``.
+
+    Use this to implement viscoplasticity (Perzyna), non-standard consistency
+    conditions, or any model where the equation determining Δλ differs from the
+    yield surface.
+    """
+
+    value: Any
+
+
+class DlambdaField:
+    """Framework-provided pseudo-field for the Δλ NR unknown.
+
+    Not a :class:`StateField` — does not appear in ``state_fields`` /
+    ``state_names`` / ``implicit_state_names``.  A single stateless singleton
+    ``DLAMBDA_FIELD`` is attached to :class:`~manforge.core.material.MaterialModel`
+    as the class attribute ``dlambda`` so that users can write
+    ``self.dlambda(R_dl)`` inside ``state_residual``.
+
+    Example::
+
+        def state_residual(self, state_new, dlambda, state_n, state_trial):
+            f = self.yield_function(state_new)
+            R_dl = f - self.eta * dlambda / self.dt   # Perzyna
+            return [self.dlambda(R_dl), self.alpha(R_alpha)]
+    """
+
+    __slots__ = ()
+
+    def __call__(self, value) -> DlambdaResidual:
+        return DlambdaResidual(value=value)
+
+
+DLAMBDA_FIELD = DlambdaField()
+
+
+# ---------------------------------------------------------------------------
 # Boundary validator
 # ---------------------------------------------------------------------------
 

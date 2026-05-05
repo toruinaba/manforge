@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import autograd.numpy as anp
 
 from manforge.autodiff.operators import identity_voigt
-from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS
+from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS, DLAMBDA_FIELD
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 from manforge.utils.smooth import smooth_sqrt
 
@@ -77,6 +77,11 @@ class MaterialModel(ABC):
     state_fields: dict[str, StateField] = {}
     state_names: list[str] = []
     implicit_state_names: list[str] = []
+
+    # Framework-provided pseudo-field for the Δλ NR unknown.  Users can
+    # optionally return self.dlambda(R_dl) from state_residual to override
+    # the default R_dλ = yield_function(state).
+    dlambda = DLAMBDA_FIELD
 
     @property
     def params(self) -> dict:
