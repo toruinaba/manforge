@@ -14,6 +14,7 @@ import pytest
 import numpy as np
 import autograd.numpy as anp
 
+from manforge.core.state import Implicit, Explicit, NTENS
 from manforge.models.af_kinematic import AFKinematic3D
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.verification.fd_check import check_tangent
@@ -26,15 +27,16 @@ from manforge.verification.fd_check import check_tangent
 class _AFAlphaImplicit(AFKinematic3D):
     """AF 3D with only alpha declared as an implicit state (ep remains explicit).
 
+    MRO override: re-declare ``alpha`` as Implicit; ``ep`` stays Explicit from parent.
     update_state returns only the explicit key (ep).
     state_residual returns only the implicit key (alpha).
     """
 
-    implicit_state_names = ["alpha"]
     implicit_stress = False
+    alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
     def update_state(self, dlambda, stress, state_n):
-        return {"ep": state_n["ep"] + dlambda}
+        return [self.ep(state_n["ep"] + dlambda)]
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -44,7 +46,7 @@ class _AFAlphaImplicit(AFKinematic3D):
         n_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        return {"alpha": R_alpha}
+        return [self.alpha(R_alpha)]
 
 
 # ---------------------------------------------------------------------------
@@ -54,11 +56,11 @@ class _AFAlphaImplicit(AFKinematic3D):
 class _AFAlphaImplicitStress(AFKinematic3D):
     """AF 3D with alpha implicit and σ as an independent NR unknown."""
 
-    implicit_state_names = ["alpha"]
     implicit_stress = True
+    alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
     def update_state(self, dlambda, stress, state_n):
-        return {"ep": state_n["ep"] + dlambda}
+        return [self.ep(state_n["ep"] + dlambda)]
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -68,7 +70,7 @@ class _AFAlphaImplicitStress(AFKinematic3D):
         n_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        return {"alpha": R_alpha}
+        return [self.alpha(R_alpha)]
 
 
 # ---------------------------------------------------------------------------

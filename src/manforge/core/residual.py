@@ -4,6 +4,8 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
+from manforge.core.state import StateResidual, StateUpdate, _validate_state_items
+
 
 # ---------------------------------------------------------------------------
 # State flatten / unflatten helpers
@@ -41,39 +43,59 @@ def _unflatten_state(vec, shapes: list) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Key-consistency validation helpers (called at first NR evaluation)
+# Return-value normalisation helpers
 # ---------------------------------------------------------------------------
 
-def _check_update_state_keys(model_name, returned: dict, expected_keys: set):
-    actual = set(returned.keys())
-    if actual != expected_keys:
-        extra = actual - expected_keys
-        missing = expected_keys - actual
-        parts = []
-        if extra:
-            parts.append(f"unexpected keys: {sorted(extra)}")
-        if missing:
-            parts.append(f"missing keys: {sorted(missing)}")
-        raise ValueError(
-            f"{model_name}.update_state() returned wrong keys "
-            f"({'; '.join(parts)}). Expected: {sorted(expected_keys)}"
-        )
+def _normalise_update(returned, explicit_keys: set, model_name: str) -> dict:
+    """Accept list[StateUpdate] or legacy dict from update_state; return a plain dict."""
+    if isinstance(returned, list):
+        return _validate_state_items(returned, explicit_keys, StateUpdate, "update_state", model_name)
+    # Legacy / default: plain dict (e.g. default state_residual impl, or old-style models)
+    if isinstance(returned, dict):
+        actual = set(returned.keys())
+        if actual != explicit_keys:
+            extra = actual - explicit_keys
+            missing = explicit_keys - actual
+            parts = []
+            if extra:
+                parts.append(f"unexpected keys: {sorted(extra)}")
+            if missing:
+                parts.append(f"missing keys: {sorted(missing)}")
+            raise ValueError(
+                f"{model_name}.update_state() returned wrong keys "
+                f"({'; '.join(parts)}). Expected: {sorted(explicit_keys)}"
+            )
+        return returned
+    raise TypeError(
+        f"{model_name}.update_state must return a list of StateUpdate "
+        f"(use `self.<field>(value)`) or a dict, got {type(returned).__name__}"
+    )
 
 
-def _check_state_residual_keys(model_name, returned: dict, expected_keys: set):
-    actual = set(returned.keys())
-    if actual != expected_keys:
-        extra = actual - expected_keys
-        missing = expected_keys - actual
-        parts = []
-        if extra:
-            parts.append(f"unexpected keys: {sorted(extra)}")
-        if missing:
-            parts.append(f"missing keys: {sorted(missing)}")
-        raise ValueError(
-            f"{model_name}.state_residual() returned wrong keys "
-            f"({'; '.join(parts)}). Expected: {sorted(expected_keys)}"
-        )
+def _normalise_residual(returned, implicit_keys: set, model_name: str) -> dict:
+    """Accept list[StateResidual] or legacy dict from state_residual; return a plain dict."""
+    if isinstance(returned, list):
+        return _validate_state_items(returned, implicit_keys, StateResidual, "state_residual", model_name)
+    # Legacy / default: plain dict
+    if isinstance(returned, dict):
+        actual = set(returned.keys())
+        if actual != implicit_keys:
+            extra = actual - implicit_keys
+            missing = implicit_keys - actual
+            parts = []
+            if extra:
+                parts.append(f"unexpected keys: {sorted(extra)}")
+            if missing:
+                parts.append(f"missing keys: {sorted(missing)}")
+            raise ValueError(
+                f"{model_name}.state_residual() returned wrong keys "
+                f"({'; '.join(parts)}). Expected: {sorted(implicit_keys)}"
+            )
+        return returned
+    raise TypeError(
+        f"{model_name}.state_residual must return a list of StateResidual "
+        f"(use `self.<field>(value)`) or a dict, got {type(returned).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +161,9 @@ def make_nr_residual(model, stress_trial, state_n):
             sig = x[_sig_sl]
             # Compute explicit states from update_state using current sig.
             if explicit_keys:
-                q_exp = model.update_state(dlambda, sig, state_n)
-                _check_update_state_keys(model_name, q_exp, explicit_keys)
+                q_exp = _normalise_update(
+                    model.update_state(dlambda, sig, state_n), explicit_keys, model_name
+                )
                 q_full = {**q_imp, **q_exp}
             else:
                 q_full = q_imp
@@ -159,24 +182,24 @@ def make_nr_residual(model, stress_trial, state_n):
             )(anp.array(stress_trial))
             sig = anp.array(stress_trial) - dlambda * (C_approx @ n_approx)
             if explicit_keys:
-                q_exp = model.update_state(dlambda, sig, state_n)
-                _check_update_state_keys(model_name, q_exp, explicit_keys)
+                q_exp = _normalise_update(
+                    model.update_state(dlambda, sig, state_n), explicit_keys, model_name
+                )
                 q_full = {**q_imp, **q_exp}
             else:
                 q_full = q_imp if q_imp else {}
 
-        C = model.elastic_stiffness(q_full)
-        n = autograd.grad(lambda s: model.yield_function(s, q_full))(sig)
         R_yield = model.yield_function(sig, q_full)
 
         parts = []
         if do_implicit_stress:
-            R_stress = sig - anp.array(stress_trial) + dlambda * (C @ n)
+            R_stress = model.stress_residual(sig, dlambda, q_full, anp.array(stress_trial), state_n)
             parts.append(R_stress)
         parts.append(anp.atleast_1d(R_yield))
         if n_implicit > 0:
-            R_state_dict = model.state_residual(q_imp, dlambda, sig, state_n)
-            _check_state_residual_keys(model_name, R_state_dict, set(implicit_keys))
+            R_state_dict = _normalise_residual(
+                model.state_residual(q_imp, dlambda, sig, state_n), set(implicit_keys), model_name
+            )
             R_state_flat, _ = _flatten_state(R_state_dict)
             parts.append(R_state_flat)
 
@@ -220,22 +243,21 @@ def make_tangent_residual(model, stress_trial, state_n):
             q_imp = {}
 
         if explicit_keys:
-            q_exp = model.update_state(dlambda, sig, state_n)
-            _check_update_state_keys(model_name, q_exp, explicit_keys)
+            q_exp = _normalise_update(
+                model.update_state(dlambda, sig, state_n), explicit_keys, model_name
+            )
             q_full = {**q_imp, **q_exp}
         else:
             q_full = q_imp
 
-        C = model.elastic_stiffness(q_full)
-        n = autograd.grad(lambda s: model.yield_function(s, q_full))(sig)
-
-        R_stress = sig - anp.array(stress_trial) + dlambda * (C @ n)
+        R_stress = model.stress_residual(sig, dlambda, q_full, anp.array(stress_trial), state_n)
         R_yield = model.yield_function(sig, q_full)
 
         parts = [R_stress, anp.atleast_1d(R_yield)]
         if n_implicit > 0:
-            R_state_dict = model.state_residual(q_imp, dlambda, sig, state_n)
-            _check_state_residual_keys(model_name, R_state_dict, set(implicit_keys))
+            R_state_dict = _normalise_residual(
+                model.state_residual(q_imp, dlambda, sig, state_n), set(implicit_keys), model_name
+            )
             R_state_flat, _ = _flatten_state(R_state_dict)
             parts.append(R_state_flat)
 

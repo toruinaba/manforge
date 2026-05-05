@@ -278,7 +278,8 @@ class TestAFPattern:
         stress = anp.zeros(6)
 
         def alpha_sq_norm(dl):
-            st = model.update_state(dl, stress, state0)
+            items = model.update_state(dl, stress, state0)
+            st = {item.name: item.value for item in items}
             return anp.sum(st["alpha"] ** 2)
 
         # Gradient at dlambda=0 (where xi = stress - alpha = 0)

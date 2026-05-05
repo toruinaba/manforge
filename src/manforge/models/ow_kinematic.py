@@ -3,8 +3,8 @@
 This model is the canonical example of a *genuinely implicit* hardening law
 in manforge.  Unlike the standard Armstrong-Frederick model, the backward-Euler
 discretization of the Ohno-Wang evolution equation cannot be solved in closed
-form, so the model overrides ``state_residual`` and triggers the augmented
-(ntens+1+n_state) residual system automatically.
+form, so the model overrides ``state_residual`` and triggers the vector NR path
+automatically.
 
 Model parameters
 ----------------
@@ -45,7 +45,7 @@ Rearranged as a residual (the form used by ``state_residual``):
     R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
 
 Because ‖α_{n+1}‖ appears nonlinearly, this cannot be solved for α_{n+1} in
-closed form.  Setting ``implicit_state_names = state_names`` and
+closed form.  Declaring both state variables as ``Implicit`` and setting
 ``implicit_stress = True`` activates the vector Newton-Raphson path and
 the correct consistent tangent automatically.
 
@@ -62,7 +62,7 @@ the same saturation backstress amplitude with both models, choose:
 
 Flow direction consistency
 --------------------------
-The augmented residual system (``core/residual.py``) computes the flow
+The vector residual system (``core/residual.py``) computes the flow
 direction as ``n = ∂f/∂σ`` evaluated at ``(σ, state_new)``.  For this model
 ``f = σ_vm(σ − α)``, so ``n`` depends on ``α_{n+1}``.  For full backward-Euler
 consistency, ``state_residual`` also evaluates ``n̂`` from the relative
@@ -73,14 +73,15 @@ Notes
 -----
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k
   (same limit as standard AF).
-* The plastic increment is always solved via the augmented NR using
-  ``state_residual``.  No ``update_state`` is defined because
-  ``implicit_state_names`` does not require one.
+* The plastic increment is always solved via the vector NR using
+  ``state_residual``.  No ``update_state`` is defined because all states are
+  declared ``Implicit``.
 """
 
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel1D, MaterialModel3D, MaterialModelPS
+from manforge.core.state import Implicit, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
@@ -88,9 +89,8 @@ class OWKinematic3D(MaterialModel3D):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`.
-    Uses the vector NR path (``implicit_state_names = state_names``) because the
-    backward-Euler discretisation of the Ohno-Wang evolution equation is genuinely
-    implicit.
+    Uses the vector NR path because the backward-Euler discretisation of the
+    Ohno-Wang evolution equation is genuinely implicit.
 
     Parameters
     ----------
@@ -109,10 +109,10 @@ class OWKinematic3D(MaterialModel3D):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -122,13 +122,6 @@ class OWKinematic3D(MaterialModel3D):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -143,9 +136,6 @@ class OWKinematic3D(MaterialModel3D):
         The flow direction ``n̂`` is evaluated at the *new* relative stress
         ``σ − α_{n+1}`` for full backward-Euler consistency with the flow
         direction used in the stress residual equation.
-
-        Required because ``implicit_state_names = state_names``, which activates
-        the vector Newton-Raphson solver and the correct consistent tangent.
         """
         alpha_new = state_new["alpha"]
 
@@ -164,7 +154,7 @@ class OWKinematic3D(MaterialModel3D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematicPS(MaterialModelPS):
@@ -174,7 +164,7 @@ class OWKinematicPS(MaterialModelPS):
     :class:`~manforge.core.material.MaterialModelPS` (including the
     missing-component correction in ``_vonmises``).
 
-    Uses the vector NR path (``implicit_state_names = state_names``).
+    Uses the vector NR path (all states implicit).
 
     Parameters
     ----------
@@ -193,10 +183,10 @@ class OWKinematicPS(MaterialModelPS):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -206,13 +196,6 @@ class OWKinematicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -234,7 +217,7 @@ class OWKinematicPS(MaterialModelPS):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematic1D(MaterialModel1D):
@@ -243,7 +226,7 @@ class OWKinematic1D(MaterialModel1D):
     Inherits operator methods from
     :class:`~manforge.core.material.MaterialModel1D`.
 
-    Uses the vector NR path (``implicit_state_names = state_names``).
+    Uses the vector NR path (all states implicit).
 
     Parameters
     ----------
@@ -261,10 +244,10 @@ class OWKinematic1D(MaterialModel1D):
         Dynamic recovery parameter (Ohno-Wang nonlinearity).
     """
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    ep = Implicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -274,13 +257,6 @@ class OWKinematic1D(MaterialModel1D):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -302,4 +278,4 @@ class OWKinematic1D(MaterialModel1D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]

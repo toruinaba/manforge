@@ -40,21 +40,21 @@ Notes
 * gamma=0 reduces to Prager's linear kinematic hardening rule with modulus C_k.
 * The saturated backstress magnitude under monotonic loading is C_k / gamma.
 * No user_defined_return_mapping or user_defined_tangent is provided; the
-  generic numerical_newton + JAX autodiff path is used, which is exactly what
+  generic numerical_newton + autodiff path is used, which is exactly what
   this model is designed to test.
 """
 
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.state import Explicit, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    ``hardening_type = "reduced"``: implements ``update_state`` which
-    solves the backward-Euler AF equation in closed form.
+    Uses the scalar NR path (all states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
     Parameters
@@ -75,7 +75,8 @@ class AFKinematic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -85,13 +86,6 @@ class AFKinematic3D(MaterialModel3D):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -111,14 +105,13 @@ class AFKinematic3D(MaterialModel3D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
 
 
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
-    ``hardening_type = "reduced"``: implements ``update_state`` with
-    closed-form backward-Euler AF update.
+    Uses the scalar NR path (all states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path.
 
     Inherits operator methods from
@@ -143,7 +136,8 @@ class AFKinematicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -153,13 +147,6 @@ class AFKinematicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -174,14 +161,13 @@ class AFKinematicPS(MaterialModelPS):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
 
 
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
-    ``hardening_type = "reduced"``: implements ``update_state`` with
-    closed-form backward-Euler AF update.
+    Uses the scalar NR path (all states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path.
 
     Inherits operator methods from
@@ -204,7 +190,8 @@ class AFKinematic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    alpha = Explicit(shape=NTENS, doc="backstress tensor")
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -214,13 +201,6 @@ class AFKinematic1D(MaterialModel1D):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
-
-    def initial_state(self) -> dict:
-        """Return virgin state: zero backstress tensor and zero plastic strain."""
-        return {
-            "alpha": anp.zeros(self.ntens),
-            "ep": anp.array(0.0),
-        }
 
     def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
@@ -235,4 +215,4 @@ class AFKinematic1D(MaterialModel1D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return {"alpha": alpha_new, "ep": state["ep"] + dlambda}
+        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]

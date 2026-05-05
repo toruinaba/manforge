@@ -11,8 +11,13 @@ Rearranged as a residual:
 
 n_hat is evaluated at (stress - alpha_n) — i.e., the OLD backstress — so both
 paths are algebraically identical at convergence.
+
+Uses MRO override: re-declare ``alpha`` and ``ep`` as ``Implicit`` to activate
+the vector NR path.  ``implicit_stress = True`` is set to match the OW model
+behaviour for cross-testing purposes.
 """
 
+from manforge.core.state import Implicit, NTENS
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
 from manforge.core.stress_state import PLANE_STRAIN
 
@@ -20,8 +25,9 @@ from manforge.core.stress_state import PLANE_STRAIN
 class _AFKinematicImplicit3D(AFKinematic3D):
     """AF kinematic 3D model with hardening expressed as an implicit residual."""
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
+    ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -33,14 +39,15 @@ class _AFKinematicImplicit3D(AFKinematic3D):
         scale = 1.0 + self.gamma * dlambda
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class _AFKinematicImplicitPS(AFKinematicPS):
     """Plane-stress variant of the implicit AF model."""
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
+    ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
     def state_residual(self, state_new, dlambda, stress, state_n):
         alpha_n = state_n["alpha"]
@@ -52,14 +59,15 @@ class _AFKinematicImplicitPS(AFKinematicPS):
         scale = 1.0 + self.gamma * dlambda
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
-    implicit_state_names = ["alpha", "ep"]
     implicit_stress = True
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
+    ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
     def __init__(self):
         super().__init__(stress_state=PLANE_STRAIN,
@@ -75,4 +83,4 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         scale = 1.0 + self.gamma * dlambda
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        return [self.alpha(R_alpha), self.ep(R_ep)]
