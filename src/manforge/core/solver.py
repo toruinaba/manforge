@@ -10,6 +10,7 @@ from manforge.core.residual import (
     _normalise_update,
     _wrap_state,
     _call_update_state,
+    _call_state_residual,
     _state_with_stress,
 )
 from manforge.core.state import _state_with_stress as _state_with_stress_fn
@@ -52,6 +53,7 @@ def _numerical_newton(model, stress_trial, state_n, max_iter, tol,
 
 def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverged):
     """Scalar NR on Δλ (stress=Explicit, no implicit non-stress states)."""
+    from manforge.core.material import MaterialModel as _MaterialModel
     dlambda = anp.array(0.0)
     stress = anp.array(stress_trial)
     state_new = state_n
@@ -65,6 +67,22 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
         k for k in model.state_names
         if k != "stress" and k not in model.implicit_state_names
     )
+    user_has_state_residual = (
+        type(model).state_residual is not _MaterialModel.state_residual
+    )
+
+    def _eval_R_dl(dl, state_new_dict):
+        """Return R_dl: user override if present, else yield_function."""
+        if user_has_state_residual:
+            # state_trial["stress"] = current stress for the Explicit case
+            trial_dict = dict(state_new_dict)
+            _, r_dl = _call_state_residual(
+                model, state_new_dict, dl, state_n, trial_dict,
+                set(), model_name  # no implicit non-stress keys in scalar-NR
+            )
+            if r_dl is not None:
+                return r_dl
+        return model.yield_function(_wrap_state(state_new_dict, model))
 
     for _iteration in range(max_iter):
         # Update explicit non-stress states
@@ -103,8 +121,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
         else:
             state_new = {"stress": stress}
 
-        state_new_state = _wrap_state(state_new, model)
-        f = model.yield_function(state_new_state)
+        f = _eval_R_dl(dlambda, state_new)
         residual_history.append(float(np.abs(float(f))))
 
         if abs(float(f)) < tol:
@@ -127,7 +144,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
             )(_stress)
             s_upd = anp.array(stress_trial) - dl * (model.elastic_stiffness(st_state) @ nn)
             st2 = {"stress": s_upd, **{k: v for k, v in st.items() if k != "stress"}}
-            return model.yield_function(_wrap_state(st2, model))
+            return _eval_R_dl(dl, st2)
 
         dfddl = autograd.grad(_f_residual)(dlambda)
         dlambda = dlambda - f / dfddl

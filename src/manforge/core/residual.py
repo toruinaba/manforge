@@ -5,7 +5,8 @@ import autograd.numpy as anp
 import numpy as np
 
 from manforge.core.state import (
-    StateResidual, StateUpdate, State, _validate_state_items, _state_with_stress,
+    StateResidual, StateUpdate, DlambdaResidual, State,
+    _validate_state_items, _state_with_stress,
 )
 
 
@@ -127,6 +128,12 @@ def _call_update_state(model, dlambda, state_n_dict, state_trial_dict,
     expected_all = (expected_explicit_keys | {"stress"}) if require_stress else expected_explicit_keys
     if isinstance(returned, list):
         for item in returned:
+            if isinstance(item, DlambdaResidual):
+                raise TypeError(
+                    f"{model_name}.update_state: self.dlambda(...) is not allowed in "
+                    "update_state (Δλ has no explicit update rule). "
+                    "Use state_residual to override the Δλ residual instead."
+                )
             if not isinstance(item, StateUpdate):
                 raise TypeError(
                     f"{model_name}.update_state: every item must be StateUpdate, "
@@ -179,10 +186,18 @@ def _call_update_state(model, dlambda, state_n_dict, state_trial_dict,
 
 def _call_state_residual(model, state_new_dict, dlambda, state_n_dict, state_trial_dict,
                           expected_implicit_keys, model_name):
-    """Call model.state_residual(state_new, dlambda, state_n, state_trial) → dict.
+    """Call model.state_residual(state_new, dlambda, state_n, state_trial).
 
     *expected_implicit_keys* must NOT include "stress".  The returned dict
     MUST include "stress" when stress is Implicit so the framework can use it.
+
+    Returns
+    -------
+    tuple
+        ``(state_dict, r_dlambda_or_None)`` where *state_dict* maps implicit
+        field names to residual values and *r_dlambda_or_None* is the scalar
+        Δλ-row override if ``self.dlambda(R)`` was included in the list, else
+        ``None`` (framework falls back to ``model.yield_function(state)``).
     """
     state_new = _wrap_state(state_new_dict, model)
     state_n = _wrap_state(state_n_dict, model)
@@ -192,13 +207,26 @@ def _call_state_residual(model, state_new_dict, dlambda, state_n_dict, state_tri
     do_implicit_stress = stress_field.kind == "implicit"
     expected_all = (expected_implicit_keys | {"stress"}) if do_implicit_stress else expected_implicit_keys
     if isinstance(returned, list):
+        # Partition DlambdaResidual items from StateResidual items
+        state_items = []
+        dl_items = []
         for item in returned:
-            if not isinstance(item, StateResidual):
+            if isinstance(item, DlambdaResidual):
+                dl_items.append(item)
+            elif isinstance(item, StateResidual):
+                state_items.append(item)
+            else:
                 raise TypeError(
-                    f"{model_name}.state_residual: every item must be StateResidual, "
+                    f"{model_name}.state_residual: every item must be StateResidual "
+                    f"or DlambdaResidual (self.dlambda(R)), "
                     f"got {type(item).__name__}"
                 )
-        actual_keys = {item.name for item in returned}
+        if len(dl_items) > 1:
+            raise ValueError(
+                f"{model_name}.state_residual: duplicate self.dlambda(...) entries"
+            )
+        r_dl = dl_items[0].value if dl_items else None
+        actual_keys = {item.name for item in state_items}
         if actual_keys != expected_all:
             extra = actual_keys - expected_all
             missing = expected_all - actual_keys
@@ -216,7 +244,7 @@ def _call_state_residual(model, state_new_dict, dlambda, state_n_dict, state_tri
                 f"{model_name}.state_residual() returned wrong keys "
                 f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
             )
-        return {item.name: item.value for item in returned}
+        return {item.name: item.value for item in state_items}, r_dl
     if isinstance(returned, dict):
         actual_keys = set(returned.keys())
         if actual_keys != expected_all:
@@ -235,10 +263,11 @@ def _call_state_residual(model, state_new_dict, dlambda, state_n_dict, state_tri
                 f"{model_name}.state_residual() returned wrong keys "
                 f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
             )
-        return returned
+        return returned, None
     raise TypeError(
         f"{model_name}.state_residual must return a list of StateResidual "
-        f"(use `self.<field>(value)`) or a dict, got {type(returned).__name__}"
+        f"(use `self.<field>(value)`, optionally `self.dlambda(R)`) or a dict, "
+        f"got {type(returned).__name__}"
     )
 
 
@@ -270,10 +299,14 @@ def make_nr_residual(model, stress_trial, state_n):
         ``n_implicit`` (int), ``implicit_shapes`` (list).
     unflatten_implicit : callable(flat) -> dict
     """
+    from manforge.core.material import MaterialModel as _MaterialModel
     ntens = model.ntens
     stress_field = model.state_fields["stress"]
     do_implicit_stress = (stress_field.kind == "implicit")
     model_name = type(model).__name__
+    user_has_state_residual = (
+        type(model).state_residual is not _MaterialModel.state_residual
+    )
 
     # Keys excluding "stress"
     implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
@@ -354,11 +387,12 @@ def make_nr_residual(model, stress_trial, state_n):
                 sig = sig_approx
 
         q_full_state = _wrap_state(q_full, model)
-        R_yield = model.yield_function(q_full_state)
 
-        parts = [anp.atleast_1d(R_yield)]
+        # Collect optional R_dl override and implicit-state residuals from state_residual
+        r_dl_override = None
+        R_state_dict = {}
 
-        if n_implicit > 0:
+        if user_has_state_residual:
             state_trial_for_residual = dict(state_n)
             if do_implicit_stress:
                 # When stress is Implicit, state_trial["stress"] must be the fixed
@@ -369,22 +403,27 @@ def make_nr_residual(model, stress_trial, state_n):
                 # When stress is Explicit, pass the current derived stress as the trial
                 # so that user's state_residual can access it (e.g. AF flow direction).
                 state_trial_for_residual["stress"] = q_full.get("stress", anp.array(stress_trial))
-            R_state_dict = _call_state_residual(
+            R_state_dict, r_dl_override = _call_state_residual(
                 model, q_full, dlambda, state_n, state_trial_for_residual,
                 set(implicit_keys_non_stress), model_name
             )
-            if do_implicit_stress:
-                # stress MUST be in R_state_dict (enforced by _call_state_residual)
-                parts.insert(0, R_state_dict["stress"])
-            R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
-            if R_state_non_stress:
-                R_state_flat, _ = _flatten_state(R_state_non_stress)
-                parts.append(R_state_flat)
         elif do_implicit_stress:
             raise ValueError(
-                f"{model_name}: stress is Implicit but there are no implicit states "
-                "to call state_residual() on — this should not happen."
+                f"{model_name}: stress is Implicit but state_residual() is not implemented "
+                "— this should not happen."
             )
+
+        # Δλ row: user override if provided, else yield_function default
+        R_dl = r_dl_override if r_dl_override is not None else model.yield_function(q_full_state)
+        parts = [anp.atleast_1d(R_dl)]
+
+        if do_implicit_stress:
+            # stress MUST be in R_state_dict (enforced by _call_state_residual)
+            parts.insert(0, R_state_dict["stress"])
+        R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
+        if R_state_non_stress:
+            R_state_flat, _ = _flatten_state(R_state_non_stress)
+            parts.append(R_state_flat)
 
         return anp.concatenate(parts)
 
@@ -404,6 +443,7 @@ def make_tangent_residual(model, stress_trial, state_n):
     n_implicit : int
     unflatten_implicit : callable(flat) -> dict
     """
+    from manforge.core.material import MaterialModel as _MaterialModel
     ntens = model.ntens
     stress_field = model.state_fields["stress"]
     do_implicit_stress = (stress_field.kind == "implicit")
@@ -413,6 +453,9 @@ def make_tangent_residual(model, stress_trial, state_n):
         if k != "stress" and k not in model.implicit_state_names
     )
     model_name = type(model).__name__
+    user_has_state_residual = (
+        type(model).state_residual is not _MaterialModel.state_residual
+    )
 
     implicit_state_n = {k: state_n[k] for k in implicit_keys_non_stress}
     _, implicit_shapes = _flatten_state(implicit_state_n)
@@ -445,9 +488,11 @@ def make_tangent_residual(model, stress_trial, state_n):
         q_full_state = _wrap_state(q_full, model)
         stress_trial_arr = anp.array(stress_trial)
 
-        R_yield = model.yield_function(q_full_state)
+        # Collect optional R_dl override and implicit-state residuals from state_residual
+        r_dl_override = None
+        R_state_dict = {}
 
-        if n_implicit > 0:
+        if user_has_state_residual:
             state_trial_for_residual = dict(state_n)
             if do_implicit_stress:
                 # When stress is Implicit, state_trial["stress"] must be the fixed elastic
@@ -458,22 +503,24 @@ def make_tangent_residual(model, stress_trial, state_n):
                 # When stress is Explicit, pass the tangent variable sig as the trial
                 # so that user's state_residual captures ∂R_state/∂σ correctly.
                 state_trial_for_residual["stress"] = sig
-            R_state_dict = _call_state_residual(
+            R_state_dict, r_dl_override = _call_state_residual(
                 model, q_full, dlambda, state_n, state_trial_for_residual,
                 set(implicit_keys_non_stress), model_name
             )
-            # stress MUST be in R_state_dict for Implicit stress (enforced by _call_state_residual)
-            R_stress = R_state_dict["stress"] if do_implicit_stress else (
-                model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
-            )
-            R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
-            parts = [R_stress, anp.atleast_1d(R_yield)]
-            if R_state_non_stress:
-                R_state_flat, _ = _flatten_state(R_state_non_stress)
-                parts.append(R_state_flat)
-        else:
-            R_stress = model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
-            parts = [R_stress, anp.atleast_1d(R_yield)]
+
+        # Δλ row: user override if provided, else yield_function default
+        R_dl = r_dl_override if r_dl_override is not None else model.yield_function(q_full_state)
+
+        # Stress residual row
+        R_stress = R_state_dict["stress"] if do_implicit_stress else (
+            model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
+        )
+
+        R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
+        parts = [R_stress, anp.atleast_1d(R_dl)]
+        if R_state_non_stress:
+            R_state_flat, _ = _flatten_state(R_state_non_stress)
+            parts.append(R_state_flat)
 
         return anp.concatenate(parts)
 

@@ -1,4 +1,4 @@
-from manforge.core.state import Implicit, Explicit, State, NTENS, StateResidual, StateUpdate
+from manforge.core.state import Implicit, Explicit, State, NTENS, StateResidual, StateUpdate, DlambdaResidual
 from manforge.core.stress_state import (
     StressState,
     SOLID_3D,
@@ -16,6 +16,7 @@ __all__ = [
     "NTENS",
     "StateResidual",
     "StateUpdate",
+    "DlambdaResidual",
     "StressState",
     "SOLID_3D",
     "PLANE_STRAIN",
