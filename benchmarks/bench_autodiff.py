@@ -2,7 +2,7 @@
 
 3 scenarios:
   1. driver_step   – StrainDriver, J2Isotropic3D, N=40 steps
-  2. augmented_nr  – OWKinematic3D, 200 small-increment steps (augmented NR)
+  2. vector_nr     – OWKinematic3D, 200 small-increment steps (implicit_state_names)
   3. fd_tangent    – check_tangent for J2Isotropic3D (1 + 12 stress_update calls)
 
 Run:
@@ -76,10 +76,10 @@ def _make_driver_step():
 
 
 # ---------------------------------------------------------------------------
-# scenario 2: augmented NR  (OW 3D, 200 increments)
+# scenario 2: vector NR  (OW 3D, 200 increments, implicit_state_names=["alpha","ep"])
 # ---------------------------------------------------------------------------
 
-def _make_augmented_nr():
+def _make_vector_nr():
     import numpy as np
     from manforge.models.ow_kinematic import OWKinematic3D
     from manforge.simulation.integrator import PythonIntegrator
@@ -135,7 +135,7 @@ def _make_fd_tangent():
 
 SCENARIOS = [
     ("driver_step",   _make_driver_step),
-    ("augmented_nr",  _make_augmented_nr),
+    ("vector_nr",     _make_vector_nr),
     ("fd_tangent",    _make_fd_tangent),
 ]
 

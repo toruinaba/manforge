@@ -24,6 +24,16 @@ class MaterialModel(ABC):
         Names of internal state variables (keys in ``state`` dicts).
     stress_state : StressState
         Dimensionality descriptor (default: ``SOLID_3D``, 6-component 3D).
+    implicit_state_names : list[str]
+        State variable names that are treated as independent NR unknowns
+        (implicit/hidden variables).  Must be a subset of ``state_names``.
+        State variables *not* listed here are updated explicitly via
+        :meth:`update_state` at every NR iteration.  Default: ``[]`` (all
+        states are explicit — scalar NR on Δλ only).
+    implicit_stress : bool
+        If ``True``, σ is also included as an independent NR unknown (in
+        addition to Δλ and any implicit states).  Default: ``False``
+        (σ is computed from σ_trial, Δλ, and q at every iteration).
     ntens : int
         Read-only property; returns ``self.stress_state.ntens``.
     """
@@ -31,7 +41,8 @@ class MaterialModel(ABC):
     param_names: list[str]
     state_names: list[str]
     stress_state: StressState = SOLID_3D
-    hardening_type: str = "reduced"  # "reduced" or "augmented"
+    implicit_state_names: list[str] = []
+    implicit_stress: bool = False
 
     @property
     def params(self) -> dict:
@@ -40,20 +51,25 @@ class MaterialModel(ABC):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Skip intermediate abstract classes (MaterialModel3D, MaterialModelPS, etc.)
-        # that have not yet implemented yield_function.
+        # Skip intermediate abstract classes that have not yet implemented yield_function.
         if cls.yield_function is MaterialModel.yield_function:
             return
-        ht = cls.hardening_type
-        if ht not in ("reduced", "augmented"):
+        # Reject legacy hardening_type attribute.
+        if "hardening_type" in cls.__dict__:
+            _val = cls.__dict__["hardening_type"]
             _hint = ""
-            if ht in ("explicit", "implicit"):
-                _hint = f" (renamed to '{'reduced' if ht == 'explicit' else 'augmented'}' — update hardening_type on {cls.__name__})"
+            if _val == "reduced":
+                _hint = " — remove hardening_type; implicit_state_names=[] is the default"
+            elif _val == "augmented":
+                _hint = (
+                    " — remove hardening_type; set implicit_state_names=<your state_names>"
+                    " (and implicit_stress=True if σ should be an NR unknown)"
+                )
             raise TypeError(
-                f"{cls.__name__}: hardening_type must be 'reduced' or 'augmented', "
-                f"got {ht!r}{_hint}"
+                f"{cls.__name__}: hardening_type has been removed. "
+                f"Use implicit_state_names and implicit_stress instead.{_hint}"
             )
-        # Detect old method names (removed in this version) and guide migration.
+        # Detect renamed methods and guide migration.
         if "hardening_increment" in cls.__dict__:
             raise TypeError(
                 f"{cls.__name__}: hardening_increment() has been renamed to "
@@ -64,15 +80,26 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: hardening_residual() has been renamed to "
                 "state_residual() — rename the method on your subclass"
             )
-        if ht == "reduced" and cls.update_state is MaterialModel.update_state:
+        implicit = set(cls.implicit_state_names)
+        all_states = set(cls.state_names)
+        unknown = implicit - all_states
+        if unknown:
             raise TypeError(
-                f"{cls.__name__}: reduced hardening models must implement "
-                "update_state()"
+                f"{cls.__name__}: implicit_state_names contains names not in "
+                f"state_names: {sorted(unknown)}"
             )
-        if ht == "augmented" and cls.state_residual is MaterialModel.state_residual:
+        explicit = all_states - implicit
+        needs_update = bool(explicit)
+        needs_residual = bool(implicit)
+        if needs_update and cls.update_state is MaterialModel.update_state:
             raise TypeError(
-                f"{cls.__name__}: augmented hardening models must implement "
-                "state_residual()"
+                f"{cls.__name__}: explicit states {sorted(explicit)} require "
+                "update_state() to be implemented"
+            )
+        if needs_residual and cls.state_residual is MaterialModel.state_residual:
+            raise TypeError(
+                f"{cls.__name__}: implicit states {sorted(implicit)} require "
+                "state_residual() to be implemented"
             )
         from manforge.verification.fortran_registry import collect_bindings
         cls._fortran_bindings = collect_bindings(cls)
@@ -143,18 +170,17 @@ class MaterialModel(ABC):
     ) -> dict:
         """Return updated state variables after a plastic increment.
 
-        Closed-form update rule: given (Δλ, σ, q_n), computes q_{n+1}
-        directly.  Required for reduced hardening models
-        (``hardening_type='reduced'``).
+        Closed-form (explicit) update rule: given (Δλ, σ, q_n), returns
+        q_{n+1} directly.  Required for all state variables *not* listed in
+        :attr:`implicit_state_names`.  Only the keys for explicit states need
+        to be returned; extra keys raise ``ValueError`` at residual-build time.
 
         The companion residual form is :meth:`state_residual`, related by::
 
             state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
 
-        The base class provides a default ``state_residual`` derived from this
-        method, so reduced models only need to implement ``update_state``.
-        Augmented models that cannot express q_{n+1} in closed form must
-        instead override :meth:`state_residual` directly.
+        The base class provides a default ``state_residual`` from this method,
+        so models where all states are explicit only need ``update_state``.
 
         Parameters
         ----------
@@ -162,24 +188,23 @@ class MaterialModel(ABC):
             Plastic multiplier increment Δλ ≥ 0.
         stress : anp.ndarray, shape (ntens,)
             Current stress within the NR iteration (Voigt notation).
-            Models that depend only on dlambda (e.g. isotropic hardening)
-            may ignore this argument.
         state : dict
             State at the beginning of the increment.
 
         Returns
         -------
         dict
-            Updated state ``q_{n+1}``.
+            Updated explicit-state dict ``{k: q_{n+1}[k] for k in explicit_keys}``.
 
         Raises
         ------
         NotImplementedError
-            If not overridden on a reduced model.
+            If not overridden when explicit states exist.
         """
         raise NotImplementedError(
             f"{type(self).__name__}.update_state() is not implemented. "
-            "Reduced models (hardening_type='reduced') must override this method."
+            "Models with explicit states (not in implicit_state_names) must "
+            "implement update_state()."
         )
 
     def state_residual(
@@ -189,25 +214,26 @@ class MaterialModel(ABC):
         stress: anp.ndarray,
         state_n: dict,
     ) -> dict:
-        """Residual of the state evolution equations.
+        """Residual of the implicit state evolution equations.
 
-        Defines R_h(q_{n+1}, Δλ, σ, q_n) = 0 for use in the augmented
-        residual system where state variables are independent unknowns.
+        Defines R_h(q_{n+1}, Δλ, σ, q_n) = 0 for state variables listed in
+        :attr:`implicit_state_names`.  Only those keys should appear in the
+        returned dict; extra or missing keys raise ``ValueError`` at
+        residual-build time.
 
         The relationship to the closed-form update rule is::
 
             state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
 
-        The default implementation derives ``state_residual`` automatically from
-        :meth:`update_state`.  Override this method directly to define implicit
-        hardening laws where ``state_new`` cannot be expressed in closed form as
-        a function of ``(dlambda, stress, state_n)`` — this is the ``augmented``
-        path.
+        The default implementation derives the residual automatically from
+        :meth:`update_state` (valid when all states can be expressed in closed
+        form).  Override this method directly when ``state_new`` cannot be
+        computed in closed form from ``(dlambda, stress, state_n)``.
 
         Parameters
         ----------
         state_new : dict
-            Proposed state at step n+1 (independent unknown).
+            Proposed implicit-state values at step n+1 (NR unknowns).
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
         stress : anp.ndarray, shape (ntens,)
@@ -218,8 +244,7 @@ class MaterialModel(ABC):
         Returns
         -------
         dict
-            Residual dict with same keys and shapes as ``state_new``.
-            Zero at convergence.
+            Residual dict keyed by :attr:`implicit_state_names`.  Zero at convergence.
         """
         state_explicit = self.update_state(dlambda, stress, state_n)
         return {k: state_new[k] - state_explicit[k] for k in state_new}

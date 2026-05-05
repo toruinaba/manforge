@@ -50,11 +50,20 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 **1. Material model layer** — `src/manforge/core/material.py`
 
-`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods based on `hardening_type`:
+`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. Two class-level attributes control the NR unknown set:
+
+- `implicit_state_names: list[str] = []` — names of state variables treated as independent NR unknowns (must be a subset of `state_names`). Default `[]` → all states are explicit.
+- `implicit_stress: bool = False` — if `True`, σ is also included as an independent NR unknown (gives the fully-coupled vector NR). Default `False` → σ is derived from Δλ via the consistency condition each iteration.
+
+Required methods depend on which states are explicit vs implicit:
 - `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
 - `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- For **reduced** hardening (`hardening_type = "reduced"`, default): `update_state(dlambda, stress, state)` → updated state dict `q_{n+1}`. State is substituted into the residual each NR iteration; scalar NR on Δλ only (1D reduced system).
-- For **augmented** hardening (`hardening_type = "augmented"`): `state_residual(state_new, dlambda, stress, state_n)` → residual dict (zero at convergence). State is an independent unknown; full (ntens+1+n_state) vector NR (augmented system). The two are related by `state_residual = q_{n+1} − update_state(...)`, and the base class provides `state_residual` automatically from `update_state`.
+- `update_state(dlambda, stress, state)` → dict with only the **explicit** state keys (`state_names − implicit_state_names`). Required whenever any state is explicit. Scalar NR on Δλ when `implicit_state_names = []` and `implicit_stress = False`.
+- `state_residual(state_new, dlambda, stress, state_n)` → dict with only the **implicit** state keys (`implicit_state_names`). Required whenever any state is implicit. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
+
+The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models that have a closed-form explicit update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
+
+`hardening_type` is no longer used and raises `TypeError` with a migration hint if declared.
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
@@ -75,13 +84,13 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 
 - `stress_update.py`: Two-level API:
   - `stress_update(model, deps, stress_n, state_n, method="auto")` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call.
-  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). Dispatches on `model.hardening_type`: `"reduced"` → scalar NR on Δλ; `"augmented"` → (ntens+1+n_state) vector NR (max 50 iter, tol=1e-10).
+  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.implicit_state_names` and `model.implicit_stress`: scalar NR on Δλ when both are empty/False; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` otherwise (max 50 iter, tol=1e-10).
   - `method` values: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`).
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
-- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point via `jax.jacobian` and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). For augmented models, state blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`). Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
-- `tangent.py`: Consistent tangent via implicit differentiation — reduced models use (ntens+1)×(ntens+1) system; augmented models use (ntens+1+n_state) system (does NOT differentiate through NR iterations)
-- `residual.py`: Residual builders for both paths: `make_reduced_residual` (reduced) and `make_augmented_residual` (augmented), plus `select_residual_builder` dispatch
+- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). State blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`); only implicit states appear in `dstate_*` fields. Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
+- `tangent.py`: Consistent tangent via implicit differentiation — always uses the `[σ, Δλ, q_implicit]` linear system regardless of `implicit_stress` (size ntens+1+n_implicit). Does NOT differentiate through NR iterations.
+- `residual.py`: Two residual builders: `make_nr_residual(model, stress_trial, state_n)` → `(fn, meta, unflatten)` for the NR phase (σ included only when `implicit_stress=True`); `make_tangent_residual(model, stress_trial, state_n)` → `(fn, n_implicit, unflatten)` for the tangent/Jacobian phase (σ always included).
 
 JAX autodiff computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 

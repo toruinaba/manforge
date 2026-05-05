@@ -8,12 +8,17 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import _flatten_state
+from manforge.core.residual import make_tangent_residual, _flatten_state
 
 
 @dataclass
 class JacobianBlocks:
-    """Named blocks of the return-mapping residual Jacobian at the converged point."""
+    """Named blocks of the return-mapping residual Jacobian at the converged point.
+
+    The Jacobian is computed from the tangent residual system where σ is
+    always an independent variable.  Explicit-state keys (not in
+    ``model.implicit_state_names``) do not appear in ``dstate_*`` fields.
+    """
 
     dstress_dsigma: anp.ndarray
     dstress_ddlambda: anp.ndarray
@@ -54,63 +59,42 @@ def ad_jacobian_blocks(
                 "to ad_jacobian_blocks(). Use stress_update() instead, or pass "
                 "stress_trial=... explicitly."
             )
+
     ntens = model.ntens
+    implicit_keys = sorted(model.implicit_state_names)
+    implicit_state = {k: state[k] for k in implicit_keys}
+    flat_impl, _ = _flatten_state(implicit_state)
+    n_implicit = len(flat_impl)
 
-    _blocks_fn = (
-        _jacobian_blocks_augmented
-        if model.hardening_type == "augmented"
-        else _jacobian_blocks_reduced
-    )
-    return _blocks_fn(model, stress, state, dlambda, stress_trial, state_n, ntens)
+    residual_fn, _, _ = make_tangent_residual(model, stress_trial, state_n)
 
-
-def _jacobian_blocks_reduced(
-    model, stress, state, dlambda, stress_trial, state_n, ntens
-):
-    from manforge.core.residual import make_reduced_residual
-
-    residual_fn = make_reduced_residual(model, stress_trial, state_n)
-    x_conv = anp.concatenate([anp.array(stress), anp.array([float(dlambda)])])
-    J = autograd.jacobian(residual_fn)(x_conv)
-
-    return JacobianBlocks(
-        dstress_dsigma=J[:ntens, :ntens],
-        dstress_ddlambda=J[:ntens, ntens],
-        dyield_dsigma=J[ntens, :ntens],
-        dyield_ddlambda=J[ntens, ntens],
-        dstress_dstate=None,
-        dyield_dstate=None,
-        dstate_dsigma=None,
-        dstate_ddlambda=None,
-        dstate_dstate=None,
-        full=J,
-    )
-
-
-def _jacobian_blocks_augmented(
-    model, stress, state, dlambda, stress_trial, state_n, ntens
-):
-    from manforge.core.residual import make_augmented_residual
-
-    residual_fn, n_state, unflatten_fn = make_augmented_residual(
-        model, stress_trial, state_n
-    )
-
-    flat_state, _ = _flatten_state(state)
     x_conv = anp.concatenate([
         anp.array(stress),
         anp.array([float(dlambda)]),
-        flat_state,
+        flat_impl,
     ])
     J = autograd.jacobian(residual_fn)(x_conv)
-
-    state_keys = sorted(state.keys())
-    slices = _build_state_slices(state, state_keys)
 
     dstress_dsigma   = J[:ntens, :ntens]
     dstress_ddlambda = J[:ntens, ntens]
     dyield_dsigma    = J[ntens, :ntens]
     dyield_ddlambda  = J[ntens, ntens]
+
+    if n_implicit == 0:
+        return JacobianBlocks(
+            dstress_dsigma=dstress_dsigma,
+            dstress_ddlambda=dstress_ddlambda,
+            dyield_dsigma=dyield_dsigma,
+            dyield_ddlambda=dyield_ddlambda,
+            dstress_dstate=None,
+            dyield_dstate=None,
+            dstate_dsigma=None,
+            dstate_ddlambda=None,
+            dstate_dstate=None,
+            full=J,
+        )
+
+    slices = _build_state_slices(implicit_state, implicit_keys)
 
     dstress_dstate: dict = {}
     dyield_dstate:  dict = {}

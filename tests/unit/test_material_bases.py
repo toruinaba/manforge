@@ -510,12 +510,13 @@ def test_1d_I_dev_projects_to_deviatoric():
 # __init_subclass__ validation
 # ---------------------------------------------------------------------------
 
-def test_reduced_without_update_state_raises():
-    """Reduced model that does not implement update_state must raise TypeError."""
+def test_explicit_state_without_update_state_raises():
+    """Model with explicit states (implicit_state_names=[]) must implement update_state."""
     with pytest.raises(TypeError, match="update_state"):
         class Bad(MaterialModel3D):
             param_names = []
-            state_names = []
+            state_names = ["ep"]
+            implicit_state_names = []
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -524,9 +525,24 @@ def test_reduced_without_update_state_raises():
                 pass
 
 
-def test_augmented_without_state_residual_raises():
-    """Augmented model that does not implement state_residual must raise TypeError."""
+def test_implicit_state_without_state_residual_raises():
+    """Model with implicit states must implement state_residual."""
     with pytest.raises(TypeError, match="state_residual"):
+        class Bad(MaterialModel3D):
+            param_names = []
+            state_names = ["alpha"]
+            implicit_state_names = ["alpha"]
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, stress, state):
+                pass
+
+
+def test_hardening_type_attribute_raises():
+    """Declaring hardening_type must raise TypeError with migration hint."""
+    with pytest.raises(TypeError, match="hardening_type has been removed"):
         class Bad(MaterialModel3D):
             hardening_type = "augmented"
             param_names = []
@@ -538,14 +554,17 @@ def test_augmented_without_state_residual_raises():
             def yield_function(self, stress, state):
                 pass
 
+            def state_residual(self, state_new, dlambda, stress, state_n):
+                return {}
 
-def test_invalid_hardening_type_raises():
-    """Unknown hardening_type value must raise TypeError."""
-    with pytest.raises(TypeError, match="hardening_type"):
+
+def test_hardening_type_reduced_hint():
+    """hardening_type='reduced' gives hint to remove the attribute."""
+    with pytest.raises(TypeError, match="implicit_state_names=\\[\\] is the default"):
         class Bad(MaterialModel3D):
-            hardening_type = "mixed"
+            hardening_type = "reduced"
             param_names = []
-            state_names = []
+            state_names = ["ep"]
 
             def elastic_stiffness(self, state=None):
                 pass
@@ -554,29 +573,82 @@ def test_invalid_hardening_type_raises():
                 pass
 
             def update_state(self, dlambda, stress, state):
-                return {}
+                return {"ep": state["ep"] + dlambda}
 
 
-def test_augmented_with_both_methods_allowed():
-    """Augmented model may optionally define update_state as well."""
-    class OKImplicit(MaterialModel3D):
-        hardening_type = "augmented"
+def test_implicit_state_names_not_in_state_names_raises():
+    """implicit_state_names containing unknown keys must raise TypeError."""
+    with pytest.raises(TypeError, match="not in state_names"):
+        class Bad(MaterialModel3D):
+            param_names = []
+            state_names = ["ep"]
+            implicit_state_names = ["alpha"]  # "alpha" not in state_names
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, stress, state):
+                pass
+
+            def state_residual(self, state_new, dlambda, stress, state_n):
+                return {"alpha": anp.array(0.0)}
+
+
+def test_mixed_implicit_explicit_requires_both_methods():
+    """Partial implicit (some explicit, some implicit) requires both methods."""
+    class OK(MaterialModel3D):
         param_names = []
-        state_names = []
+        state_names = ["alpha", "ep"]
+        implicit_state_names = ["alpha"]  # ep is explicit
 
-        def elastic_stiffness(self):
+        def elastic_stiffness(self, state=None):
             pass
 
         def yield_function(self, stress, state):
             pass
 
         def update_state(self, dlambda, stress, state):
-            return {}
+            return {"ep": state["ep"] + dlambda}
 
         def state_residual(self, state_new, dlambda, stress, state_n):
-            return {}
+            return {"alpha": state_new["alpha"] - state_n["alpha"]}
 
-    assert OKImplicit().hardening_type == "augmented"
+    assert OK.implicit_state_names == ["alpha"]
+    assert OK.implicit_stress is False
+
+
+def test_all_implicit_states_no_update_state_needed():
+    """Model with all states implicit does not need update_state."""
+    class OKImplicit(MaterialModel3D):
+        param_names = []
+        state_names = ["alpha", "ep"]
+        implicit_state_names = ["alpha", "ep"]
+
+        def elastic_stiffness(self, state=None):
+            pass
+
+        def yield_function(self, stress, state):
+            pass
+
+        def state_residual(self, state_new, dlambda, stress, state_n):
+            return {"alpha": anp.array(0.0), "ep": anp.array(0.0)}
+
+    assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}
+
+
+def test_no_state_names_no_methods_needed():
+    """Model with empty state_names needs neither update_state nor state_residual."""
+    class OKStateless(MaterialModel3D):
+        param_names = []
+        state_names = []
+
+        def elastic_stiffness(self, state=None):
+            pass
+
+        def yield_function(self, stress, state):
+            pass
+
+    assert OKStateless.implicit_state_names == []
 
 
 # ---------------------------------------------------------------------------
