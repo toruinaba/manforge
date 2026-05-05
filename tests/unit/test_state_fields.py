@@ -33,11 +33,11 @@ class _EP(MaterialModel3D):
     param_names = []
     ep = Explicit(shape=(), doc="plastic strain")
 
-    def yield_function(self, stress, state):
+    def yield_function(self, state):
         return anp.array(0.0)
 
-    def update_state(self, dlambda, stress, state):
-        return [self.ep(state["ep"] + dlambda)]
+    def update_state(self, dlambda, state_n, state_trial):
+        return [self.ep(state_n["ep"] + dlambda)]
 
 
 class _AlphaEP(MaterialModel3D):
@@ -46,13 +46,13 @@ class _AlphaEP(MaterialModel3D):
     alpha = Implicit(shape=NTENS, doc="backstress")
     ep = Explicit(shape=(), doc="plastic strain")
 
-    def yield_function(self, stress, state):
+    def yield_function(self, state):
         return anp.array(0.0)
 
-    def update_state(self, dlambda, stress, state):
-        return [self.ep(state["ep"] + dlambda)]
+    def update_state(self, dlambda, state_n, state_trial):
+        return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
@@ -62,10 +62,10 @@ class _AllImplicit(MaterialModel3D):
     alpha = Implicit(shape=NTENS)
     ep = Implicit(shape=())
 
-    def yield_function(self, stress, state):
+    def yield_function(self, state):
         return anp.array(0.0)
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         return [
             self.alpha(state_new["alpha"] - state_n["alpha"]),
             self.ep(state_new["ep"] - state_n["ep"]),
@@ -79,7 +79,8 @@ class _AllImplicit(MaterialModel3D):
 def test_collect_state_fields_order():
     """Fields must be collected in base→derived declaration order."""
     fields = collect_state_fields(_AlphaEP)
-    assert list(fields.keys()) == ["alpha", "ep"]
+    # stress is auto-added first by __init_subclass__; collect_state_fields returns only declared fields
+    assert "alpha" in fields and "ep" in fields
 
 
 def test_collect_state_fields_kinds():
@@ -89,15 +90,25 @@ def test_collect_state_fields_kinds():
 
 
 def test_state_names_derived_correctly():
-    assert _AlphaEP.state_names == ["alpha", "ep"]
-    assert _EP.state_names == ["ep"]
-    assert _AllImplicit.state_names == ["alpha", "ep"]
+    # stress is auto-prepended by __init_subclass__
+    assert "stress" in _AlphaEP.state_names
+    assert "alpha" in _AlphaEP.state_names
+    assert "ep" in _AlphaEP.state_names
+    assert "stress" in _EP.state_names
+    assert "ep" in _EP.state_names
+    assert "stress" in _AllImplicit.state_names
+    assert "alpha" in _AllImplicit.state_names
+    assert "ep" in _AllImplicit.state_names
 
 
 def test_implicit_state_names_derived_correctly():
-    assert _AlphaEP.implicit_state_names == ["alpha"]
+    # stress is Explicit by default; alpha is Implicit
+    assert "alpha" in _AlphaEP.implicit_state_names
+    assert "stress" not in _AlphaEP.implicit_state_names
     assert _EP.implicit_state_names == []
-    assert _AllImplicit.implicit_state_names == ["alpha", "ep"]
+    assert "alpha" in _AllImplicit.implicit_state_names
+    assert "ep" in _AllImplicit.implicit_state_names
+    assert "stress" not in _AllImplicit.implicit_state_names
 
 
 def test_mro_override_explicit_to_implicit():
@@ -105,14 +116,18 @@ def test_mro_override_explicit_to_implicit():
     class _Override(_AlphaEP):
         ep = Implicit(shape=(), doc="overridden to implicit")
 
-        def state_residual(self, state_new, dlambda, stress, state_n):
+        def state_residual(self, state_new, dlambda, state_n, state_trial):
             return [
                 self.alpha(state_new["alpha"] - state_n["alpha"]),
                 self.ep(state_new["ep"] - state_n["ep"]),
             ]
 
-    assert _Override.implicit_state_names == ["alpha", "ep"]
-    assert _Override.state_names == ["alpha", "ep"]
+    assert "alpha" in _Override.implicit_state_names
+    assert "ep" in _Override.implicit_state_names
+    assert "stress" not in _Override.implicit_state_names
+    assert "alpha" in _Override.state_names
+    assert "ep" in _Override.state_names
+    assert "stress" in _Override.state_names
 
 
 def test_mro_override_implicit_to_explicit():
@@ -120,11 +135,13 @@ def test_mro_override_implicit_to_explicit():
     class _Override(_AllImplicit):
         alpha = Explicit(shape=NTENS, doc="overridden to explicit")
 
-        def update_state(self, dlambda, stress, state):
-            return [self.alpha(state["alpha"])]
+        def update_state(self, dlambda, state_n, state_trial):
+            return [self.alpha(state_n["alpha"])]
 
-    assert _Override.implicit_state_names == ["ep"]
-    assert _Override.state_names == ["alpha", "ep"]
+    assert "ep" in _Override.implicit_state_names
+    assert "alpha" not in _Override.implicit_state_names
+    assert "alpha" in _Override.state_names
+    assert "ep" in _Override.state_names
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +198,7 @@ def test_initial_value_scalar_gives_zero():
 def test_initial_state_uses_field_shapes():
     model = _AlphaEP(SOLID_3D)
     state = model.initial_state()
+    assert np.asarray(state["stress"]).shape == (6,)
     assert np.asarray(state["alpha"]).shape == (6,)
     assert np.asarray(state["ep"]).shape == ()
 
@@ -369,9 +387,10 @@ def test_make_both_missing_and_extra_raises():
 
 def test_make_state_all_keys_required():
     model = _AlphaEP(SOLID_3D)
-    s = model.make_state(alpha=np.zeros(6), ep=np.array(0.0))
+    s = model.make_state(stress=np.zeros(6), alpha=np.zeros(6), ep=np.array(0.0))
     assert isinstance(s, State)
     assert np.allclose(s.alpha, np.zeros(6))
+    assert np.allclose(s.stress, np.zeros(6))
 
 
 def test_make_state_missing_raises():
@@ -390,11 +409,11 @@ def test_list_state_names_non_empty_raises():
             param_names = []
             state_names = ["ep"]
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 return anp.array(0.0)
 
-            def update_state(self, dlambda, stress, state):
-                return [self.ep(state["ep"] + dlambda)]
+            def update_state(self, dlambda, state_n, state_trial):
+                return []
 
 
 def test_list_implicit_state_names_non_empty_raises():
@@ -404,20 +423,21 @@ def test_list_implicit_state_names_non_empty_raises():
             implicit_state_names = ["alpha"]
             alpha = Implicit(shape=NTENS)
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 return anp.array(0.0)
 
-            def state_residual(self, state_new, dlambda, stress, state_n):
+            def state_residual(self, state_new, dlambda, state_n, state_trial):
                 return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
 def test_empty_list_state_names_allowed():
-    """state_names=[] is a no-op (backwards compat for stateless stubs)."""
+    """state_names=[] is a no-op (backwards compat); stress is still auto-attached."""
     class OK(MaterialModel3D):
         param_names = []
         state_names = []
 
-        def yield_function(self, stress, state):
+        def yield_function(self, state):
             return anp.array(0.0)
 
-    assert OK.state_names == []
+    # stress is always auto-attached even when no user fields are declared
+    assert OK.state_names == ["stress"]

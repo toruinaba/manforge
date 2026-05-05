@@ -12,9 +12,8 @@ Rearranged as a residual:
 n_hat is evaluated at (stress - alpha_n) — i.e., the OLD backstress — so both
 paths are algebraically identical at convergence.
 
-Uses MRO override: re-declare ``alpha`` and ``ep`` as ``Implicit`` to activate
-the vector NR path.  ``implicit_stress = True`` is set to match the OW model
-behaviour for cross-testing purposes.
+Uses MRO override: re-declare ``stress``, ``alpha`` and ``ep`` as ``Implicit`` to
+activate the vector NR path with σ as an NR unknown.
 """
 
 from manforge.core.state import Implicit, NTENS
@@ -25,12 +24,13 @@ from manforge.core.stress_state import PLANE_STRAIN
 class _AFKinematicImplicit3D(AFKinematic3D):
     """AF kinematic 3D model with hardening expressed as an implicit residual."""
 
-    implicit_stress = True
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
+        stress = state_new["stress"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
@@ -45,12 +45,13 @@ class _AFKinematicImplicit3D(AFKinematic3D):
 class _AFKinematicImplicitPS(AFKinematicPS):
     """Plane-stress variant of the implicit AF model."""
 
-    implicit_stress = True
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
+        stress = state_new["stress"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
@@ -65,7 +66,7 @@ class _AFKinematicImplicitPS(AFKinematicPS):
 class _AFKinematicImplicitPE(AFKinematic3D):
     """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
 
-    implicit_stress = True
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
@@ -73,8 +74,9 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         super().__init__(stress_state=PLANE_STRAIN,
                          E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
+        stress = state_new["stress"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)

@@ -13,7 +13,7 @@ ep : equivalent plastic strain (scalar, ≥ 0)
 
 Yield function
 --------------
-f(σ, ep) = σ_vm(σ) - (σ_y0 + H * ep)
+f(state) = σ_vm(state.stress) - (σ_y0 + H * ep)
 
 where σ_vm is the von Mises equivalent stress.
 
@@ -34,8 +34,8 @@ from manforge.verification.fortran_registry import verified_against_fortran
 class J2Isotropic3D(MaterialModel3D):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
-    Uses the scalar NR path (all states explicit): implements ``update_state`` which
-    returns the updated state directly in closed form (Δep = Δλ).
+    Uses the scalar NR path (all non-stress states explicit): implements
+    ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
     (``_dev``, ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which
@@ -81,14 +81,14 @@ class J2Isotropic3D(MaterialModel3D):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(stress) - sigma_y
+        return self._vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
@@ -130,7 +130,7 @@ class J2Isotropic3D(MaterialModel3D):
 
         return ReturnMappingResult(
             stress=stress_new,
-            state={"ep": ep_n + dlambda},
+            state={"stress": stress_new, "ep": ep_n + dlambda},
             dlambda=anp.asarray(dlambda),
             n_iterations=1,
             residual_history=[float(f_trial), 0.0],
@@ -175,16 +175,9 @@ class J2Isotropic3D(MaterialModel3D):
 class J2IsotropicPS(MaterialModelPS):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
-    Uses the scalar NR path (all states explicit): implements ``update_state``
-    (Δep = Δλ). Uses the autodiff return-mapping path (``method="auto"``).
-    A closed-form plane-stress corrector (which requires an iterative σ33 = 0
-    enforcement loop) is not yet implemented.
-
-    Inherits operator methods from
-    :class:`~manforge.core.material.MaterialModelPS` (``_dev``,
-    ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which implement
-    the static condensation and missing-component correction specific to
-    plane-stress kinematics.
+    Uses the scalar NR path (all non-stress states explicit): implements
+    ``update_state`` (Δep = Δλ). Uses the autodiff return-mapping path
+    (``method="auto"``).
 
     Parameters
     ----------
@@ -212,25 +205,22 @@ class J2IsotropicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(stress) - sigma_y
+        return self._vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
 
 class J2Isotropic1D(MaterialModel1D):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
-    Uses the scalar NR path (all states explicit): implements ``update_state``
-    (Δep = Δλ). Provides closed-form ``user_defined_return_mapping`` and
-    ``user_defined_tangent`` using the 1D radial return mapping.
-
-    Inherits operator methods from
-    :class:`~manforge.core.material.MaterialModel1D`.
+    Uses the scalar NR path (all non-stress states explicit): implements
+    ``update_state`` (Δep = Δλ). Provides closed-form ``user_defined_return_mapping``
+    and ``user_defined_tangent`` using the 1D radial return mapping.
 
     Parameters
     ----------
@@ -257,18 +247,14 @@ class J2Isotropic1D(MaterialModel1D):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    # ------------------------------------------------------------------
-    # Material physics — reduced hardening (hardening_type = "reduced")
-    # ------------------------------------------------------------------
-
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(stress) - sigma_y
+        return self._vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
@@ -300,7 +286,7 @@ class J2Isotropic1D(MaterialModel1D):
         stress_new = stress_trial - E * dlambda * n
         return ReturnMappingResult(
             stress=stress_new,
-            state={"ep": ep_n + dlambda},
+            state={"stress": stress_new, "ep": ep_n + dlambda},
             dlambda=anp.asarray(dlambda),
             n_iterations=1,
             residual_history=[float(f_trial), 0.0],

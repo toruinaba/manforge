@@ -106,7 +106,7 @@ def test_plastic_yield_consistency(model):
     _r = PythonIntegrator(model).stress_update(strain_inc, anp.zeros(6), state_n)
     stress_new, state_new = _r.stress, _r.state
 
-    f_final = model.yield_function(stress_new, state_new)
+    f_final = model.yield_function(state_new)
     assert anp.abs(f_final) < 1e-8, f"|f| = {float(anp.abs(f_final)):.3e}"
 
 

@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import autograd.numpy as anp
 
 from manforge.autodiff.operators import identity_voigt
-from manforge.core.state import StateField, State, collect_state_fields, _make
+from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 from manforge.utils.smooth import smooth_sqrt
 
@@ -17,32 +17,40 @@ class MaterialModel(ABC):
     using :func:`~manforge.core.state.Implicit` and
     :func:`~manforge.core.state.Explicit`::
 
-        from manforge.core.state import Implicit, Explicit
+        from manforge.core.state import Implicit, Explicit, NTENS
 
         class MyModel(MaterialModel3D):
             param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-            alpha = Implicit(shape="ntens", doc="backstress tensor")
-            ep    = Explicit(shape=(),      doc="equivalent plastic strain")
+            stress = Implicit(shape=NTENS, doc="Cauchy stress")   # NR unknown
+            alpha  = Implicit(shape=NTENS, doc="backstress tensor")
+            ep     = Explicit(shape=(),    doc="equivalent plastic strain")
 
     ``state_names`` and ``implicit_state_names`` are derived automatically from
     the field declarations; hand-declaring these lists raises ``TypeError``.
 
-    Two class-level flags control the NR unknown set:
+    σ (stress) is always a state field.  If not declared explicitly,
+    ``__init_subclass__`` auto-attaches it as ``Explicit(shape=NTENS)``.
+    Declare ``stress = Implicit(shape=NTENS)`` to include σ as an NR unknown
+    (replaces the removed ``implicit_stress = True`` flag).
 
-    - ``implicit_stress: bool = False`` — if ``True``, σ is included as an
-      independent NR unknown (fully-coupled vector NR).
-    - State variables declared as :func:`~manforge.core.state.Implicit` are
-      included as NR unknowns automatically.
+    User methods receive a ``State`` object for all state arguments (including
+    ``state.stress``).  The ``stress`` argument has been removed from
+    ``yield_function``, ``update_state``, and ``state_residual``.
 
     Required methods depend on which states are explicit vs implicit:
 
-    - ``update_state(dlambda, stress, state)`` — required when any state is
-      explicit; returns only the explicit-state keys.
-    - ``state_residual(state_new, dlambda, stress, state_n)`` — required when
-      any state is implicit; returns only the implicit-state keys.
+    - ``update_state(dlambda, state_n, state_trial)`` — required when any
+      non-stress state is explicit; returns only the explicit-state keys.
+    - ``state_residual(state_new, dlambda, state_n, state_trial)`` — required
+      when any state is implicit; returns only the implicit-state keys.
 
-    ``hardening_type`` is no longer used and raises ``TypeError`` with a
-    migration hint if declared.
+    The framework auto-injects the associative stress default
+    (``σ ← σ_trial − Δλ·C·∂f/∂σ`` or ``R_stress = σ − σ_trial + Δλ·C·∂f/∂σ``)
+    when the user does not return ``stress`` from ``update_state`` /
+    ``state_residual``.
+
+    ``hardening_type`` and ``implicit_stress`` are no longer used and raise
+    ``TypeError`` with migration hints if declared.
 
     Attributes
     ----------
@@ -50,22 +58,19 @@ class MaterialModel(ABC):
         Names of material parameters (keys expected in ``params`` dicts).
     state_fields : dict[str, StateField]
         Ordered mapping of field name → StateField descriptor, collected from
-        the MRO by ``__init_subclass__``.
+        the MRO by ``__init_subclass__``.  Always contains ``"stress"``.
     state_names : list[str]
         Derived from ``state_fields`` (all field names, in declaration order).
     implicit_state_names : list[str]
         Derived from ``state_fields`` (names where ``kind == "implicit"``).
     stress_state : StressState
         Dimensionality descriptor (default: ``SOLID_3D``, 6-component 3D).
-    implicit_stress : bool
-        If ``True``, σ is also an independent NR unknown.  Default: ``False``.
     ntens : int
         Read-only property; returns ``self.stress_state.ntens``.
     """
 
     param_names: list[str]
     stress_state: StressState = SOLID_3D
-    implicit_stress: bool = False
 
     # Derived by __init_subclass__ from StateField descriptors:
     state_fields: dict[str, StateField] = {}
@@ -78,6 +83,7 @@ class MaterialModel(ABC):
         return {name: getattr(self, name) for name in self.param_names}
 
     def __init_subclass__(cls, **kwargs):
+        import inspect
         super().__init_subclass__(**kwargs)
         # Skip intermediate abstract classes that have not yet implemented yield_function.
         if cls.yield_function is MaterialModel.yield_function:
@@ -91,32 +97,36 @@ class MaterialModel(ABC):
             elif _val == "augmented":
                 _hint = (
                     " — remove hardening_type; set implicit_state_names=<your state_names>"
-                    " (and implicit_stress=True if σ should be an NR unknown)"
+                    " (and stress = Implicit(shape=NTENS) if σ should be an NR unknown)"
                 )
             raise TypeError(
                 f"{cls.__name__}: hardening_type has been removed. "
-                f"Use implicit_state_names and implicit_stress instead.{_hint}"
+                f"Use StateField declarations and stress = Implicit(shape=NTENS) instead.{_hint}"
             )
-        # Reject old list-based declarations (only when non-empty — empty lists are harmless).
-        if "state_names" in cls.__dict__:
-            val = cls.__dict__["state_names"]
-            if isinstance(val, list) and val:
+        # Reject old implicit_stress flag.
+        if "implicit_stress" in cls.__dict__:
+            _val = cls.__dict__["implicit_stress"]
+            if isinstance(_val, bool):
+                if _val:
+                    _hint = (
+                        "\n    from manforge.core import Implicit, NTENS\n"
+                        "    stress = Implicit(shape=NTENS, doc='Cauchy stress')"
+                    )
+                else:
+                    _hint = "\n    Remove the implicit_stress = False declaration (it is the default)."
                 raise TypeError(
-                    f"{cls.__name__}: list-based state_names has been removed. "
-                    "Declare state variables as class attributes instead:\n"
-                    "    from manforge.core.state import Implicit, Explicit\n"
-                    "    ep    = Explicit(shape=())\n"
-                    "    alpha = Implicit(shape='ntens')"
+                    f"{cls.__name__}: implicit_stress has been removed. "
+                    f"Declare stress as a state field instead:{_hint}"
                 )
-        if "implicit_state_names" in cls.__dict__:
-            val = cls.__dict__["implicit_state_names"]
-            if isinstance(val, list) and val:
-                raise TypeError(
-                    f"{cls.__name__}: list-based implicit_state_names has been removed. "
-                    "Declare implicit state variables using Implicit(shape=...) instead:\n"
-                    "    from manforge.core.state import Implicit\n"
-                    "    alpha = Implicit(shape='ntens')"
-                )
+        # Reject old stress_residual override (replaced by state_residual returning stress).
+        if "stress_residual" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__}: stress_residual() override has been removed. "
+                "Override state_residual() and return self.stress(R_stress) instead:\n"
+                "    def state_residual(self, state_new, dlambda, state_n, state_trial):\n"
+                "        ...\n"
+                "        return [self.stress(R_stress), self.alpha(R_alpha), ...]"
+            )
         # Detect renamed methods and guide migration.
         if "hardening_increment" in cls.__dict__:
             raise TypeError(
@@ -128,19 +138,86 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: hardening_residual() has been renamed to "
                 "state_residual() — rename the method on your subclass"
             )
+        # Reject old list-based declarations BEFORE signature checks so that migration
+        # error messages remain accurate (list-based errors fire first).
+        if "state_names" in cls.__dict__:
+            val = cls.__dict__["state_names"]
+            if isinstance(val, list) and val:
+                raise TypeError(
+                    f"{cls.__name__}: list-based state_names has been removed. "
+                    "Declare state variables as class attributes instead:\n"
+                    "    from manforge.core.state import Implicit, Explicit\n"
+                    "    ep    = Explicit(shape=())\n"
+                    "    alpha = Implicit(shape=NTENS)"
+                )
+        if "implicit_state_names" in cls.__dict__:
+            val = cls.__dict__["implicit_state_names"]
+            if isinstance(val, list) and val:
+                raise TypeError(
+                    f"{cls.__name__}: list-based implicit_state_names has been removed. "
+                    "Declare implicit state variables using Implicit(shape=...) instead:\n"
+                    "    from manforge.core.state import Implicit\n"
+                    "    alpha = Implicit(shape=NTENS)"
+                )
+        # Reject old yield_function(self, stress, state) signature.
+        if "yield_function" in cls.__dict__:
+            sig = inspect.signature(cls.__dict__["yield_function"])
+            params = list(sig.parameters.keys())
+            if len(params) >= 3 and params[1] == "stress" and params[2] == "state":
+                raise TypeError(
+                    f"{cls.__name__}: yield_function(self, stress, state) is no longer accepted. "
+                    "Update to yield_function(self, state) and access stress via state.stress:\n"
+                    "    def yield_function(self, state):\n"
+                    "        xi = state.stress - state.alpha\n"
+                    "        return self._vonmises(xi) - self.sigma_y0"
+                )
+        # Reject old update_state(self, dlambda, stress, state) signature.
+        if "update_state" in cls.__dict__:
+            sig = inspect.signature(cls.__dict__["update_state"])
+            params = list(sig.parameters.keys())
+            if len(params) >= 4 and params[2] == "stress":
+                raise TypeError(
+                    f"{cls.__name__}: update_state(self, dlambda, stress, state) is no longer accepted. "
+                    "Update to update_state(self, dlambda, state_n, state_trial):\n"
+                    "    def update_state(self, dlambda, state_n, state_trial):\n"
+                    "        stress = state_trial.stress\n"
+                    "        ..."
+                )
+        # Reject old state_residual(self, state_new, dlambda, stress, state_n) signature.
+        if "state_residual" in cls.__dict__:
+            sig = inspect.signature(cls.__dict__["state_residual"])
+            params = list(sig.parameters.keys())
+            if len(params) >= 4 and params[3] == "stress":
+                raise TypeError(
+                    f"{cls.__name__}: state_residual(self, state_new, dlambda, stress, state_n) "
+                    "is no longer accepted. Update to state_residual(self, state_new, dlambda, "
+                    "state_n, state_trial):\n"
+                    "    def state_residual(self, state_new, dlambda, state_n, state_trial):\n"
+                    "        stress = state_new.stress\n"
+                    "        ..."
+                )
         # Collect StateField descriptors from MRO and derive state_names / implicit_state_names.
         fields = collect_state_fields(cls)
+        # Auto-attach "stress" as Explicit if not declared.
+        if "stress" not in fields:
+            from manforge.core.state import Explicit as _Explicit
+            stress_field = _Explicit(shape=NTENS, doc="Cauchy stress")
+            object.__setattr__(stress_field, "name", "stress")
+            # Insert stress at front of ordered dict.
+            fields = {"stress": stress_field, **fields}
         cls.state_fields = fields
         cls.state_names = list(fields.keys())
         cls.implicit_state_names = [k for k, f in fields.items() if f.kind == "implicit"]
         implicit = set(cls.implicit_state_names)
         all_states = set(cls.state_names)
-        explicit = all_states - implicit
-        needs_update = bool(explicit)
+        # Explicit states excluding "stress" (stress default is handled by framework).
+        explicit_non_stress = (all_states - implicit) - {"stress"}
+        implicit_non_stress = implicit - {"stress"}
+        needs_update = bool(explicit_non_stress)
         needs_residual = bool(implicit)
         if needs_update and cls.update_state is MaterialModel.update_state:
             raise TypeError(
-                f"{cls.__name__}: explicit states {sorted(explicit)} require "
+                f"{cls.__name__}: explicit states {sorted(explicit_non_stress)} require "
                 "update_state() to be implemented"
             )
         if needs_residual and cls.state_residual is MaterialModel.state_residual:
@@ -189,19 +266,17 @@ class MaterialModel(ABC):
     @abstractmethod
     def yield_function(
         self,
-        stress: anp.ndarray,
-        state: dict,
+        state,
     ) -> anp.ndarray:
-        """Evaluate the yield function f(σ, q).
+        """Evaluate the yield function f(state).
 
         The material is in the elastic domain when f ≤ 0.
 
         Parameters
         ----------
-        stress : anp.ndarray, shape (ntens,)
-            Stress in Voigt notation.
-        state : dict
-            Internal state variables.
+        state : State or dict
+            Current state including ``state.stress`` (Voigt notation) and all
+            internal state variables.
 
         Returns
         -------
@@ -212,41 +287,36 @@ class MaterialModel(ABC):
     def update_state(
         self,
         dlambda: anp.ndarray,
-        stress: anp.ndarray,
-        state: dict,
-    ) -> dict:
+        state_n,
+        state_trial,
+    ) -> list:
         """Return updated state variables after a plastic increment.
 
-        Closed-form (explicit) update rule: given (Δλ, σ, q_n), returns
-        q_{n+1} directly.  Required for all state variables *not* listed in
-        :attr:`implicit_state_names`.  Only the keys for explicit states need
-        to be returned; extra keys raise ``ValueError`` at residual-build time.
-
-        The companion residual form is :meth:`state_residual`, related by::
-
-            state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
-
-        The base class provides a default ``state_residual`` from this method,
-        so models where all states are explicit only need ``update_state``.
+        Closed-form (explicit) update rule: given (Δλ, state_n, state_trial),
+        returns explicit state keys as a list of :class:`StateUpdate`.
+        Required for all state variables *not* listed in
+        :attr:`implicit_state_names`.  The ``stress`` key need only be returned
+        when a custom stress update is required; if omitted, the framework
+        auto-injects the associative formula.
 
         Parameters
         ----------
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ ≥ 0.
-        stress : anp.ndarray, shape (ntens,)
-            Current stress within the NR iteration (Voigt notation).
-        state : dict
+        state_n : State or dict
             State at the beginning of the increment.
+        state_trial : State or dict
+            Trial state (``state_trial.stress`` is the elastic trial stress).
 
         Returns
         -------
-        dict
-            Updated explicit-state dict ``{k: q_{n+1}[k] for k in explicit_keys}``.
+        list[StateUpdate]
+            Updated explicit-state items (use ``self.<field>(value)`` syntax).
 
         Raises
         ------
         NotImplementedError
-            If not overridden when explicit states exist.
+            If not overridden when explicit non-stress states exist.
         """
         raise NotImplementedError(
             f"{type(self).__name__}.update_state() is not implemented. "
@@ -256,45 +326,38 @@ class MaterialModel(ABC):
 
     def state_residual(
         self,
-        state_new: dict,
+        state_new,
         dlambda: anp.ndarray,
-        stress: anp.ndarray,
-        state_n: dict,
-    ) -> dict:
+        state_n,
+        state_trial,
+    ) -> list:
         """Residual of the implicit state evolution equations.
 
-        Defines R_h(q_{n+1}, Δλ, σ, q_n) = 0 for state variables listed in
-        :attr:`implicit_state_names`.  Only those keys should appear in the
-        returned dict; extra or missing keys raise ``ValueError`` at
-        residual-build time.
-
-        The relationship to the closed-form update rule is::
-
-            state_residual(q_{n+1}, Δλ, σ, q_n) = q_{n+1} - update_state(Δλ, σ, q_n)
-
-        The default implementation derives the residual automatically from
-        :meth:`update_state` (valid when all states can be expressed in closed
-        form).  Override this method directly when ``state_new`` cannot be
-        computed in closed form from ``(dlambda, stress, state_n)``.
+        Defines R_h(state_new, Δλ, state_n, state_trial) = 0 for state
+        variables listed in :attr:`implicit_state_names`.  The ``stress`` key
+        need only be returned when a custom stress residual is required; if
+        omitted, the framework auto-injects the associative formula.
 
         Parameters
         ----------
-        state_new : dict
-            Proposed implicit-state values at step n+1 (NR unknowns).
+        state_new : State or dict
+            Proposed state values at step n+1 (NR unknowns).
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
-        stress : anp.ndarray, shape (ntens,)
-            Current stress σ_{n+1}.
-        state_n : dict
+        state_n : State or dict
             State at the beginning of the increment.
+        state_trial : State or dict
+            Trial state (``state_trial.stress`` is the elastic trial stress).
 
         Returns
         -------
-        dict
-            Residual dict keyed by :attr:`implicit_state_names`.  Zero at convergence.
+        list[StateResidual]
+            Residual items (use ``self.<field>(value)`` syntax).  Zero at convergence.
         """
-        state_explicit = self.update_state(dlambda, stress, state_n)
-        return {k: state_new[k] - state_explicit[k] for k in state_new}
+        raise NotImplementedError(
+            f"{type(self).__name__}.state_residual() is not implemented. "
+            "Models with implicit states must implement state_residual()."
+        )
 
     # ------------------------------------------------------------------
     # Default helpers provided by the framework
@@ -366,7 +429,7 @@ class MaterialModel(ABC):
         )
 
     def initial_state(self) -> dict:
-        """Return zero-initialised state dict.
+        """Return zero-initialised state dict (including ``stress``).
 
         The default implementation uses the ``StateField`` descriptors to
         produce a ``dict`` with the correct shapes.  Override when a non-zero
@@ -375,7 +438,8 @@ class MaterialModel(ABC):
         Returns
         -------
         dict
-            ``{name: zeros(shape) for name in state_names}``
+            ``{name: zeros(shape) for name in state_names}``  — always includes
+            ``"stress"`` (the key added by ``__init_subclass__``).
         """
         if self.state_fields:
             return {name: f.initial_value(self) for name, f in self.state_fields.items()}
@@ -389,8 +453,8 @@ class MaterialModel(ABC):
     def make_state(self, **kwargs) -> "State":
         """Assemble a complete :class:`~manforge.core.state.State` from keyword arguments.
 
-        All field names are required; extra or missing keys raise ``TypeError``
-        at the call site (before any autograd trace).
+        All field names (including ``stress``) are required; extra or missing
+        keys raise ``TypeError`` at the call site (before any autograd trace).
 
         Returns
         -------
@@ -401,54 +465,44 @@ class MaterialModel(ABC):
         data = _make(required, f"{type(self).__name__}.make_state", kwargs)
         return State(data, tuple(self.state_names))
 
-    def stress_residual(
+    def _default_stress_residual(
         self,
         stress: anp.ndarray,
         dlambda: anp.ndarray,
-        state: dict,
+        state,
         stress_trial: anp.ndarray,
-        state_n: dict,
     ) -> anp.ndarray:
-        """Stress residual of the return-mapping system.
+        """Internal default associative stress residual R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
 
-        Default implementation (associative flow rule)::
-
-            R_stress = σ − σ_trial + Δλ · C(q) · ∂f/∂σ
-
-        where C = elastic_stiffness(q) and f = yield_function.  Override to
-        implement non-associative flow (separate plastic potential g ≠ f)::
-
-            n = autograd.grad(lambda s: self.plastic_potential(s, state))(stress)
-            return stress - stress_trial + dlambda * (C @ n)
-
-        Note: the ``implicit_stress = False`` path derives σ via a fixed-point
-        step assuming the default associative formula.  If you override this
-        method, set ``implicit_stress = True`` so that the full vector NR is
-        used and the override is applied consistently.
-
-        Parameters
-        ----------
-        stress : anp.ndarray, shape (ntens,)
-            Current stress σ_{n+1} within the NR iteration.
-        dlambda : anp.ndarray, scalar
-            Plastic multiplier increment Δλ.
-        state : dict
-            Current state q_{n+1} (implicit keys as NR unknowns, explicit keys
-            populated from ``update_state``).
-        stress_trial : anp.ndarray, shape (ntens,)
-            Elastic trial stress.
-        state_n : dict
-            State at the beginning of the increment (unused by default, but
-            exposed for models that need it — e.g. damage recovery).
-
-        Returns
-        -------
-        anp.ndarray, shape (ntens,)
+        Used by the framework when the user does not return ``stress`` from
+        ``state_residual``.  Not part of the public API.
         """
         import autograd
+        from manforge.core.state import _state_with_stress
         C = self.elastic_stiffness(state)
-        n = autograd.grad(lambda s: self.yield_function(s, state))(stress)
+        n = autograd.grad(
+            lambda s: self.yield_function(_state_with_stress(state, s))
+        )(stress)
         return stress - stress_trial + dlambda * (C @ n)
+
+    def _default_stress_update(
+        self,
+        stress_trial: anp.ndarray,
+        dlambda: anp.ndarray,
+        state,
+    ) -> anp.ndarray:
+        """Internal default associative stress update σ ← σ_trial − Δλ·C·∂f/∂σ.
+
+        Used by the framework when the user does not return ``stress`` from
+        ``update_state``.  Not part of the public API.
+        """
+        import autograd
+        from manforge.core.state import _state_with_stress
+        C = self.elastic_stiffness(state)
+        n = autograd.grad(
+            lambda s: self.yield_function(_state_with_stress(state, s))
+        )(anp.array(stress_trial))
+        return anp.array(stress_trial) - dlambda * (C @ n)
 
     def _vonmises(self, stress: anp.ndarray) -> anp.ndarray:
         """Von Mises equivalent stress with missing-component correction.

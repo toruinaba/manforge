@@ -55,7 +55,7 @@ def test_plastic_corrector_standalone_plastic(model):
     assert rm is not None, "plastic_corrector should return a result for plastic step"
 
     # Yield consistency: f(σ_new, state_new) ≈ 0
-    f_final = model.yield_function(rm.stress, rm.state)
+    f_final = model.yield_function(rm.state)
     assert abs(float(f_final)) < 1e-8, f"|f| = {float(abs(f_final)):.3e}"
 
     # State update: ep_new = ep_n + dlambda
@@ -201,7 +201,6 @@ def test_method_analytical_raises_if_no_hooks():
 
     class MinimalModel(MaterialModel3D):
         param_names = ["E", "nu", "sigma_y0"]
-        state_names = []
 
         def __init__(self):
             super().__init__()
@@ -214,18 +213,19 @@ def test_method_analytical_raises_if_no_hooks():
             lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
             return self.isotropic_C(lam, mu)
 
-        def yield_function(self, stress, state):
-            return self._vonmises(stress) - self.sigma_y0
+        def yield_function(self, state):
+            return self._vonmises(state["stress"]) - self.sigma_y0
 
-        def update_state(self, dlambda, stress, state):
-            return {}
+        def update_state(self, dlambda, state_n, state_trial):
+            return []
 
     minimal_model = MinimalModel()
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    state0 = minimal_model.initial_state()
 
     with pytest.raises(NotImplementedError):
         PythonAnalyticalIntegrator(minimal_model).stress_update(
-            strain_inc, anp.zeros(6), {}
+            strain_inc, anp.zeros(6), state0
         )
 
 

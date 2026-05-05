@@ -522,7 +522,7 @@ def test_explicit_state_without_update_state_raises():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
 
@@ -537,7 +537,7 @@ def test_implicit_state_without_state_residual_raises():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
 
@@ -551,10 +551,10 @@ def test_hardening_type_attribute_raises():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
-            def state_residual(self, state_new, dlambda, stress, state_n):
+            def state_residual(self, state_new, dlambda, state_n, state_trial):
                 return {}
 
 
@@ -570,11 +570,11 @@ def test_hardening_type_reduced_hint():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
-            def update_state(self, dlambda, stress, state):
-                return {"ep": state["ep"] + dlambda}
+            def update_state(self, dlambda, state_n, state_trial):
+                return [self.ep(state_n["ep"] + dlambda)]
 
 
 def test_list_state_names_raises():
@@ -587,11 +587,11 @@ def test_list_state_names_raises():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
-            def update_state(self, dlambda, stress, state):
-                return {"ep": state["ep"] + dlambda}
+            def update_state(self, dlambda, state_n, state_trial):
+                return [state_n["ep"] + dlambda]
 
 
 def test_list_implicit_state_names_raises():
@@ -606,10 +606,10 @@ def test_list_implicit_state_names_raises():
             def elastic_stiffness(self, state=None):
                 pass
 
-            def yield_function(self, stress, state):
+            def yield_function(self, state):
                 pass
 
-            def state_residual(self, state_new, dlambda, stress, state_n):
+            def state_residual(self, state_new, dlambda, state_n, state_trial):
                 return {"alpha": anp.array(0.0)}
 
 
@@ -624,17 +624,16 @@ def test_mixed_implicit_explicit_requires_both_methods():
         def elastic_stiffness(self, state=None):
             pass
 
-        def yield_function(self, stress, state):
+        def yield_function(self, state):
             pass
 
-        def update_state(self, dlambda, stress, state):
-            return [self.ep(state["ep"] + dlambda)]
+        def update_state(self, dlambda, state_n, state_trial):
+            return [self.ep(state_n["ep"] + dlambda)]
 
-        def state_residual(self, state_new, dlambda, stress, state_n):
+        def state_residual(self, state_new, dlambda, state_n, state_trial):
             return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
     assert OK.implicit_state_names == ["alpha"]
-    assert OK.implicit_stress is False
 
 
 def test_all_implicit_states_no_update_state_needed():
@@ -648,10 +647,10 @@ def test_all_implicit_states_no_update_state_needed():
         def elastic_stiffness(self, state=None):
             pass
 
-        def yield_function(self, stress, state):
+        def yield_function(self, state):
             pass
 
-        def state_residual(self, state_new, dlambda, stress, state_n):
+        def state_residual(self, state_new, dlambda, state_n, state_trial):
             return [self.alpha(anp.array(0.0)), self.ep(anp.array(0.0))]
 
     assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}
@@ -665,11 +664,117 @@ def test_no_state_fields_no_methods_needed():
         def elastic_stiffness(self, state=None):
             pass
 
-        def yield_function(self, stress, state):
+        def yield_function(self, state):
             pass
 
-    assert OKStateless.state_names == []
+    # stress is always auto-attached even when no user fields are declared
+    assert OKStateless.state_names == ["stress"]
     assert OKStateless.implicit_state_names == []
+
+
+def test_implicit_stress_true_raises():
+    """Declaring implicit_stress=True must raise TypeError with migration hint."""
+    from manforge.core.state import Implicit
+    with pytest.raises(TypeError, match="implicit_stress has been removed"):
+        class Bad(MaterialModel3D):
+            implicit_stress = True
+            param_names = []
+            alpha = Implicit(shape=NTENS)
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, state):
+                pass
+
+            def state_residual(self, state_new, dlambda, state_n, state_trial):
+                return [self.alpha(anp.array(0.0))]
+
+
+def test_implicit_stress_false_raises():
+    """Declaring implicit_stress=False must raise TypeError with migration hint."""
+    with pytest.raises(TypeError, match="implicit_stress has been removed"):
+        class Bad(MaterialModel3D):
+            implicit_stress = False
+            param_names = []
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, state):
+                pass
+
+            def update_state(self, dlambda, state_n, state_trial):
+                return []
+
+
+def test_old_yield_function_signature_raises():
+    """yield_function(self, stress, state) must raise TypeError."""
+    with pytest.raises(TypeError, match="yield_function.*is no longer accepted"):
+        class Bad(MaterialModel3D):
+            param_names = []
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, stress, state):
+                pass
+
+            def update_state(self, dlambda, state_n, state_trial):
+                return []
+
+
+def test_old_update_state_signature_raises():
+    """update_state(self, dlambda, stress, state) must raise TypeError."""
+    with pytest.raises(TypeError, match="update_state.*is no longer accepted"):
+        class Bad(MaterialModel3D):
+            param_names = []
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, state):
+                pass
+
+            def update_state(self, dlambda, stress, state):
+                return []
+
+
+def test_old_state_residual_signature_raises():
+    """state_residual(self, state_new, dlambda, stress, state_n) must raise TypeError."""
+    from manforge.core.state import Implicit
+    with pytest.raises(TypeError, match="state_residual.*is no longer accepted"):
+        class Bad(MaterialModel3D):
+            param_names = []
+            alpha = Implicit(shape=NTENS)
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, state):
+                pass
+
+            def state_residual(self, state_new, dlambda, stress, state_n):
+                return []
+
+
+def test_stress_residual_override_raises():
+    """Overriding stress_residual() must raise TypeError with migration hint."""
+    with pytest.raises(TypeError, match="stress_residual.*override has been removed"):
+        class Bad(MaterialModel3D):
+            param_names = []
+
+            def elastic_stiffness(self, state=None):
+                pass
+
+            def yield_function(self, state):
+                pass
+
+            def update_state(self, dlambda, state_n, state_trial):
+                return []
+
+            def stress_residual(self, stress, dlambda, state, stress_trial, state_n):
+                pass
 
 
 # ---------------------------------------------------------------------------

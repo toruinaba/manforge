@@ -2,12 +2,12 @@
 
 Validates that mixing explicit and implicit state variables works correctly:
 - A model with only some states in implicit_state_names converges to the
-  same solution as the fully-explicit or fully-implicit counterpart.
-- implicit_stress=False (σ eliminated from NR) converges to the same
-  solution as implicit_stress=True (σ as independent NR unknown).
+  same solution as the fully-explicit counterpart.
+- stress = Implicit(shape=NTENS) (σ as NR unknown) converges to the same
+  solution as the default (σ derived via fixed-point).
 
 Uses AF kinematic hardening as the reference because its state_residual has
-a known closed-form solution, so all three paths must agree at convergence.
+a known closed-form solution, so all paths must agree at convergence.
 """
 
 import pytest
@@ -32,14 +32,14 @@ class _AFAlphaImplicit(AFKinematic3D):
     state_residual returns only the implicit key (alpha).
     """
 
-    implicit_stress = False
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, stress, state_n):
+    def update_state(self, dlambda, state_n, state_trial):
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
+        stress = state_trial["stress"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
@@ -50,20 +50,21 @@ class _AFAlphaImplicit(AFKinematic3D):
 
 
 # ---------------------------------------------------------------------------
-# Partial-implicit with implicit_stress=True: α implicit, ep explicit, σ in NR
+# Partial-implicit with stress = Implicit: α implicit, ep explicit, σ in NR
 # ---------------------------------------------------------------------------
 
 class _AFAlphaImplicitStress(AFKinematic3D):
     """AF 3D with alpha implicit and σ as an independent NR unknown."""
 
-    implicit_stress = True
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, stress, state_n):
+    def update_state(self, dlambda, state_n, state_trial):
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
+        stress = state_new["stress"]
         xi = stress - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
@@ -102,13 +103,12 @@ def partial_stress_model():
 def test_partial_implicit_api():
     m = _AFAlphaImplicit(**_PARAMS)
     assert m.implicit_state_names == ["alpha"]
-    assert m.implicit_stress is False
 
 
 def test_partial_implicit_stress_api():
     m = _AFAlphaImplicitStress(**_PARAMS)
-    assert m.implicit_state_names == ["alpha"]
-    assert m.implicit_stress is True
+    assert "alpha" in m.implicit_state_names
+    assert "stress" in m.implicit_state_names
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ def test_partial_implicit_state_matches_explicit(explicit_model, partial_model, 
     [2e-3, -1e-3, -1e-3, 0.0, 0.0, 0.0],
 ])
 def test_implicit_stress_flag_matches_no_flag(partial_model, partial_stress_model, deps_vec):
-    """implicit_stress=True must converge to the same result as implicit_stress=False."""
+    """stress = Implicit must converge to the same result as default (Explicit) stress."""
     deps = anp.array(deps_vec)
     stress0 = anp.zeros(6)
     state0 = partial_model.initial_state()
@@ -170,7 +170,7 @@ def test_implicit_stress_flag_matches_no_flag(partial_model, partial_stress_mode
 
     np.testing.assert_allclose(
         np.array(r_flag.stress), np.array(r_no_flag.stress), atol=1e-7,
-        err_msg=f"implicit_stress=True stress differs for deps={deps_vec}"
+        err_msg=f"stress=Implicit stress differs for deps={deps_vec}"
     )
     np.testing.assert_allclose(
         np.array(r_flag.state["alpha"]), np.array(r_no_flag.state["alpha"]), atol=1e-7,
@@ -191,7 +191,10 @@ def test_partial_implicit_yield_consistency(partial_model, deps_vec):
     deps = anp.array(deps_vec)
 
     _r = PythonIntegrator(partial_model).stress_update(deps, anp.zeros(6), state0)
-    f = partial_model.yield_function(_r.stress, _r.state)
+    from manforge.core.state import State
+    state_with_stress = dict(_r.state)
+    state_with_stress["stress"] = _r.stress
+    f = partial_model.yield_function(state_with_stress)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
 
 
@@ -223,7 +226,7 @@ def test_partial_implicit_fd_tangent(partial_model, deps_vec):
     [2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
 ])
 def test_partial_implicit_stress_fd_tangent(partial_stress_model, deps_vec):
-    """Consistent tangent must match FD for partial-implicit with implicit_stress=True."""
+    """Consistent tangent must match FD for partial-implicit with stress=Implicit."""
     state0 = partial_stress_model.initial_state()
     result = check_tangent(
         PythonIntegrator(partial_stress_model),
@@ -232,7 +235,7 @@ def test_partial_implicit_stress_fd_tangent(partial_stress_model, deps_vec):
         anp.array(deps_vec),
     )
     assert result.passed, (
-        f"FD tangent check failed (implicit_stress): max_rel_err = {result.max_rel_err:.3e}"
+        f"FD tangent check failed (implicit stress): max_rel_err = {result.max_rel_err:.3e}"
     )
 
 

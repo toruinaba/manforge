@@ -5,27 +5,36 @@ Usage in a model class::
     from manforge.core import Implicit, Explicit, NTENS
 
     class OWKinematic3D(MaterialModel3D):
-        alpha = Implicit(shape=NTENS, doc="backstress tensor")
-        ep    = Implicit(shape=(),    doc="equivalent plastic strain")
-        implicit_stress = True
+        stress = Implicit(shape=NTENS, doc="Cauchy stress")   # NR unknown
+        alpha  = Implicit(shape=NTENS, doc="backstress tensor")
+        ep     = Implicit(shape=(),    doc="equivalent plastic strain")
 
 The ``Implicit`` / ``Explicit`` descriptors replace the old list-based
 ``state_names`` / ``implicit_state_names`` declarations.  ``MaterialModel.
 __init_subclass__`` collects them via MRO traversal and auto-derives
 ``cls.state_names`` and ``cls.implicit_state_names`` for internal use.
 
+stress field
+------------
+σ (stress) is automatically declared as ``Explicit(shape=NTENS, name="stress")``
+by ``MaterialModel.__init_subclass__`` if the user does not declare it.  When
+declared as ``Implicit``, σ is included as an NR unknown.  The ``implicit_stress``
+flag has been removed — use ``stress = Implicit(shape=NTENS)`` instead.
+
+User methods receive and return ``State`` objects that include ``state.stress``.
+
 Returning residuals / updates
 ------------------------------
 ``StateField.__call__`` wraps a computed value as ``StateResidual`` (implicit)
 or ``StateUpdate`` (explicit), giving a concise return idiom::
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
         ...
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
-    def update_state(self, dlambda, stress, state):
+    def update_state(self, dlambda, state_n, state_trial):
         ...
-        return [self.alpha(alpha_new), self.ep(ep_new)]
+        return [self.stress(sig_new), self.alpha(alpha_new), self.ep(ep_new)]
 
 The framework validates the returned list at the call boundary via
 ``_validate_state_items``.
@@ -392,3 +401,44 @@ def _make(required_keys: set, factory_name: str, kwargs: dict) -> dict:
             parts.append(f"unexpected keys: {sorted(extra)}")
         raise TypeError(f"{factory_name}() — {'; '.join(parts)}")
     return kwargs
+
+
+# ---------------------------------------------------------------------------
+# stress-replacement helper (used by residual.py to build ∂f/∂σ via autograd)
+# ---------------------------------------------------------------------------
+
+def _state_with_stress(state, new_stress) -> "State | dict":
+    """Return a copy of *state* with only the ``stress`` entry replaced.
+
+    Used by the framework to build ``autograd.grad(lambda s: model.yield_function(
+    _state_with_stress(state, s)))(stress)`` without disturbing other state
+    entries.  The returned object mirrors the type of *state*:
+
+    - If *state* is a :class:`State`, a new ``State`` is returned.
+    - If *state* is a plain ``dict``, a shallow copy with the replaced entry
+      is returned.
+
+    The replacement is a *thin wrapper* — existing entries are not copied,
+    only the ``"stress"`` key is swapped.  autograd ``ArrayBox`` values in
+    other entries pass through unchanged.
+
+    Parameters
+    ----------
+    state : State or dict
+        Current state (must contain the ``"stress"`` key).
+    new_stress : array-like
+        Replacement stress value (may be an autograd ArrayBox).
+
+    Returns
+    -------
+    State or dict
+        Same type as *state*, with ``state["stress"]`` replaced by *new_stress*.
+    """
+    if isinstance(state, State):
+        data = dict(state.as_dict())
+        data["stress"] = new_stress
+        return State(data, state._fields)
+    # plain dict
+    out = dict(state)
+    out["stress"] = new_stress
+    return out

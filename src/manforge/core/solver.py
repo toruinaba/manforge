@@ -8,17 +8,21 @@ from manforge.core.residual import (
     make_nr_residual,
     _flatten_state,
     _normalise_update,
+    _wrap_state,
+    _call_update_state,
+    _state_with_stress,
 )
+from manforge.core.state import _state_with_stress as _state_with_stress_fn
 
 
 def _numerical_newton(model, stress_trial, state_n, max_iter, tol,
                       raise_on_nonconverged=True):
     """Unified Newton-Raphson solver for return mapping.
 
-    Dispatches automatically based on ``model.implicit_state_names`` and
-    ``model.implicit_stress``:
+    Dispatches automatically based on ``model.state_fields["stress"].kind``
+    and ``model.implicit_state_names``:
 
-    * ``implicit_state_names=[]``, ``implicit_stress=False``  →  scalar NR on Δλ
+    * stress is Explicit, ``implicit_state_names=[]``  →  scalar NR on Δλ
       (uses ``autograd.grad`` for efficiency)
     * otherwise  →  vector NR on ``[σ?] + [Δλ] + [q_implicit?]``
       (uses ``autograd.jacobian`` + ``np.linalg.solve``)
@@ -47,7 +51,7 @@ def _numerical_newton(model, stress_trial, state_n, max_iter, tol,
 
 
 def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverged):
-    """Scalar NR on Δλ (implicit_state_names=[], implicit_stress=False)."""
+    """Scalar NR on Δλ (stress=Explicit, no implicit non-stress states)."""
     dlambda = anp.array(0.0)
     stress = anp.array(stress_trial)
     state_new = state_n
@@ -57,25 +61,74 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
     f = anp.array(0.0)
 
     model_name = type(model).__name__
-    explicit_keys = set(model.state_names)  # all explicit for scalar NR
+    explicit_keys_non_stress = set(
+        k for k in model.state_names
+        if k != "stress" and k not in model.implicit_state_names
+    )
 
     for _iteration in range(max_iter):
-        state_new = _normalise_update(model.update_state(dlambda, stress, state_n), explicit_keys, model_name)
-        C_new = model.elastic_stiffness(state_new)
-        n = autograd.grad(lambda s: model.yield_function(s, state_new))(stress)
+        # Update explicit non-stress states
+        if explicit_keys_non_stress:
+            state_trial_dict = dict(state_n)
+            state_trial_dict["stress"] = stress
+            q_exp = _call_update_state(
+                model, dlambda, state_n, state_trial_dict,
+                explicit_keys_non_stress, model_name
+            )
+            # User may provide custom stress via update_state
+            stress = q_exp.get("stress", stress)
+            state_new = {"stress": stress,
+                         **{k: v for k, v in q_exp.items() if k != "stress"}}
+        else:
+            state_new = {"stress": stress}
+
+        # Compute flow direction and update stress
+        state_new_state = _wrap_state(state_new, model)
+        C_new = model.elastic_stiffness(state_new_state)
+        n = autograd.grad(
+            lambda s: model.yield_function(_state_with_stress_fn(state_new_state, s))
+        )(stress)
         stress = anp.array(stress_trial) - dlambda * (C_new @ n)
-        state_new = _normalise_update(model.update_state(dlambda, stress, state_n), explicit_keys, model_name)
-        f = model.yield_function(stress, state_new)
+
+        # Re-evaluate with updated stress
+        if explicit_keys_non_stress:
+            state_trial_dict = dict(state_n)
+            state_trial_dict["stress"] = stress
+            q_exp = _call_update_state(
+                model, dlambda, state_n, state_trial_dict,
+                explicit_keys_non_stress, model_name
+            )
+            stress = q_exp.get("stress", stress)
+            state_new = {"stress": stress,
+                         **{k: v for k, v in q_exp.items() if k != "stress"}}
+        else:
+            state_new = {"stress": stress}
+
+        state_new_state = _wrap_state(state_new, model)
+        f = model.yield_function(state_new_state)
         residual_history.append(float(np.abs(float(f))))
 
         if abs(float(f)) < tol:
             return stress, state_new, dlambda, n_iterations, residual_history, True
 
         def _f_residual(dl, _stress=stress):
-            st = _normalise_update(model.update_state(dl, _stress, state_n), explicit_keys, model_name)
-            nn = autograd.grad(lambda s: model.yield_function(s, st))(_stress)
-            s_upd = anp.array(stress_trial) - dl * (model.elastic_stiffness(st) @ nn)
-            return model.yield_function(s_upd, st)
+            trial_dict = dict(state_n)
+            trial_dict["stress"] = _stress
+            if explicit_keys_non_stress:
+                q_st = _call_update_state(
+                    model, dl, state_n, trial_dict, explicit_keys_non_stress, model_name
+                )
+                _stress2 = q_st.get("stress", _stress)
+                st = {"stress": _stress2, **{k: v for k, v in q_st.items() if k != "stress"}}
+            else:
+                st = {"stress": _stress}
+            st_state = _wrap_state(st, model)
+            nn = autograd.grad(
+                lambda s: model.yield_function(_state_with_stress_fn(st_state, s))
+            )(_stress)
+            s_upd = anp.array(stress_trial) - dl * (model.elastic_stiffness(st_state) @ nn)
+            st2 = {"stress": s_upd, **{k: v for k, v in st.items() if k != "stress"}}
+            return model.yield_function(_wrap_state(st2, model))
 
         dfddl = autograd.grad(_f_residual)(dlambda)
         dlambda = dlambda - f / dfddl
@@ -95,11 +148,14 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
     ntens = unknowns_meta["ntens"]
     do_implicit_stress = unknowns_meta["implicit_stress"]
     n_implicit = unknowns_meta["n_implicit"]
-    implicit_keys = sorted(model.implicit_state_names)
-    explicit_keys = set(model.state_names) - set(implicit_keys)
+    implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
+    explicit_keys_non_stress = set(
+        k for k in model.state_names
+        if k != "stress" and k not in model.implicit_state_names
+    )
 
     # Build initial guess x.
-    implicit_state_n = {k: state_n[k] for k in implicit_keys}
+    implicit_state_n = {k: state_n[k] for k in implicit_keys_non_stress}
     flat_impl_n, _ = _flatten_state(implicit_state_n)
     parts = []
     if do_implicit_stress:
@@ -139,33 +195,54 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
             f"(||R||_2 = {float(np.linalg.norm(np.array(R))):.3e}, tol = {tol:.3e})"
         )
 
-    # Extract results from x.
     dlambda_val = x[_dl_idx]
-    vr_model_name = type(model).__name__
+    model_name = type(model).__name__
 
     if do_implicit_stress:
         stress = x[:ntens]
     else:
         q_imp = unflatten_implicit(x[_q_sl]) if n_implicit > 0 else {}
-        if explicit_keys:
-            q_exp = _normalise_update(
-                model.update_state(dlambda_val, anp.array(stress_trial), state_n),
-                explicit_keys, vr_model_name,
+        if explicit_keys_non_stress:
+            # Compute σ from final Δλ and implicit state
+            q_approx = {"stress": anp.array(stress_trial), **q_imp}
+            q_approx.update({k: state_n[k] for k in explicit_keys_non_stress})
+            q_approx_state = _wrap_state(q_approx, model)
+            C = model.elastic_stiffness(q_approx_state)
+            n_dir = autograd.grad(
+                lambda s: model.yield_function(_state_with_stress_fn(q_approx_state, s))
+            )(anp.array(stress_trial))
+            stress = anp.array(stress_trial) - dlambda_val * (C @ n_dir)
+            # Try to get explicit state
+            state_trial_dict = dict(state_n)
+            state_trial_dict["stress"] = stress
+            q_exp = _call_update_state(
+                model, dlambda_val, state_n, state_trial_dict,
+                explicit_keys_non_stress, model_name
             )
-            q_full = {**q_imp, **q_exp}
+            stress = q_exp.get("stress", stress)
         else:
-            q_full = q_imp if q_imp else dict(state_n)
-        C = model.elastic_stiffness(q_full)
-        n_dir = autograd.grad(lambda s: model.yield_function(s, q_full))(anp.array(stress_trial))
-        stress = anp.array(stress_trial) - dlambda_val * (C @ n_dir)
+            q_imp_full = {"stress": anp.array(stress_trial), **q_imp}
+            q_imp_state = _wrap_state(q_imp_full, model)
+            C = model.elastic_stiffness(q_imp_state)
+            n_dir = autograd.grad(
+                lambda s: model.yield_function(_state_with_stress_fn(q_imp_state, s))
+            )(anp.array(stress_trial))
+            stress = anp.array(stress_trial) - dlambda_val * (C @ n_dir)
 
+    # Final state extraction
     q_imp = unflatten_implicit(x[_q_sl]) if n_implicit > 0 else {}
-    if explicit_keys:
-        q_exp = _normalise_update(
-            model.update_state(dlambda_val, stress, state_n), explicit_keys, vr_model_name,
+    if explicit_keys_non_stress:
+        state_trial_dict = dict(state_n)
+        state_trial_dict["stress"] = stress
+        q_exp = _call_update_state(
+            model, dlambda_val, state_n, state_trial_dict,
+            explicit_keys_non_stress, model_name
         )
-        state_new = {**q_imp, **q_exp}
+        stress = q_exp.get("stress", stress)
+        state_new = {"stress": stress,
+                     **q_imp,
+                     **{k: v for k, v in q_exp.items() if k != "stress"}}
     else:
-        state_new = q_imp if q_imp else dict(state_n)
+        state_new = {"stress": stress, **q_imp} if q_imp else {"stress": stress}
 
     return stress, state_new, anp.array(dlambda_val), n_iterations, residual_history, converged

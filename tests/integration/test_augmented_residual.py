@@ -54,24 +54,26 @@ def implicit_ps_model():
 # ---------------------------------------------------------------------------
 
 def test_j2_has_no_implicit_states(model):
+    # stress is Explicit (default), no other implicit states
     assert model.implicit_state_names == []
-    assert model.implicit_stress is False
 
 
 def test_af_has_no_implicit_states():
     m = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     assert m.implicit_state_names == []
-    assert m.implicit_stress is False
 
 
 def test_implicit_af_has_implicit_states(implicit_model):
-    assert implicit_model.implicit_state_names == ["alpha", "ep"]
-    assert implicit_model.implicit_stress is True
+    # stress, alpha, ep all declared Implicit
+    assert "stress" in implicit_model.implicit_state_names
+    assert "alpha" in implicit_model.implicit_state_names
+    assert "ep" in implicit_model.implicit_state_names
 
 
 def test_implicit_ps_has_implicit_states(implicit_ps_model):
-    assert implicit_ps_model.implicit_state_names == ["alpha", "ep"]
-    assert implicit_ps_model.implicit_stress is True
+    assert "stress" in implicit_ps_model.implicit_state_names
+    assert "alpha" in implicit_ps_model.implicit_state_names
+    assert "ep" in implicit_ps_model.implicit_state_names
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +142,7 @@ def test_augmented_yield_consistency_3d(implicit_model, deps_vec):
 
     _r = PythonIntegrator(implicit_model).stress_update(deps, anp.zeros(6), state0)
     stress_new, state_new = _r.stress, _r.state
-    f = implicit_model.yield_function(stress_new, state_new)
+    f = implicit_model.yield_function(state_new)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
 
 
@@ -198,7 +200,7 @@ def test_augmented_yield_consistency_plane_stress(implicit_ps_model):
 
     _r = PythonIntegrator(implicit_ps_model).stress_update(deps, anp.zeros(3), state0)
     stress_new, state_new = _r.stress, _r.state
-    f = implicit_ps_model.yield_function(stress_new, state_new)
+    f = implicit_ps_model.yield_function(state_new)
     assert abs(float(f)) < 1e-8, f"PS yield not satisfied: f = {float(f):.3e}"
 
 
@@ -279,8 +281,9 @@ def test_augmented_tangent_matches_reduced_3d(af_model, implicit_model, deps_vec
 
 def test_implicit_pe_has_implicit_states():
     m = _AFKinematicImplicitPE()
-    assert m.implicit_state_names == ["alpha", "ep"]
-    assert m.implicit_stress is True
+    assert "stress" in m.implicit_state_names
+    assert "alpha" in m.implicit_state_names
+    assert "ep" in m.implicit_state_names
 
 
 def test_augmented_yield_consistency_plane_strain():
@@ -291,7 +294,7 @@ def test_augmented_yield_consistency_plane_strain():
 
     _r = PythonIntegrator(model).stress_update(deps, anp.zeros(4), state0)
     stress_new, state_new = _r.stress, _r.state
-    f = model.yield_function(stress_new, state_new)
+    f = model.yield_function(state_new)
     assert abs(float(f)) < 1e-8, f"PE yield not satisfied: f = {float(f):.3e}"
 
 
