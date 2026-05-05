@@ -136,15 +136,15 @@ src/manforge/
 | `MaterialModelPS` | `PLANE_STRESS` | 3 |
 | `MaterialModel1D` | `UNIAXIAL_1D` | 1 |
 
-必須メソッドは `implicit_state_names` と `implicit_stress` の設定によって異なる:
+状態変数は `Implicit` / `Explicit` フィールドとして宣言し、σ も含めて対等に扱う:
 
-| 設定 | 必須メソッド | NR 未知数 |
-|-----|-------------|----------|
-| `implicit_state_names = []` (デフォルト) | `yield_function`, `update_state` | スカラー Δλ |
-| `implicit_state_names = [全 state]`, `implicit_stress = True` | `yield_function`, `state_residual` | `[σ, Δλ, q]` |
-| 部分的 implicit (一部 state のみ) | `yield_function`, `update_state`, `state_residual` の両方 | `[Δλ, q_implicit]` |
+| フィールド宣言 | 必須メソッド | NR 未知数 |
+|--------------|-------------|----------|
+| 全 state が `Explicit` (デフォルト) | `yield_function`, `update_state` | スカラー Δλ |
+| 一部 state が `Implicit` (σ は Explicit) | `yield_function`, `update_state`, `state_residual` の両方 | `[Δλ, q_implicit]` |
+| 全 state が `Implicit`、`stress = Implicit` | `yield_function`, `state_residual` | `[σ, Δλ, q]` |
 
-`update_state` は **陽更新 state のみ** (`state_names − implicit_state_names`) のキーを返す。`state_residual` は **陰 state のみ** (`implicit_state_names`) のキーを返す。`hardening_type` は廃止 (宣言すると `TypeError`)。
+`update_state` は **陽更新 state のみ** のキーを返す。`state_residual` は **陰 state のみ** のキーを返し、`self.stress(R_stress)` を含めると σ 残差をカスタム指定できる。`hardening_type` と `implicit_stress` は廃止 (宣言すると `TypeError`)。全メソッドは `state["stress"]` 経由で応力にアクセスする (旧 2 引数シグネチャは `TypeError`)。
 
 `elastic_stiffness(self, state=None)` は `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D` 基底クラスに等方性デフォルト実装が用意されており、`self.E` と `self.nu` を持つモデルなら実装不要。状態依存の弾性剛性 (損傷塑性など) を持つモデルのみ override する。
 
@@ -278,25 +278,26 @@ print(result.params, result.residual)
 
 ### Explicit-state template (J2-like)
 
-デフォルト (`implicit_state_names = []`) では、状態更新を closed-form で `update_state` に記述する。NR はスカラー Δλ のみ解く。
+状態変数を `Explicit` として宣言し、`update_state` に closed-form 更新を書く。NR はスカラー Δλ のみ解く。σ は自動装着されフレームワークが関連流れ則で更新する。
 
 ```python
 import autograd.numpy as anp
+from manforge.core import Implicit, Explicit, NTENS
 from manforge.core.material import MaterialModel3D
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "H"]
-    state_names = ["ep"]
+    ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, *, E, nu, sigma_y0, H):
         super().__init__()   # デフォルト SOLID_3D
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
 
-    def yield_function(self, stress, state):
-        return self._vonmises(stress) - (self.sigma_y0 + self.H * state["ep"])
+    def yield_function(self, state):
+        return self._vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
 
-    def update_state(self, dlambda, stress, state):
-        return {"ep": state["ep"] + dlambda}
+    def update_state(self, dlambda, state_n, state_trial):
+        return [self.ep(state_n["ep"] + dlambda)]
 ```
 
 `elastic_stiffness` は `self.E` と `self.nu` から自動生成されるため省略可能。状態依存の弾性剛性を持つ場合は `elastic_stiffness(self, state=None)` を override する。
@@ -326,36 +327,35 @@ model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
 ### Implicit-state template (Ohno-Wang-like)
 
-`update_state` が closed-form で解けない場合 (後方 Euler 離散化に状態変数が非線形に現れる場合)、`implicit_state_names` にその state 名を列挙して `state_residual` を実装する。NR の未知数ベクトルは `[Δλ, q_implicit]` (+ `implicit_stress=True` にすると σ も含まれる)。
+`update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し、`state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
 
 ```python
 import autograd.numpy as anp
+from manforge.core import Implicit, Explicit, NTENS
 from manforge.core.material import MaterialModel3D
 
 class MyImplicitModel(MaterialModel3D):
-    implicit_state_names = ["alpha", "ep"]   # 全 state が陰 → update_state 不要
-    implicit_stress = True                   # σ も NR 未知数に含める
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    state_names = ["alpha", "ep"]
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")
+    alpha  = Implicit(shape=NTENS, doc="backstress tensor")
+    ep     = Implicit(shape=(),    doc="equivalent plastic strain")
 
     def __init__(self, *, E, nu, sigma_y0, C_k, gamma):
         super().__init__()
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
         self.C_k = C_k; self.gamma = gamma
 
-    def initial_state(self):
-        return {"alpha": anp.zeros(self.ntens), "ep": anp.array(0.0)}
-
-    def yield_function(self, stress, state):
-        xi = stress - state["alpha"]
+    def yield_function(self, state):
+        xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, stress, state_n):
-        """後方 Euler 残差。implicit_state_names のキーのみ返す。収束時にゼロ。"""
+    def state_residual(self, state_new, dlambda, state_n, state_trial):
+        """後方 Euler 残差。implicit state のキーのみ返す。収束時にゼロ。"""
         # ...モデル固有の残差を定義...
         R_alpha = ...         # shape (ntens,)
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return {"alpha": R_alpha, "ep": R_ep}
+        # stress を省略すると framework が associative R_stress を自動装着する
+        return [self.alpha(R_alpha), self.ep(R_ep)]
 ```
 
 参照実装: `src/manforge/models/ow_kinematic.py`
@@ -373,7 +373,7 @@ from manforge.simulation.types import FieldHistory, FieldType
 # Armstrong-Frederick (全 state 陽更新、スカラー NR)
 model_af = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
 
-# Ohno-Wang 修正 AF (全 state 陰、implicit_stress=True、ベクトル NR)
+# Ohno-Wang 修正 AF (全 state 陰、stress=Implicit、ベクトル NR)
 model_ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=0.05)
 
 strain_history = np.zeros((150, 6))

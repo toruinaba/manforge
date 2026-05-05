@@ -40,9 +40,11 @@ def estimate_yield_strain(model) -> float:
     e1 = (lambda _a: (_a.__setitem__(0, 1.0), _a)[1])(np.zeros(ntens))
     sigma_unit = C @ e1
 
+    from manforge.core.state import _state_with_stress
     eps_hi = 1e-3
     for _ in range(60):
-        f_hi = float(model.yield_function(eps_hi * sigma_unit, state_0))
+        state_hi = _state_with_stress(state_0, eps_hi * sigma_unit)
+        f_hi = float(model.yield_function(state_hi))
         if f_hi > 0.0:
             break
         eps_hi *= 10.0
@@ -53,7 +55,8 @@ def estimate_yield_strain(model) -> float:
     eps_lo = 0.0
     for _ in range(60):
         eps_mid = (eps_lo + eps_hi) / 2.0
-        f_mid = float(model.yield_function(eps_mid * sigma_unit, state_0))
+        state_mid = _state_with_stress(state_0, eps_mid * sigma_unit)
+        f_mid = float(model.yield_function(state_mid))
         if f_mid > 0.0:
             eps_hi = eps_mid
         else:

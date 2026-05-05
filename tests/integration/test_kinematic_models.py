@@ -107,7 +107,7 @@ def test_yield_consistency_plastic(km_model, km_state0, deps_vec):
     """After a plastic step, stress must lie on the yield surface."""
     deps = anp.array(deps_vec)
     _r = PythonIntegrator(km_model).stress_update( deps, anp.zeros(6), km_state0)
-    f = km_model.yield_function(_r.stress, _r.state)
+    f = km_model.yield_function(_r.state)
     assert abs(float(f)) < 1e-8, f"Yield not satisfied: f = {float(f):.3e}"
 
 
@@ -186,7 +186,7 @@ def test_gamma0_gives_linear_kinematic(model_type):
     state0 = model.initial_state()
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
     _r = PythonIntegrator(model).stress_update( deps, anp.zeros(6), state0)
-    f = model.yield_function(_r.stress, _r.state)
+    f = model.yield_function(_r.state)
     assert abs(float(f)) < 1e-8
     assert float(_r.state["alpha"][0]) > 0.0
 
@@ -260,7 +260,7 @@ def test_plane_strain_yield_consistency(model_type):
     assert state0["alpha"].shape == (4,)
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(4))
     _r = PythonIntegrator(model).stress_update( deps, anp.zeros(4), state0)
-    f = model.yield_function(_r.stress, _r.state)
+    f = model.yield_function(_r.state)
     assert abs(float(f)) < 1e-8
 
 
@@ -300,7 +300,7 @@ def test_plane_stress_yield_consistency(model_type):
     state0 = model.initial_state()
     deps = _DEPS_PS[model_type]
     _r = PythonIntegrator(model).stress_update( deps, anp.zeros(3), state0)
-    f = model.yield_function(_r.stress, _r.state)
+    f = model.yield_function(_r.state)
     assert abs(float(f)) < 1e-8
 
 
@@ -333,7 +333,7 @@ def test_1d_yield_consistency(model_type):
     state0 = model.initial_state()
     deps = anp.array([3e-3])
     _r = PythonIntegrator(model).stress_update( deps, anp.zeros(1), state0)
-    f = model.yield_function(_r.stress, _r.state)
+    f = model.yield_function(_r.state)
     assert abs(float(f)) < 1e-8
 
 

@@ -57,38 +57,37 @@ from manforge.core import Implicit, Explicit, NTENS
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0"]
-    ep    = Explicit(shape=(),   doc="equivalent plastic strain")
+    ep    = Explicit(shape=(),    doc="equivalent plastic strain")
     alpha = Implicit(shape=NTENS, doc="backstress tensor")
-    implicit_stress = True   # σ also an NR unknown
+    stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")  # optional
 ```
 
 - `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
 - `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
 - `shape` accepts `NTENS` (resolves to `(ntens,)` at construction time), `()` (scalar), an `int`, or a tuple. The string `"ntens"` is no longer accepted — use `NTENS` instead.
-- `state_names` and `implicit_state_names` are derived automatically from the field declarations by `__init_subclass__`; hand-declaring them as non-empty lists raises `TypeError` with a migration hint.
-- `implicit_stress: bool = False` — if `True`, σ is also an NR unknown (fully-coupled vector NR). Default: σ derived from Δλ each iteration.
+- **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR, same as old `implicit_stress=True`). `implicit_stress` is no longer accepted and raises `TypeError`.
+- `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`; hand-declaring them as non-empty lists raises `TypeError` with a migration hint.
 
 `__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
 
-The NR system consists of 3 residual equations. The base class provides default implementations for two of them; users only need to override when customising physics:
-- `stress_residual(stress, dlambda, state, stress_trial, state_n)` → shape `(ntens,)`. Default: associative flow `σ − σ_trial + Δλ·C·∂f/∂σ`. Override for non-associative flow rules.
-- `yield_function(stress, state)` → scalar (≤0 = elastic). **Must be implemented.**
-- `state_residual(state_new, dlambda, stress, state_n)` → list of `StateResidual` items. Required when any state is `Implicit`.
+User methods are unified on `State` arguments — stress is accessed via `state["stress"]` (or `state.stress`) like any other state:
 
-Required methods depend on which states are explicit vs implicit:
-- `elastic_stiffness()` → (ntens, ntens) Voigt stiffness tensor (always required)
-- `yield_function(stress, state)` → scalar (≤0 = elastic) (always required)
-- `update_state(dlambda, stress, state)` → `list[StateUpdate]` with only the **explicit** state keys. Required whenever any state is `Explicit`. Scalar NR on Δλ when all states are explicit and `implicit_stress = False`.
-- `state_residual(state_new, dlambda, stress, state_n)` → `list[StateResidual]` with only the **implicit** state keys. Required whenever any state is `Implicit`. Vector NR on `[Δλ] + [q_implicit]` (or `[σ, Δλ, q_implicit]` if `implicit_stress=True`).
+- `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.** Old 2-arg signature `yield_function(self, stress, state)` raises `TypeError`.
+- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit** state keys (excluding stress, unless user declares `stress = Explicit` and wants custom update). Required whenever any non-stress state is `Explicit`. Old signature `update_state(self, dlambda, stress, state)` raises `TypeError`.
+- `state_residual(self, state_new, dlambda, state_n, state_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to override the default associative R_stress. Required whenever any state is `Implicit`. Old signature `state_residual(self, state_new, dlambda, stress, state_n)` raises `TypeError`.
+
+`state_trial["stress"]` semantics in these methods:
+- When `stress = Implicit`: `state_trial["stress"]` is the **fixed elastic trial stress** (used to write `R_stress = σ − σ_trial + ...`).
+- When `stress = Explicit`: `state_trial["stress"]` is the **current stress iterate** (used by models like AF kinematic to evaluate the flow direction at the current state).
 
 Use `StateField.__call__` to wrap return values (produces `StateResidual` or `StateUpdate` depending on field kind):
 
 ```python
-def state_residual(self, state_new, dlambda, stress, state_n):
+def state_residual(self, state_new, dlambda, state_n, state_trial):
     ...
     return [self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
 
-def update_state(self, dlambda, stress, state):
+def update_state(self, dlambda, state_n, state_trial):
     ...
     return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate
 ```
@@ -97,9 +96,11 @@ The framework validates the list at the boundary: wrong kind (`StateResidual` wh
 
 The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models with a closed-form update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
 
+`result.state` from the solver always contains `"stress"` — `model.yield_function(result.state)` works directly.
+
 Factory helper on the base class: `make_state(**kwargs)` assembles a full `State` wrapper with strict key validation (used for initial-state construction and prestress).
 
-`hardening_type` is no longer used and raises `TypeError` with a migration hint if declared. List-based `state_names = ["ep"]` also raises `TypeError` (use `ep = Explicit(shape=())` instead).
+`hardening_type` and `implicit_stress` are no longer used and raise `TypeError` with migration hints if declared. List-based `state_names = ["ep"]` also raises `TypeError` (use `ep = Explicit(shape=())` instead). Declaring `stress_residual` as a user method raises `TypeError` (use `state_residual` with `self.stress(R_stress)` instead).
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
@@ -120,7 +121,7 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
 
 - `stress_update.py`: Two-level API:
   - `stress_update(model, deps, stress_n, state_n, method="auto")` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call.
-  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.implicit_state_names` and `model.implicit_stress`: scalar NR on Δλ when both are empty/False; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` otherwise (max 50 iter, tol=1e-10).
+  - `return_mapping(model, stress_trial, C, state_n, method="auto")` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.state_fields["stress"].kind` and `model.implicit_state_names`: scalar NR on Δλ when stress is Explicit and no other implicit states; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` (when `stress = Implicit`) otherwise (max 50 iter, tol=1e-10).
   - `method` values: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`).
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).

@@ -112,7 +112,7 @@ def test_plastic_yield_consistency(pe_model, pe_state, strain_inc_vec):
     deps = anp.array(strain_inc_vec)
     _r = PythonIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state)
     stress, state = _r.stress, _r.state
-    f = pe_model.yield_function(stress, state)
+    f = pe_model.yield_function(state)
     assert abs(float(f)) < 1e-8, f"|f| = {abs(float(f)):.3e}"
 
 
@@ -233,8 +233,8 @@ def test_j2isotropic3d_autodiff_plane_strain(pe_state):
     stress, state, ddsdde = _r.stress, _r.state, _r.ddsdde
     assert stress.shape == (4,)
     assert ddsdde.shape == (4, 4)
-    # Yield consistency
-    f = model.yield_function(stress, state)
+    # Yield consistency (state already includes "stress")
+    f = model.yield_function(state)
     assert abs(float(f)) < 1e-8
 
 

@@ -185,7 +185,10 @@ class _PythonIntegratorBase:
         C_n = self._model.elastic_stiffness(state_n)
         stress_trial = stress_n + C_n @ strain_inc
 
-        f_trial = self._model.yield_function(stress_trial, state_n)
+        # Yield check: build a state that includes stress for the new API
+        from manforge.core.state import _state_with_stress as _swst
+        state_trial = _swst(state_n, stress_trial)
+        f_trial = self._model.yield_function(state_trial)
         if f_trial <= 0.0:
             return StressUpdateResult(
                 return_mapping=None,

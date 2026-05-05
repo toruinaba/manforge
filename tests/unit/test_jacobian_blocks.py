@@ -60,7 +60,8 @@ class TestReducedBlocks:
         jac = ad_jacobian_blocks(model, result, state0)
 
         # flow direction is autograd.grad of yield_function w.r.t. stress
-        n_ad = autograd.grad(lambda s: model.yield_function(s, result.state))(result.stress)
+        from manforge.core.state import _state_with_stress
+        n_ad = autograd.grad(lambda s: model.yield_function(_state_with_stress(result.state, s)))(result.stress)
         np.testing.assert_allclose(
             np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
         )
@@ -139,7 +140,8 @@ class TestAugmentedBlocks:
         result, state0 = _plastic_result(ow_model)
         jac = ad_jacobian_blocks(ow_model, result, state0)
 
-        n_ad = autograd.grad(lambda s: ow_model.yield_function(s, result.state))(result.stress)
+        from manforge.core.state import _state_with_stress
+        n_ad = autograd.grad(lambda s: ow_model.yield_function(_state_with_stress(result.state, s)))(result.stress)
         np.testing.assert_allclose(
             np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
         )

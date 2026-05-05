@@ -15,7 +15,7 @@ ep    : equivalent plastic strain (scalar, ≥ 0)
 
 Yield function
 --------------
-f(σ, α) = σ_vm(σ − α) − σ_y0
+f(state) = σ_vm(state.stress − state.alpha) − σ_y0
 
 where σ_vm is the von Mises equivalent stress of the *relative* stress.
 
@@ -54,7 +54,7 @@ from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, Stre
 class AFKinematic3D(MaterialModel3D):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    Uses the scalar NR path (all states explicit via ``update_state``).
+    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path (no analytical hooks).
 
     Parameters
@@ -75,6 +75,7 @@ class AFKinematic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -87,36 +88,33 @@ class AFKinematic3D(MaterialModel3D):
         self.C_k = C_k
         self.gamma = gamma
 
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
-        xi = stress - state["alpha"]
+        xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update (implicit, analytical).
 
         α_{n+1} = (α_n + C_k Δλ ŝ) / (1 + γ Δλ)
 
         where ŝ = dev(σ − α_n) / σ_vm(σ − α_n).
         """
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
+        alpha_n = state_n["alpha"]
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
 class AFKinematicPS(MaterialModelPS):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
-    Uses the scalar NR path (all states explicit via ``update_state``).
+    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path.
-
-    Inherits operator methods from
-    :class:`~manforge.core.material.MaterialModelPS` (including the
-    missing-component correction in ``_vonmises``).
 
     Parameters
     ----------
@@ -136,6 +134,7 @@ class AFKinematicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -148,30 +147,28 @@ class AFKinematicPS(MaterialModelPS):
         self.C_k = C_k
         self.gamma = gamma
 
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
-        xi = stress - state["alpha"]
+        xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
+        alpha_n = state_n["alpha"]
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
 class AFKinematic1D(MaterialModel1D):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
-    Uses the scalar NR path (all states explicit via ``update_state``).
+    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
     Uses the generic NR + autodiff return-mapping path.
-
-    Inherits operator methods from
-    :class:`~manforge.core.material.MaterialModel1D`.
 
     Parameters
     ----------
@@ -190,6 +187,7 @@ class AFKinematic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -202,17 +200,18 @@ class AFKinematic1D(MaterialModel1D):
         self.C_k = C_k
         self.gamma = gamma
 
-    def yield_function(self, stress: anp.ndarray, state: dict) -> anp.ndarray:
+    def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
-        xi = stress - state["alpha"]
+        xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def update_state(self, dlambda, stress, state) -> dict:
+    def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
-        alpha_n = state["alpha"]
-        xi = stress - alpha_n
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
+        alpha_n = state_n["alpha"]
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]

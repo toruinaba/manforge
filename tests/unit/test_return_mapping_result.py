@@ -39,7 +39,7 @@ def test_plastic_step_fields(model, initial_state):
     assert result.stress_trial.shape == (6,)
 
     # Yield function should be ~0 after plastic step
-    f = model.yield_function(result.stress, result.state)
+    f = model.yield_function(result.state)
     assert abs(float(f)) < 1e-8
 
 

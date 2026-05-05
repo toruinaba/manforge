@@ -8,7 +8,7 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import make_tangent_residual, _flatten_state
+from manforge.core.residual import make_tangent_residual, _flatten_state, _wrap_state
 
 
 @dataclass
@@ -61,12 +61,17 @@ def ad_jacobian_blocks(
             )
 
     ntens = model.ntens
-    implicit_keys = sorted(model.implicit_state_names)
-    implicit_state = {k: state[k] for k in implicit_keys}
+    implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
+    implicit_state = {k: state[k] for k in implicit_keys_non_stress}
     flat_impl, _ = _flatten_state(implicit_state)
     n_implicit = len(flat_impl)
 
-    residual_fn, _, _ = make_tangent_residual(model, stress_trial, state_n)
+    # state_n must include "stress" for tangent residual
+    state_n_full = dict(state_n)
+    if "stress" not in state_n_full:
+        state_n_full["stress"] = anp.zeros(ntens)
+
+    residual_fn, _, _ = make_tangent_residual(model, stress_trial, state_n_full)
 
     x_conv = anp.concatenate([
         anp.array(stress),
@@ -94,7 +99,7 @@ def ad_jacobian_blocks(
             full=J,
         )
 
-    slices = _build_state_slices(implicit_state, implicit_keys)
+    slices = _build_state_slices(implicit_state, implicit_keys_non_stress)
 
     dstress_dstate: dict = {}
     dyield_dstate:  dict = {}

@@ -23,20 +23,23 @@ from manforge.simulation.integrator import PythonIntegrator
 
 def test_implicit_state_names_ow3d():
     m = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
-    assert m.implicit_state_names == ["alpha", "ep"]
-    assert m.implicit_stress is True
+    assert "stress" in m.implicit_state_names
+    assert "alpha" in m.implicit_state_names
+    assert "ep" in m.implicit_state_names
 
 
 def test_implicit_state_names_owps():
     m = OWKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
-    assert m.implicit_state_names == ["alpha", "ep"]
-    assert m.implicit_stress is True
+    assert "stress" in m.implicit_state_names
+    assert "alpha" in m.implicit_state_names
+    assert "ep" in m.implicit_state_names
 
 
 def test_implicit_state_names_ow1d():
     m = OWKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
-    assert m.implicit_state_names == ["alpha", "ep"]
-    assert m.implicit_stress is True
+    assert "stress" in m.implicit_state_names
+    assert "alpha" in m.implicit_state_names
+    assert "ep" in m.implicit_state_names
 
 
 # ---------------------------------------------------------------------------

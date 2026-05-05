@@ -4,14 +4,15 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import make_tangent_residual, _flatten_state
+from manforge.core.residual import make_tangent_residual, _flatten_state, _wrap_state
+from manforge.core.state import _state_with_stress
 
 
 def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     """Compute the consistent (algorithmic) tangent dσ_{n+1}/dΔε.
 
-    σ is always included as an independent variable in the linear system,
-    regardless of ``model.implicit_stress``.  The linear system solved is::
+    σ is always included as an independent variable in the linear system.
+    The linear system solved is::
 
         A · dx/dε = rhs
         A = ∂R/∂x  (ntens + 1 + n_implicit) × (ntens + 1 + n_implicit)
@@ -37,16 +38,27 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     anp.ndarray, shape (ntens, ntens)
     """
     ntens = model.ntens
+    state_with_stress = dict(state)
+    state_with_stress["stress"] = stress
+    state_full = _wrap_state(state_with_stress, model)
+
     C_n = model.elastic_stiffness(state_n)
-    C_conv = model.elastic_stiffness(state)
+    C_conv = model.elastic_stiffness(state_full)
 
-    n_conv = autograd.grad(lambda s: model.yield_function(s, state))(stress)
-    stress_trial = stress + float(dlambda) * (C_conv @ n_conv)
+    n_conv = autograd.grad(
+        lambda s: model.yield_function(_state_with_stress(state_full, s))
+    )(anp.array(stress))
+    stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
 
-    residual_fn, n_implicit, _ = make_tangent_residual(model, stress_trial, state_n)
+    # state_n must include "stress" for tangent residual
+    state_n_full = dict(state_n)
+    if "stress" not in state_n_full:
+        state_n_full["stress"] = anp.zeros(ntens)
 
-    implicit_keys = sorted(model.implicit_state_names)
-    implicit_state = {k: state[k] for k in implicit_keys}
+    residual_fn, n_implicit, _ = make_tangent_residual(model, stress_trial, state_n_full)
+
+    implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
+    implicit_state = {k: state[k] for k in implicit_keys_non_stress}
     flat_impl, _ = _flatten_state(implicit_state)
 
     x_conv = anp.concatenate([

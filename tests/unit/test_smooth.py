@@ -276,9 +276,10 @@ class TestAFPattern:
         model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         state0 = model.initial_state()
         stress = anp.zeros(6)
+        state_trial = dict(state0); state_trial["stress"] = stress
 
         def alpha_sq_norm(dl):
-            items = model.update_state(dl, stress, state0)
+            items = model.update_state(dl, state0, state_trial)
             st = {item.name: item.value for item in items}
             return anp.sum(st["alpha"] ** 2)
 
