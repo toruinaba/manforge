@@ -112,55 +112,63 @@ def _normalise_residual(returned, implicit_keys: set, model_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _call_update_state(model, dlambda, state_n_dict, state_trial_dict,
-                        expected_explicit_keys, model_name):
+                        expected_explicit_keys, model_name, require_stress=True):
     """Call model.update_state(dlambda, state_n, state_trial) → dict.
 
-    *expected_explicit_keys* must NOT include "stress" — stress is handled
-    separately by the framework.
+    *expected_explicit_keys* must NOT include "stress".  When *require_stress*
+    is True (the default), the returned dict MUST include "stress" so the
+    framework can use the user-supplied σ.  Pass ``require_stress=False`` when
+    stress is Implicit and update_state is only called for non-stress explicit
+    states.
     """
     state_n = _wrap_state(state_n_dict, model)
     state_trial = _wrap_state(state_trial_dict, model)
     returned = model.update_state(dlambda, state_n, state_trial)
-    # Accept list[StateUpdate] with only the non-stress explicit keys
+    expected_all = (expected_explicit_keys | {"stress"}) if require_stress else expected_explicit_keys
     if isinstance(returned, list):
-        # User may optionally include "stress" in the list — accept it
-        actual_keys = {item.name for item in returned if isinstance(item, StateUpdate)}
-        stress_provided = "stress" in actual_keys
-        non_stress_keys = actual_keys - {"stress"}
-        if non_stress_keys != expected_explicit_keys:
-            extra = non_stress_keys - expected_explicit_keys
-            missing = expected_explicit_keys - non_stress_keys
-            parts = []
-            if extra:
-                parts.append(f"unexpected keys: {sorted(extra)}")
-            if missing:
-                parts.append(f"missing keys: {sorted(missing)}")
-            raise ValueError(
-                f"{model_name}.update_state() returned wrong non-stress keys "
-                f"({'; '.join(parts)}). Expected: {sorted(expected_explicit_keys)}"
-            )
-        # Validate types
         for item in returned:
             if not isinstance(item, StateUpdate):
                 raise TypeError(
                     f"{model_name}.update_state: every item must be StateUpdate, "
                     f"got {type(item).__name__}"
                 )
-        return {item.name: item.value for item in returned}
-    if isinstance(returned, dict):
-        stress_provided = "stress" in returned
-        actual_non_stress = set(returned.keys()) - {"stress"}
-        if actual_non_stress != expected_explicit_keys:
-            extra = actual_non_stress - expected_explicit_keys
-            missing = expected_explicit_keys - actual_non_stress
+        actual_keys = {item.name for item in returned}
+        if actual_keys != expected_all:
+            extra = actual_keys - expected_all
+            missing = expected_all - actual_keys
             parts = []
             if extra:
                 parts.append(f"unexpected keys: {sorted(extra)}")
             if missing:
                 parts.append(f"missing keys: {sorted(missing)}")
+                if "stress" in missing:
+                    parts.append(
+                        "Hint: add self.stress(self.default_stress_update(dlambda, state_n, state_trial))"
+                        " for associative flow, or self.stress(sig_new) for custom update"
+                    )
             raise ValueError(
                 f"{model_name}.update_state() returned wrong keys "
-                f"({'; '.join(parts)}). Expected: {sorted(expected_explicit_keys)}"
+                f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
+            )
+        return {item.name: item.value for item in returned}
+    if isinstance(returned, dict):
+        actual_keys = set(returned.keys())
+        if actual_keys != expected_all:
+            extra = actual_keys - expected_all
+            missing = expected_all - actual_keys
+            parts = []
+            if extra:
+                parts.append(f"unexpected keys: {sorted(extra)}")
+            if missing:
+                parts.append(f"missing keys: {sorted(missing)}")
+                if "stress" in missing:
+                    parts.append(
+                        "Hint: add 'stress': self.default_stress_update(dlambda, state_n, state_trial)"
+                        " for associative flow"
+                    )
+            raise ValueError(
+                f"{model_name}.update_state() returned wrong keys "
+                f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
             )
         return returned
     raise TypeError(
@@ -173,48 +181,59 @@ def _call_state_residual(model, state_new_dict, dlambda, state_n_dict, state_tri
                           expected_implicit_keys, model_name):
     """Call model.state_residual(state_new, dlambda, state_n, state_trial) → dict.
 
-    *expected_implicit_keys* must NOT include "stress".  The user may optionally
-    include "stress" in the returned list to provide a custom R_stress.
+    *expected_implicit_keys* must NOT include "stress".  The returned dict
+    MUST include "stress" when stress is Implicit so the framework can use it.
     """
     state_new = _wrap_state(state_new_dict, model)
     state_n = _wrap_state(state_n_dict, model)
     state_trial = _wrap_state(state_trial_dict, model)
     returned = model.state_residual(state_new, dlambda, state_n, state_trial)
+    stress_field = model.state_fields["stress"]
+    do_implicit_stress = stress_field.kind == "implicit"
+    expected_all = (expected_implicit_keys | {"stress"}) if do_implicit_stress else expected_implicit_keys
     if isinstance(returned, list):
-        actual_keys = {item.name for item in returned if isinstance(item, StateResidual)}
-        non_stress_keys = actual_keys - {"stress"}
-        if non_stress_keys != expected_implicit_keys:
-            extra = non_stress_keys - expected_implicit_keys
-            missing = expected_implicit_keys - non_stress_keys
-            parts = []
-            if extra:
-                parts.append(f"unexpected keys: {sorted(extra)}")
-            if missing:
-                parts.append(f"missing keys: {sorted(missing)}")
-            raise ValueError(
-                f"{model_name}.state_residual() returned wrong non-stress keys "
-                f"({'; '.join(parts)}). Expected: {sorted(expected_implicit_keys)}"
-            )
         for item in returned:
             if not isinstance(item, StateResidual):
                 raise TypeError(
                     f"{model_name}.state_residual: every item must be StateResidual, "
                     f"got {type(item).__name__}"
                 )
-        return {item.name: item.value for item in returned}
-    if isinstance(returned, dict):
-        actual_non_stress = set(returned.keys()) - {"stress"}
-        if actual_non_stress != expected_implicit_keys:
-            extra = actual_non_stress - expected_implicit_keys
-            missing = expected_implicit_keys - actual_non_stress
+        actual_keys = {item.name for item in returned}
+        if actual_keys != expected_all:
+            extra = actual_keys - expected_all
+            missing = expected_all - actual_keys
             parts = []
             if extra:
                 parts.append(f"unexpected keys: {sorted(extra)}")
             if missing:
                 parts.append(f"missing keys: {sorted(missing)}")
+                if "stress" in missing:
+                    parts.append(
+                        "Hint: add self.stress(self.default_stress_residual(state_new, dlambda, state_trial))"
+                        " for associative flow, or self.stress(R_custom) for non-associative"
+                    )
             raise ValueError(
                 f"{model_name}.state_residual() returned wrong keys "
-                f"({'; '.join(parts)}). Expected: {sorted(expected_implicit_keys)}"
+                f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
+            )
+        return {item.name: item.value for item in returned}
+    if isinstance(returned, dict):
+        actual_keys = set(returned.keys())
+        if actual_keys != expected_all:
+            extra = actual_keys - expected_all
+            missing = expected_all - actual_keys
+            parts = []
+            if extra:
+                parts.append(f"unexpected keys: {sorted(extra)}")
+            if missing:
+                parts.append(f"missing keys: {sorted(missing)}")
+                if "stress" in missing:
+                    parts.append(
+                        "Hint: add 'stress': self.default_stress_residual(state_new, dlambda, state_trial)"
+                    )
+            raise ValueError(
+                f"{model_name}.state_residual() returned wrong keys "
+                f"({'; '.join(parts)}). Expected: {sorted(expected_all)}"
             )
         return returned
     raise TypeError(
@@ -296,12 +315,12 @@ def make_nr_residual(model, stress_trial, state_n):
             state_trial_dict = dict(state_n)
             state_trial_dict["stress"] = sig
             if explicit_keys_non_stress:
+                # stress is Implicit so update_state is only called for non-stress
+                # explicit states; stress is not expected in its return value.
                 q_exp = _call_update_state(
                     model, dlambda, state_n, state_trial_dict,
-                    explicit_keys_non_stress, model_name
+                    explicit_keys_non_stress, model_name, require_stress=False
                 )
-                # q_exp may include "stress" if user provided custom update
-                sig = q_exp.get("stress", sig)
                 q_full = {"stress": sig, **q_imp,
                           **{k: v for k, v in q_exp.items() if k != "stress"}}
             else:
@@ -316,35 +335,28 @@ def make_nr_residual(model, stress_trial, state_n):
             n_approx = autograd.grad(
                 lambda s: model.yield_function(_state_with_stress(q_approx_state, s))
             )(anp.array(stress_trial))
-            sig = anp.array(stress_trial) - dlambda * (C_approx @ n_approx)
+            sig_approx = anp.array(stress_trial) - dlambda * (C_approx @ n_approx)
 
             state_trial_dict = dict(state_n)
-            state_trial_dict["stress"] = sig
+            state_trial_dict["stress"] = sig_approx
             if explicit_keys_non_stress:
+                # stress is Explicit: update_state MUST return stress (require_stress=True)
                 q_exp = _call_update_state(
                     model, dlambda, state_n, state_trial_dict,
                     explicit_keys_non_stress, model_name
                 )
-                # User may provide custom stress via update_state
-                sig = q_exp.get("stress", sig)
+                # Use the user-supplied stress from update_state
+                sig = q_exp["stress"]
                 q_full = {"stress": sig, **q_imp,
                           **{k: v for k, v in q_exp.items() if k != "stress"}}
             else:
-                q_full = {"stress": sig, **q_imp}
+                q_full = {"stress": sig_approx, **q_imp}
+                sig = sig_approx
 
         q_full_state = _wrap_state(q_full, model)
         R_yield = model.yield_function(q_full_state)
 
-        parts = []
-        if do_implicit_stress:
-            stress_trial_arr = anp.array(stress_trial)
-            # Default associative R_stress (overridden below if user provides it)
-            R_stress = model._default_stress_residual(
-                q_full["stress"], dlambda, q_full_state, stress_trial_arr
-            )
-            parts.append(R_stress)
-
-        parts.append(anp.atleast_1d(R_yield))
+        parts = [anp.atleast_1d(R_yield)]
 
         if n_implicit > 0:
             state_trial_for_residual = dict(state_n)
@@ -361,13 +373,18 @@ def make_nr_residual(model, stress_trial, state_n):
                 model, q_full, dlambda, state_n, state_trial_for_residual,
                 set(implicit_keys_non_stress), model_name
             )
-            # If user provided stress residual, replace default
-            if "stress" in R_state_dict and do_implicit_stress:
-                parts[0] = R_state_dict["stress"]
+            if do_implicit_stress:
+                # stress MUST be in R_state_dict (enforced by _call_state_residual)
+                parts.insert(0, R_state_dict["stress"])
             R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
             if R_state_non_stress:
                 R_state_flat, _ = _flatten_state(R_state_non_stress)
                 parts.append(R_state_flat)
+        elif do_implicit_stress:
+            raise ValueError(
+                f"{model_name}: stress is Implicit but there are no implicit states "
+                "to call state_residual() on — this should not happen."
+            )
 
         return anp.concatenate(parts)
 
@@ -412,9 +429,13 @@ def make_tangent_residual(model, stress_trial, state_n):
         state_trial_dict = dict(state_n)
         state_trial_dict["stress"] = sig
         if explicit_keys_non_stress:
+            # For Implicit stress, update_state is only called for non-stress
+            # explicit states (require_stress=False).  For Explicit stress,
+            # update_state must return stress (require_stress=True default).
             q_exp = _call_update_state(
                 model, dlambda, state_n, state_trial_dict,
-                explicit_keys_non_stress, model_name
+                explicit_keys_non_stress, model_name,
+                require_stress=(not do_implicit_stress)
             )
             q_full = {"stress": sig, **q_imp,
                       **{k: v for k, v in q_exp.items() if k != "stress"}}
@@ -424,10 +445,7 @@ def make_tangent_residual(model, stress_trial, state_n):
         q_full_state = _wrap_state(q_full, model)
         stress_trial_arr = anp.array(stress_trial)
 
-        R_stress = model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
         R_yield = model.yield_function(q_full_state)
-
-        parts = [R_stress, anp.atleast_1d(R_yield)]
 
         if n_implicit > 0:
             state_trial_for_residual = dict(state_n)
@@ -444,13 +462,18 @@ def make_tangent_residual(model, stress_trial, state_n):
                 model, q_full, dlambda, state_n, state_trial_for_residual,
                 set(implicit_keys_non_stress), model_name
             )
-            # If user provided stress residual, replace default
-            if "stress" in R_state_dict:
-                parts[0] = R_state_dict["stress"]
+            # stress MUST be in R_state_dict for Implicit stress (enforced by _call_state_residual)
+            R_stress = R_state_dict["stress"] if do_implicit_stress else (
+                model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
+            )
             R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
+            parts = [R_stress, anp.atleast_1d(R_yield)]
             if R_state_non_stress:
                 R_state_flat, _ = _flatten_state(R_state_non_stress)
                 parts.append(R_state_flat)
+        else:
+            R_stress = model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
+            parts = [R_stress, anp.atleast_1d(R_yield)]
 
         return anp.concatenate(parts)
 

@@ -75,6 +75,7 @@ class AFKinematic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -99,14 +100,14 @@ class AFKinematic3D(MaterialModel3D):
 
         where ŝ = dev(σ − α_n) / σ_vm(σ − α_n).
         """
-        stress = state_trial["stress"]
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
         alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
 class AFKinematicPS(MaterialModelPS):
@@ -133,6 +134,7 @@ class AFKinematicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -152,14 +154,14 @@ class AFKinematicPS(MaterialModelPS):
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
-        stress = state_trial["stress"]
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
         alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
 class AFKinematic1D(MaterialModel1D):
@@ -185,6 +187,7 @@ class AFKinematic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
@@ -204,11 +207,11 @@ class AFKinematic1D(MaterialModel1D):
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
-        stress = state_trial["stress"]
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
         alpha_n = state_n["alpha"]
-        xi = stress - alpha_n
+        xi = state_trial["stress"] - alpha_n
         s_xi = self._dev(xi)
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
+        return [self.stress(sig), self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]

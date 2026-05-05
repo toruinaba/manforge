@@ -37,9 +37,10 @@ class _AFKinematicImplicit3D(AFKinematic3D):
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class _AFKinematicImplicitPS(AFKinematicPS):
@@ -58,9 +59,10 @@ class _AFKinematicImplicitPS(AFKinematicPS):
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class _AFKinematicImplicitPE(AFKinematic3D):
@@ -83,6 +85,7 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         n_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]

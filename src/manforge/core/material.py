@@ -465,6 +465,84 @@ class MaterialModel(ABC):
         data = _make(required, f"{type(self).__name__}.make_state", kwargs)
         return State(data, tuple(self.state_names))
 
+    def default_stress_residual(
+        self,
+        state_new,
+        dlambda: anp.ndarray,
+        state_trial,
+    ) -> anp.ndarray:
+        """Associative default R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
+
+        Call this from :meth:`state_residual` when the model uses associative
+        flow (flow direction = ∂f/∂σ)::
+
+            def state_residual(self, state_new, dlambda, state_n, state_trial):
+                R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
+                R_alpha = ...
+                return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+
+        For non-associative flow (plastic potential g ≠ f), compute R_stress
+        from your g-based flow direction and return ``self.stress(R_stress)``
+        directly.
+
+        Parameters
+        ----------
+        state_new : State or dict
+            Proposed state at step n+1 (NR iterate); ``state_new["stress"]``
+            is the current σ unknown.
+        dlambda : scalar
+            Plastic multiplier increment Δλ.
+        state_trial : State or dict
+            Trial state; ``state_trial["stress"]`` is the fixed elastic
+            predictor σ_trial.
+
+        Returns
+        -------
+        anp.ndarray, shape (ntens,)
+        """
+        return self._default_stress_residual(
+            state_new["stress"], dlambda, state_new, state_trial["stress"]
+        )
+
+    def default_stress_update(
+        self,
+        dlambda: anp.ndarray,
+        state_n,
+        state_trial,
+    ) -> anp.ndarray:
+        """Return the framework-pre-computed associative stress iterate.
+
+        For ``stress = Explicit`` models the framework derives σ_{n+1} =
+        σ_trial − Δλ·C·∂f/∂σ before calling :meth:`update_state` and passes
+        it as ``state_trial["stress"]``.  This helper returns that value,
+        allowing user code to explicitly acknowledge the default associative
+        update::
+
+            def update_state(self, dlambda, state_n, state_trial):
+                sig = self.default_stress_update(dlambda, state_n, state_trial)
+                return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
+
+        For a non-associative or damage-coupled Explicit stress update, compute
+        ``sig`` directly (from your own formula) and return ``self.stress(sig)``
+        instead of calling this helper.
+
+        Parameters
+        ----------
+        dlambda : scalar
+            Plastic multiplier increment Δλ (unused; present for API symmetry
+            with :meth:`default_stress_residual`).
+        state_n : State or dict
+            State at the beginning of the increment (unused by default).
+        state_trial : State or dict
+            Trial state; ``state_trial["stress"]`` is the framework-pre-computed
+            associative σ iterate.
+
+        Returns
+        -------
+        anp.ndarray, shape (ntens,)
+        """
+        return state_trial["stress"]
+
     def _default_stress_residual(
         self,
         stress: anp.ndarray,
@@ -472,10 +550,9 @@ class MaterialModel(ABC):
         state,
         stress_trial: anp.ndarray,
     ) -> anp.ndarray:
-        """Internal default associative stress residual R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
+        """Internal: associative R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
 
-        Used by the framework when the user does not return ``stress`` from
-        ``state_residual``.  Not part of the public API.
+        Used by the framework and by :meth:`default_stress_residual`.
         """
         import autograd
         from manforge.core.state import _state_with_stress
@@ -491,10 +568,10 @@ class MaterialModel(ABC):
         dlambda: anp.ndarray,
         state,
     ) -> anp.ndarray:
-        """Internal default associative stress update σ ← σ_trial − Δλ·C·∂f/∂σ.
+        """Internal: associative σ ← σ_trial − Δλ·C·∂f/∂σ.
 
-        Used by the framework when the user does not return ``stress`` from
-        ``update_state``.  Not part of the public API.
+        Used by the framework to pre-compute the stress iterate for Explicit
+        stress models before calling :meth:`update_state`.
         """
         import autograd
         from manforge.core.state import _state_with_stress

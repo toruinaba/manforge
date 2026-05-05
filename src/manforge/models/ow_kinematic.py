@@ -123,6 +123,7 @@ class OWKinematic3D(MaterialModel3D):
 
         alpha_vm = self._vonmises(alpha_new)
 
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -130,7 +131,7 @@ class OWKinematic3D(MaterialModel3D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematicPS(MaterialModelPS):
@@ -183,6 +184,7 @@ class OWKinematicPS(MaterialModelPS):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_vm = self._vonmises(alpha_new)
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -190,7 +192,7 @@ class OWKinematicPS(MaterialModelPS):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
 class OWKinematic1D(MaterialModel1D):
@@ -242,6 +244,7 @@ class OWKinematic1D(MaterialModel1D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_vm = self._vonmises(alpha_new)
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -249,4 +252,4 @@ class OWKinematic1D(MaterialModel1D):
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]

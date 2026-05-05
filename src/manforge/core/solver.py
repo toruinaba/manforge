@@ -75,8 +75,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
                 model, dlambda, state_n, state_trial_dict,
                 explicit_keys_non_stress, model_name
             )
-            # User may provide custom stress via update_state
-            stress = q_exp.get("stress", stress)
+            stress = q_exp["stress"]
             state_new = {"stress": stress,
                          **{k: v for k, v in q_exp.items() if k != "stress"}}
         else:
@@ -98,7 +97,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
                 model, dlambda, state_n, state_trial_dict,
                 explicit_keys_non_stress, model_name
             )
-            stress = q_exp.get("stress", stress)
+            stress = q_exp["stress"]
             state_new = {"stress": stress,
                          **{k: v for k, v in q_exp.items() if k != "stress"}}
         else:
@@ -118,7 +117,7 @@ def _scalar_nr(model, stress_trial, state_n, max_iter, tol, raise_on_nonconverge
                 q_st = _call_update_state(
                     model, dl, state_n, trial_dict, explicit_keys_non_stress, model_name
                 )
-                _stress2 = q_st.get("stress", _stress)
+                _stress2 = q_st["stress"]
                 st = {"stress": _stress2, **{k: v for k, v in q_st.items() if k != "stress"}}
             else:
                 st = {"stress": _stress}
@@ -219,7 +218,7 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
                 model, dlambda_val, state_n, state_trial_dict,
                 explicit_keys_non_stress, model_name
             )
-            stress = q_exp.get("stress", stress)
+            stress = q_exp["stress"]
         else:
             q_imp_full = {"stress": anp.array(stress_trial), **q_imp}
             q_imp_state = _wrap_state(q_imp_full, model)
@@ -236,9 +235,11 @@ def _vector_nr(model, stress_trial, state_n, residual_fn, unknowns_meta,
         state_trial_dict["stress"] = stress
         q_exp = _call_update_state(
             model, dlambda_val, state_n, state_trial_dict,
-            explicit_keys_non_stress, model_name
+            explicit_keys_non_stress, model_name,
+            require_stress=(not do_implicit_stress),
         )
-        stress = q_exp.get("stress", stress)
+        if not do_implicit_stress:
+            stress = q_exp["stress"]
         state_new = {"stress": stress,
                      **q_imp,
                      **{k: v for k, v in q_exp.items() if k != "stress"}}

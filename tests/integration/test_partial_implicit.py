@@ -27,15 +27,16 @@ from manforge.verification.fd_check import check_tangent
 class _AFAlphaImplicit(AFKinematic3D):
     """AF 3D with only alpha declared as an implicit state (ep remains explicit).
 
-    MRO override: re-declare ``alpha`` as Implicit; ``ep`` stays Explicit from parent.
-    update_state returns only the explicit key (ep).
+    MRO override: re-declare ``alpha`` as Implicit; ``ep`` and ``stress`` stay
+    Explicit from parent.  update_state returns the explicit keys (stress, ep).
     state_residual returns only the implicit key (alpha).
     """
 
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
     def update_state(self, dlambda, state_n, state_trial):
-        return [self.ep(state_n["ep"] + dlambda)]
+        sig = self.default_stress_update(dlambda, state_n, state_trial)
+        return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
 
     def state_residual(self, state_new, dlambda, state_n, state_trial):
         alpha_n = state_n["alpha"]
@@ -60,6 +61,7 @@ class _AFAlphaImplicitStress(AFKinematic3D):
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
     def update_state(self, dlambda, state_n, state_trial):
+        # stress is Implicit: only return the explicit ep key
         return [self.ep(state_n["ep"] + dlambda)]
 
     def state_residual(self, state_new, dlambda, state_n, state_trial):
@@ -70,8 +72,9 @@ class _AFAlphaImplicitStress(AFKinematic3D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
+        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
         R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
-        return [self.alpha(R_alpha)]
+        return [self.stress(R_stress), self.alpha(R_alpha)]
 
 
 # ---------------------------------------------------------------------------
