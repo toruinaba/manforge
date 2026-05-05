@@ -100,7 +100,7 @@ src/manforge/
 ├── models/
 │   ├── j2_isotropic.py    # J2 等方硬化 (参照実装)
 │   ├── af_kinematic.py    # Armstrong-Frederick 移動硬化
-│   └── ow_kinematic.py    # Ohno-Wang 修正 AF (augmented path の参照実装)
+│   └── ow_kinematic.py    # Ohno-Wang 修正 AF (implicit_state_names の参照実装)
 ├── simulation/
 │   ├── types.py           # FieldType / FieldHistory / DriverResult
 │   ├── driver.py          # StrainDriver / StressDriver
@@ -448,7 +448,7 @@ print(jac.dstress_dsigma)   # shape (ntens, ntens)
 print(jac.full)             # フラットな全体行列
 ```
 
-augmented モデル (例: Ohno-Wang) では状態変数名をキーとするブロックも取得できる:
+implicit_state_names を持つモデル (例: Ohno-Wang) では状態変数名をキーとするブロックも取得できる:
 
 ```python
 jac.dstate_dsigma["alpha"]        # ∂R_alpha/∂σ,  shape (ntens, ntens)
