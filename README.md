@@ -144,7 +144,7 @@ src/manforge/
 | 一部 state が `Implicit` (σ は Explicit) | `yield_function`, `update_state`, `state_residual` の両方 | `[Δλ, q_implicit]` |
 | 全 state が `Implicit`、`stress = Implicit` | `yield_function`, `state_residual` | `[σ, Δλ, q]` |
 
-`update_state` は **陽更新 state のみ** のキーを返す。`state_residual` は **陰 state のみ** のキーを返し、`self.stress(R_stress)` を含めると σ 残差をカスタム指定できる。`hardening_type` と `implicit_stress` は廃止 (宣言すると `TypeError`)。全メソッドは `state["stress"]` 経由で応力にアクセスする (旧 2 引数シグネチャは `TypeError`)。
+`update_state` は **陽更新 state のみ** のキーを返す。`state_residual` は **陰 state のみ** のキーを返し、`self.stress(R_stress)` を含めると σ 残差をカスタム指定できる。さらに `self.dlambda(R_dl)` を含めると Δλ 行の残差を差し替えられる (粘塑性 Perzyna 型など)。省略時は `yield_function(state) = 0` がデフォルト。`hardening_type` と `implicit_stress` は廃止 (宣言すると `TypeError`)。全メソッドは `state["stress"]` 経由で応力にアクセスする (旧 2 引数シグネチャは `TypeError`)。
 
 `elastic_stiffness(self, state=None)` は `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D` 基底クラスに等方性デフォルト実装が用意されており、`self.E` と `self.nu` を持つモデルなら実装不要。状態依存の弾性剛性 (損傷塑性など) を持つモデルのみ override する。
 
@@ -359,6 +359,21 @@ class MyImplicitModel(MaterialModel3D):
 ```
 
 参照実装: `src/manforge/models/ow_kinematic.py`
+
+#### Δλ 行残差のカスタム指定 (粘塑性・非標準 consistency condition)
+
+`state_residual` に `self.dlambda(R_dl)` を含めると NR 残差の Δλ 行を差し替えられる。省略時は `yield_function(state) = 0` (標準弾塑性)。
+
+```python
+def state_residual(self, state_new, dlambda, state_n, state_trial):
+    # Perzyna 型粘塑性: f − η·Δλ/Δt = 0
+    f = self.yield_function(state_new)
+    R_dl = f - self.eta * dlambda / self.dt
+    R_alpha = ...
+    return [self.dlambda(R_dl), self.alpha(R_alpha)]
+```
+
+`self.dlambda(R_dl)` は scalar-NR / vector NR / consistent tangent の全経路で機能する。`update_state` で使うと `TypeError`、リスト内に 2 個含めると `ValueError`。
 
 ### Kinematic / backstress (AF・OW の既製クラス)
 
