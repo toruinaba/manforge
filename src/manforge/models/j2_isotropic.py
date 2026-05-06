@@ -27,7 +27,7 @@ import autograd.numpy as anp
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.state import Explicit, NTENS
 from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
-from manforge.core.stress_update import ReturnMappingResult
+from manforge.core.result import ReturnMappingResult
 from manforge.verification.fortran_registry import verified_against_fortran
 
 

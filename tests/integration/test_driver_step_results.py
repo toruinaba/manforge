@@ -4,7 +4,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import StressUpdateResult
+from manforge.core.result import StressUpdateResult
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.integrator import PythonNumericalIntegrator
 from manforge.simulation.types import DriverResult, FieldHistory, FieldType

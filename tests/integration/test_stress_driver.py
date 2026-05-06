@@ -250,6 +250,6 @@ def test_stress_driver_integrator_types(model_3d, IntegratorCls):
     result = StressDriver(IntegratorCls(model_3d)).run(stress_load(stress_history))
 
     assert len(result.step_results) == N
-    from manforge.core.stress_update import StressUpdateResult
+    from manforge.core.result import StressUpdateResult
     for sr in result.step_results:
         assert isinstance(sr, StressUpdateResult)
