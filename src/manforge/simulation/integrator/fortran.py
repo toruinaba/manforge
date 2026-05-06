@@ -43,6 +43,23 @@ class FortranIntegrator:
         construction time.
     state_names : list[str]
         Ordered list of state-variable names, used by the default hooks.
+    elastic_stiffness_fn : callable, optional
+        ``elastic_stiffness_fn(state) -> ndarray`` — returns the elastic
+        stiffness matrix.  When provided, the instance exposes an
+        ``elastic_stiffness`` method that :class:`~manforge.simulation.StressDriver`
+        can use to compute the initial strain increment without probing the UMAT.
+        When ``None`` (default), ``StressDriver`` falls back to a zero-strain
+        UMAT probe.  :meth:`from_model` fills this automatically from
+        ``model.elastic_stiffness`` when the model provides it.
+        Mutually exclusive with ``elastic_stiffness_subroutine``.
+    elastic_stiffness_subroutine : str, optional
+        Name of an f2py-callable Fortran subroutine that returns the elastic
+        stiffness (e.g. ``"j2_isotropic_3d_elastic_stiffness"``).  When
+        provided, the integrator builds a wrapper internally that calls
+        ``fortran.call(name, *param_fn())`` and returns the result as the
+        elastic stiffness.  Use this to validate the Fortran elastic-component
+        implementation independently of any Python reference.  Mutually
+        exclusive with ``elastic_stiffness_fn``.
     state_to_args : callable, optional
         ``state_to_args(state_dict) -> tuple`` packs the state dict into
         positional UMAT args.  Defaults to ``state_names``-order packing.
@@ -52,9 +69,9 @@ class FortranIntegrator:
     parse_umat_ddsdde : callable, optional
         ``parse_umat_ddsdde(ret) -> ndarray`` extracts the consistent tangent
         from the f2py return tuple.  When ``None``, the tangent is read from
-        the first 2-D array found in the trailing returns (same as the default
-        hook used by :class:`~manforge.verification.CrosscheckStrainDriver` /
-        :class:`~manforge.verification.CrosscheckStressDriver`).
+        the first 2-D array found in the trailing returns.  If extraction fails
+        and ``elastic_stiffness_fn`` is provided, the elastic stiffness is used
+        as a fallback; otherwise the exception propagates.
 
     Notes
     -----
@@ -64,8 +81,6 @@ class FortranIntegrator:
     Driver loops that gate on ``step.result.is_plastic`` should guard with
     ``if result.is_plastic is True``.  ``stress_trial`` is not reconstructed on
     the Python side — the UMAT is treated as a closed verification target.
-    ``ddsdde`` is taken entirely from the UMAT output; if ``parse_umat_ddsdde``
-    raises, the exception propagates (no Python fallback).
     """
 
     def __init__(
@@ -77,16 +92,37 @@ class FortranIntegrator:
         initial_state,
         param_fn: Callable[[], tuple],
         state_names: list[str],
+        elastic_stiffness_fn: Callable | None = None,
+        elastic_stiffness_subroutine: str | None = None,
         state_to_args: Callable[[dict], tuple] | None = None,
         parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
         parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
     ) -> None:
+        if elastic_stiffness_fn is not None and elastic_stiffness_subroutine is not None:
+            raise ValueError(
+                "Pass elastic_stiffness_fn OR elastic_stiffness_subroutine, not both."
+            )
         self._fortran = fortran
         self._subroutine = subroutine
         self.dimension = dimension
         self._initial_state = initial_state
         self._param_fn = param_fn
         self._state_names = list(state_names)
+
+        if elastic_stiffness_subroutine is not None:
+            _sub = elastic_stiffness_subroutine
+            elastic_stiffness_fn = lambda state=None: fortran.call(_sub, *self._param_fn())
+
+        if elastic_stiffness_fn is not None:
+            # Bind as an instance method so hasattr(self, "elastic_stiffness")
+            # returns True only when a callable was actually provided.
+            import types
+            self.elastic_stiffness = types.MethodType(
+                lambda self_, state=None: np.asarray(
+                    elastic_stiffness_fn(state), dtype=np.float64
+                ),
+                self,
+            )
 
         n_state = len(self._state_names)
         self._s2a: Callable[[dict], tuple] = (
@@ -118,6 +154,8 @@ class FortranIntegrator:
         param_fn: Callable[[], tuple] | None = None,
         state_names: list[str] | None = None,
         initial_state=None,
+        elastic_stiffness_fn: Callable | None = None,
+        elastic_stiffness_subroutine: str | None = None,
         state_to_args: Callable[[dict], tuple] | None = None,
         parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
         parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
@@ -141,7 +179,19 @@ class FortranIntegrator:
             f2py-callable subroutine name.
         model : MaterialModel
             Must have ``param_names``, ``state_names``, ``initial_state``,
-            and ``dimension`` attributes.
+            and ``dimension`` attributes.  Auto-derived ``state_names``
+            excludes ``"stress"`` because ``stress_update`` always passes
+            ``stress_n`` as a dedicated positional argument — not as a state
+            slot.  Pass ``state_names=`` explicitly only if your UMAT expects
+            an additional stress array inside the state argument list.
+            If *model* has an ``elastic_stiffness`` method it is wired up
+            automatically so that :class:`~manforge.simulation.StressDriver`
+            can avoid probing the UMAT with a zero-strain call.
+            Pass ``elastic_stiffness_subroutine="..."`` to wire the
+            integrator's elastic stiffness to a Fortran subroutine instead
+            of the model's Python implementation.  This is useful when
+            validating the Fortran elastic component without depending on
+            the Python reference.
 
         Examples
         --------
@@ -161,12 +211,25 @@ class FortranIntegrator:
         _param_fn = param_fn if param_fn is not None else (
             lambda: tuple(getattr(model, n) for n in names)
         )
-        _state_names = state_names if state_names is not None else list(model.state_names)
+        # Exclude "stress" from the auto-derived list: Fortran UMATs receive
+        # stress as a dedicated positional argument (stress_in), not as a
+        # state-array slot.  Pass state_names= explicitly to override.
+        _state_names = (
+            state_names
+            if state_names is not None
+            else [n for n in model.state_names if n != "stress"]
+        )
         _initial_state = initial_state if initial_state is not None else model.initial_state
         _dimension = (
             dimension if dimension is not None
             else getattr(model, "dimension", SOLID_3D)
         )
+        if (
+            elastic_stiffness_fn is None
+            and elastic_stiffness_subroutine is None
+            and hasattr(model, "elastic_stiffness")
+        ):
+            elastic_stiffness_fn = model.elastic_stiffness
         return cls(
             fortran,
             subroutine,
@@ -174,6 +237,8 @@ class FortranIntegrator:
             param_fn=_param_fn,
             state_names=_state_names,
             initial_state=_initial_state,
+            elastic_stiffness_fn=elastic_stiffness_fn,
+            elastic_stiffness_subroutine=elastic_stiffness_subroutine,
             state_to_args=state_to_args,
             parse_umat_return=parse_umat_return,
             parse_umat_ddsdde=parse_umat_ddsdde,
@@ -201,7 +266,14 @@ class FortranIntegrator:
 
         f_stress, f_state = self._pur(ret)
         f_stress = np.asarray(f_stress, dtype=np.float64)
-        ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
+        try:
+            ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
+        except (ValueError, IndexError):
+            # UMAT does not return ddsdde (e.g. mock subroutines without tangent).
+            # Fall back to elastic stiffness when available, otherwise re-raise.
+            if not hasattr(self, "elastic_stiffness"):
+                raise
+            ddsdde = np.asarray(self.elastic_stiffness(state_n), dtype=np.float64)
 
         rm = ReturnMappingResult(
             stress=f_stress,

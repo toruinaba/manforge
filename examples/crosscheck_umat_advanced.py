@@ -2,6 +2,7 @@
 
 Demonstrates all features of the manforge Fortran crosscheck API:
 
+* Part 0 — Fortran-sourced elastic stiffness (elastic_stiffness_subroutine=)
 * Part 1 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
 * Part 2 — iter_run streaming + early break on failure
 * Part 3 — Jacobian inspection      (compare_jacobians / ad_jacobian_blocks)
@@ -57,6 +58,64 @@ def _make_fc_int(fortran):
 
 history = generate_strain_history(model)
 load = FieldHistory(FieldType.STRAIN, "eps", history)
+
+
+# =========================================================================
+# Part 0: Fortran-sourced elastic stiffness
+#
+#   elastic_stiffness_fn= accepts any callable, including a lambda that
+#   calls fortran.call() directly.  Use this when the elastic subroutine
+#   has a different parameter signature than the main UMAT param_fn.
+#
+#   elastic_stiffness_subroutine= is a shortcut: the integrator internally
+#   builds fortran.call(name, *param_fn()).  Use it when the elastic
+#   subroutine accepts exactly the same args as param_fn().
+#
+#   Both options cause hasattr(fc, "elastic_stiffness") == True so that
+#   StressDriver can compute the initial strain increment without probing
+#   the UMAT with a zero-strain call.
+# =========================================================================
+print("=" * 60)
+print("  Part 0: Fortran-sourced elastic stiffness")
+print("=" * 60)
+
+# --- 0a: elastic_stiffness_fn (general path) ---
+# j2_isotropic_3d_elastic_stiffness takes only (E, nu), not all 4 UMAT params,
+# so we use elastic_stiffness_fn= and capture model.E / model.nu explicitly.
+fc_int0 = FortranIntegrator.from_model(
+    fortran_j2,
+    "j2_isotropic_3d",
+    model,
+    elastic_stiffness_fn=lambda state=None: fortran_j2.call(
+        "j2_isotropic_3d_elastic_stiffness", model.E, model.nu
+    ),
+)
+C_fortran = fc_int0.elastic_stiffness()
+C_python  = model.elastic_stiffness()
+print(f"  elastic_stiffness_fn: Fortran C[0,0] = {C_fortran[0,0]:.1f}  "
+      f"(Python: {C_python[0,0]:.1f})")
+np.testing.assert_allclose(C_fortran, C_python, rtol=1e-10,
+                            err_msg="Fortran/Python elastic stiffness mismatch")
+
+# --- 0b: elastic_stiffness_subroutine (shortcut when param signatures match) ---
+# Build a standalone integrator whose param_fn returns exactly (E, nu) so
+# that fortran.call("j2_isotropic_3d_elastic_stiffness", *param_fn()) works.
+# (The main UMAT subroutine is not called here — this integrator is elastic-only.)
+fc_int0_sub = FortranIntegrator(
+    fortran_j2,
+    "j2_isotropic_3d",
+    initial_state=model.initial_state,
+    param_fn=lambda: (model.E, model.nu),
+    state_names=["ep"],
+    elastic_stiffness_subroutine="j2_isotropic_3d_elastic_stiffness",
+)
+C_sub = fc_int0_sub.elastic_stiffness()
+print(f"  elastic_stiffness_subroutine: C[0,0] = {C_sub[0,0]:.1f}")
+np.testing.assert_allclose(C_sub, C_python, rtol=1e-10,
+                            err_msg="elastic_stiffness_subroutine mismatch")
+
+print("  Fortran-sourced elastic stiffness: PASS")
+print()
 
 
 # =========================================================================
@@ -269,6 +328,9 @@ if fortran_mock is not None:
 
         def initial_state(self):
             return {"alpha": anp.zeros(self.ntens), "ep": anp.array(0.0)}
+
+        def elastic_stiffness(self, state=None):
+            return self.E * np.eye(self.ntens)
 
     mock_model = MockModel(E=1.0, H_kin=0.1, H_iso=0.05)
     ntens = mock_model.ntens
