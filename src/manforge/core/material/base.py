@@ -16,13 +16,13 @@ class MaterialModel(ABC):
     using :func:`~manforge.core.state.Implicit` and
     :func:`~manforge.core.state.Explicit`::
 
-        from manforge.core.state import Implicit, Explicit, NTENS
+        from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
 
         class MyModel(MaterialModel3D):
             param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-            stress = Implicit(shape=NTENS, doc="Cauchy stress")   # NR unknown
-            alpha  = Implicit(shape=NTENS, doc="backstress tensor")
-            ep     = Explicit(shape=(),    doc="equivalent plastic strain")
+            stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
+            alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
+            ep     = Explicit(shape=SCALAR,  doc="equivalent plastic strain")
 
     ``state_names`` and ``implicit_state_names`` are derived automatically from
     the field declarations; hand-declaring these lists raises ``TypeError``.

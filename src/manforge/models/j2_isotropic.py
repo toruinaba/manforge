@@ -25,7 +25,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.state import Explicit
+from manforge.core.state import Explicit, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
 from manforge.verification.fortran_registry import verified_against_fortran
@@ -71,7 +71,7 @@ class J2Isotropic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
@@ -195,7 +195,7 @@ class J2IsotropicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, H: float):
@@ -237,7 +237,7 @@ class J2Isotropic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, H: float):

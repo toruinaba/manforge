@@ -47,7 +47,7 @@ Notes
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.state import Explicit, NTENS  # Explicit used for alpha, ep; NTENS for shape
+from manforge.core.state import Explicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
@@ -76,7 +76,7 @@ class AFKinematic3D(MaterialModel3D):
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -133,7 +133,7 @@ class AFKinematicPS(MaterialModelPS):
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
@@ -184,7 +184,7 @@ class AFKinematic1D(MaterialModel1D):
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     alpha = Explicit(shape=NTENS, doc="backstress tensor")
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):

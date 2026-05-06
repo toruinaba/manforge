@@ -2,12 +2,12 @@
 
 Usage in a model class::
 
-    from manforge.core import Implicit, Explicit, NTENS
+    from manforge.core import Implicit, Explicit, NTENS, SCALAR
 
     class OWKinematic3D(MaterialModel3D):
-        stress = Implicit(shape=NTENS, doc="Cauchy stress")   # NR unknown
-        alpha  = Implicit(shape=NTENS, doc="backstress tensor")
-        ep     = Implicit(shape=(),    doc="equivalent plastic strain")
+        stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
+        alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
+        ep     = Implicit(shape=SCALAR,  doc="equivalent plastic strain")
 
 The ``Implicit`` / ``Explicit`` descriptors replace the old list-based
 ``state_names`` / ``implicit_state_names`` declarations.  ``MaterialModel.
@@ -75,6 +75,29 @@ NTENS = _NtensSentinel()
 
 
 # ---------------------------------------------------------------------------
+# SCALAR sentinel
+# ---------------------------------------------------------------------------
+
+class _ScalarSentinel:
+    """Placeholder shape resolved to ``()`` at StateField.resolve_shape()."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "SCALAR"
+
+    def __reduce__(self):
+        return (_get_scalar_sentinel, ())
+
+
+def _get_scalar_sentinel():
+    return SCALAR
+
+
+SCALAR = _ScalarSentinel()
+
+
+# ---------------------------------------------------------------------------
 # StateField descriptor
 # ---------------------------------------------------------------------------
 
@@ -87,12 +110,14 @@ class StateField:
     kind : str
         ``"implicit"`` — treated as an NR unknown (goes into `state_residual`).
         ``"explicit"`` — updated in closed form (goes into `update_state`).
-    shape : _NtensSentinel, tuple, or int
-        Array shape.  Use ``NTENS`` (from ``manforge.core``) to denote a vector
-        of length ``model.ntens`` (resolved at construction time).  Use ``()``
-        for a scalar state.  An ``int`` ``n`` is equivalent to ``(n,)``.
-        Any other tuple is used directly (e.g. ``(6, 6)``).
-        The string ``"ntens"`` is no longer accepted — use ``NTENS``.
+    shape : _NtensSentinel, _ScalarSentinel, tuple, or int
+        Array shape.  Use ``NTENS`` (from ``manforge.core``) for a vector of
+        length ``model.ntens``.  Use ``SCALAR`` (from ``manforge.core``) for a
+        0-d scalar state (preferred over ``()``).  An ``int`` ``n`` is
+        equivalent to ``(n,)``.  Any other tuple is used directly (e.g.
+        ``(6, 6)``).  Passing ``()`` directly is also accepted (backward
+        compatible).  The string ``"ntens"`` is no longer accepted — use
+        ``NTENS``.
     default : callable or None
         Factory ``(model) -> array`` for the initial value.  ``None`` → zeros
         of the resolved shape.
@@ -152,9 +177,11 @@ class StateField:
         return StateUpdate(name=self.name, value=value)
 
     def resolve_shape(self, ntens: int) -> tuple:
-        """Return the concrete shape with NTENS substituted."""
+        """Return the concrete shape with NTENS/SCALAR substituted."""
         if self.shape is NTENS:
             return (ntens,)
+        if self.shape is SCALAR:
+            return ()
         if isinstance(self.shape, int):
             return (self.shape,)
         return tuple(self.shape)
