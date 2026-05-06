@@ -1,10 +1,11 @@
-"""Parameter fitting example for J2 isotropic hardening.
+"""Parameter fitting example for J2 isotropic hardening — cyclic loading.
 
 Demonstrates:
-- Generating synthetic uniaxial stress-strain data from known parameters
+- Building a cyclic strain history with FieldHistory.cyclic_strain
+- Generating synthetic cyclic stress-strain data from known parameters
 - Adding measurement noise to simulate experimental data
 - Fitting sigma_y0 and H using fit_params (L-BFGS-B)
-- Comparing true vs fitted parameters
+- Comparing true vs fitted parameters on the hysteresis loop
 - Plotting the fit quality (saved as PNG)
 
 Usage
@@ -18,7 +19,7 @@ import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 from manforge.fitting.optimizer import fit_params
 
 try:
@@ -36,17 +37,20 @@ true_model = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 driver_factory = lambda i: StrainDriver(i)
 
 # ---------------------------------------------------------------------------
-# Generate synthetic "experimental" data
+# Generate synthetic "experimental" data (cyclic: 4 half-cycles)
 # ---------------------------------------------------------------------------
 rng = np.random.default_rng(42)
-N = 50
-strain_exp = np.linspace(0.0, 5e-3, N)
-load = FieldHistory(FieldType.STRAIN, "Strain", strain_exp)
+load = FieldHistory.cyclic_strain(
+    peaks=[5e-3, -5e-3, 5e-3, -5e-3],
+    n_per_segment=12,
+    ntens=1,
+)
 stress_clean = driver_factory(PythonIntegrator(true_model)).run(load).stress[:, 0]
+strain_exp = load.data[:, 0]
 
 # Add small Gaussian noise (~0.5 MPa std) to simulate measurement scatter
 noise_std = 0.5
-stress_exp = stress_clean + rng.normal(0.0, noise_std, size=N)
+stress_exp = stress_clean + rng.normal(0.0, noise_std, size=len(strain_exp))
 
 exp_data = {"strain": strain_exp, "stress": stress_exp}
 
@@ -103,17 +107,19 @@ if HAS_MATPLOTLIB:
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
-    # Left: stress-strain comparison
+    # Left: hysteresis loop comparison
     ax = axes[0]
-    ax.scatter(strain_exp * 100, stress_exp, s=15, color="gray", alpha=0.6,
+    ax.scatter(strain_exp * 100, stress_exp, s=8, color="gray", alpha=0.5,
                label="Synthetic exp. data (noisy)")
     ax.plot(strain_exp * 100, stress_clean, color="black", linewidth=1.5,
             linestyle="--", label=f"True  (σ_y0={true_model.sigma_y0:.0f}, H={true_model.H:.0f})")
-    ax.plot(strain_exp * 100, stress_fitted, color="steelblue", linewidth=2,
+    ax.plot(strain_exp * 100, stress_fitted, color="steelblue", linewidth=1.5,
             label=f"Fitted (σ_y0={fitted_sigma_y0:.1f}, H={fitted_H:.1f})")
+    ax.axhline(0.0, color="black", linewidth=0.5)
+    ax.axvline(0.0, color="black", linewidth=0.5)
     ax.set_xlabel("Axial strain ε₁₁  [%]")
     ax.set_ylabel("Axial stress σ₁₁  [MPa]")
-    ax.set_title("Fit quality")
+    ax.set_title("Fit quality — hysteresis loop")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 

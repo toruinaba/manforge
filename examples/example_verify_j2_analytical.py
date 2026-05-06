@@ -31,7 +31,7 @@ from manforge.simulation.integrator import (
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
 )
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 
 # ---------------------------------------------------------------------------
 # Model (steel, MPa units)
@@ -146,9 +146,12 @@ print("=" * 60)
 print("  Part 3: Driver step-by-step verification")
 print("=" * 60)
 
-N = 30
-strain_history = np.linspace(0.0, 5e-3, N)
-load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
+load = FieldHistory.cyclic_strain(
+    peaks=[5e-3, -2e-3, 5e-3],
+    n_per_segment=10,
+    ntens=model.ntens,
+    component=0,
+)
 driver_result = StrainDriver(PythonIntegrator(model)).run(load)
 
 # Find the first plastic step
@@ -158,7 +161,7 @@ for i, rm in enumerate(driver_result.step_results):
         first_plastic = i
         break
 
-print(f"  Total steps: {N}")
+print(f"  Total steps: {len(driver_result.step_results)}  (3 segments × 10 — cyclic)")
 print(f"  First plastic step: {first_plastic}")
 print()
 

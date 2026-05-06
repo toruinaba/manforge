@@ -15,7 +15,6 @@ Usage
 
 import math
 
-import jax.numpy as jnp
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
@@ -23,9 +22,9 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 
-deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+deps = np.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 
 # =========================================================================
@@ -36,7 +35,7 @@ print("  Part 1: J2Isotropic3D — reduced hardening (scalar NR)")
 print("=" * 60)
 
 j2 = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-result_j2 = PythonNumericalIntegrator(j2).stress_update(deps, jnp.zeros(6), j2.initial_state())
+result_j2 = PythonNumericalIntegrator(j2).stress_update(deps, np.zeros(6), j2.initial_state())
 
 print(f"  is_plastic       : {result_j2.is_plastic}")
 print(f"  n_iterations     : {result_j2.n_iterations}")
@@ -58,7 +57,7 @@ print("  Part 2: OWKinematic3D — augmented hardening (augmented NR)")
 print("=" * 60)
 
 ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=50_000.0, gamma=500.0)
-result_ow = PythonIntegrator(ow).stress_update(deps, jnp.zeros(6), ow.initial_state())
+result_ow = PythonIntegrator(ow).stress_update(deps, np.zeros(6), ow.initial_state())
 
 history = result_ow.residual_history
 print(f"  is_plastic       : {result_ow.is_plastic}")
@@ -98,7 +97,12 @@ print("=" * 60)
 print("  Part 3: StrainDriver — OW history across loading steps")
 print("=" * 60)
 
-load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
+load = FieldHistory.cyclic_strain(
+    peaks=[5e-3, -5e-3, 5e-3],
+    n_per_segment=7,
+    ntens=ow.ntens,
+    component=0,
+)
 dr = StrainDriver(PythonIntegrator(ow)).run(load)
 
 elastic_count = sum(1 for rm in dr.step_results if not rm.is_plastic)
@@ -109,7 +113,7 @@ max_final_res = max(
     default=0.0,
 )
 
-print(f"  Total steps      : {len(dr.step_results)}")
+print(f"  Total steps      : {len(dr.step_results)}  (3 segments × 7 — cyclic)")
 print(f"  Elastic steps    : {elastic_count}")
 print(f"  Plastic steps    : {plastic_count}")
 print(f"  Max NR iters     : {max_iters}")
@@ -121,7 +125,7 @@ for rm in dr.step_results:
     else:
         assert rm.n_iterations == 0
         assert rm.residual_history == []
-print("  => All plastic steps converged to tol=1e-10.")
+print("  => All plastic steps converged to tol=1e-10 (cyclic, including reversal).")
 print()
 
 print("=" * 60)
