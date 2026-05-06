@@ -51,6 +51,15 @@ class FortranIntegrator:
         When ``None`` (default), ``StressDriver`` falls back to a zero-strain
         UMAT probe.  :meth:`from_model` fills this automatically from
         ``model.elastic_stiffness`` when the model provides it.
+        Mutually exclusive with ``elastic_stiffness_subroutine``.
+    elastic_stiffness_subroutine : str, optional
+        Name of an f2py-callable Fortran subroutine that returns the elastic
+        stiffness (e.g. ``"j2_isotropic_3d_elastic_stiffness"``).  When
+        provided, the integrator builds a wrapper internally that calls
+        ``fortran.call(name, *param_fn())`` and returns the result as the
+        elastic stiffness.  Use this to validate the Fortran elastic-component
+        implementation independently of any Python reference.  Mutually
+        exclusive with ``elastic_stiffness_fn``.
     state_to_args : callable, optional
         ``state_to_args(state_dict) -> tuple`` packs the state dict into
         positional UMAT args.  Defaults to ``state_names``-order packing.
@@ -84,16 +93,25 @@ class FortranIntegrator:
         param_fn: Callable[[], tuple],
         state_names: list[str],
         elastic_stiffness_fn: Callable | None = None,
+        elastic_stiffness_subroutine: str | None = None,
         state_to_args: Callable[[dict], tuple] | None = None,
         parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
         parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
     ) -> None:
+        if elastic_stiffness_fn is not None and elastic_stiffness_subroutine is not None:
+            raise ValueError(
+                "Pass elastic_stiffness_fn OR elastic_stiffness_subroutine, not both."
+            )
         self._fortran = fortran
         self._subroutine = subroutine
         self.dimension = dimension
         self._initial_state = initial_state
         self._param_fn = param_fn
         self._state_names = list(state_names)
+
+        if elastic_stiffness_subroutine is not None:
+            _sub = elastic_stiffness_subroutine
+            elastic_stiffness_fn = lambda state=None: fortran.call(_sub, *self._param_fn())
 
         if elastic_stiffness_fn is not None:
             # Bind as an instance method so hasattr(self, "elastic_stiffness")
@@ -137,6 +155,7 @@ class FortranIntegrator:
         state_names: list[str] | None = None,
         initial_state=None,
         elastic_stiffness_fn: Callable | None = None,
+        elastic_stiffness_subroutine: str | None = None,
         state_to_args: Callable[[dict], tuple] | None = None,
         parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
         parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
@@ -168,6 +187,11 @@ class FortranIntegrator:
             If *model* has an ``elastic_stiffness`` method it is wired up
             automatically so that :class:`~manforge.simulation.StressDriver`
             can avoid probing the UMAT with a zero-strain call.
+            Pass ``elastic_stiffness_subroutine="..."`` to wire the
+            integrator's elastic stiffness to a Fortran subroutine instead
+            of the model's Python implementation.  This is useful when
+            validating the Fortran elastic component without depending on
+            the Python reference.
 
         Examples
         --------
@@ -200,7 +224,11 @@ class FortranIntegrator:
             dimension if dimension is not None
             else getattr(model, "dimension", SOLID_3D)
         )
-        if elastic_stiffness_fn is None and hasattr(model, "elastic_stiffness"):
+        if (
+            elastic_stiffness_fn is None
+            and elastic_stiffness_subroutine is None
+            and hasattr(model, "elastic_stiffness")
+        ):
             elastic_stiffness_fn = model.elastic_stiffness
         return cls(
             fortran,
@@ -210,6 +238,7 @@ class FortranIntegrator:
             state_names=_state_names,
             initial_state=_initial_state,
             elastic_stiffness_fn=elastic_stiffness_fn,
+            elastic_stiffness_subroutine=elastic_stiffness_subroutine,
             state_to_args=state_to_args,
             parse_umat_return=parse_umat_return,
             parse_umat_ddsdde=parse_umat_ddsdde,
