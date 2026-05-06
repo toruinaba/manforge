@@ -90,7 +90,7 @@ src/manforge/
 │   ├── stress_state.py    # StressState (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material/          # MaterialModel ABC + MaterialModel3D/PS/1D
 │   │   ├── base.py        #   MaterialModel (ABC, フレームワーク基底)
-│   │   └── stress_states.py #   MaterialModel3D / MaterialModelPS / MaterialModel1D
+│   │   └── bases.py         #   MaterialModel3D / MaterialModelPS / MaterialModel1D
 │   ├── stress_update.py   # ReturnMappingResult / StressUpdateResult — 戻り値 dataclass
 │   ├── solver.py          # _numerical_newton (scalar / vector NR を自動選択)
 │   ├── tangent.py         # consistent tangent (implicit differentiation)

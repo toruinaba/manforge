@@ -48,7 +48,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Three-layer design
 
-**1. Material model layer** — `src/manforge/core/material/` (`base.py` for `MaterialModel`, `stress_states.py` for `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D`; both re-exported from `manforge.core.material`)
+**1. Material model layer** — `src/manforge/core/material/` (`base.py` for `MaterialModel`, `bases.py` for `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D`; both re-exported from `manforge.core.material`)
 
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
