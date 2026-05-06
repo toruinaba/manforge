@@ -410,6 +410,12 @@ class State:
     def items(self):
         return self._data.items()
 
+    def with_stress(self, new_stress) -> "State":
+        """Return a new State with only the ``stress`` entry replaced."""
+        data = dict(self._data)
+        data["stress"] = new_stress
+        return State(data, self._fields)
+
     def as_dict(self) -> dict:
         """Return the underlying dict (no copy — values are shared)."""
         return self._data
