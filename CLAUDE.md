@@ -73,23 +73,22 @@ class MyModel(MaterialModel3D):
 User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
 
 - `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.**
-- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit** state keys (excluding stress, unless user declares `stress = Explicit` and wants custom update). Required whenever any non-stress state is `Explicit`.
-- `state_residual(self, state_new, dlambda, state_n, state_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to override the default associative R_stress. Required whenever any state is `Implicit`.
+- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
+- `state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
 
-`state_trial["stress"]` semantics in these methods:
-- When `stress = Implicit`: `state_trial["stress"]` is the **fixed elastic trial stress** (used to write `R_stress = σ − σ_trial + ...`).
-- When `stress = Explicit`: `state_trial["stress"]` is the **current stress iterate** (used by models like AF kinematic to evaluate the flow direction at the current state).
+`state_trial["stress"]` semantics: always the **current σ NR iterate** (same in both `update_state` and `state_residual`). The fixed elastic predictor σ_trial = σ_n + C Δε is provided as the keyword argument `stress_trial` to `state_residual`. Use `self.default_stress_residual(state_new, dlambda, stress_trial)` to compute the associative R_stress.
 
 Use `StateField.__call__` to wrap return values (produces `StateResidual` or `StateUpdate` depending on field kind):
 
 ```python
-def state_residual(self, state_new, dlambda, state_n, state_trial):
+def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
     ...
-    return [self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
+    return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
 
 def update_state(self, dlambda, state_n, state_trial):
     ...
-    return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate
+    return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate (no stress)
 ```
 
 The framework validates the list at the boundary: wrong kind (`StateResidual` where `StateUpdate` expected), duplicate names, missing or extra fields all raise `TypeError` / `ValueError` immediately.
@@ -121,20 +120,21 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
   - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`, `converged`.
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
   - Both are importable via `from manforge.core import ReturnMappingResult, StressUpdateResult`.
-- `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). State blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`); only implicit states appear in `dstate_*` fields. Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
-- `residual.py`: Two residual builders: `make_nr_residual(model, stress_trial, state_n)` → `(fn, meta, unflatten)` for the NR phase (σ included only when stress is Implicit); `make_tangent_residual(model, stress_trial, state_n)` → `(fn, n_implicit, unflatten)` for the tangent/Jacobian phase (σ always included).
+- (no `jacobian.py` or `residual.py` in `core/` — these live in `simulation/` and `verification/` respectively)
 
 autograd computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 
 **3. Application layer**
 
 - `simulation/integrator/` (package): `_PythonIntegratorBase.stress_update(strain_inc, stress_n, state_n)` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call. `_PythonIntegratorBase.return_mapping(stress_trial, state_n)` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.state_fields["stress"].kind` and `model.implicit_state_names`: scalar NR on Δλ when stress is Explicit and no other implicit states; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` (when `stress = Implicit`) otherwise (max 50 iter, tol=1e-10). `_method` class variable on subclasses: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`). NR logic lives in `integrator/base.py`; consistent tangent via implicit differentiation in the same file (`_consistent_tangent`).
-- `simulation/_residual.py`: Two residual builders: `make_nr_residual(model, stress_trial, state_n)` → `(fn, meta, unflatten)` for the NR phase; `make_tangent_residual(model, stress_trial, state_n)` → `(fn, n_implicit, unflatten)` for the tangent/Jacobian phase.
+- `simulation/_layout.py`: `ResidualLayout` frozen dataclass — single source of truth for the NR unknown vector layout `x = [σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]`. Created via `ResidualLayout.from_model(model)`; provides `pack`, `unpack`, `state_slice` helpers used by `_residual.py`, `integrator/base.py`, and `verification/jacobian.py`.
+- `simulation/_residual.py`: `build_residual(model, stress_trial, state_n)` → `(residual_fn, layout)` — unified autograd-differentiable residual for both NR and tangent phases. `residual_fn(x)` returns a flat array. `build_state_from_x(model, x_conv, state_n, layout)` reconstructs the full state dict from a converged NR vector.
 - `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Two APIs: `run(load, *, initial_stress=None, initial_state=None, collect_state)` → `DriverResult` (batch); `iter_run(load, *, initial_stress=None, initial_state=None)` → `Iterator[DriverStep]` (step-by-step, supports early break / mid-loop branching). `DriverStep` fields: `i`, `strain` (cumulative), `result` (`StressUpdateResult`), `converged`, `n_outer_iter`, `residual_inf`. `StressDriver.iter_run` accepts `raise_on_nonconverged=False` to yield non-converged steps instead of raising. `DriverResult` fields: `step_results: list[StressUpdateResult]` (primary); `stress`, `strain`, `fields` are derived properties.
 - `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences
 - `verification/fortran_bridge.py`: f2py interface; calls compiled UMAT and compares output element-wise to Python (stress tol: 1e-6, tangent tol: 1e-5)
 - `verification/crosscheck_driver.py`: `CrosscheckStrainDriver` / `CrosscheckStressDriver` (both `Comparator` subclasses). Mirror `StrainDriver` / `StressDriver` respectively. `CrosscheckStressDriver.__init__` accepts `max_iter` / `tol` directly (no dict wrapper). `iter_run(load, *, initial_stress=None, initial_state=None)` yields `CrosscheckCaseResult` per step; `run(load)` returns `CrosscheckResult`. `CrosscheckCaseResult` holds `result_a`, `result_b` (raw `StressUpdateResult`) and `state_n` (step-start state) for use with `compare_jacobians`. Single-step comparison: pass a 1-row `FieldHistory` with `initial_stress`/`initial_state`.
+- `verification/jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point and decomposes it into named blocks (`dRsigma_dsigma`, `dRdlambda_dsigma`, `dRstate_dstate`, etc.). State blocks are keyed by variable name (e.g. `jac.dRstate_dsigma["alpha"]`); always `dict` (empty when no implicit non-stress states). Accepts both `StressUpdateResult` and `ReturnMappingResult` (latter requires `stress_trial=` kwarg). Import from `manforge.verification.jacobian`.
 - `verification/jacobian_compare.py`: `compare_jacobians(model, result_a, result_b, state_n)` — compare Jacobian blocks from two `StressUpdateResult` objects (opt-in debugging utility, not called automatically by crosscheck drivers).
 
 ### StressDimension (element dimensionality)

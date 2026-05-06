@@ -16,13 +16,14 @@ Usage
     uv run python examples/example_verify_j2_analytical.py
 """
 
-import jax
-import jax.numpy as jnp
+import autograd
+import autograd.numpy as anp
 import numpy as np
 import numpy.testing as npt
 
-import manforge  # noqa: F401 — enables JAX float64
-from manforge.core.jacobian import ad_jacobian_blocks
+import manforge  # noqa: F401 — enables float64
+from manforge.verification.jacobian import ad_jacobian_blocks
+from manforge.core.state import _state_with_stress
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import (
@@ -49,8 +50,8 @@ print("=" * 60)
 print("  Part 1: Single plastic step — AD vs analytical")
 print("=" * 60)
 
-deps = jnp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-stress_n = jnp.zeros(6)
+deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+stress_n = anp.zeros(6)
 
 # --- numerical (Newton-Raphson) ---
 result_ad = PythonNumericalIntegrator(model).stress_update(deps, stress_n, state0)
@@ -103,34 +104,34 @@ print("=" * 60)
 
 jac = ad_jacobian_blocks(model, result_ad, state0)
 
-# --- flow direction: dyield_dsigma = df/dsigma = (3/2) s / sigma_vm ---
+# --- flow direction: dRdlambda_dsigma = df/dsigma = (3/2) s / sigma_vm ---
 s = model._dev(result_ad.stress)
 sigma_vm = model._vonmises(result_ad.stress)
 n_analytical = (3.0 / 2.0) * s / sigma_vm
 
-npt.assert_allclose(jac.dyield_dsigma, n_analytical, rtol=1e-10)
-print("  dyield_dsigma (flow direction n): PASS")
+npt.assert_allclose(jac.dRdlambda_dsigma, n_analytical, rtol=1e-10)
+print("  dRdlambda_dsigma (flow direction n): PASS")
 
-# cross-check: also matches jax.grad of yield_function
-n_ad = jax.grad(lambda sig: model.yield_function(sig, result_ad.state))(
-    result_ad.stress
-)
-npt.assert_allclose(jac.dyield_dsigma, n_ad, rtol=1e-10)
-print("  dyield_dsigma == jax.grad(f)   : PASS")
+# cross-check: also matches autograd.grad of yield_function
+n_ad = autograd.grad(
+    lambda sig: model.yield_function(_state_with_stress(result_ad.state, sig))
+)(result_ad.stress)
+npt.assert_allclose(jac.dRdlambda_dsigma, n_ad, rtol=1e-10)
+print("  dRdlambda_dsigma == autograd.grad(f): PASS")
 
-# --- dstress_ddlambda = C @ n (return mapping residual structure) ---
+# --- dRsigma_ddlambda = C @ n (return mapping residual structure) ---
 Cn = C @ n_analytical
-npt.assert_allclose(jac.dstress_ddlambda, Cn, rtol=1e-10)
-print("  dstress_ddlambda (= C @ n)     : PASS")
+npt.assert_allclose(jac.dRsigma_ddlambda, Cn, rtol=1e-10)
+print("  dRsigma_ddlambda (= C @ n)     : PASS")
 
-# --- dyield_ddlambda = -H (for J2 linear isotropic hardening) ---
-npt.assert_allclose(float(jac.dyield_ddlambda), -model.H, rtol=1e-10)
-print(f"  dyield_ddlambda (= -H = {float(jac.dyield_ddlambda):.1f}): PASS")
+# --- dRdlambda_ddlambda = -H (for J2 linear isotropic hardening) ---
+npt.assert_allclose(float(jac.dRdlambda_ddlambda), -model.H, rtol=1e-10)
+print(f"  dRdlambda_ddlambda (= -H = {float(jac.dRdlambda_ddlambda):.1f}): PASS")
 
-# --- reduced hardening: state blocks are None ---
-assert jac.dstate_dsigma is None
-assert jac.dstate_dstate is None
-print("  state blocks (reduced model)   : None (correct)")
+# --- reduced hardening: state blocks are empty dicts ---
+assert jac.dRstate_dsigma == {}
+assert jac.dRstate_dstate == {}
+print("  state blocks (reduced model)   : empty dicts (correct)")
 
 # --- full matrix shape ---
 assert jac.full.shape == (7, 7)  # ntens + 1 = 6 + 1
@@ -181,8 +182,10 @@ print(f"  Step {step_idx} user_defined_tangent: PASS")
 
 # Jacobian blocks for this step
 jac = ad_jacobian_blocks(model, rm, state_prev)
-n_step = jax.grad(lambda sig: model.yield_function(sig, rm.state))(rm.stress)
-npt.assert_allclose(jac.dyield_dsigma, n_step, rtol=1e-10)
+n_step = autograd.grad(
+    lambda sig: model.yield_function(_state_with_stress(rm.state, sig))
+)(rm.stress)
+npt.assert_allclose(jac.dRdlambda_dsigma, n_step, rtol=1e-10)
 print(f"  Step {step_idx} Jacobian blocks: PASS")
 print()
 

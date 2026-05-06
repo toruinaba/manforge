@@ -1,11 +1,9 @@
 """Jacobian block comparison for diagnosing failed crosschecks.
 
 :func:`compare_jacobians` compares the residual Jacobian blocks computed by
-:func:`~manforge.core.jacobian.ad_jacobian_blocks` for two
+:func:`~manforge.verification.jacobian.ad_jacobian_blocks` for two
 :class:`~manforge.core.result.StressUpdateResult` objects.  It is
-intended for manual use when a crosscheck fails:
-
-::
+intended for manual use when a crosscheck fails::
 
     cc = CrosscheckStrainDriver(int_a, int_b)
     for case in cc.iter_run(load):
@@ -32,8 +30,7 @@ class JacobianComparisonResult:
     passed : bool
         ``True`` if every block is within ``rtol``.
     blocks : dict[str, float]
-        Block name → maximum relative error.  Dict-valued blocks use
-        ``"block_name::var"`` as the key.
+        Block label → maximum relative error.
     max_rel_err : float
         Maximum relative error across all blocks.
     """
@@ -74,36 +71,18 @@ def compare_jacobians(
     jac_a = ad_jacobian_blocks(model, result_a, state_n)
     jac_b = ad_jacobian_blocks(model, result_b, state_n)
 
-    _SCALAR_BLOCKS = [
-        "dstress_dsigma",
-        "dstress_ddlambda",
-        "dyield_dsigma",
-        "dyield_ddlambda",
-    ]
-    _DICT_BLOCKS = [
-        "dstress_dstate",
-        "dyield_dstate",
-        "dstate_dsigma",
-        "dstate_ddlambda",
-        "dstate_dstate",
-    ]
-
     block_errs: dict[str, float] = {}
+    for label, arr_a in jac_a.iter_blocks():
+        # Find matching block in jac_b by iterating it too
+        # Simpler: collect jac_b into a dict first
+        pass
 
-    for name in _SCALAR_BLOCKS:
-        va = np.asarray(getattr(jac_a, name), dtype=float)
-        vb = np.asarray(getattr(jac_b, name), dtype=float)
-        block_errs[name] = _array_rel_err(va, vb)
+    blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
 
-    for name in _DICT_BLOCKS:
-        da = getattr(jac_a, name)
-        db = getattr(jac_b, name)
-        if da is None or db is None:
-            continue
-        for key in da:
-            va = np.asarray(da[key], dtype=float)
-            vb = np.asarray(db.get(key, np.zeros_like(va)), dtype=float)
-            block_errs[f"{name}::{key}"] = _array_rel_err(va, vb)
+    for label, arr_a in jac_a.iter_blocks():
+        arr_a = np.asarray(arr_a, dtype=float)
+        arr_b = np.asarray(blocks_b.get(label, np.zeros_like(arr_a)), dtype=float)
+        block_errs[label] = _array_rel_err(arr_a, arr_b)
 
     max_err = max(block_errs.values()) if block_errs else 0.0
 

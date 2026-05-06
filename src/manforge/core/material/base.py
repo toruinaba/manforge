@@ -189,14 +189,14 @@ class MaterialModel(ABC):
         state_n,
         state_trial,
     ) -> list:
-        """Return updated state variables after a plastic increment.
+        """Return updated non-stress explicit state variables after a plastic increment.
 
         Closed-form (explicit) update rule: given (Δλ, state_n, state_trial),
-        returns explicit state keys as a list of :class:`StateUpdate`.
-        Required for all state variables *not* listed in
-        :attr:`implicit_state_names`.  The ``stress`` key need only be returned
-        when a custom stress update is required; if omitted, the framework
-        auto-injects the associative formula.
+        returns the explicit **non-stress** state keys as a list of
+        :class:`StateUpdate`.  Required when any non-stress state is explicit.
+
+        Do **not** return ``stress`` from this method — the framework handles
+        the stress update via the NR residual system.
 
         Parameters
         ----------
@@ -205,12 +205,13 @@ class MaterialModel(ABC):
         state_n : State or dict
             State at the beginning of the increment.
         state_trial : State or dict
-            Trial state (``state_trial["stress"]`` is the elastic trial stress).
+            Trial state.  ``state_trial["stress"]`` is the **current σ NR iterate**
+            (use it to evaluate flow directions at the current state).
 
         Returns
         -------
         list[StateUpdate]
-            Updated explicit-state items (use ``self.<field>(value)`` syntax).
+            Updated explicit non-stress state items (``self.<field>(value)``).
 
         Raises
         ------
@@ -229,29 +230,44 @@ class MaterialModel(ABC):
         dlambda: anp.ndarray,
         state_n,
         state_trial,
+        *,
+        stress_trial: anp.ndarray = None,
     ) -> list:
         """Residual of the implicit state evolution equations.
 
         Defines R_h(state_new, Δλ, state_n, state_trial) = 0 for state
-        variables listed in :attr:`implicit_state_names`.  The ``stress`` key
-        need only be returned when a custom stress residual is required; if
-        omitted, the framework auto-injects the associative formula.
+        variables listed in :attr:`implicit_state_names`.  When stress is
+        declared ``Implicit``, return ``self.stress(R_stress)`` in the list
+        as well.
 
         Parameters
         ----------
         state_new : State or dict
             Proposed state values at step n+1 (NR unknowns).
+            ``state_new["stress"]`` is always the **current σ NR iterate**.
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
         state_n : State or dict
             State at the beginning of the increment.
         state_trial : State or dict
-            Trial state (``state_trial["stress"]`` is the elastic trial stress).
+            Trial state.  ``state_trial["stress"]`` is the **current σ NR iterate**
+            (same as ``state_new["stress"]``), available for evaluating flow
+            directions at the current state.
+        stress_trial : anp.ndarray, shape (ntens,), keyword-only
+            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this (not
+            ``state_trial["stress"]``) when you need the fixed trial stress for
+            the associative residual formula::
+
+                R_stress = σ − stress_trial + Δλ·C·∂f/∂σ
+
+            Call :meth:`default_stress_residual` which accepts ``stress_trial``
+            directly, or use this kwarg to compute R_stress manually.
 
         Returns
         -------
         list[StateResidual]
             Residual items (use ``self.<field>(value)`` syntax).  Zero at convergence.
+            Optionally include ``self.dlambda(R_dl)`` to override the Δλ row.
         """
         raise NotImplementedError(
             f"{type(self).__name__}.state_residual() is not implemented. "
@@ -300,15 +316,16 @@ class MaterialModel(ABC):
         self,
         state_new,
         dlambda: anp.ndarray,
-        state_trial,
+        stress_trial: anp.ndarray,
     ) -> anp.ndarray:
         """Associative default R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
 
         Call this from :meth:`state_residual` when the model uses associative
         flow (flow direction = ∂f/∂σ)::
 
-            def state_residual(self, state_new, dlambda, state_n, state_trial):
-                R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
+            def state_residual(self, state_new, dlambda, state_n, state_trial,
+                               *, stress_trial):
+                R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
                 R_alpha = ...
                 return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
@@ -320,11 +337,11 @@ class MaterialModel(ABC):
         ----------
         state_new : State or dict
             Proposed state at step n+1 (NR iterate); ``state_new["stress"]``
-            is the current σ unknown.
+            is the current σ NR unknown.
         dlambda : scalar
             Plastic multiplier increment Δλ.
-        state_trial : State or dict
-            Trial state; ``state_trial["stress"]`` is the fixed elastic predictor σ_trial.
+        stress_trial : anp.ndarray, shape (ntens,)
+            Fixed elastic predictor σ_trial = σ_n + C Δε.
 
         Returns
         -------
@@ -333,7 +350,6 @@ class MaterialModel(ABC):
         import autograd
         from manforge.core.state import _state_with_stress
         stress = state_new["stress"]
-        stress_trial = state_trial["stress"]
         C = self.elastic_stiffness(state_new)
         n = autograd.grad(
             lambda s: self.yield_function(_state_with_stress(state_new, s))
@@ -346,31 +362,26 @@ class MaterialModel(ABC):
         state_n,
         state_trial,
     ) -> anp.ndarray:
-        """Return the framework-pre-computed associative stress iterate.
+        """Return the current σ NR iterate from ``state_trial``.
 
-        For ``stress = Explicit`` models the framework derives σ_{n+1} =
-        σ_trial − Δλ·C·∂f/∂σ before calling :meth:`update_state` and passes
-        it as ``state_trial["stress"]``.  This helper returns that value,
-        allowing user code to explicitly acknowledge the default associative
-        update::
+        In ``update_state``, ``state_trial["stress"]`` is the **current σ NR
+        iterate**.  This helper is a no-op that returns it, provided for
+        symmetry with :meth:`default_stress_residual`.
 
-            def update_state(self, dlambda, state_n, state_trial):
-                sig = self.default_stress_update(dlambda, state_n, state_trial)
-                return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
-
-        For a non-associative or damage-coupled Explicit stress update, compute
-        ``sig`` directly (from your own formula) and return ``self.stress(sig)``
-        instead of calling this helper.
+        .. deprecated::
+            ``stress`` must no longer be returned from ``update_state``.
+            This method exists only for models that have not yet been updated.
+            The framework ignores any ``stress`` value returned by
+            ``update_state``; the NR system drives σ directly.
 
         Parameters
         ----------
         dlambda : scalar
-            Plastic multiplier increment Δλ (unused; present for API symmetry
-            with :meth:`default_stress_residual`).
+            Unused.
         state_n : State or dict
-            State at the beginning of the increment (unused by default).
+            Unused.
         state_trial : State or dict
-            Trial state; ``state_trial["stress"]`` is the framework-pre-computed associative σ iterate.
+            ``state_trial["stress"]`` is the current σ NR iterate.
 
         Returns
         -------

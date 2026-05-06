@@ -105,7 +105,7 @@ class OWKinematic3D(MaterialModel3D):
         xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial) -> list:
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual.
 
         R_α = α_{n+1} − α_n − C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
@@ -123,7 +123,7 @@ class OWKinematic3D(MaterialModel3D):
 
         alpha_vm = self._vonmises(alpha_new)
 
-        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -175,7 +175,7 @@ class OWKinematicPS(MaterialModelPS):
         xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial) -> list:
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual (plane stress)."""
         alpha_new = state_new["alpha"]
         stress_new = state_new["stress"]
@@ -184,7 +184,7 @@ class OWKinematicPS(MaterialModelPS):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_vm = self._vonmises(alpha_new)
-        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
@@ -235,7 +235,7 @@ class OWKinematic1D(MaterialModel1D):
         xi = state["stress"] - state["alpha"]
         return self._vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial) -> list:
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual (1D)."""
         alpha_new = state_new["alpha"]
         stress_new = state_new["stress"]
@@ -244,7 +244,7 @@ class OWKinematic1D(MaterialModel1D):
         vm_safe = self._vonmises(xi)
         n_hat = s_xi / vm_safe
         alpha_vm = self._vonmises(alpha_new)
-        R_stress = self.default_stress_residual(state_new, dlambda, state_trial)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]

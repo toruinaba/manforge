@@ -48,7 +48,7 @@ class _DlambdaOnlyModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         return [self.dlambda(self.yield_function(state_new))]
 
 
@@ -69,7 +69,7 @@ class _AlphaModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         R_alpha = state_new["alpha"] - state_n["alpha"]
         return [self.alpha(R_alpha)]
 
@@ -89,7 +89,7 @@ class _DuplicateDlambdaModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         R_alpha = state_new["alpha"] - state_n["alpha"]
         return [
             self.alpha(R_alpha),
@@ -113,7 +113,7 @@ class _BadItemModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         return [42]  # wrong type
 
 
@@ -175,16 +175,14 @@ def test_dlambda_not_in_state_fields():
 # ---------------------------------------------------------------------------
 
 def test_update_state_rejects_dlambda_residual():
+    """update_state returning self.dlambda(...) raises TypeError via the integrator."""
+    from manforge.simulation.integrator import PythonIntegrator
     model = _DlambdaInUpdateState(sigma_y0=250.0)
-    state_n = model.make_state(stress=anp.zeros(6), ep=anp.array(0.0))
-    stress_trial = anp.zeros(6)
-    import numpy as np
-    from manforge.simulation._residual import _call_update_state
+    state_n = model.initial_state()
+    # Uniaxial strain that triggers yielding (sigma_vm > 250 MPa at E≈200GPa)
+    deps = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     with pytest.raises(TypeError, match="self.dlambda.*not allowed in update_state"):
-        _call_update_state(
-            model, anp.array(0.01), state_n, state_n,
-            {"ep"}, "_DlambdaInUpdateState"
-        )
+        PythonIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
 
 
 # ---------------------------------------------------------------------------
@@ -192,15 +190,13 @@ def test_update_state_rejects_dlambda_residual():
 # ---------------------------------------------------------------------------
 
 def test_state_residual_duplicate_dlambda_raises():
-    import numpy as np
-    from manforge.simulation._residual import _call_state_residual
+    """state_residual returning self.dlambda(...) twice raises ValueError via integrator."""
+    from manforge.simulation.integrator import PythonIntegrator
     model = _DuplicateDlambdaModel(sigma_y0=250.0)
-    state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
+    state_n = model.initial_state()
+    deps = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     with pytest.raises(ValueError, match="duplicate self.dlambda"):
-        _call_state_residual(
-            model, dict(state_n), anp.array(0.01), dict(state_n), dict(state_n),
-            {"alpha"}, "_DuplicateDlambdaModel"
-        )
+        PythonIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
 
 
 # ---------------------------------------------------------------------------
@@ -208,41 +204,52 @@ def test_state_residual_duplicate_dlambda_raises():
 # ---------------------------------------------------------------------------
 
 def test_state_residual_bad_item_raises():
-    from manforge.simulation._residual import _call_state_residual
+    """state_residual returning a non-StateResidual item raises TypeError via integrator."""
+    from manforge.simulation.integrator import PythonIntegrator
     model = _BadItemModel(sigma_y0=250.0)
-    state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
-    with pytest.raises(TypeError, match="StateResidual.*DlambdaResidual"):
-        _call_state_residual(
-            model, dict(state_n), anp.array(0.01), dict(state_n), dict(state_n),
-            {"alpha"}, "_BadItemModel"
-        )
+    state_n = model.initial_state()
+    deps = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    with pytest.raises(TypeError):
+        PythonIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
 
 
 # ---------------------------------------------------------------------------
-# Tests: _call_state_residual returns (dict, r_dl) correctly
+# Tests: state_residual dlambda extraction returns (dict, r_dl) correctly
 # ---------------------------------------------------------------------------
 
-def test_call_state_residual_with_dlambda_override():
-    from manforge.simulation._residual import _call_state_residual
+def test_state_residual_with_dlambda_override_extracts_correctly():
+    """state_residual returning only self.dlambda(R) → empty dict + non-None r_dl."""
+    from manforge.core.state import _validate_state_items, StateResidual
     model = _DlambdaOnlyModel(sigma_y0=250.0)
     state_n = model.make_state(stress=anp.zeros(6))
-    state_dict = dict(state_n)
-    result_dict, r_dl = _call_state_residual(
-        model, state_dict, anp.array(0.0), state_dict, state_dict,
-        set(), "_DlambdaOnlyModel"
+    from manforge.simulation._residual import _wrap_state
+    state_wrapped = _wrap_state(state_n, model)
+    returned = model.state_residual(
+        state_wrapped, anp.array(0.0), state_wrapped, state_wrapped,
+        stress_trial=anp.zeros(6),
+    )
+    result_dict, r_dl = _validate_state_items(
+        returned, set(), StateResidual, "state_residual", "_DlambdaOnlyModel",
+        extract_dlambda=True,
     )
     assert result_dict == {}
     assert r_dl is not None
 
 
-def test_call_state_residual_without_dlambda_returns_none():
-    from manforge.simulation._residual import _call_state_residual
+def test_state_residual_without_dlambda_extracts_none():
+    """state_residual returning only alpha → dict with 'alpha' + None r_dl."""
+    from manforge.core.state import _validate_state_items, StateResidual
     model = _AlphaModel(sigma_y0=250.0, H_k=1000.0)
     state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
-    state_dict = dict(state_n)
-    result_dict, r_dl = _call_state_residual(
-        model, state_dict, anp.array(0.0), state_dict, state_dict,
-        {"alpha"}, "_AlphaModel"
+    from manforge.simulation._residual import _wrap_state
+    state_wrapped = _wrap_state(state_n, model)
+    returned = model.state_residual(
+        state_wrapped, anp.array(0.0), state_wrapped, state_wrapped,
+        stress_trial=anp.zeros(6),
+    )
+    result_dict, r_dl = _validate_state_items(
+        returned, {"alpha"}, StateResidual, "state_residual", "_AlphaModel",
+        extract_dlambda=True,
     )
     assert "alpha" in result_dict
     assert r_dl is None

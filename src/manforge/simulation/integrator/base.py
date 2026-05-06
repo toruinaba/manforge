@@ -8,7 +8,8 @@ import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
-from manforge.simulation._residual import build_residual, _flatten_state, _wrap_state
+from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
+from manforge.simulation._layout import ResidualLayout
 from manforge.core.state import _state_with_stress
 
 
@@ -115,30 +116,14 @@ class _PythonIntegratorBase:
     def _numerical_newton(self, stress_trial, state_n):
         """Unified NR return mapping.
 
-        Uses self._model / self._max_iter / self._tol / self._raise_on_nonconverged.
-        Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (n_imp)].
+        Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
         """
-        from manforge.simulation._residual import _call_update_state
         model = self._model
-        ntens = model.ntens
-        implicit_keys_non_stress = sorted(
-            k for k in model.implicit_state_names if k != "stress"
-        )
-        explicit_keys_non_stress = set(
-            k for k in model.state_names
-            if k != "stress" and k not in model.implicit_state_names
-        )
-        do_implicit_stress = model.state_fields["stress"].kind == "implicit"
+        residual_fn, layout = build_residual(model, stress_trial, state_n)
 
-        residual_fn, n_unknown, unflatten_implicit = build_residual(
-            model, stress_trial, state_n
-        )
-        n_implicit = n_unknown - ntens - 1
-
-        implicit_state_n = {k: state_n[k] for k in implicit_keys_non_stress}
-        flat_impl_n, _ = _flatten_state(implicit_state_n)
-        x = anp.concatenate(
-            [anp.array(stress_trial), anp.array([0.0]), flat_impl_n]
+        x = layout.pack(
+            stress_trial, 0.0,
+            {k: state_n[k] for k in layout.implicit_keys}
         )
 
         residual_history = []
@@ -164,27 +149,17 @@ class _PythonIntegratorBase:
                 f"tol = {self._tol:.3e})"
             )
 
-        stress = x[:ntens]
-        dlambda_val = x[ntens]
-        q_imp = unflatten_implicit(x[ntens + 1:]) if n_implicit > 0 else {}
-        model_name = type(model).__name__
+        state_new = build_state_from_x(model, x, state_n, layout)
+        sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
 
-        if explicit_keys_non_stress:
-            state_trial_dict = dict(state_n)
-            state_trial_dict["stress"] = stress
-            q_exp = _call_update_state(
-                model, dlambda_val, state_n, state_trial_dict,
-                explicit_keys_non_stress, model_name,
-                require_stress=(not do_implicit_stress),
-            )
-            if not do_implicit_stress and "stress" in q_exp:
-                stress = q_exp["stress"]
-            state_new = {"stress": stress, **q_imp,
-                         **{k: v for k, v in q_exp.items() if k != "stress"}}
-        else:
-            state_new = {"stress": stress, **q_imp}
-
-        return stress, state_new, anp.array(dlambda_val), n_iterations, residual_history, converged
+        return (
+            state_new["stress"],
+            state_new,
+            anp.array(dlambda_val),
+            n_iterations,
+            residual_history,
+            converged,
+        )
 
     def _consistent_tangent(self, rm, stress_n, state_n):
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
@@ -204,40 +179,20 @@ class _PythonIntegratorBase:
         )(anp.array(stress))
         stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
 
-        state_n_full = dict(state_n)
-        if "stress" not in state_n_full:
-            state_n_full["stress"] = anp.zeros(ntens)
-        implicit_keys_non_stress = sorted(
-            k for k in model.implicit_state_names if k != "stress"
-        )
-        implicit_state = {k: state[k] for k in implicit_keys_non_stress}
-        flat_impl, _ = _flatten_state(implicit_state)
+        residual_fn, layout = build_residual(model, stress_trial, state_n)
 
-        residual_fn, n_unknown, _ = build_residual(model, stress_trial, state_n_full)
-        x_conv = anp.concatenate(
-            [anp.array(stress), anp.array([float(dlambda)]), flat_impl]
-        )
-        A = autograd.jacobian(residual_fn)(x_conv)
+        q_imp = {k: state[k] for k in layout.implicit_keys}
+        x_conv = layout.pack(stress, dlambda, q_imp)
+
+        A = autograd.jacobian(residual_fn)(anp.array(x_conv))
         rhs = np.vstack(
-            [np.array(C_n), np.zeros((n_unknown - ntens, ntens))]
+            [np.array(C_n), np.zeros((layout.n_unknown - ntens, ntens))]
         )
         dxde = np.linalg.solve(np.array(A), rhs)
         return anp.array(dxde[:ntens, :])
 
     def return_mapping(self, stress_trial, state_n) -> ReturnMappingResult:
-        """Perform the plastic correction (return mapping) for one load increment.
-
-        Projects the elastic trial stress back onto the yield surface.
-        Does NOT compute the consistent tangent — call :meth:`stress_update`
-        for the complete constitutive integration including the tangent.
-
-        Parameters
-        ----------
-        stress_trial : array-like, shape (ntens,)
-            Elastic trial stress σ_trial = σ_n + C Δε.
-        state_n : dict
-            Internal state at the beginning of the increment.
-        """
+        """Perform the plastic correction (return mapping) for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)
         rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
         if rm is not None:
@@ -256,14 +211,10 @@ class _PythonIntegratorBase:
         )
 
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
-        """Perform a complete constitutive stress update for one load increment.
-
-        Executes: elastic trial → yield check → return mapping → consistent tangent.
-        """
+        """Perform a complete constitutive stress update for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)
         stress_trial = stress_n + C_n @ strain_inc
 
-        # Yield check: build a state that includes stress for the new API
         from manforge.core.state import _state_with_stress as _swst
         state_trial = _swst(state_n, stress_trial)
         f_trial = self._model.yield_function(state_trial)

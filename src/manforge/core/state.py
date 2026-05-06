@@ -280,7 +280,10 @@ def _validate_state_items(
     expected_cls,
     method_name: str,
     model_name: str,
-) -> dict:
+    *,
+    extract_dlambda: bool = False,
+    hint: str = "",
+) -> "dict | tuple[dict, Any]":
     """Validate a list of StateResidual / StateUpdate and return a name→value dict.
 
     Called at the framework boundary (residual.py / solver.py) after
@@ -298,11 +301,18 @@ def _validate_state_items(
         ``"state_residual"`` or ``"update_state"`` (used in error messages).
     model_name : str
         Class name of the model (used in error messages).
+    extract_dlambda : bool, optional
+        When ``True``, ``DlambdaResidual`` items are separated from the state
+        items and returned as the second element of a tuple.
+    hint : str, optional
+        Extra guidance appended to missing-key error messages.
 
     Returns
     -------
     dict[str, array-like]
-        Mapping from field name to value, suitable for ``_flatten_state``.
+        Mapping from field name to value (when ``extract_dlambda=False``).
+    tuple[dict[str, array-like], Any]
+        ``(state_dict, dlambda_value_or_None)`` when ``extract_dlambda=True``.
 
     Raises
     ------
@@ -318,11 +328,19 @@ def _validate_state_items(
             f"got {type(returned).__name__}"
         )
     out: dict = {}
+    dl_items = []
     for item in returned:
+        if extract_dlambda and isinstance(item, DlambdaResidual):
+            dl_items.append(item)
+            continue
         if not isinstance(item, expected_cls):
+            extra_info = (
+                f" (self.dlambda(...) is not allowed in {method_name})"
+                if isinstance(item, DlambdaResidual) else ""
+            )
             raise TypeError(
                 f"{model_name}.{method_name}: every item must be "
-                f"{expected_cls.__name__} (use `self.<field>(value)`), "
+                f"{expected_cls.__name__} (use `self.<field>(value)`){extra_info}, "
                 f"got {type(item).__name__}"
             )
         if item.name in out:
@@ -330,6 +348,10 @@ def _validate_state_items(
                 f"{model_name}.{method_name}: duplicate entry for {item.name!r}"
             )
         out[item.name] = item.value
+    if extract_dlambda and len(dl_items) > 1:
+        raise ValueError(
+            f"{model_name}.{method_name}: duplicate self.dlambda(...) entries"
+        )
     actual = set(out.keys())
     if actual != expected_names:
         parts = []
@@ -337,9 +359,14 @@ def _validate_state_items(
         extra = actual - expected_names
         if missing:
             parts.append(f"missing: {sorted(missing)}")
+            if hint:
+                parts.append(hint)
         if extra:
             parts.append(f"unexpected: {sorted(extra)}")
         raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
+    if extract_dlambda:
+        r_dl = dl_items[0].value if dl_items else None
+        return out, r_dl
     return out
 
 

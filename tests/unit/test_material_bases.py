@@ -559,7 +559,7 @@ def test_mixed_implicit_explicit_requires_both_methods():
         def update_state(self, dlambda, state_n, state_trial):
             return [self.ep(state_n["ep"] + dlambda)]
 
-        def state_residual(self, state_new, dlambda, state_n, state_trial):
+        def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
             return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
     assert OK.implicit_state_names == ["alpha"]
@@ -579,7 +579,7 @@ def test_all_implicit_states_no_update_state_needed():
         def yield_function(self, state):
             pass
 
-        def state_residual(self, state_new, dlambda, state_n, state_trial):
+        def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
             return [self.alpha(anp.array(0.0)), self.ep(anp.array(0.0))]
 
     assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}

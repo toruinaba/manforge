@@ -3,39 +3,122 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterator
 
 import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.simulation._residual import build_residual, _flatten_state, _wrap_state
+from manforge.simulation._residual import build_residual
+from manforge.simulation._layout import ResidualLayout
 
 
 @dataclass
 class JacobianBlocks:
     """Named blocks of the return-mapping residual Jacobian at the converged point.
 
-    The Jacobian is computed from the tangent residual system where σ is
-    always an independent variable.  Explicit-state keys (not in
-    ``model.implicit_state_names``) do not appear in ``dstate_*`` fields.
+    The residual / unknown vector layout follows :class:`~manforge.simulation._layout.ResidualLayout`:
+    ``[σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]``.
+
+    Block naming convention: ``dR<row>_d<col>`` where the row / column labels are:
+
+    - ``sigma``   — the σ block (rows/cols 0 … ntens-1)
+    - ``dlambda`` — the Δλ row/col (index ntens)
+    - ``state``   — the implicit non-stress state block (rows/cols ntens+1 … )
+
+    State blocks are always ``dict[str, ndarray]`` (empty dict when there are no
+    implicit non-stress states), never ``None``.
+
+    Attributes
+    ----------
+    layout : ResidualLayout
+        Layout descriptor used to compute this Jacobian.
+    dRsigma_dsigma : ndarray, shape (ntens, ntens)
+        ∂R_σ / ∂σ
+    dRsigma_ddlambda : ndarray, shape (ntens,)
+        ∂R_σ / ∂Δλ
+    dRsigma_dstate : dict[str, ndarray]
+        ∂R_σ / ∂q_k for each implicit non-stress state key.
+    dRdlambda_dsigma : ndarray, shape (ntens,)
+        ∂R_Δλ / ∂σ  (gradient of the Δλ-row w.r.t. σ)
+    dRdlambda_ddlambda : float
+        ∂R_Δλ / ∂Δλ
+    dRdlambda_dstate : dict[str, ndarray]
+        ∂R_Δλ / ∂q_k for each implicit non-stress state key.
+    dRstate_dsigma : dict[str, ndarray]
+        ∂R_qj / ∂σ for each implicit non-stress key j.
+    dRstate_ddlambda : dict[str, ndarray]
+        ∂R_qj / ∂Δλ for each implicit non-stress key j.
+    dRstate_dstate : dict[str, dict[str, ndarray]]
+        ∂R_qj / ∂q_k (row j → col k → array).
+    full : ndarray, shape (n_unknown, n_unknown)
+        Full Jacobian matrix.
     """
 
-    dstress_dsigma: anp.ndarray
-    dstress_ddlambda: anp.ndarray
-    dyield_dsigma: anp.ndarray
-    dyield_ddlambda: anp.ndarray
-    dstress_dstate: dict | None
-    dyield_dstate: dict | None
-    dstate_dsigma: dict | None
-    dstate_ddlambda: dict | None
-    dstate_dstate: dict | None
+    layout: ResidualLayout
+
+    dRsigma_dsigma: anp.ndarray
+    dRsigma_ddlambda: anp.ndarray
+    dRsigma_dstate: dict
+
+    dRdlambda_dsigma: anp.ndarray
+    dRdlambda_ddlambda: float
+    dRdlambda_dstate: dict
+
+    dRstate_dsigma: dict
+    dRstate_ddlambda: dict
+    dRstate_dstate: dict
+
     full: anp.ndarray
+
+    def iter_blocks(self) -> Iterator[tuple[str, anp.ndarray]]:
+        """Iterate over all non-empty named blocks as ``(name, array)`` pairs.
+
+        Scalar blocks are yielded as-is; dict blocks are expanded with
+        ``"block_name::key"`` labels.
+
+        Useful for :func:`compare_jacobians`.
+        """
+        ntens = self.layout.ntens
+
+        yield "dRsigma_dsigma",   self.dRsigma_dsigma
+        yield "dRsigma_ddlambda", self.dRsigma_ddlambda
+        yield "dRdlambda_dsigma",    self.dRdlambda_dsigma
+        yield "dRdlambda_ddlambda",  np.atleast_1d(self.dRdlambda_ddlambda)
+
+        for name, d in [
+            ("dRsigma_dstate",   self.dRsigma_dstate),
+            ("dRdlambda_dstate",    self.dRdlambda_dstate),
+            ("dRstate_dsigma",  self.dRstate_dsigma),
+            ("dRstate_ddlambda", self.dRstate_ddlambda),
+        ]:
+            for key, arr in d.items():
+                yield f"{name}::{key}", np.asarray(arr)
+
+        for row_key, col_dict in self.dRstate_dstate.items():
+            for col_key, arr in col_dict.items():
+                yield f"dRstate_dstate::{row_key}::{col_key}", np.asarray(arr)
 
 
 def ad_jacobian_blocks(
     model, result, state_n: dict, *, stress_trial=None
 ) -> JacobianBlocks:
-    """Compute the residual Jacobian at the converged point and decompose into blocks."""
+    """Compute the residual Jacobian at the converged point and decompose into blocks.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    result : StressUpdateResult or ReturnMappingResult
+        Converged result from a stress integration step.
+    state_n : dict
+        State at the beginning of the increment (must include ``"stress"``).
+    stress_trial : array-like, optional
+        Required when *result* is a :class:`~manforge.core.result.ReturnMappingResult`.
+
+    Returns
+    -------
+    JacobianBlocks
+    """
     from manforge.core.result import StressUpdateResult
 
     if isinstance(result, StressUpdateResult):
@@ -60,85 +143,50 @@ def ad_jacobian_blocks(
                 "stress_trial=... explicitly."
             )
 
-    ntens = model.ntens
-    implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
-    implicit_state = {k: state[k] for k in implicit_keys_non_stress}
-    flat_impl, _ = _flatten_state(implicit_state)
-    n_implicit = len(flat_impl)
+    residual_fn, layout = build_residual(model, stress_trial, state_n)
+    ntens = layout.ntens
 
-    # state_n must include "stress" for tangent residual
-    state_n_full = dict(state_n)
-    if "stress" not in state_n_full:
-        state_n_full["stress"] = anp.zeros(ntens)
+    # Build the converged x vector
+    q_imp = {k: state[k] for k in layout.implicit_keys}
+    x_conv = layout.pack(stress, dlambda, q_imp)
 
-    residual_fn, _, _ = build_residual(model, stress_trial, state_n_full)
+    J = autograd.jacobian(residual_fn)(anp.array(x_conv))
 
-    x_conv = anp.concatenate([
-        anp.array(stress),
-        anp.array([float(dlambda)]),
-        flat_impl,
-    ])
-    J = autograd.jacobian(residual_fn)(x_conv)
-
-    dstress_dsigma   = J[:ntens, :ntens]
-    dstress_ddlambda = J[:ntens, ntens]
-    dyield_dsigma    = J[ntens, :ntens]
-    dyield_ddlambda  = J[ntens, ntens]
-
-    if n_implicit == 0:
-        return JacobianBlocks(
-            dstress_dsigma=dstress_dsigma,
-            dstress_ddlambda=dstress_ddlambda,
-            dyield_dsigma=dyield_dsigma,
-            dyield_ddlambda=dyield_ddlambda,
-            dstress_dstate=None,
-            dyield_dstate=None,
-            dstate_dsigma=None,
-            dstate_ddlambda=None,
-            dstate_dstate=None,
-            full=J,
-        )
-
-    slices = _build_state_slices(implicit_state, implicit_keys_non_stress)
-
-    dstress_dstate: dict = {}
-    dyield_dstate:  dict = {}
-    dstate_dsigma:  dict = {}
-    dstate_ddlambda: dict = {}
-    dstate_dstate:  dict = {}
+    dRsigma_dsigma    = J[:ntens, :ntens]
+    dRsigma_ddlambda  = J[:ntens, ntens]
+    dRdlambda_dsigma  = J[ntens, :ntens]
+    dRdlambda_ddlambda = J[ntens, ntens]
 
     q0 = ntens + 1
-    for key, sl in slices.items():
+    dRsigma_dstate:    dict = {}
+    dRdlambda_dstate:  dict = {}
+    dRstate_dsigma:    dict = {}
+    dRstate_ddlambda:  dict = {}
+    dRstate_dstate:    dict = {}
+
+    for k in layout.implicit_keys:
+        sl = layout.state_slice(k)
         q_sl = slice(q0 + sl.start, q0 + sl.stop)
-        dstress_dstate[key]  = J[:ntens, q_sl]
-        dyield_dstate[key]   = J[ntens, q_sl]
-        dstate_dsigma[key]   = J[q_sl, :ntens]
-        dstate_ddlambda[key] = J[q_sl, ntens]
-        dstate_dstate[key]   = {}
-        for key2, sl2 in slices.items():
+        dRsigma_dstate[k]   = J[:ntens, q_sl]
+        dRdlambda_dstate[k] = J[ntens, q_sl]
+        dRstate_dsigma[k]   = J[q_sl, :ntens]
+        dRstate_ddlambda[k] = J[q_sl, ntens]
+        dRstate_dstate[k]   = {}
+        for k2 in layout.implicit_keys:
+            sl2 = layout.state_slice(k2)
             q_sl2 = slice(q0 + sl2.start, q0 + sl2.stop)
-            dstate_dstate[key][key2] = J[q_sl, q_sl2]
+            dRstate_dstate[k][k2] = J[q_sl, q_sl2]
 
     return JacobianBlocks(
-        dstress_dsigma=dstress_dsigma,
-        dstress_ddlambda=dstress_ddlambda,
-        dyield_dsigma=dyield_dsigma,
-        dyield_ddlambda=dyield_ddlambda,
-        dstress_dstate=dstress_dstate,
-        dyield_dstate=dyield_dstate,
-        dstate_dsigma=dstate_dsigma,
-        dstate_ddlambda=dstate_ddlambda,
-        dstate_dstate=dstate_dstate,
+        layout=layout,
+        dRsigma_dsigma=dRsigma_dsigma,
+        dRsigma_ddlambda=dRsigma_ddlambda,
+        dRsigma_dstate=dRsigma_dstate,
+        dRdlambda_dsigma=dRdlambda_dsigma,
+        dRdlambda_ddlambda=dRdlambda_ddlambda,
+        dRdlambda_dstate=dRdlambda_dstate,
+        dRstate_dsigma=dRstate_dsigma,
+        dRstate_ddlambda=dRstate_ddlambda,
+        dRstate_dstate=dRstate_dstate,
         full=J,
     )
-
-
-def _build_state_slices(state: dict, keys: list) -> dict:
-    slices = {}
-    offset = 0
-    for key in keys:
-        val = np.asarray(state[key])
-        size = val.size
-        slices[key] = slice(offset, offset + size)
-        offset += size
-    return slices
