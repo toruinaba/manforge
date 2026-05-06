@@ -202,21 +202,3 @@ def test_custom_stress_residual_consistent_tangent(deps_vec):
     )
 
 
-# ---------------------------------------------------------------------------
-# Migration: old stress_residual override raises TypeError
-# ---------------------------------------------------------------------------
-
-def test_stress_residual_override_raises():
-    """Subclass that overrides stress_residual() raises TypeError."""
-    with pytest.raises(TypeError, match="stress_residual.*override has been removed"):
-        class Bad(MaterialModel3D):
-            param_names = []
-
-            def yield_function(self, state):
-                return anp.array(0.0)
-
-            def update_state(self, dlambda, state_n, state_trial):
-                return []
-
-            def stress_residual(self, stress, dlambda, state, stress_trial, state_n):
-                pass

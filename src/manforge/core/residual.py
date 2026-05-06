@@ -513,7 +513,7 @@ def make_tangent_residual(model, stress_trial, state_n):
 
         # Stress residual row
         R_stress = R_state_dict["stress"] if do_implicit_stress else (
-            model._default_stress_residual(sig, dlambda, q_full_state, stress_trial_arr)
+            model.default_stress_residual(q_full_state, dlambda, {"stress": stress_trial_arr})
         )
 
         R_state_non_stress = {k: v for k, v in R_state_dict.items() if k != "stress"}
