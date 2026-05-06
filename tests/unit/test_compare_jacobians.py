@@ -51,7 +51,7 @@ class TestCompareJacobiansJ2:
         """blocks dict should contain at least the four scalar block keys."""
         r, state0 = _result(model, 3e-3)
         out = compare_jacobians(model, r, r, state0)
-        for key in ("dstress_dsigma", "dstress_ddlambda", "dyield_dsigma", "dyield_ddlambda"):
+        for key in ("dRsigma_dsigma", "dRsigma_ddlambda", "dRdlambda_dsigma", "dRdlambda_ddlambda"):
             assert key in out.blocks
 
     def test_max_rel_err_equals_max_of_blocks(self, model):

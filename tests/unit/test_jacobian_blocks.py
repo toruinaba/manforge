@@ -41,21 +41,21 @@ class TestReducedBlocks:
         result, state0 = _plastic_result(model)
         jac = ad_jacobian_blocks(model, result, state0)
         ntens = model.ntens
-        assert jac.dstress_dsigma.shape == (ntens, ntens)
-        assert jac.dstress_ddlambda.shape == (ntens,)
-        assert jac.dyield_dsigma.shape == (ntens,)
+        assert jac.dRsigma_dsigma.shape == (ntens, ntens)
+        assert jac.dRsigma_ddlambda.shape == (ntens,)
+        assert jac.dRdlambda_dsigma.shape == (ntens,)
         assert jac.full.shape == (ntens + 1, ntens + 1)
 
-    def test_state_blocks_are_none(self, model):
+    def test_state_blocks_are_empty_dicts(self, model):
         result, state0 = _plastic_result(model)
         jac = ad_jacobian_blocks(model, result, state0)
-        assert jac.dstress_dstate is None
-        assert jac.dyield_dstate is None
-        assert jac.dstate_dsigma is None
-        assert jac.dstate_ddlambda is None
-        assert jac.dstate_dstate is None
+        assert jac.dRsigma_dstate == {}
+        assert jac.dRdlambda_dstate == {}
+        assert jac.dRstate_dsigma == {}
+        assert jac.dRstate_ddlambda == {}
+        assert jac.dRstate_dstate == {}
 
-    def test_dyield_dsigma_matches_flow_direction(self, model):
+    def test_dRdlambda_dsigma_matches_flow_direction(self, model):
         result, state0 = _plastic_result(model)
         jac = ad_jacobian_blocks(model, result, state0)
 
@@ -63,7 +63,7 @@ class TestReducedBlocks:
         from manforge.core.state import _state_with_stress
         n_ad = autograd.grad(lambda s: model.yield_function(_state_with_stress(result.state, s)))(result.stress)
         np.testing.assert_allclose(
-            np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
+            np.array(jac.dRdlambda_dsigma), np.array(n_ad), rtol=1e-10
         )
 
     def test_full_matrix_blocks_consistent(self, model):
@@ -71,10 +71,10 @@ class TestReducedBlocks:
         jac = ad_jacobian_blocks(model, result, state0)
         ntens = model.ntens
 
-        np.testing.assert_array_equal(jac.dstress_dsigma, jac.full[:ntens, :ntens])
-        np.testing.assert_array_equal(jac.dstress_ddlambda, jac.full[:ntens, ntens])
-        np.testing.assert_array_equal(jac.dyield_dsigma, jac.full[ntens, :ntens])
-        np.testing.assert_array_equal(jac.dyield_ddlambda, jac.full[ntens, ntens])
+        np.testing.assert_array_equal(jac.dRsigma_dsigma, jac.full[:ntens, :ntens])
+        np.testing.assert_array_equal(jac.dRsigma_ddlambda, jac.full[:ntens, ntens])
+        np.testing.assert_array_equal(jac.dRdlambda_dsigma, jac.full[ntens, :ntens])
+        np.testing.assert_array_equal(jac.dRdlambda_ddlambda, jac.full[ntens, ntens])
 
     def test_elastic_step_raises_no_error(self, model):
         deps = anp.array([1e-4, 0, 0, 0, 0, 0])
@@ -90,12 +90,12 @@ class TestReducedBlocks:
 # ---------------------------------------------------------------------------
 
 class TestReducedBlocksAF:
-    def test_af_state_blocks_are_none(self, af_model):
+    def test_af_state_blocks_are_empty_dicts(self, af_model):
         result, state0 = _plastic_result(af_model)
         jac = ad_jacobian_blocks(af_model, result, state0)
-        # AF is reduced hardening — state blocks should be None
-        assert jac.dstate_dsigma is None
-        assert jac.dstate_dstate is None
+        # AF is reduced hardening — state blocks should be empty dicts
+        assert jac.dRstate_dsigma == {}
+        assert jac.dRstate_dstate == {}
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +111,10 @@ class TestAugmentedBlocks:
     def test_state_block_keys(self, ow_model):
         result, state0 = _plastic_result(ow_model)
         jac = ad_jacobian_blocks(ow_model, result, state0)
-        # OW has state_names = ["alpha", "ep"] -> sorted keys
-        assert set(jac.dstate_dsigma.keys()) == {"alpha", "ep"}
-        assert set(jac.dstate_ddlambda.keys()) == {"alpha", "ep"}
-        assert set(jac.dstate_dstate.keys()) == {"alpha", "ep"}
+        # OW has implicit_keys = ["alpha", "ep"] (declaration order)
+        assert set(jac.dRstate_dsigma.keys()) == {"alpha", "ep"}
+        assert set(jac.dRstate_ddlambda.keys()) == {"alpha", "ep"}
+        assert set(jac.dRstate_dstate.keys()) == {"alpha", "ep"}
 
     def test_state_block_shapes(self, ow_model):
         result, state0 = _plastic_result(ow_model)
@@ -122,10 +122,10 @@ class TestAugmentedBlocks:
         ntens = ow_model.ntens
         # alpha: shape (ntens,) -> n_state contribution = ntens
         # ep: scalar -> n_state contribution = 1
-        assert jac.dstate_dsigma["alpha"].shape == (ntens, ntens)
-        assert jac.dstate_dsigma["ep"].shape == (1, ntens)
-        assert jac.dstate_ddlambda["alpha"].shape == (ntens,)
-        assert jac.dstate_ddlambda["ep"].shape == (1,)
+        assert jac.dRstate_dsigma["alpha"].shape == (ntens, ntens)
+        assert jac.dRstate_dsigma["ep"].shape == (1, ntens)
+        assert jac.dRstate_ddlambda["alpha"].shape == (ntens,)
+        assert jac.dRstate_ddlambda["ep"].shape == (1,)
 
     @pytest.mark.slow
     def test_full_matrix_size(self, ow_model):
@@ -136,14 +136,14 @@ class TestAugmentedBlocks:
         n_state = ntens + 1
         assert jac.full.shape == (ntens + 1 + n_state, ntens + 1 + n_state)
 
-    def test_dyield_dsigma_matches_flow_direction(self, ow_model):
+    def test_dRdlambda_dsigma_matches_flow_direction(self, ow_model):
         result, state0 = _plastic_result(ow_model)
         jac = ad_jacobian_blocks(ow_model, result, state0)
 
         from manforge.core.state import _state_with_stress
         n_ad = autograd.grad(lambda s: ow_model.yield_function(_state_with_stress(result.state, s)))(result.stress)
         np.testing.assert_allclose(
-            np.array(jac.dyield_dsigma), np.array(n_ad), rtol=1e-10
+            np.array(jac.dRdlambda_dsigma), np.array(n_ad), rtol=1e-10
         )
 
 
@@ -160,7 +160,7 @@ class TestReturnMappingResultPath:
         rm = PythonIntegrator(model).return_mapping(st, state0)
         jac = ad_jacobian_blocks(model, rm, state0, stress_trial=st)
         assert isinstance(jac, JacobianBlocks)
-        assert jac.dstress_dsigma.shape == (model.ntens, model.ntens)
+        assert jac.dRsigma_dsigma.shape == (model.ntens, model.ntens)
 
     def test_matches_stress_update_result(self, model):
         deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(model.ntens))
@@ -174,7 +174,7 @@ class TestReturnMappingResultPath:
         jac_su = ad_jacobian_blocks(model, su, state0)
 
         np.testing.assert_allclose(
-            np.array(jac_rm.dstress_dsigma), np.array(jac_su.dstress_dsigma), rtol=1e-10
+            np.array(jac_rm.dRsigma_dsigma), np.array(jac_su.dRsigma_dsigma), rtol=1e-10
         )
 
     def test_missing_stress_trial_raises(self, model):

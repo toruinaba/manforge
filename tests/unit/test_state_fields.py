@@ -52,7 +52,7 @@ class _AlphaEP(MaterialModel3D):
     def update_state(self, dlambda, state_n, state_trial):
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
@@ -65,7 +65,7 @@ class _AllImplicit(MaterialModel3D):
     def yield_function(self, state):
         return anp.array(0.0)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         return [
             self.alpha(state_new["alpha"] - state_n["alpha"]),
             self.ep(state_new["ep"] - state_n["ep"]),
@@ -116,7 +116,7 @@ def test_mro_override_explicit_to_implicit():
     class _Override(_AlphaEP):
         ep = Implicit(shape=(), doc="overridden to implicit")
 
-        def state_residual(self, state_new, dlambda, state_n, state_trial):
+        def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
             return [
                 self.alpha(state_new["alpha"] - state_n["alpha"]),
                 self.ep(state_new["ep"] - state_n["ep"]),

@@ -25,7 +25,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.state import Explicit, NTENS
+from manforge.core.state import Explicit
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
 from manforge.verification.fortran_registry import verified_against_fortran
@@ -71,7 +71,6 @@ class J2Isotropic3D(MaterialModel3D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
@@ -89,8 +88,7 @@ class J2Isotropic3D(MaterialModel3D):
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        sig = self.default_stress_update(dlambda, state_n, state_trial)
-        return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
@@ -197,7 +195,6 @@ class J2IsotropicPS(MaterialModelPS):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
@@ -215,8 +212,7 @@ class J2IsotropicPS(MaterialModelPS):
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        sig = self.default_stress_update(dlambda, state_n, state_trial)
-        return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
 
 class J2Isotropic1D(MaterialModel1D):
@@ -241,7 +237,6 @@ class J2Isotropic1D(MaterialModel1D):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
-    stress = Explicit(shape=NTENS, doc="Cauchy stress")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
@@ -259,8 +254,7 @@ class J2Isotropic1D(MaterialModel1D):
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
-        sig = self.default_stress_update(dlambda, state_n, state_trial)
-        return [self.stress(sig), self.ep(state_n["ep"] + dlambda)]
+        return [self.ep(state_n["ep"] + dlambda)]
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
