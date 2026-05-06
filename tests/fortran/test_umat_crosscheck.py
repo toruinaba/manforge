@@ -247,6 +247,10 @@ class MockKinematicModel:
             "ep": anp.array(0.0),
         }
 
+    def elastic_stiffness(self, state=None):
+        import numpy as np
+        return self.E * np.eye(self.ntens)
+
 
 @pytest.fixture
 def mock_fortran():

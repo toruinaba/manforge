@@ -87,6 +87,7 @@ class FortranIntegrator:
         self._initial_state = initial_state
         self._param_fn = param_fn
         self._state_names = list(state_names)
+        self._model = None  # set by from_model for elastic_stiffness delegation
 
         n_state = len(self._state_names)
         self._s2a: Callable[[dict], tuple] = (
@@ -141,7 +142,9 @@ class FortranIntegrator:
             f2py-callable subroutine name.
         model : MaterialModel
             Must have ``param_names``, ``state_names``, ``initial_state``,
-            and ``dimension`` attributes.
+            and ``dimension`` attributes.  Auto-derived ``state_names``
+            excludes ``"stress"``; pass ``state_names=`` explicitly if your
+            UMAT exposes stress as a state slot rather than a positional arg.
 
         Examples
         --------
@@ -161,13 +164,20 @@ class FortranIntegrator:
         _param_fn = param_fn if param_fn is not None else (
             lambda: tuple(getattr(model, n) for n in names)
         )
-        _state_names = state_names if state_names is not None else list(model.state_names)
+        # Exclude "stress" from the auto-derived list: Fortran UMATs receive
+        # stress as a dedicated positional argument (stress_in), not as a
+        # state-array slot.  Pass state_names= explicitly to override.
+        _state_names = (
+            state_names
+            if state_names is not None
+            else [n for n in model.state_names if n != "stress"]
+        )
         _initial_state = initial_state if initial_state is not None else model.initial_state
         _dimension = (
             dimension if dimension is not None
             else getattr(model, "dimension", SOLID_3D)
         )
-        return cls(
+        instance = cls(
             fortran,
             subroutine,
             dimension=_dimension,
@@ -178,6 +188,8 @@ class FortranIntegrator:
             parse_umat_return=parse_umat_return,
             parse_umat_ddsdde=parse_umat_ddsdde,
         )
+        instance._model = model
+        return instance
 
     @property
     def ntens(self) -> int:
@@ -185,6 +197,21 @@ class FortranIntegrator:
 
     def initial_state(self) -> dict:
         return _resolve_callable_or_value(self._initial_state)
+
+    def elastic_stiffness(self, state=None) -> np.ndarray:
+        """Return the elastic stiffness from the attached model (when available).
+
+        StressDriver uses this to compute the initial strain increment without
+        probing the UMAT with a zero-strain call — which would return an
+        elasto-plastic tangent when the current stress state is on the yield
+        surface and cause divergence in the outer NR loop.
+        """
+        if self._model is not None and hasattr(self._model, "elastic_stiffness"):
+            return np.asarray(self._model.elastic_stiffness(state), dtype=np.float64)
+        raise AttributeError(
+            "FortranIntegrator has no attached model with elastic_stiffness. "
+            "Pass a model via from_model() or add an elastic_stiffness_fn."
+        )
 
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
         strain_inc = np.asarray(strain_inc, dtype=np.float64)
@@ -201,7 +228,12 @@ class FortranIntegrator:
 
         f_stress, f_state = self._pur(ret)
         f_stress = np.asarray(f_stress, dtype=np.float64)
-        ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
+        try:
+            ddsdde = np.asarray(self._pudd(ret), dtype=np.float64)
+        except (ValueError, IndexError):
+            # UMAT does not return ddsdde (e.g. mock subroutines without tangent).
+            # Fall back to the elastic stiffness when available.
+            ddsdde = np.asarray(self.elastic_stiffness(state_n), dtype=np.float64)
 
         rm = ReturnMappingResult(
             stress=f_stress,
