@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import autograd.numpy as anp
 
 from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS, DLAMBDA_FIELD
-from manforge.core.stress_state import SOLID_3D, StressState
+from manforge.core.dimension import SOLID_3D, StressState
 from manforge.utils.smooth import smooth_sqrt
 
 

@@ -234,7 +234,7 @@ class MockKinematicModel:
         self.E = E
         self.H_kin = H_kin
         self.H_iso = H_iso
-        from manforge.core.stress_state import SOLID_3D
+        from manforge.core.dimension import SOLID_3D
         self.stress_state = SOLID_3D
 
     @property

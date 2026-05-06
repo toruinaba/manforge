@@ -251,7 +251,7 @@ except ModuleNotFoundError:
 
 if fortran_mock is not None:
     import autograd.numpy as anp
-    from manforge.core.stress_state import SOLID_3D
+    from manforge.core.dimension import SOLID_3D
 
     class MockModel:
         param_names = ["E", "H_kin", "H_iso"]

@@ -18,7 +18,7 @@ activate the vector NR path with σ as an NR unknown.
 
 from manforge.core.state import Implicit, NTENS
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
-from manforge.core.stress_state import PLANE_STRAIN
+from manforge.core.dimension import PLANE_STRAIN
 
 
 class _AFKinematicImplicit3D(AFKinematic3D):

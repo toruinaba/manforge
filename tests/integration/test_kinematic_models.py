@@ -18,7 +18,7 @@ import autograd.numpy as anp
 
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS, AFKinematic1D
 from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinematic1D
-from manforge.core.stress_state import PLANE_STRAIN
+from manforge.core.dimension import PLANE_STRAIN
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType

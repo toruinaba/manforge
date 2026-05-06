@@ -40,7 +40,7 @@ import autograd.numpy as anp
 import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
-from manforge.core.stress_state import StressState, SOLID_3D
+from manforge.core.dimension import StressState, SOLID_3D
 from manforge.simulation.solver import _numerical_newton
 from manforge.simulation.tangent import consistent_tangent
 

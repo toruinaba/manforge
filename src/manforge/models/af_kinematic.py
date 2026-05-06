@@ -48,7 +48,7 @@ import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.state import Explicit, NTENS
-from manforge.core.stress_state import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
 
 
 class AFKinematic3D(MaterialModel3D):

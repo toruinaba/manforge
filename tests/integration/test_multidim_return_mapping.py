@@ -16,7 +16,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import (
