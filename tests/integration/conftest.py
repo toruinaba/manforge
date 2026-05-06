@@ -3,7 +3,7 @@ import pytest
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS, AFKinematic1D
 from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinematic1D
-from manforge.core.stress_state import PLANE_STRAIN
+from manforge.core.dimension import PLANE_STRAIN
 
 
 @pytest.fixture

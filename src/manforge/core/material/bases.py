@@ -3,7 +3,7 @@
 import autograd.numpy as anp
 
 from manforge.core.material.base import MaterialModel
-from manforge.core.stress_state import (
+from manforge.core.dimension import (
     SOLID_3D,
     PLANE_STRESS,
     UNIAXIAL_1D,

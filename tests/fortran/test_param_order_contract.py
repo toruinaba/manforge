@@ -22,7 +22,7 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 import autograd.numpy as anp
-from manforge.core.stress_state import SOLID_3D
+from manforge.core.dimension import SOLID_3D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 from manforge.verification import FortranModule
 

@@ -21,7 +21,7 @@ from manforge.core.state import (
     StateResidual, StateUpdate, _validate_state_items,
 )
 from manforge.core.material import MaterialModel3D, MaterialModel1D
-from manforge.core.stress_state import SOLID_3D, UNIAXIAL_1D
+from manforge.core.dimension import SOLID_3D, UNIAXIAL_1D
 
 
 # ---------------------------------------------------------------------------

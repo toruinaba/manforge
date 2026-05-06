@@ -13,7 +13,7 @@ import pytest
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
 from manforge.core.state import NTENS
-from manforge.core.stress_state import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
 

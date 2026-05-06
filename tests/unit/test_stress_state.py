@@ -6,7 +6,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_state import (
+from manforge.core.dimension import (
     PLANE_STRAIN,
     PLANE_STRESS,
     SOLID_3D,
@@ -244,7 +244,7 @@ def test_projection_identity_no_ss():
 
 def test_isotropic_C_shapes():
     from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-    from manforge.core.stress_state import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+    from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 
     for model, expected_shape in [
         (J2Isotropic3D(SOLID_3D, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (6, 6)),

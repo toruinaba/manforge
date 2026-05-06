@@ -5,7 +5,7 @@ a full material model implementation.
 """
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.stress_state import SOLID_3D
+from manforge.core.dimension import SOLID_3D
 
 
 class _Stub3D(MaterialModel3D):

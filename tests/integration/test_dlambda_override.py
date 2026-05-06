@@ -15,7 +15,7 @@ import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D
 from manforge.core.state import Implicit, Explicit, NTENS
-from manforge.core.stress_state import SOLID_3D
+from manforge.core.dimension import SOLID_3D
 from manforge.simulation.integrator import PythonIntegrator
 
 
