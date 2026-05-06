@@ -4,7 +4,7 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import make_tangent_residual, _flatten_state, _wrap_state
+from manforge.core.residual import build_residual, _flatten_state, _wrap_state
 from manforge.core.state import _state_with_stress
 
 
@@ -50,16 +50,15 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     )(anp.array(stress))
     stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
 
-    # state_n must include "stress" for tangent residual
     state_n_full = dict(state_n)
     if "stress" not in state_n_full:
         state_n_full["stress"] = anp.zeros(ntens)
 
-    residual_fn, n_implicit, _ = make_tangent_residual(model, stress_trial, state_n_full)
-
-    implicit_keys_non_stress = sorted([k for k in model.implicit_state_names if k != "stress"])
+    implicit_keys_non_stress = sorted(k for k in model.implicit_state_names if k != "stress")
     implicit_state = {k: state[k] for k in implicit_keys_non_stress}
     flat_impl, _ = _flatten_state(implicit_state)
+
+    residual_fn, n_unknown, _ = build_residual(model, stress_trial, state_n_full)
 
     x_conv = anp.concatenate([
         anp.array(stress),
@@ -68,7 +67,7 @@ def consistent_tangent(model, stress, state, dlambda, stress_n, state_n):
     ])
 
     A = autograd.jacobian(residual_fn)(x_conv)
-    rhs = np.vstack([np.array(C_n), np.zeros((1 + n_implicit, ntens))])
+    rhs = np.vstack([np.array(C_n), np.zeros((n_unknown - ntens, ntens))])
     dxde = np.linalg.solve(np.array(A), rhs)
 
     return anp.array(dxde[:ntens, :])

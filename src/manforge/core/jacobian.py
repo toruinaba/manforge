@@ -8,7 +8,7 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import make_tangent_residual, _flatten_state, _wrap_state
+from manforge.core.residual import build_residual, _flatten_state, _wrap_state
 
 
 @dataclass
@@ -71,7 +71,7 @@ def ad_jacobian_blocks(
     if "stress" not in state_n_full:
         state_n_full["stress"] = anp.zeros(ntens)
 
-    residual_fn, _, _ = make_tangent_residual(model, stress_trial, state_n_full)
+    residual_fn, _, _ = build_residual(model, stress_trial, state_n_full)
 
     x_conv = anp.concatenate([
         anp.array(stress),
