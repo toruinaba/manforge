@@ -31,7 +31,7 @@ from manforge.simulation.integrator import (
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
 )
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 
 # ---------------------------------------------------------------------------
 # Model (steel, MPa units)

@@ -32,7 +32,7 @@ import manforge  # noqa: F401 — enables JAX float64
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation import FortranIntegrator, StressDriver
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 from manforge.verification import FortranModule
 
 try:

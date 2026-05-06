@@ -38,6 +38,10 @@ def _piecewise_linear(
     Returns a 1-D array of length ``len(peaks) * n_per_segment`` using the
     same ``np.linspace(...)[1:]`` idiom as ``generate_strain_history``.
     """
+    if len(peaks) == 0:
+        raise ValueError("peaks must not be empty")
+    if n_per_segment < 1:
+        raise ValueError(f"n_per_segment must be >= 1, got {n_per_segment}")
     current = start
     parts: list[np.ndarray] = []
     for target in peaks:

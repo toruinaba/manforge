@@ -22,7 +22,7 @@ from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.types import FieldHistory
 
 deps = np.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 

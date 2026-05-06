@@ -68,6 +68,26 @@ def test_component_out_of_bounds():
         FieldHistory.cyclic_strain([5e-3], n_per_segment=5, ntens=3, component=3)
 
 
+def test_empty_peaks_raises():
+    with pytest.raises(ValueError, match="peaks"):
+        FieldHistory.cyclic_strain([], n_per_segment=10, ntens=1)
+
+
+def test_n_per_segment_zero_raises():
+    with pytest.raises(ValueError, match="n_per_segment"):
+        FieldHistory.cyclic_strain([5e-3], n_per_segment=0, ntens=1)
+
+
+def test_triangular_n_cycles_zero_raises():
+    with pytest.raises(ValueError, match="peaks"):
+        FieldHistory.triangular_strain(5e-3, n_cycles=0, ntens=1)
+
+
+def test_decaying_n_cycles_zero_raises():
+    with pytest.raises(ValueError, match="peaks"):
+        FieldHistory.decaying_cyclic_strain(5e-3, n_cycles=0, ntens=1)
+
+
 # ---------------------------------------------------------------------------
 # triangular_strain
 # ---------------------------------------------------------------------------
