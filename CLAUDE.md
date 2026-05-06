@@ -48,7 +48,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Three-layer design
 
-**1. Material model layer** — `src/manforge/core/material.py`
+**1. Material model layer** — `src/manforge/core/material/` (`base.py` for `MaterialModel`, `stress_states.py` for `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D`; both re-exported from `manforge.core.material`)
 
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
@@ -65,16 +65,16 @@ class MyModel(MaterialModel3D):
 - `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
 - `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
 - `shape` accepts `NTENS` (resolves to `(ntens,)` at construction time), `()` (scalar), an `int`, or a tuple. The string `"ntens"` is no longer accepted — use `NTENS` instead.
-- **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR, same as old `implicit_stress=True`). `implicit_stress` is no longer accepted and raises `TypeError`.
-- `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`; hand-declaring them as non-empty lists raises `TypeError` with a migration hint.
+- **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR).
+- `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`.
 
 `__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
 
 User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
 
-- `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.** Old 2-arg signature `yield_function(self, stress, state)` raises `TypeError`.
-- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit** state keys (excluding stress, unless user declares `stress = Explicit` and wants custom update). Required whenever any non-stress state is `Explicit`. Old signature `update_state(self, dlambda, stress, state)` raises `TypeError`.
-- `state_residual(self, state_new, dlambda, state_n, state_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to override the default associative R_stress. Required whenever any state is `Implicit`. Old signature `state_residual(self, state_new, dlambda, stress, state_n)` raises `TypeError`.
+- `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.**
+- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit** state keys (excluding stress, unless user declares `stress = Explicit` and wants custom update). Required whenever any non-stress state is `Explicit`.
+- `state_residual(self, state_new, dlambda, state_n, state_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to override the default associative R_stress. Required whenever any state is `Implicit`.
 
 `state_trial["stress"]` semantics in these methods:
 - When `stress = Implicit`: `state_trial["stress"]` is the **fixed elastic trial stress** (used to write `R_stress = σ − σ_trial + ...`).
@@ -99,8 +99,6 @@ The base class provides a default `state_residual = q_{n+1} − update_state(...
 `result.state` from the solver always contains `"stress"` — `model.yield_function(result.state)` works directly.
 
 Factory helper on the base class: `make_state(**kwargs)` assembles a full `State` wrapper with strict key validation (used for initial-state construction and prestress).
-
-`hardening_type` and `implicit_stress` are no longer used and raise `TypeError` with migration hints if declared. List-based `state_names = ["ep"]` also raises `TypeError` (use `ep = Explicit(shape=())` instead). Declaring `stress_residual` as a user method raises `TypeError` (use `state_residual` with `self.stress(R_stress)` instead).
 
 Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
 
@@ -127,7 +125,7 @@ The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotrop
   - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
 - `jacobian.py`: `JacobianBlocks` dataclass and `ad_jacobian_blocks(model, result, state_n)` — computes the residual Jacobian at the converged point and decomposes it into named blocks (`dstress_dsigma`, `dyield_dsigma`, `dstate_dstate`, etc.). State blocks are keyed by variable name (e.g. `jac.dstate_dsigma["alpha"]`); only implicit states appear in `dstate_*` fields. Accepts both `StressUpdateResult` and `ReturnMappingResult`. Used for step-by-step verification of analytical derivatives.
 - `tangent.py`: Consistent tangent via implicit differentiation — always uses the `[σ, Δλ, q_implicit]` linear system regardless of `implicit_stress` (size ntens+1+n_implicit). Does NOT differentiate through NR iterations.
-- `residual.py`: Two residual builders: `make_nr_residual(model, stress_trial, state_n)` → `(fn, meta, unflatten)` for the NR phase (σ included only when `implicit_stress=True`); `make_tangent_residual(model, stress_trial, state_n)` → `(fn, n_implicit, unflatten)` for the tangent/Jacobian phase (σ always included).
+- `residual.py`: Two residual builders: `make_nr_residual(model, stress_trial, state_n)` → `(fn, meta, unflatten)` for the NR phase (σ included only when stress is Implicit); `make_tangent_residual(model, stress_trial, state_n)` → `(fn, n_implicit, unflatten)` for the tangent/Jacobian phase (σ always included).
 
 JAX autodiff computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
 
