@@ -270,6 +270,9 @@ if fortran_mock is not None:
         def initial_state(self):
             return {"alpha": anp.zeros(self.ntens), "ep": anp.array(0.0)}
 
+        def elastic_stiffness(self, state=None):
+            return self.E * np.eye(self.ntens)
+
     mock_model = MockModel(E=1.0, H_kin=0.1, H_iso=0.05)
     ntens = mock_model.ntens
 

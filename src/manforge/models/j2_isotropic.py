@@ -81,6 +81,13 @@ class J2Isotropic3D(MaterialModel3D):
         self.sigma_y0 = sigma_y0
         self.H = H
 
+    @verified_against_fortran(
+        "j2_isotropic_3d_elastic_stiffness",
+        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
+    )
+    def elastic_stiffness(self, state=None) -> anp.ndarray:
+        return super().elastic_stiffness(state)
+
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
