@@ -79,7 +79,7 @@ print(f"Final σ11: {result.stress[-1, 0]:.1f} MPa")
 
 ```
 manforge
-├── Material layer  (core/material.py)         定義: 降伏関数・硬化則・弾性テンソル
+├── Material layer  (core/material/)           定義: 降伏関数・硬化則・弾性テンソル
 ├── Solver layer    (simulation/integrator.py …) 実行: return mapping / consistent tangent
 └── Application     (simulation/ fitting/ …)   使用: ドライバ / フィッティング / 検証
 ```
@@ -88,7 +88,9 @@ manforge
 src/manforge/
 ├── core/
 │   ├── stress_state.py    # StressState (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
-│   ├── material.py        # MaterialModel ABC + MaterialModel3D/PS/1D
+│   ├── material/          # MaterialModel ABC + MaterialModel3D/PS/1D
+│   │   ├── base.py        #   MaterialModel (ABC, フレームワーク基底)
+│   │   └── stress_states.py #   MaterialModel3D / MaterialModelPS / MaterialModel1D
 │   ├── stress_update.py   # ReturnMappingResult / StressUpdateResult — 戻り値 dataclass
 │   ├── solver.py          # _numerical_newton (scalar / vector NR を自動選択)
 │   ├── tangent.py         # consistent tangent (implicit differentiation)
@@ -144,7 +146,7 @@ src/manforge/
 | 一部 state が `Implicit` (σ は Explicit) | `yield_function`, `update_state`, `state_residual` の両方 | `[Δλ, q_implicit]` |
 | 全 state が `Implicit`、`stress = Implicit` | `yield_function`, `state_residual` | `[σ, Δλ, q]` |
 
-`update_state` は **陽更新 state のみ** のキーを返す。`state_residual` は **陰 state のみ** のキーを返し、`self.stress(R_stress)` を含めると σ 残差をカスタム指定できる。さらに `self.dlambda(R_dl)` を含めると Δλ 行の残差を差し替えられる (粘塑性 Perzyna 型など)。省略時は `yield_function(state) = 0` がデフォルト。`hardening_type` と `implicit_stress` は廃止 (宣言すると `TypeError`)。全メソッドは `state["stress"]` 経由で応力にアクセスする (旧 2 引数シグネチャは `TypeError`)。
+`update_state` は **陽更新 state のみ** のキーを返す。`state_residual` は **陰 state のみ** のキーを返し、`self.stress(R_stress)` を含めると σ 残差をカスタム指定できる。さらに `self.dlambda(R_dl)` を含めると Δλ 行の残差を差し替えられる (粘塑性 Perzyna 型など)。省略時は `yield_function(state) = 0` がデフォルト。全メソッドは `state["stress"]` 経由で応力にアクセスする。
 
 `elastic_stiffness(self, state=None)` は `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D` 基底クラスに等方性デフォルト実装が用意されており、`self.E` と `self.nu` を持つモデルなら実装不要。状態依存の弾性剛性 (損傷塑性など) を持つモデルのみ override する。
 
