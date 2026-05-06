@@ -150,7 +150,7 @@ class _CustomStressResidual(MaterialModel3D):
         C = self.elastic_stiffness(state_new)
         s = self._dev(stress)
         vm = self._vonmises(stress)
-        m2 = anp.array(self.stress_state.mandel_factors_np) ** 2
+        m2 = anp.array(self.dimension.mandel_factors_np) ** 2
         n_hat = 1.5 * (s * m2) / vm
         R_stress = stress - state_trial["stress"] + dlambda * (C @ n_hat)
         R_ep = state_new["ep"] - state_n["ep"] - dlambda

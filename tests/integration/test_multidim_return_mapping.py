@@ -34,13 +34,13 @@ from manforge.verification.fd_check import check_tangent
 
 def test_j2isotropic3d_accepts_solid_3d():
     model = J2Isotropic3D(SOLID_3D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-    assert model.stress_state is SOLID_3D
+    assert model.dimension is SOLID_3D
     assert model.ntens == 6
 
 
 def test_j2isotropic3d_accepts_plane_strain():
     model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-    assert model.stress_state is PLANE_STRAIN
+    assert model.dimension is PLANE_STRAIN
     assert model.ntens == 4
 
 

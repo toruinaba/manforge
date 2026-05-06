@@ -256,7 +256,7 @@ if fortran_mock is not None:
     class MockModel:
         param_names = ["E", "H_kin", "H_iso"]
         state_names = ["alpha", "ep"]
-        stress_state = SOLID_3D
+        dimension = SOLID_3D
 
         def __init__(self, *, E, H_kin, H_iso):
             self.E = E
@@ -265,7 +265,7 @@ if fortran_mock is not None:
 
         @property
         def ntens(self):
-            return self.stress_state.ntens
+            return self.dimension.ntens
 
         def initial_state(self):
             return {"alpha": anp.zeros(self.ntens), "ep": anp.array(0.0)}

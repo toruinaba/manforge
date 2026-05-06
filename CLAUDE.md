@@ -138,13 +138,13 @@ autograd computes yield function gradients and the Hessian needed for the tangen
 - `verification/crosscheck_driver.py`: `CrosscheckStrainDriver` / `CrosscheckStressDriver` (both `Comparator` subclasses). Mirror `StrainDriver` / `StressDriver` respectively. `CrosscheckStressDriver.__init__` accepts `max_iter` / `tol` directly (no dict wrapper). `iter_run(load, *, initial_stress=None, initial_state=None)` yields `CrosscheckCaseResult` per step; `run(load)` returns `CrosscheckResult`. `CrosscheckCaseResult` holds `result_a`, `result_b` (raw `StressUpdateResult`) and `state_n` (step-start state) for use with `compare_jacobians`. Single-step comparison: pass a 1-row `FieldHistory` with `initial_stress`/`initial_state`.
 - `verification/jacobian_compare.py`: `compare_jacobians(model, result_a, result_b, state_n)` — compare Jacobian blocks from two `StressUpdateResult` objects (opt-in debugging utility, not called automatically by crosscheck drivers).
 
-### StressState and dimensionality
+### StressDimension (element dimensionality)
 
-`StressState` (`src/manforge/core/dimension.py`) is a frozen dataclass that encapsulates the element dimensionality (ABAQUS NTENS convention). Four pre-built instances: `SOLID_3D` (ntens=6), `PLANE_STRAIN` (ntens=4), `PLANE_STRESS` (ntens=3), `UNIAXIAL_1D` (ntens=1). The model's `stress_state` attribute drives the size of all stress/strain arrays and the condensation of the elastic stiffness.
+`StressDimension` (`src/manforge/core/dimension.py`) is a frozen dataclass that encapsulates the element dimensionality (ABAQUS NTENS convention). Four pre-built instances: `SOLID_3D` (ntens=6), `PLANE_STRAIN` (ntens=4), `PLANE_STRESS` (ntens=3), `UNIAXIAL_1D` (ntens=1). The model's `dimension` attribute drives the size of all stress/strain arrays and the condensation of the elastic stiffness.
 
 ### Voigt convention
 
-For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 13, 23]` with physical shear (not engineering shear). For other element types the component count is `ntens` per the associated `StressState`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
+For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 13, 23]` with physical shear (not engineering shear). For other element types the component count is `ntens` per the associated `StressDimension`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
 
 ### State variables
 

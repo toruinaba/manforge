@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import autograd.numpy as anp
 
 from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS, DLAMBDA_FIELD
-from manforge.core.dimension import SOLID_3D, StressState
+from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.utils.smooth import smooth_sqrt
 
 
@@ -63,14 +63,14 @@ class MaterialModel(ABC):
         Derived from ``state_fields`` (all field names, in declaration order).
     implicit_state_names : list[str]
         Derived from ``state_fields`` (names where ``kind == "implicit"``).
-    stress_state : StressState
+    dimension : StressDimension
         Dimensionality descriptor (default: ``SOLID_3D``, 6-component 3D).
     ntens : int
-        Read-only property; returns ``self.stress_state.ntens``.
+        Read-only property; returns ``self.dimension.ntens``.
     """
 
     param_names: list[str]
-    stress_state: StressState = SOLID_3D
+    dimension: StressDimension = SOLID_3D
 
     # Derived by __init_subclass__ from StateField descriptors:
     state_fields: dict[str, StateField] = {}
@@ -126,8 +126,8 @@ class MaterialModel(ABC):
 
     @property
     def ntens(self) -> int:
-        """Number of stress/strain components (derived from stress_state)."""
-        return self.stress_state.ntens
+        """Number of stress/strain components (derived from dimension)."""
+        return self.dimension.ntens
 
     # ------------------------------------------------------------------
     # Abstract interface — must be implemented by subclasses
@@ -405,8 +405,8 @@ class MaterialModel(ABC):
         """
         s = self._dev(stress)
         p = self._hydrostatic(stress)
-        s_m = s * self.stress_state.mandel_factors_np
-        sq_norm = anp.dot(s_m, s_m) + self.stress_state.n_missing * p ** 2
+        s_m = s * self.dimension.mandel_factors_np
+        sq_norm = anp.dot(s_m, s_m) + self.dimension.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
     def user_defined_return_mapping(

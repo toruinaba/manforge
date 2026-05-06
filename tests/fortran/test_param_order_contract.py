@@ -74,10 +74,10 @@ class _MockKinematicModel:
         self.E = 1.0
         self.H_kin = 0.1
         self.H_iso = 0.05
-        self.stress_state = SOLID_3D
+        self.dimension = SOLID_3D
 
     def initial_state(self):
-        return {"alpha": anp.zeros(self.stress_state.ntens), "ep": anp.array(0.0)}
+        return {"alpha": anp.zeros(self.dimension.ntens), "ep": anp.array(0.0)}
 
 
 _MOCK_MODULE = pytest.importorskip(

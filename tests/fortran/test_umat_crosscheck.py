@@ -131,8 +131,8 @@ def _make_single_step_cases(model):
     from manforge.simulation.integrator import PythonIntegrator as _PyInt
     eps_y = estimate_yield_strain(model)
     ntens = model.ntens
-    ndi = model.stress_state.ndi
-    nshr = model.stress_state.nshr
+    ndi = model.dimension.ndi
+    nshr = model.dimension.nshr
     state_0 = dict(model.initial_state())
     z = np.zeros(ntens)
     cases = []
@@ -235,11 +235,11 @@ class MockKinematicModel:
         self.H_kin = H_kin
         self.H_iso = H_iso
         from manforge.core.dimension import SOLID_3D
-        self.stress_state = SOLID_3D
+        self.dimension = SOLID_3D
 
     @property
     def ntens(self):
-        return self.stress_state.ntens
+        return self.dimension.ntens
 
     def initial_state(self):
         return {

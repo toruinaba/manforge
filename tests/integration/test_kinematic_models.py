@@ -30,9 +30,9 @@ _FACTORIES_3D = {
     "ow": lambda: OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0),
 }
 _FACTORIES_PE = {
-    "af": lambda: AFKinematic3D(stress_state=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
+    "af": lambda: AFKinematic3D(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
                                 C_k=10000.0, gamma=100.0),
-    "ow": lambda: OWKinematic3D(stress_state=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
+    "ow": lambda: OWKinematic3D(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
                                 C_k=10000.0, gamma=1.0),
 }
 _FACTORIES_PS = {

@@ -29,7 +29,7 @@ def build_objective(model, driver_factory, exp_data, fixed_params=None):
     Parameters
     ----------
     model : MaterialModel
-        Template model instance — used to determine the class and stress_state.
+        Template model instance — used to determine the class and dimension.
         A new instance is constructed each evaluation with the current params.
     driver_factory : callable
         ``driver_factory(integrator) -> DriverBase`` — called once per
@@ -46,7 +46,7 @@ def build_objective(model, driver_factory, exp_data, fixed_params=None):
         ``objective(free_params: dict) -> float``
     """
     model_cls = type(model)
-    stress_state = model.stress_state
+    dimension = model.dimension
     fixed = dict(fixed_params) if fixed_params else {}
     load = FieldHistory(
         FieldType.STRAIN, "Strain", np.asarray(exp_data["strain"], dtype=float)
@@ -56,7 +56,7 @@ def build_objective(model, driver_factory, exp_data, fixed_params=None):
 
     def objective(free_params: dict) -> float:
         all_params = {**fixed, **free_params}
-        m = model_cls(stress_state=stress_state, **all_params)
+        m = model_cls(dimension=dimension, **all_params)
         integrator = PythonIntegrator(m)
         result = driver_factory(integrator).run(load)
         stress_comp = result.stress

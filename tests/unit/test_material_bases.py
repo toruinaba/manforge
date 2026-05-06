@@ -23,13 +23,13 @@ from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
 def test_materialmodel3d_accepts_solid_3d():
     m = _Stub3D(SOLID_3D)
-    assert m.stress_state is SOLID_3D
+    assert m.dimension is SOLID_3D
     assert m.ntens == 6
 
 
 def test_materialmodel3d_accepts_plane_strain():
     m = _Stub3D(PLANE_STRAIN)
-    assert m.stress_state is PLANE_STRAIN
+    assert m.dimension is PLANE_STRAIN
     assert m.ntens == 4
 
 
@@ -225,7 +225,7 @@ def test_I_dev_projects_to_deviatoric(ss):
 
 def test_materialmodelps_accepts_plane_stress():
     m = _StubPS(PLANE_STRESS)
-    assert m.stress_state is PLANE_STRESS
+    assert m.dimension is PLANE_STRESS
     assert m.ntens == 3
 
 
@@ -386,7 +386,7 @@ def test_ps_I_dev_projects_to_deviatoric():
 
 def test_materialmodel1d_accepts_uniaxial_1d():
     m = _Stub1D(UNIAXIAL_1D)
-    assert m.stress_state is UNIAXIAL_1D
+    assert m.dimension is UNIAXIAL_1D
     assert m.ntens == 1
 
 

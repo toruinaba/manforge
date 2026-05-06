@@ -1,4 +1,4 @@
-"""Tests for StressState and parameterized operators."""
+"""Tests for StressDimension and parameterized operators."""
 
 import math
 
@@ -11,7 +11,7 @@ from manforge.core.dimension import (
     PLANE_STRESS,
     SOLID_3D,
     UNIAXIAL_1D,
-    StressState,
+    StressDimension,
 )
 from manforge.autodiff.operators import (
     I_dev_voigt,
@@ -30,7 +30,7 @@ ALL_SS = [SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D]
 
 
 # ---------------------------------------------------------------------------
-# StressState structural invariants
+# StressDimension structural invariants
 # ---------------------------------------------------------------------------
 
 
@@ -58,11 +58,11 @@ def test_shear_mandel_factors_are_sqrt2(ss):
 
 def test_invalid_stress_state_raises():
     with pytest.raises(ValueError, match="ntens"):
-        StressState("bad", ntens=5, ndi=3, nshr=3, ndi_phys=3,
+        StressDimension("bad", ntens=5, ndi=3, nshr=3, ndi_phys=3,
                     mandel_factors=(1.0,) * 5)
 
     with pytest.raises(ValueError, match="len.mandel_factors."):
-        StressState("bad2", ntens=6, ndi=3, nshr=3, ndi_phys=3,
+        StressDimension("bad2", ntens=6, ndi=3, nshr=3, ndi_phys=3,
                     mandel_factors=(1.0,) * 4)
 
 
@@ -253,7 +253,7 @@ def test_isotropic_C_shapes():
         (J2Isotropic1D(UNIAXIAL_1D, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (1, 1)),
     ]:
         C = model.elastic_stiffness()
-        assert C.shape == expected_shape, f"{model.stress_state.name}: expected {expected_shape}, got {C.shape}"
+        assert C.shape == expected_shape, f"{model.dimension.name}: expected {expected_shape}, got {C.shape}"
 
 
 def test_isotropic_C_3d_diagonal():
