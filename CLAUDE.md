@@ -64,7 +64,7 @@ class MyModel(MaterialModel3D):
 
 - `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
 - `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
-- `shape` accepts `NTENS` (resolves to `(ntens,)` at construction time), `SCALAR` (scalar 0-d state, preferred over `()`), an `int`, or a tuple. Passing `()` directly is also accepted (backward compatible). The string `"ntens"` is no longer accepted — use `NTENS` instead.
+- `shape` accepts `NTENS` (resolved to `(ntens,)` when `resolve_shape` is called during layout/state initialization), `SCALAR` (scalar 0-d state, preferred over `()`), an `int`, or a tuple. Passing `()` directly is also accepted (backward compatible). The string `"ntens"` is no longer accepted — use `NTENS` instead.
 - **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR).
 - `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`.
 

@@ -177,7 +177,6 @@ def test_scalar_sentinel_resolves_to_empty_tuple():
 def test_scalar_sentinel_initial_value_is_zero_d():
     model = _EP(SOLID_3D)
     f = Explicit(shape=SCALAR)
-    object.__setattr__(f, "name", "ep")
     val = f.initial_value(model)
     assert np.asarray(val).shape == ()
     assert float(val) == 0.0
