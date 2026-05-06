@@ -1,10 +1,11 @@
-"""Uniaxial tension simulation with J2 isotropic hardening.
+"""Cyclic uniaxial simulation with J2 isotropic hardening.
 
 Demonstrates:
 - Defining a J2Isotropic1D model with constructor parameters
-- Running a uniaxial strain history with StrainDriver
+- Building a cyclic strain history with FieldHistory.cyclic_strain
+- Running a cyclic strain history with StrainDriver (hysteresis loop)
 - Verifying the consistent tangent with check_tangent
-- Plotting the stress-strain curve (saved as PNG)
+- Plotting the stress-strain hysteresis loop (saved as PNG)
 
 Usage
 -----
@@ -28,8 +29,6 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-import jax.numpy as jnp
-
 # ---------------------------------------------------------------------------
 # Model (steel, MPa units)
 # ---------------------------------------------------------------------------
@@ -41,30 +40,34 @@ model = J2Isotropic1D(
 )
 
 # ---------------------------------------------------------------------------
-# Simulation
+# Cyclic simulation: 4 half-cycles (0 → +5e-3 → -5e-3 → +5e-3 → -5e-3)
 # ---------------------------------------------------------------------------
-N = 100
-strain_history = np.linspace(0.0, 5e-3, N)   # cumulative ε11
-load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
+load = FieldHistory.cyclic_strain(
+    peaks=[5e-3, -5e-3, 5e-3, -5e-3],
+    n_per_segment=25,
+    ntens=1,
+)
 result = StrainDriver(PythonIntegrator(model)).run(load)
+strain_history = result.strain[:, 0]   # ε11
 stress_history = result.stress[:, 0]   # σ11
 
 # ---------------------------------------------------------------------------
 # Console output
 # ---------------------------------------------------------------------------
-sigma_final = stress_history[-1]
 eps_yield_approx = model.sigma_y0 / model.E
+plastic_steps = sum(1 for r in result.step_results if r.is_plastic)
 
 print("=" * 50)
-print("  J2 Uniaxial Tension Simulation")
+print("  J2 Cyclic Uniaxial Simulation")
 print("=" * 50)
 print(f"  E          = {model.E:.0f} MPa")
 print(f"  nu         = {model.nu}")
 print(f"  sigma_y0   = {model.sigma_y0:.1f} MPa")
 print(f"  H          = {model.H:.0f} MPa")
-print(f"  Strain range: 0 → {strain_history[-1]:.4f}")
+print(f"  Strain peaks: ±{5e-3:.4f}  (4 half-cycles, 25 steps each)")
 print(f"  Approx. yield strain: {eps_yield_approx:.5f}")
-print(f"  Final stress (sigma11): {sigma_final:.2f} MPa")
+print(f"  Total steps: {len(result.step_results)}  (plastic: {plastic_steps})")
+print(f"  Max stress: {stress_history.max():.2f} MPa")
 print()
 
 # ---------------------------------------------------------------------------
@@ -73,9 +76,9 @@ print()
 print("Tangent check — elastic domain:")
 result_e = check_tangent(
     PythonIntegrator(model),
-    jnp.zeros(1),
+    np.zeros(1),
     model.initial_state(),
-    jnp.array([1e-5]),
+    np.array([1e-5]),
 )
 status = "PASS" if result_e.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
@@ -83,9 +86,9 @@ print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
 print("Tangent check — plastic domain (uniaxial):")
 result_p = check_tangent(
     PythonIntegrator(model),
-    jnp.zeros(1),
+    np.zeros(1),
     model.initial_state(),
-    jnp.array([2e-3]),
+    np.array([2e-3]),
 )
 status = "PASS" if result_p.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_p.max_rel_err:.2e}")
@@ -95,14 +98,17 @@ print()
 # Plot
 # ---------------------------------------------------------------------------
 if HAS_MATPLOTLIB:
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(strain_history * 100, stress_history, color="steelblue", linewidth=2,
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.plot(strain_history * 100, stress_history, color="steelblue", linewidth=1.5,
             label="J2 isotropic hardening")
-    ax.axhline(model.sigma_y0, color="gray", linestyle="--", linewidth=1,
+    ax.axhline( model.sigma_y0, color="gray", linestyle="--", linewidth=1,
                label=f"$\\sigma_{{y0}}$ = {model.sigma_y0:.0f} MPa")
+    ax.axhline(-model.sigma_y0, color="gray", linestyle="--", linewidth=1)
+    ax.axhline(0.0, color="black", linewidth=0.5)
+    ax.axvline(0.0, color="black", linewidth=0.5)
     ax.set_xlabel("Axial strain ε₁₁  [%]")
     ax.set_ylabel("Axial stress σ₁₁  [MPa]")
-    ax.set_title("Uniaxial Tension — J2 Isotropic Hardening")
+    ax.set_title("Cyclic Uniaxial — J2 Isotropic Hardening (hysteresis)")
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()

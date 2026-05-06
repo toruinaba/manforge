@@ -14,6 +14,8 @@ generate_strain_history
 
 import numpy as np
 
+from manforge.simulation.types import FieldHistory
+
 
 def estimate_yield_strain(model) -> float:
     """Estimate the yield strain in the first component direction.
@@ -85,10 +87,7 @@ def generate_strain_history(model, eps_y=None) -> np.ndarray:
     if eps_y is None:
         eps_y = estimate_yield_strain(model)
 
-    ntens = model.ntens
-    steps_per_segment = 5
-
-    targets = [
+    peaks = [
         0.5 * eps_y,
         5.0 * eps_y,
         2.0 * eps_y,
@@ -97,14 +96,6 @@ def generate_strain_history(model, eps_y=None) -> np.ndarray:
         -2.0 * eps_y,
         0.0,
     ]
-
-    axial = [0.0]
-    for target in targets:
-        segment = np.linspace(axial[-1], target, steps_per_segment + 1)[1:]
-        axial.extend(segment.tolist())
-
-    axial = np.array(axial[1:])
-
-    history = np.zeros((len(axial), ntens))
-    history[:, 0] = axial
-    return history
+    return FieldHistory.cyclic_strain(
+        peaks, n_per_segment=5, ntens=model.ntens, component=0
+    ).data
