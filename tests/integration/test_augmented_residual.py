@@ -315,7 +315,7 @@ def test_augmented_matches_reduced_plane_strain():
     """Implicit AF plane-strain path must produce the same stress as the explicit path."""
     deps = anp.array([2e-3, -1e-3, 0.0, 1e-3])
 
-    explicit_model = AFKinematic3D(stress_state=PLANE_STRAIN,
+    explicit_model = AFKinematic3D(dimension=PLANE_STRAIN,
                                    E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     implicit_model = _AFKinematicImplicitPE()
     state0 = explicit_model.initial_state()

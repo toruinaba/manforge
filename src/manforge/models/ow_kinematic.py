@@ -58,7 +58,7 @@ import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel1D, MaterialModel3D, MaterialModelPS
 from manforge.core.state import Implicit, NTENS
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressState
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
 class OWKinematic3D(MaterialModel3D):
@@ -71,8 +71,8 @@ class OWKinematic3D(MaterialModel3D):
 
     Parameters
     ----------
-    stress_state : StressState, optional
-        Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
+    dimension : StressDimension, optional
+        Must satisfy ``dimension.ndi == dimension.ndi_phys``.
         Defaults to ``SOLID_3D``.
     E : float
         Young's modulus.
@@ -91,9 +91,9 @@ class OWKinematic3D(MaterialModel3D):
     alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
-    def __init__(self, stress_state: StressState = SOLID_3D, *,
+    def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(stress_state)
+        super().__init__(dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -141,8 +141,8 @@ class OWKinematicPS(MaterialModelPS):
 
     Parameters
     ----------
-    stress_state : StressState, optional
-        Must satisfy ``stress_state.is_plane_stress``.
+    dimension : StressDimension, optional
+        Must satisfy ``dimension.is_plane_stress``.
         Defaults to ``PLANE_STRESS``.
     E : float
         Young's modulus.
@@ -161,9 +161,9 @@ class OWKinematicPS(MaterialModelPS):
     alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
-    def __init__(self, stress_state: StressState = PLANE_STRESS, *,
+    def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(stress_state)
+        super().__init__(dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -202,7 +202,7 @@ class OWKinematic1D(MaterialModel1D):
 
     Parameters
     ----------
-    stress_state : StressState, optional
+    dimension : StressDimension, optional
         Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
     E : float
         Young's modulus.
@@ -221,9 +221,9 @@ class OWKinematic1D(MaterialModel1D):
     alpha = Implicit(shape=NTENS, doc="backstress tensor")
     ep = Implicit(shape=(), doc="equivalent plastic strain")
 
-    def __init__(self, stress_state: StressState = UNIAXIAL_1D, *,
+    def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(stress_state)
+        super().__init__(dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0

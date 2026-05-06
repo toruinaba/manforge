@@ -73,7 +73,7 @@ class _AFKinematicImplicitPE(AFKinematic3D):
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
     def __init__(self):
-        super().__init__(stress_state=PLANE_STRAIN,
+        super().__init__(dimension=PLANE_STRAIN,
                          E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
     def state_residual(self, state_new, dlambda, state_n, state_trial):

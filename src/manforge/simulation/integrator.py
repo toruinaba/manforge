@@ -4,7 +4,7 @@
 surface a :class:`~manforge.simulation.driver.DriverBase` needs from any
 constitutive implementation:
 
-* ``stress_state`` / ``ntens``  — array-shape information
+* ``dimension`` / ``ntens``  — array-shape information
 * ``initial_state()``           — initial internal state dict
 * ``elastic_stiffness()``       — (ntens, ntens) stiffness tensor
 * ``stress_update(Δε, σ_n, s_n) → StressUpdateResult``  — one step
@@ -40,7 +40,7 @@ import autograd.numpy as anp
 import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
-from manforge.core.dimension import StressState, SOLID_3D
+from manforge.core.dimension import StressDimension, SOLID_3D
 from manforge.simulation.solver import _numerical_newton
 from manforge.simulation.tangent import consistent_tangent
 
@@ -58,11 +58,11 @@ class StressIntegrator:
     adapters.
     """
 
-    stress_state: StressState
+    dimension: StressDimension
 
     @property
     def ntens(self) -> int:
-        return self.stress_state.ntens
+        return self.dimension.ntens
 
     def initial_state(self) -> dict:
         raise NotImplementedError
@@ -102,8 +102,8 @@ class _PythonIntegratorBase:
         self._raise_on_nonconverged = raise_on_nonconverged
 
     @property
-    def stress_state(self) -> StressState:
-        return self._model.stress_state
+    def dimension(self) -> StressDimension:
+        return self._model.dimension
 
     @property
     def ntens(self) -> int:
@@ -295,7 +295,7 @@ class FortranIntegrator:
         f2py module wrapper (from :class:`~manforge.verification.FortranModule`).
     subroutine : str
         Name of the f2py-callable core-logic subroutine.
-    stress_state : StressState, optional
+    dimension : StressDimension, optional
         Dimensionality descriptor.  Defaults to :data:`SOLID_3D` (ntens=6).
     initial_state : callable or dict
         Either a no-arg callable returning a state dict (e.g.
@@ -337,7 +337,7 @@ class FortranIntegrator:
         fortran,
         subroutine: str,
         *,
-        stress_state: StressState = SOLID_3D,
+        dimension: StressDimension = SOLID_3D,
         initial_state,
         param_fn: Callable[[], tuple],
         state_names: list[str],
@@ -347,7 +347,7 @@ class FortranIntegrator:
     ) -> None:
         self._fortran = fortran
         self._subroutine = subroutine
-        self.stress_state = stress_state
+        self.dimension = dimension
         self._initial_state = initial_state
         self._param_fn = param_fn
         self._state_names = list(state_names)
@@ -378,7 +378,7 @@ class FortranIntegrator:
         subroutine: str,
         model,
         *,
-        stress_state: StressState | None = None,
+        dimension: StressDimension | None = None,
         param_fn: Callable[[], tuple] | None = None,
         state_names: list[str] | None = None,
         initial_state=None,
@@ -389,7 +389,7 @@ class FortranIntegrator:
         """Build a FortranIntegrator from a MaterialModel.
 
         Fills ``param_fn``, ``state_names``, ``initial_state``, and
-        ``stress_state`` from *model* attributes.  Any kwarg passed explicitly
+        ``dimension`` from *model* attributes.  Any kwarg passed explicitly
         overrides the auto-derived value.
 
         ``param_fn`` is auto-generated as
@@ -405,7 +405,7 @@ class FortranIntegrator:
             f2py-callable subroutine name.
         model : MaterialModel
             Must have ``param_names``, ``state_names``, ``initial_state``,
-            and ``stress_state`` attributes.
+            and ``dimension`` attributes.
 
         Examples
         --------
@@ -427,14 +427,14 @@ class FortranIntegrator:
         )
         _state_names = state_names if state_names is not None else list(model.state_names)
         _initial_state = initial_state if initial_state is not None else model.initial_state
-        _stress_state = (
-            stress_state if stress_state is not None
-            else getattr(model, "stress_state", SOLID_3D)
+        _dimension = (
+            dimension if dimension is not None
+            else getattr(model, "dimension", SOLID_3D)
         )
         return cls(
             fortran,
             subroutine,
-            stress_state=_stress_state,
+            dimension=_dimension,
             param_fn=_param_fn,
             state_names=_state_names,
             initial_state=_initial_state,
@@ -445,7 +445,7 @@ class FortranIntegrator:
 
     @property
     def ntens(self) -> int:
-        return self.stress_state.ntens
+        return self.dimension.ntens
 
     def initial_state(self) -> dict:
         return _resolve_callable_or_value(self._initial_state)

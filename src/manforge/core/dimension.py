@@ -1,4 +1,4 @@
-"""StressState: dimensionality descriptor for stress/strain analyses."""
+"""StressDimension: dimensionality descriptor for stress/strain analyses."""
 
 import math
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ import numpy as np
 
 
 @dataclass(frozen=True)
-class StressState:
+class StressDimension:
     """Dimensionality descriptor for a stress analysis."""
 
     name: str
@@ -21,12 +21,12 @@ class StressState:
     def __post_init__(self):
         if self.ntens != self.ndi + self.nshr:
             raise ValueError(
-                f"StressState '{self.name}': ntens={self.ntens} != "
+                f"StressDimension '{self.name}': ntens={self.ntens} != "
                 f"ndi={self.ndi} + nshr={self.nshr}"
             )
         if len(self.mandel_factors) != self.ntens:
             raise ValueError(
-                f"StressState '{self.name}': len(mandel_factors)="
+                f"StressDimension '{self.name}': len(mandel_factors)="
                 f"{len(self.mandel_factors)} != ntens={self.ntens}"
             )
 
@@ -62,7 +62,7 @@ class StressState:
 
 _sqrt2 = math.sqrt(2.0)
 
-SOLID_3D = StressState(
+SOLID_3D = StressDimension(
     name="3D_SOLID",
     ntens=6,
     ndi=3,
@@ -71,7 +71,7 @@ SOLID_3D = StressState(
     mandel_factors=(1.0, 1.0, 1.0, _sqrt2, _sqrt2, _sqrt2),
 )
 
-PLANE_STRAIN = StressState(
+PLANE_STRAIN = StressDimension(
     name="PLANE_STRAIN",
     ntens=4,
     ndi=3,
@@ -80,7 +80,7 @@ PLANE_STRAIN = StressState(
     mandel_factors=(1.0, 1.0, 1.0, _sqrt2),
 )
 
-PLANE_STRESS = StressState(
+PLANE_STRESS = StressDimension(
     name="PLANE_STRESS",
     ntens=3,
     ndi=2,
@@ -90,7 +90,7 @@ PLANE_STRESS = StressState(
     is_plane_stress=True,
 )
 
-UNIAXIAL_1D = StressState(
+UNIAXIAL_1D = StressDimension(
     name="UNIAXIAL_1D",
     ntens=1,
     ndi=1,

@@ -8,7 +8,7 @@ strain convention).  When inner-product equivalence with tensor double-
 contraction is required (e.g. for norms), the Mandel transformation
 (multiply shear by √2) is applied internally via ``utils.voigt``.
 
-Each function accepts an optional ``ss`` (:class:`~manforge.core.dimension.StressState`)
+Each function accepts an optional ``ss`` (:class:`~manforge.core.dimension.StressDimension`)
 argument so that it works for any element dimensionality.  When ``ss`` is
 omitted the 6-component 3D convention is used (backward-compatible).
 """

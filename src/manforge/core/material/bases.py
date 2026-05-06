@@ -7,7 +7,7 @@ from manforge.core.dimension import (
     SOLID_3D,
     PLANE_STRESS,
     UNIAXIAL_1D,
-    StressState,
+    StressDimension,
 )
 
 
@@ -38,25 +38,25 @@ class MaterialModel3D(MaterialModel):
 
     Parameters
     ----------
-    stress_state : StressState, optional
-        Must satisfy ``stress_state.ndi == stress_state.ndi_phys``.
+    dimension : StressDimension, optional
+        Must satisfy ``dimension.ndi == dimension.ndi_phys``.
         Defaults to ``SOLID_3D``.
 
     Raises
     ------
     ValueError
-        If ``stress_state.ndi != stress_state.ndi_phys``.
+        If ``dimension.ndi != dimension.ndi_phys``.
     """
 
-    def __init__(self, stress_state: StressState = SOLID_3D):
-        if stress_state.ndi != stress_state.ndi_phys:
+    def __init__(self, dimension: StressDimension = SOLID_3D):
+        if dimension.ndi != dimension.ndi_phys:
             raise ValueError(
                 f"MaterialModel3D requires ndi == ndi_phys "
                 f"(e.g. SOLID_3D or PLANE_STRAIN). "
-                f"Got '{stress_state.name}' with ndi={stress_state.ndi}, "
-                f"ndi_phys={stress_state.ndi_phys}."
+                f"Got '{dimension.name}' with ndi={dimension.ndi}, "
+                f"ndi_phys={dimension.ndi_phys}."
             )
-        self.stress_state = stress_state
+        self.dimension = dimension
 
     # ------------------------------------------------------------------
     # Operator methods — concrete for full-rank stress states
@@ -72,7 +72,7 @@ class MaterialModel3D(MaterialModel):
     def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_np
+        return stress - p * self.dimension.identity_np
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """Isotropic elastic stiffness via submatrix extraction.
@@ -103,7 +103,7 @@ class MaterialModel3D(MaterialModel):
 
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
-        delta = self.stress_state.identity_np
+        delta = self.dimension.identity_np
         return anp.outer(delta, delta) / 3.0
 
     def _I_dev(self) -> anp.ndarray:
@@ -132,24 +132,24 @@ class MaterialModelPS(MaterialModel):
 
     Parameters
     ----------
-    stress_state : StressState, optional
-        Must satisfy ``stress_state.is_plane_stress``.
+    dimension : StressDimension, optional
+        Must satisfy ``dimension.is_plane_stress``.
         Defaults to ``PLANE_STRESS``.
 
     Raises
     ------
     ValueError
-        If ``stress_state.is_plane_stress`` is ``False``.
+        If ``dimension.is_plane_stress`` is ``False``.
     """
 
-    def __init__(self, stress_state: StressState = PLANE_STRESS):
-        if not stress_state.is_plane_stress:
+    def __init__(self, dimension: StressDimension = PLANE_STRESS):
+        if not dimension.is_plane_stress:
             raise ValueError(
-                f"MaterialModelPS requires a plane-stress StressState "
+                f"MaterialModelPS requires a plane-stress StressDimension "
                 f"(is_plane_stress=True). "
-                f"Got '{stress_state.name}'."
+                f"Got '{dimension.name}'."
             )
-        self.stress_state = stress_state
+        self.dimension = dimension
 
     # ------------------------------------------------------------------
     # Operator methods — concrete for PLANE_STRESS
@@ -165,7 +165,7 @@ class MaterialModelPS(MaterialModel):
     def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored components, s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_np  # δ = [1, 1, 0]
+        return stress - p * self.dimension.identity_np  # δ = [1, 1, 0]
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """Plane-stress isotropic stiffness via static condensation.
@@ -198,7 +198,7 @@ class MaterialModelPS(MaterialModel):
 
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
-        delta = self.stress_state.identity_np  # [1, 1, 0]
+        delta = self.dimension.identity_np  # [1, 1, 0]
         return anp.outer(delta, delta) / 3.0
 
     def _I_dev(self) -> anp.ndarray:
@@ -226,22 +226,22 @@ class MaterialModel1D(MaterialModel):
 
     Parameters
     ----------
-    stress_state : StressState, optional
+    dimension : StressDimension, optional
         Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
 
     Raises
     ------
     ValueError
-        If ``stress_state.ntens != 1``.
+        If ``dimension.ntens != 1``.
     """
 
-    def __init__(self, stress_state: StressState = UNIAXIAL_1D):
-        if stress_state.ntens != 1:
+    def __init__(self, dimension: StressDimension = UNIAXIAL_1D):
+        if dimension.ntens != 1:
             raise ValueError(
-                f"MaterialModel1D requires a 1D StressState (ntens=1). "
-                f"Got '{stress_state.name}' with ntens={stress_state.ntens}."
+                f"MaterialModel1D requires a 1D StressDimension (ntens=1). "
+                f"Got '{dimension.name}' with ntens={dimension.ntens}."
             )
-        self.stress_state = stress_state
+        self.dimension = dimension
 
     # ------------------------------------------------------------------
     # Operator methods — concrete for UNIAXIAL_1D
@@ -257,7 +257,7 @@ class MaterialModel1D(MaterialModel):
     def _dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored component, s = σ − p δ."""
         p = self._hydrostatic(stress)
-        return stress - p * self.stress_state.identity_np  # δ = [1.0]
+        return stress - p * self.dimension.identity_np  # δ = [1.0]
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
         """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).
@@ -276,7 +276,7 @@ class MaterialModel1D(MaterialModel):
 
     def _I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor [[1/3]] for ntens=1."""
-        delta = self.stress_state.identity_np  # [1.0]
+        delta = self.dimension.identity_np  # [1.0]
         return anp.outer(delta, delta) / 3.0
 
     def _I_dev(self) -> anp.ndarray:
