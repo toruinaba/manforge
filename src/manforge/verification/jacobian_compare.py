@@ -69,7 +69,7 @@ def compare_jacobians(
     -------
     JacobianComparisonResult
     """
-    from manforge.core.jacobian import ad_jacobian_blocks
+    from manforge.verification.jacobian import ad_jacobian_blocks
 
     jac_a = ad_jacobian_blocks(model, result_a, state_n)
     jac_b = ad_jacobian_blocks(model, result_b, state_n)

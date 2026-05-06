@@ -8,7 +8,7 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.residual import build_residual, _flatten_state, _wrap_state
+from manforge.simulation._residual import build_residual, _flatten_state, _wrap_state
 
 
 @dataclass

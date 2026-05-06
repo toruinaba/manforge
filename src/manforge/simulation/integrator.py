@@ -42,7 +42,7 @@ import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension, SOLID_3D
-from manforge.core.residual import build_residual, _flatten_state, _wrap_state
+from manforge.simulation._residual import build_residual, _flatten_state, _wrap_state
 from manforge.core.state import _state_with_stress
 
 
@@ -152,7 +152,7 @@ class _PythonIntegratorBase:
         Uses self._model / self._max_iter / self._tol / self._raise_on_nonconverged.
         Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (n_imp)].
         """
-        from manforge.core.residual import _call_update_state
+        from manforge.simulation._residual import _call_update_state
         model = self._model
         ntens = model.ntens
         implicit_keys_non_stress = sorted(

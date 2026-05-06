@@ -5,7 +5,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.jacobian import ad_jacobian_blocks, JacobianBlocks
+from manforge.verification.jacobian import ad_jacobian_blocks, JacobianBlocks
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.models.af_kinematic import AFKinematic3D
 from manforge.models.ow_kinematic import OWKinematic3D

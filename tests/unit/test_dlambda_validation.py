@@ -179,7 +179,7 @@ def test_update_state_rejects_dlambda_residual():
     state_n = model.make_state(stress=anp.zeros(6), ep=anp.array(0.0))
     stress_trial = anp.zeros(6)
     import numpy as np
-    from manforge.core.residual import _call_update_state
+    from manforge.simulation._residual import _call_update_state
     with pytest.raises(TypeError, match="self.dlambda.*not allowed in update_state"):
         _call_update_state(
             model, anp.array(0.01), state_n, state_n,
@@ -193,7 +193,7 @@ def test_update_state_rejects_dlambda_residual():
 
 def test_state_residual_duplicate_dlambda_raises():
     import numpy as np
-    from manforge.core.residual import _call_state_residual
+    from manforge.simulation._residual import _call_state_residual
     model = _DuplicateDlambdaModel(sigma_y0=250.0)
     state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
     with pytest.raises(ValueError, match="duplicate self.dlambda"):
@@ -208,7 +208,7 @@ def test_state_residual_duplicate_dlambda_raises():
 # ---------------------------------------------------------------------------
 
 def test_state_residual_bad_item_raises():
-    from manforge.core.residual import _call_state_residual
+    from manforge.simulation._residual import _call_state_residual
     model = _BadItemModel(sigma_y0=250.0)
     state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
     with pytest.raises(TypeError, match="StateResidual.*DlambdaResidual"):
@@ -223,7 +223,7 @@ def test_state_residual_bad_item_raises():
 # ---------------------------------------------------------------------------
 
 def test_call_state_residual_with_dlambda_override():
-    from manforge.core.residual import _call_state_residual
+    from manforge.simulation._residual import _call_state_residual
     model = _DlambdaOnlyModel(sigma_y0=250.0)
     state_n = model.make_state(stress=anp.zeros(6))
     state_dict = dict(state_n)
@@ -236,7 +236,7 @@ def test_call_state_residual_with_dlambda_override():
 
 
 def test_call_state_residual_without_dlambda_returns_none():
-    from manforge.core.residual import _call_state_residual
+    from manforge.simulation._residual import _call_state_residual
     model = _AlphaModel(sigma_y0=250.0, H_k=1000.0)
     state_n = model.make_state(stress=anp.zeros(6), alpha=anp.zeros(6))
     state_dict = dict(state_n)
