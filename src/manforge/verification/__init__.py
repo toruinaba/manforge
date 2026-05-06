@@ -5,6 +5,7 @@ from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
 )
+from manforge.verification.jacobian import JacobianBlocks, ad_jacobian_blocks
 from manforge.verification.jacobian_compare import (
     compare_jacobians,
     JacobianComparisonResult,
@@ -33,7 +34,9 @@ __all__ = [
     "Comparator",
     "CaseResult",
     "ComparisonResult",
-    # Jacobian comparison (for diagnosing failed crosschecks)
+    # Jacobian block decomposition and comparison
+    "JacobianBlocks",
+    "ad_jacobian_blocks",
     "compare_jacobians",
     "JacobianComparisonResult",
     # Finite-difference tangent check
