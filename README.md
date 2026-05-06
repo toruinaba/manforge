@@ -95,12 +95,12 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 
 ```python
 import autograd.numpy as anp
-from manforge.core import Implicit, Explicit, NTENS
+from manforge.core import Implicit, Explicit, NTENS, SCALAR
 from manforge.core.material import MaterialModel3D
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=(), doc="equivalent plastic strain")
+    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, *, E, nu, sigma_y0, H):
         super().__init__()
@@ -139,7 +139,7 @@ class MyImplicitModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")
     alpha  = Implicit(shape=NTENS, doc="backstress tensor")
-    ep     = Implicit(shape=(),    doc="equivalent plastic strain")
+    ep     = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]

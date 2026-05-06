@@ -53,18 +53,18 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 `MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
 ```python
-from manforge.core import Implicit, Explicit, NTENS
+from manforge.core import Implicit, Explicit, NTENS, SCALAR
 
 class MyModel(MaterialModel3D):
     param_names = ["E", "nu", "sigma_y0"]
-    ep    = Explicit(shape=(),    doc="equivalent plastic strain")
-    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    ep    = Explicit(shape=SCALAR, doc="equivalent plastic strain")
+    alpha = Implicit(shape=NTENS,  doc="backstress tensor")
     stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")  # optional
 ```
 
 - `Explicit(shape, doc)` — state updated in closed form via `update_state`; no NR unknown.
 - `Implicit(shape, doc)` — state solved as NR unknown via `state_residual`.
-- `shape` accepts `NTENS` (resolves to `(ntens,)` at construction time), `()` (scalar), an `int`, or a tuple. The string `"ntens"` is no longer accepted — use `NTENS` instead.
+- `shape` accepts `NTENS` (resolved to `(ntens,)` when `resolve_shape` is called during layout/state initialization), `SCALAR` (scalar 0-d state, preferred over `()`), an `int`, or a tuple. Passing `()` directly is also accepted (backward compatible). The string `"ntens"` is no longer accepted — use `NTENS` instead.
 - **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR).
 - `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`.
 

@@ -17,7 +17,7 @@ import pytest
 import autograd.numpy as anp
 
 from manforge.core.state import (
-    Implicit, Explicit, StateField, collect_state_fields, State, _make, NTENS,
+    Implicit, Explicit, StateField, collect_state_fields, State, _make, NTENS, SCALAR,
     StateResidual, StateUpdate, _validate_state_items,
 )
 from manforge.core.material import MaterialModel3D, MaterialModel1D
@@ -167,6 +167,19 @@ def test_ntens_string_raises_typeerror():
 def test_scalar_shape_resolves_to_empty_tuple():
     f = Explicit(shape=())
     assert f.resolve_shape(ntens=6) == ()
+
+
+def test_scalar_sentinel_resolves_to_empty_tuple():
+    f = Explicit(shape=SCALAR)
+    assert f.resolve_shape(ntens=6) == ()
+
+
+def test_scalar_sentinel_initial_value_is_zero_d():
+    model = _EP(SOLID_3D)
+    f = Explicit(shape=SCALAR)
+    val = f.initial_value(model)
+    assert np.asarray(val).shape == ()
+    assert float(val) == 0.0
 
 
 def test_int_shape_resolves_to_singleton_tuple():
