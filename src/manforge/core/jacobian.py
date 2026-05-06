@@ -36,7 +36,7 @@ def ad_jacobian_blocks(
     model, result, state_n: dict, *, stress_trial=None
 ) -> JacobianBlocks:
     """Compute the residual Jacobian at the converged point and decompose into blocks."""
-    from manforge.core.stress_update import StressUpdateResult
+    from manforge.core.result import StressUpdateResult
 
     if isinstance(result, StressUpdateResult):
         if result.return_mapping is None:

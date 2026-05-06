@@ -2,7 +2,7 @@
 
 :func:`compare_jacobians` compares the residual Jacobian blocks computed by
 :func:`~manforge.core.jacobian.ad_jacobian_blocks` for two
-:class:`~manforge.core.stress_update.StressUpdateResult` objects.  It is
+:class:`~manforge.core.result.StressUpdateResult` objects.  It is
 intended for manual use when a crosscheck fails:
 
 ::

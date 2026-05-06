@@ -39,10 +39,10 @@ from typing import Any, Callable
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.stress_update import ReturnMappingResult, StressUpdateResult
+from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.stress_state import StressState, SOLID_3D
-from manforge.core.solver import _numerical_newton
-from manforge.core.tangent import consistent_tangent
+from manforge.simulation.solver import _numerical_newton
+from manforge.simulation.tangent import consistent_tangent
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +323,7 @@ class FortranIntegrator:
     Notes
     -----
     Fortran UMATs do not expose a per-step ``is_plastic`` flag or ``dlambda``.
-    The resulting :class:`~manforge.core.stress_update.StressUpdateResult` will
+    The resulting :class:`~manforge.core.result.StressUpdateResult` will
     have ``is_plastic=None``, ``dlambda=nan``, and ``stress_trial=None``.
     Driver loops that gate on ``step.result.is_plastic`` should guard with
     ``if result.is_plastic is True``.  ``stress_trial`` is not reconstructed on

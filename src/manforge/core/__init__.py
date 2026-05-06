@@ -6,7 +6,7 @@ from manforge.core.stress_state import (
     PLANE_STRESS,
     UNIAXIAL_1D,
 )
-from manforge.core.stress_update import ReturnMappingResult, StressUpdateResult
+from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.jacobian import JacobianBlocks, ad_jacobian_blocks
 
 __all__ = [

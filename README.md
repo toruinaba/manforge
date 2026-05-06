@@ -91,9 +91,7 @@ src/manforge/
 │   ├── material/          # MaterialModel ABC + MaterialModel3D/PS/1D
 │   │   ├── base.py        #   MaterialModel (ABC, フレームワーク基底)
 │   │   └── bases.py         #   MaterialModel3D / MaterialModelPS / MaterialModel1D
-│   ├── stress_update.py   # ReturnMappingResult / StressUpdateResult — 戻り値 dataclass
-│   ├── solver.py          # _numerical_newton (scalar / vector NR を自動選択)
-│   ├── tangent.py         # consistent tangent (implicit differentiation)
+│   ├── result.py          # ReturnMappingResult / StressUpdateResult — 戻り値 dataclass
 │   ├── residual.py        # make_nr_residual / make_tangent_residual
 │   └── jacobian.py        # JacobianBlocks — AD ヤコビアンブロック分解
 ├── autodiff/
@@ -106,6 +104,8 @@ src/manforge/
 ├── simulation/
 │   ├── types.py           # FieldType / FieldHistory / DriverResult
 │   ├── driver.py          # StrainDriver / StressDriver
+│   ├── solver.py          # _numerical_newton (scalar / vector NR を自動選択)
+│   ├── tangent.py         # consistent tangent (implicit differentiation)
 │   └── integrator.py      # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator / FortranIntegrator — アルゴリズム本体を保持
 ├── fitting/
 │   ├── objective.py       # 残差二乗和
@@ -414,7 +414,7 @@ result = StrainDriver(PythonIntegrator(model_af)).run(load)
 閉形式の return mapping が存在する場合、`user_defined_return_mapping` をオーバーライドすると `method="auto"` (デフォルト) で自動的に使用される。`None` を返すと汎用 NR にフォールバックする。
 
 ```python
-from manforge.core.stress_update import ReturnMappingResult
+from manforge.core import ReturnMappingResult
 
 class MyModel(MaterialModel3D):
     # ... 必須メソッド ...

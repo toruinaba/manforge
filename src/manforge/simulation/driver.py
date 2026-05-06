@@ -80,7 +80,7 @@ class DriverBase(ABC):
         ------
         DriverStep
             Snapshot after each step: cumulative strain, full
-            :class:`~manforge.core.stress_update.StressUpdateResult`, and
+            :class:`~manforge.core.result.StressUpdateResult`, and
             (for :class:`StressDriver`) outer-NR diagnostics.
 
         Examples

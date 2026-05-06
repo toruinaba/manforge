@@ -420,7 +420,7 @@ class MaterialModel(ABC):
         Override to provide a model-specific plastic correction algorithm.
         The implementation may use any solver internally — closed-form
         radial return, custom Newton-Raphson, etc.  The default returns
-        ``None``, causing :func:`~manforge.core.stress_update.stress_update`
+        ``None``, causing the integrator's ``stress_update`` method
         to fall back to the framework's generic ``numerical_newton`` solver.
 
         Parameters
@@ -457,7 +457,7 @@ class MaterialModel(ABC):
 
         Override to provide a model-specific analytical expression for
         dσ_{n+1}/dΔε.  The default returns ``None``, causing
-        :func:`~manforge.core.stress_update.stress_update` to fall back
+        the integrator's ``stress_update`` method to fall back
         to the generic autodiff tangent.
 
         Parameters

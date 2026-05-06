@@ -70,7 +70,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from manforge.core.stress_update import StressUpdateResult
+    from manforge.core.result import StressUpdateResult
 
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.types import FieldType

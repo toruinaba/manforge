@@ -7,11 +7,9 @@ import numpy as np
 from manforge.core.residual import (
     make_nr_residual,
     _flatten_state,
-    _normalise_update,
     _wrap_state,
     _call_update_state,
     _call_state_residual,
-    _state_with_stress,
 )
 from manforge.core.state import _state_with_stress as _state_with_stress_fn
 

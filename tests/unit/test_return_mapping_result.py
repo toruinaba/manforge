@@ -4,7 +4,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.stress_update import ReturnMappingResult, StressUpdateResult
+from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
 
 

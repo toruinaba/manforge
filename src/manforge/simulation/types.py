@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from manforge.core.stress_update import StressUpdateResult
+    from manforge.core.result import StressUpdateResult
 
 
 class FieldType(Enum):
@@ -76,7 +76,7 @@ class DriverResult:
     Parameters
     ----------
     step_results : list
-        Per-step :class:`~manforge.core.stress_update.StressUpdateResult`
+        Per-step :class:`~manforge.core.result.StressUpdateResult`
         objects, one per increment.  Provides access to converged stress,
         state, tangent (ddsdde), dlambda, stress_trial, and is_plastic for every step.
     strain : np.ndarray, shape (N, ntens)
