@@ -9,7 +9,6 @@ import numpy as np
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
-from manforge.simulation._layout import ResidualLayout
 from manforge.core.state import _state_with_stress
 
 

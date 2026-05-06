@@ -72,11 +72,6 @@ def compare_jacobians(
     jac_b = ad_jacobian_blocks(model, result_b, state_n)
 
     block_errs: dict[str, float] = {}
-    for label, arr_a in jac_a.iter_blocks():
-        # Find matching block in jac_b by iterating it too
-        # Simpler: collect jac_b into a dict first
-        pass
-
     blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
 
     for label, arr_a in jac_a.iter_blocks():
