@@ -19,7 +19,7 @@ from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory
-from manforge.verification import check_tangent
+from manforge.verification import TangentChecker
 
 try:
     import matplotlib
@@ -73,23 +73,15 @@ print()
 # ---------------------------------------------------------------------------
 # Tangent verification
 # ---------------------------------------------------------------------------
+checker = TangentChecker(PythonIntegrator(model))
+
 print("Tangent check — elastic domain:")
-result_e = check_tangent(
-    PythonIntegrator(model),
-    np.zeros(1),
-    model.initial_state(),
-    np.array([1e-5]),
-)
+result_e = checker.check(np.zeros(1), model.initial_state(), np.array([1e-5]))
 status = "PASS" if result_e.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
 
 print("Tangent check — plastic domain (uniaxial):")
-result_p = check_tangent(
-    PythonIntegrator(model),
-    np.zeros(1),
-    model.initial_state(),
-    np.array([2e-3]),
-)
+result_p = checker.check(np.zeros(1), model.initial_state(), np.array([2e-3]))
 status = "PASS" if result_p.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_p.max_rel_err:.2e}")
 print()
