@@ -17,7 +17,7 @@ import autograd.numpy as anp
 from manforge.core.state import Implicit, Explicit, NTENS
 from manforge.models.af_kinematic import AFKinematic3D
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification.fd_check import check_tangent
+from manforge.verification.tangent import check_tangent
 
 
 # ---------------------------------------------------------------------------

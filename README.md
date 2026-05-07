@@ -251,7 +251,7 @@ print(result.params, result.residual)
 
 1. **数値解で収束確認** — `PythonNumericalIntegrator` で残差が 0 に落ちることを確認
 2. **AD 値との照合** — `JacobianBlocks` でヤコビアン各ブロックを要素ごとに検証
-3. **FD tangent チェック** — `check_tangent` で consistent tangent の精度を確認
+3. **FD tangent チェック** — `TangentChecker` で consistent tangent の精度を確認
 4. **Fortran への移植** — 検証済みブロック構造をそのままサブルーチン構成に対応
 
 **JacobianBlocks**
@@ -278,14 +278,17 @@ jac.part["ep"]["dlambda"]         # ∂R_ep/∂Δλ
 # → jac.part["R_alpha"]["stress"],  jac.part["R_yield"]["alpha"]
 ```
 
-**check_tangent**
+**TangentChecker**
 
 ```python
-from manforge.verification.fd_check import check_tangent
+from manforge.verification import TangentChecker
 
-result = check_tangent(PythonIntegrator(model), stress_n, state_n, strain_inc)
+checker = TangentChecker(PythonIntegrator(model))
+result = checker.check(stress_n, state_n, strain_inc)
 print(result.passed, result.max_rel_err)
 ```
+
+`check_tangent(integrator, stress, state, deps)` の関数形式も後方互換として残っている。
 
 **CrosscheckStrainDriver**
 
@@ -370,7 +373,7 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `StrainDriver`, `StressDriver` | `manforge.simulation` |
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
 | `fit_params` | `manforge.fitting` |
-| `check_tangent` | `manforge.verification.fd_check` |
+| `TangentChecker`, `TangentCheckResult` | `manforge.verification` |
 | `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
 | `FortranModule` | `manforge.verification` |
@@ -410,7 +413,7 @@ src/manforge/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── fd_check.py        # check_tangent()
+│   ├── tangent.py         # TangentChecker / check_tangent()
 │   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_bridge.py  # FortranModule

@@ -10,7 +10,7 @@ from manforge.verification.jacobian import (
     JacobianComparisonResult,
     JacobianChecker,
 )
-from manforge.verification.fd_check import check_tangent, TangentCheckResult
+from manforge.verification.tangent import check_tangent, TangentChecker, TangentCheckResult
 from manforge.verification.fortran_bridge import FortranModule
 from manforge.verification.test_cases import (
     estimate_yield_strain,
@@ -39,6 +39,7 @@ __all__ = [
     "JacobianComparisonResult",
     "JacobianChecker",
     # Finite-difference tangent check
+    "TangentChecker",
     "check_tangent",
     "TangentCheckResult",
     # Fortran interface

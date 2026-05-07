@@ -22,7 +22,7 @@ from manforge.core.dimension import PLANE_STRAIN
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.fd_check import check_tangent
+from manforge.verification.tangent import check_tangent
 
 
 _FACTORIES_3D = {

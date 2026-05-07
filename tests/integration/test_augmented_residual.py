@@ -24,7 +24,7 @@ from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification.fd_check import check_tangent
+from manforge.verification.tangent import check_tangent
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )

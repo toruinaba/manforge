@@ -23,7 +23,6 @@ import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables float64
 from manforge.verification.jacobian import JacobianChecker
-from manforge.core.state import _state_with_stress
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import (
@@ -114,7 +113,7 @@ print("  part[dlambda][stress] (flow direction n): PASS")
 
 # cross-check: also matches autograd.grad of yield_function
 n_ad = autograd.grad(
-    lambda sig: model.yield_function(_state_with_stress(result_ad.state, sig))
+    lambda sig: model.yield_function({**result_ad.state, "stress": sig})
 )(result_ad.stress)
 npt.assert_allclose(jac.part["dlambda"]["stress"], n_ad, rtol=1e-10)
 print("  part[dlambda][stress] == autograd.grad(f): PASS")
@@ -185,7 +184,7 @@ print(f"  Step {step_idx} user_defined_tangent: PASS")
 # Jacobian blocks for this step
 jac = JacobianChecker(model).compute(rm, state_prev)
 n_step = autograd.grad(
-    lambda sig: model.yield_function(_state_with_stress(rm.state, sig))
+    lambda sig: model.yield_function({**rm.state, "stress": sig})
 )(rm.stress)
 npt.assert_allclose(jac.part["dlambda"]["stress"], n_step, rtol=1e-10)
 print(f"  Step {step_idx} Jacobian blocks: PASS")

@@ -10,7 +10,7 @@ import autograd.numpy as anp
 import pytest
 
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification.fd_check import check_tangent, TangentCheckResult
+from manforge.verification.tangent import check_tangent, TangentCheckResult
 from manforge.verification import FortranModule
 
 
