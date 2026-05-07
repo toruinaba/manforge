@@ -413,7 +413,7 @@ src/manforge/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── fd_check.py        # TangentChecker / check_tangent()
+│   ├── tangent.py         # TangentChecker / check_tangent()
 │   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_bridge.py  # FortranModule

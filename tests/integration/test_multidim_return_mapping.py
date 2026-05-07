@@ -25,7 +25,7 @@ from manforge.simulation.integrator import (
     PythonAnalyticalIntegrator,
 )
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.fd_check import check_tangent
+from manforge.verification.tangent import check_tangent
 
 
 # ---------------------------------------------------------------------------

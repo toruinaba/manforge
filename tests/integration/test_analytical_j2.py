@@ -18,7 +18,7 @@ from manforge.simulation.integrator import (
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
 )
-from manforge.verification.fd_check import check_tangent
+from manforge.verification.tangent import check_tangent
 
 
 # ---------------------------------------------------------------------------
