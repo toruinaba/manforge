@@ -26,25 +26,33 @@ class JacobianBlocks:
     names are state names (``"stress"``, ``"dlambda"``, and any implicit
     non-stress keys).
 
+    **Block shape rule**::
+
+        part[row][col].shape == layout.slot_shape(row_state) + layout.slot_shape(col)
+
+    where ``row_state`` is the state name whose residual label equals ``row``
+    (``layout.residual_name_for(row_state) == row``).
+
+    Shape notation below mirrors the ``Implicit(shape=...)`` declaration:
+
+    - ``NTENS``  — resolves to ``(ntens,)`` at runtime
+    - ``SCALAR`` — resolves to ``()``  at runtime (0-d ndarray)
+
     When ``residual_name`` is not set, row and column names are identical
     (the default symmetric case):
 
-    - ``part["stress"]["stress"]``    — ∂R_σ / ∂σ,   shape ``(ntens, ntens)``
-    - ``part["stress"]["dlambda"]``   — ∂R_σ / ∂Δλ,  shape ``(ntens,)``
-    - ``part["dlambda"]["stress"]``   — ∂R_Δλ / ∂σ,  shape ``(ntens,)``
-    - ``part["dlambda"]["dlambda"]``  — ∂R_Δλ / ∂Δλ, shape ``()``
-    - ``part["alpha"]["stress"]``     — ∂R_α / ∂σ (when alpha implicit)
-    - ``part["ep"]["alpha"]``         — ∂R_ep / ∂α
+    - ``part["stress"]["stress"]``    — ∂R_σ / ∂σ,   shape ``(NTENS, NTENS)`` ≡ ``(ntens, ntens)``
+    - ``part["stress"]["dlambda"]``   — ∂R_σ / ∂Δλ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
+    - ``part["dlambda"]["stress"]``   — ∂R_Δλ / ∂σ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
+    - ``part["dlambda"]["dlambda"]``  — ∂R_Δλ / ∂Δλ, shape ``SCALAR``         ≡ ``()``
+    - ``part["alpha"]["stress"]``     — ∂R_α / ∂σ,   ``(NTENS, NTENS)`` if α declared ``NTENS``
+    - ``part["ep"]["alpha"]``         — ∂R_ep / ∂α,  ``(NTENS,)`` if ep is ``SCALAR``, α is ``NTENS``
 
     With opt-in residual names (e.g. ``Implicit(residual_name="R_alpha")``,
     ``dlambda_residual_name="R_yield"``):
 
     - ``part["R_alpha"]["stress"]``   — ∂R_α / ∂σ
     - ``part["R_yield"]["stress"]``   — ∂R_Δλ / ∂σ
-
-    Block shape rule: ``part[row][col].shape == layout.slot_shape(row_state) + layout.slot_shape(col)``
-    where ``row_state`` is the state name whose residual label equals ``row``
-    (i.e. ``layout.residual_name_for(row_state) == row``).
 
     Attributes
     ----------

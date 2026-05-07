@@ -145,10 +145,15 @@ class ResidualLayout:
         return slice(q0 + sl.start, q0 + sl.stop)
 
     def slot_shape(self, name: str) -> tuple:
-        """Return the concrete shape for the named slot.
+        """Return the resolved shape tuple for the named slot.
 
-        ``"stress"`` → ``(ntens,)``; ``"dlambda"`` → ``()``; implicit keys
-        → the resolved shape from ``_shapes``.
+        Always returns a concrete Python tuple (never a NTENS/SCALAR sentinel)
+        so it can be passed directly to ``np.prod``, ``reshape``, or ``np.zeros``:
+
+        - ``"stress"``   → ``(ntens,)``   — equivalent to ``NTENS``
+        - ``"dlambda"``  → ``()``         — equivalent to ``SCALAR`` (0-d)
+        - implicit keys  → the shape supplied via ``Implicit(shape=...)``
+          with ``NTENS`` / ``SCALAR`` already resolved to concrete tuples
         """
         if name == "stress":
             return (self.ntens,)
