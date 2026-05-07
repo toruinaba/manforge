@@ -42,8 +42,9 @@ class JacobianBlocks:
     - ``part["R_alpha"]["stress"]``   — ∂R_α / ∂σ
     - ``part["R_yield"]["stress"]``   — ∂R_Δλ / ∂σ
 
-    ``part[row][col].shape == layout.slot_shape(col_state) + layout.slot_shape(col)``
-    where ``col_state`` is the state name corresponding to ``row``.
+    Block shape rule: ``part[row][col].shape == layout.slot_shape(row_state) + layout.slot_shape(col)``
+    where ``row_state`` is the state name whose residual label equals ``row``
+    (i.e. ``layout.residual_name_for(row_state) == row``).
 
     Attributes
     ----------
@@ -131,15 +132,15 @@ def ad_jacobian_blocks(
 
     col_names = ("stress", "dlambda", *layout.implicit_keys)
     part: dict = {}
-    for col_state in col_names:
-        row = layout.residual_name_for(col_state)
-        sl_row = layout.slot_slice(col_state)
+    for row_state in col_names:
+        row = layout.residual_name_for(row_state)
+        sl_row = layout.slot_slice(row_state)
+        shp_row = layout.slot_shape(row_state)
         part[row] = {}
         for col in col_names:
             sl_col = layout.slot_slice(col)
-            block = J[sl_row, sl_col]
-            shp_row = layout.slot_shape(col_state)
             shp_col = layout.slot_shape(col)
+            block = J[sl_row, sl_col]
             part[row][col] = block.reshape(shp_row + shp_col)
 
     return JacobianBlocks(layout=layout, part=part, full=J)

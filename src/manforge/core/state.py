@@ -150,6 +150,12 @@ class StateField:
                 "    from manforge.core import NTENS\n"
                 "    alpha = Implicit(shape=NTENS)"
             )
+        if self.residual_name is not None:
+            if not isinstance(self.residual_name, str) or not self.residual_name:
+                raise ValueError(
+                    f"StateField residual_name must be a non-empty str or None, "
+                    f"got {self.residual_name!r}"
+                )
 
     def __set_name__(self, owner, attr_name: str):
         object.__setattr__(self, "name", attr_name)

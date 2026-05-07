@@ -125,6 +125,12 @@ class MaterialModel(ABC):
                     f"collides with another state name"
                 )
             residual_names_seen[rname] = state_key
+        # Validate dlambda_residual_name is a non-empty str
+        if not isinstance(cls.dlambda_residual_name, str) or not cls.dlambda_residual_name:
+            raise ValueError(
+                f"{cls.__name__}: dlambda_residual_name must be a non-empty str, "
+                f"got {cls.dlambda_residual_name!r}"
+            )
         # Also check dlambda_residual_name
         dl_rname = cls.dlambda_residual_name
         if dl_rname in residual_names_seen:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from manforge.core.state import StateField, Implicit, Explicit, NTENS, SCALAR
+from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
 from manforge.core.material import MaterialModel3D
 from manforge.simulation._layout import ResidualLayout
 
@@ -10,6 +10,32 @@ from manforge.simulation._layout import ResidualLayout
 # ---------------------------------------------------------------------------
 # StateField.effective_residual_name
 # ---------------------------------------------------------------------------
+
+class TestResidualNameValidation:
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError, match="non-empty str"):
+            Implicit(shape=NTENS, residual_name="")
+
+    def test_non_string_raises(self):
+        with pytest.raises(ValueError, match="non-empty str"):
+            Implicit(shape=NTENS, residual_name=123)
+
+    def test_dlambda_residual_name_empty_string_raises(self):
+        with pytest.raises(ValueError, match="non-empty str"):
+            class _Bad(MaterialModel3D):
+                param_names = ["E", "nu", "sigma_y0"]
+                dlambda_residual_name = ""
+                def __init__(self, E, nu, sigma_y0): ...
+                def yield_function(self, state): ...
+
+    def test_dlambda_residual_name_none_raises(self):
+        with pytest.raises(ValueError, match="non-empty str"):
+            class _Bad(MaterialModel3D):
+                param_names = ["E", "nu", "sigma_y0"]
+                dlambda_residual_name = None
+                def __init__(self, E, nu, sigma_y0): ...
+                def yield_function(self, state): ...
+
 
 class TestEffectiveResidualName:
     def test_default_is_field_name(self):
