@@ -108,7 +108,7 @@ def _make_fd_tangent():
     import numpy as np
     from manforge.models.j2_isotropic import J2Isotropic3D
     from manforge.simulation.integrator import PythonIntegrator
-    from manforge.verification.fd_check import check_tangent
+    from manforge.verification.tangent import check_tangent
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     integrator = PythonIntegrator(model)
