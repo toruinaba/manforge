@@ -7,6 +7,7 @@ import autograd.numpy as anp
 from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS, DLAMBDA_FIELD
 from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.utils.smooth import smooth_sqrt
+from manforge.core.material.fortran_binding import collect_bindings as _collect_bindings
 
 
 class MaterialModel(ABC):
@@ -160,8 +161,7 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: implicit states {sorted(implicit)} require "
                 "state_residual() to be implemented"
             )
-        from manforge.verification.fortran_registry import collect_bindings
-        cls._fortran_bindings = collect_bindings(cls)
+        cls._fortran_bindings = _collect_bindings(cls)
 
     @property
     def ntens(self) -> int:

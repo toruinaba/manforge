@@ -1,4 +1,4 @@
-"""Fortran UMAT bridge for cross-validation.
+"""Fortran UMAT bridge — thin f2py wrapper.
 
 Provides :class:`FortranModule`, a thin wrapper around an f2py-compiled Fortran
 module.  Its sole responsibility is float64 type conversion — it has no
@@ -8,7 +8,7 @@ Usage
 -----
 ::
 
-    from manforge.verification import FortranModule
+    from manforge.simulation.integrator import FortranModule
     import numpy as np
 
     fortran = FortranModule("j2_isotropic_3d")

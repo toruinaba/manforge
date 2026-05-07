@@ -28,7 +28,7 @@ from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialMod
 from manforge.core.state import Explicit, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
-from manforge.verification.fortran_registry import verified_against_fortran
+from manforge.core.material import verified_against_fortran
 
 
 class J2Isotropic3D(MaterialModel3D):
