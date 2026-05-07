@@ -259,17 +259,23 @@ print(result.params, result.residual)
 ```python
 import numpy.testing as npt
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification import ad_jacobian_blocks
+from manforge.verification import JacobianChecker
 
 result = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
-jac = ad_jacobian_blocks(model, result, state_n)
+jac = JacobianChecker(model).compute(result, state_n)
 
-npt.assert_allclose(jac.dyield_dsigma, my_n, rtol=1e-8)
-npt.assert_allclose(float(jac.dyield_ddlambda), -H, rtol=1e-8)
+# part[残差名][状態名] でブロックにアクセス（デフォルトは両者とも同じ名前）
+npt.assert_allclose(jac.part["dlambda"]["stress"], my_n, rtol=1e-8)   # 降伏面勾配
+npt.assert_allclose(float(jac.part["dlambda"]["dlambda"]), -H, rtol=1e-8)
 
 # implicit state 付きモデル (例: Ohno-Wang)
-jac.dstate_dsigma["alpha"]        # ∂R_alpha/∂σ
-jac.dstate_ddlambda["ep"]         # ∂R_ep/∂Δλ
+jac.part["alpha"]["stress"]       # ∂R_alpha/∂σ
+jac.part["ep"]["dlambda"]         # ∂R_ep/∂Δλ
+
+# opt-in: residual_name でラベルをカスタマイズ
+# alpha = Implicit(shape=NTENS, residual_name="R_alpha")
+# dlambda_residual_name = "R_yield"
+# → jac.part["R_alpha"]["stress"],  jac.part["R_yield"]["alpha"]
 ```
 
 **check_tangent**
@@ -301,12 +307,13 @@ print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}"
 `iter_run` で失敗ステップを詳細デバッグできる:
 
 ```python
-from manforge.verification import compare_jacobians
+from manforge.verification import JacobianChecker
 
+checker = JacobianChecker(model)
 for cr in cc.iter_run(load):
     if not cr.passed:
-        jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
-        print(jac.blocks)
+        cmp = checker.compare(cr.result_a, cr.result_b, cr.state_n)
+        print(cmp.blocks)
         break
 ```
 
@@ -364,9 +371,8 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
 | `fit_params` | `manforge.fitting` |
 | `check_tangent` | `manforge.verification.fd_check` |
-| `ad_jacobian_blocks`, `JacobianBlocks` | `manforge.verification` |
+| `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
-| `compare_jacobians` | `manforge.verification` |
 | `FortranModule` | `manforge.verification` |
 | `generate_strain_history` | `manforge.verification` |
 | `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models.j2_isotropic` |
@@ -405,8 +411,7 @@ src/manforge/
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
 │   ├── fd_check.py        # check_tangent()
-│   ├── jacobian.py        # JacobianBlocks / ad_jacobian_blocks
-│   ├── jacobian_compare.py# compare_jacobians
+│   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_bridge.py  # FortranModule
 │   └── test_cases.py      # generate_strain_history 等

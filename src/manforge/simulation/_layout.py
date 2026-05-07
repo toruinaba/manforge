@@ -36,6 +36,12 @@ class ResidualLayout:
     _shapes : tuple[tuple[str, tuple[int, ...]], ...]
         ``(name, shape)`` pairs for each key in ``implicit_keys``, in the same order.
         Shapes are concrete Python tuples (no NTENS sentinel).
+    _residual_names : tuple[tuple[str, str], ...]
+        ``(state_name, residual_name)`` pairs for each slot in canonical order:
+        ``[stress, dlambda, *implicit_keys]``.  Residual names are used as row
+        labels in :class:`~manforge.verification.jacobian.JacobianBlocks`.part.
+    dlambda_residual_name : str
+        Residual-row label for the Δλ slot (default ``"dlambda"``).
     """
 
     ntens: int
@@ -43,6 +49,8 @@ class ResidualLayout:
     implicit_keys: tuple                                    # declaration order, stress excluded
     explicit_keys: tuple                                    # declaration order, stress excluded
     _shapes: tuple                                          # (name, shape) for implicit_keys
+    _residual_names: tuple = ()                             # (state_name, residual_name) pairs
+    dlambda_residual_name: str = "dlambda"
 
     # ------------------------------------------------------------------
     # Factory
@@ -65,12 +73,20 @@ class ResidualLayout:
             (k, model.state_fields[k].resolve_shape(ntens))
             for k in implicit_keys
         )
+        dl_rname = getattr(model, "dlambda_residual_name", "dlambda")
+        residual_names = (
+            ("stress", model.state_fields["stress"].effective_residual_name),
+            ("dlambda", dl_rname),
+            *((k, model.state_fields[k].effective_residual_name) for k in implicit_keys),
+        )
         return cls(
             ntens=ntens,
             stress_kind=stress_kind,
             implicit_keys=implicit_keys,
             explicit_keys=explicit_keys,
             _shapes=shapes,
+            _residual_names=residual_names,
+            dlambda_residual_name=dl_rname,
         )
 
     # ------------------------------------------------------------------
@@ -112,6 +128,52 @@ class ResidualLayout:
                 return slice(offset, offset + size)
             offset += size
         raise KeyError(f"ResidualLayout: {name!r} is not an implicit non-stress key")
+
+    def slot_slice(self, name: str) -> slice:
+        """Return the absolute slice in the x / R vector for the named slot.
+
+        Accepts ``"stress"``, ``"dlambda"``, or any key in :attr:`implicit_keys`.
+        Unlike :meth:`state_slice`, the returned slice is relative to the start
+        of the full vector (no caller-side offset needed).
+        """
+        if name == "stress":
+            return slice(0, self.ntens)
+        if name == "dlambda":
+            return slice(self.ntens, self.ntens + 1)
+        sl = self.state_slice(name)
+        q0 = self.ntens + 1
+        return slice(q0 + sl.start, q0 + sl.stop)
+
+    def slot_shape(self, name: str) -> tuple:
+        """Return the resolved shape tuple for the named slot.
+
+        Always returns a concrete Python tuple (never a NTENS/SCALAR sentinel)
+        so it can be passed directly to ``np.prod``, ``reshape``, or ``np.zeros``:
+
+        - ``"stress"``   → ``(ntens,)``   — equivalent to ``NTENS``
+        - ``"dlambda"``  → ``()``         — equivalent to ``SCALAR`` (0-d)
+        - implicit keys  → the shape supplied via ``Implicit(shape=...)``
+          with ``NTENS`` / ``SCALAR`` already resolved to concrete tuples
+        """
+        if name == "stress":
+            return (self.ntens,)
+        if name == "dlambda":
+            return ()
+        for k, shp in self._shapes:
+            if k == name:
+                return shp
+        raise KeyError(f"ResidualLayout: {name!r} is not a known slot name")
+
+    def residual_name_for(self, state_name: str) -> str:
+        """Return the residual-row label for the given state name."""
+        for s, r in self._residual_names:
+            if s == state_name:
+                return r
+        raise KeyError(f"ResidualLayout: {state_name!r} not found in _residual_names")
+
+    def residual_names(self) -> tuple:
+        """Residual-row labels in canonical order: (stress, dlambda, *implicit_keys)."""
+        return tuple(r for _, r in self._residual_names)
 
     # ------------------------------------------------------------------
     # Pack / unpack

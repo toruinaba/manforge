@@ -5,7 +5,7 @@ Demonstrates the step-by-step workflow for verifying closed-form solutions:
 1. Run stress_update (numerical_newton) to get the numerical reference
 2. Call user_defined_return_mapping / user_defined_tangent to get analytical results
 3. Compare element-by-element with numpy.testing
-4. Use ad_jacobian_blocks to inspect individual derivative blocks
+4. Use JacobianChecker.compute to inspect individual derivative blocks
 
 This is the workflow a developer follows when implementing a new constitutive
 model: first derive the analytical formulas, then compare each quantity against
@@ -22,7 +22,7 @@ import numpy as np
 import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables float64
-from manforge.verification.jacobian import ad_jacobian_blocks
+from manforge.verification.jacobian import JacobianChecker
 from manforge.core.state import _state_with_stress
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
@@ -102,36 +102,35 @@ print("=" * 60)
 print("  Part 2: Jacobian block inspection")
 print("=" * 60)
 
-jac = ad_jacobian_blocks(model, result_ad, state0)
+jac = JacobianChecker(model).compute(result_ad, state0)
 
-# --- flow direction: dRdlambda_dsigma = df/dsigma = (3/2) s / sigma_vm ---
+# --- flow direction: part["dlambda"]["stress"] = df/dsigma = (3/2) s / sigma_vm ---
 s = model._dev(result_ad.stress)
 sigma_vm = model._vonmises(result_ad.stress)
 n_analytical = (3.0 / 2.0) * s / sigma_vm
 
-npt.assert_allclose(jac.dRdlambda_dsigma, n_analytical, rtol=1e-10)
-print("  dRdlambda_dsigma (flow direction n): PASS")
+npt.assert_allclose(jac.part["dlambda"]["stress"], n_analytical, rtol=1e-10)
+print("  part[dlambda][stress] (flow direction n): PASS")
 
 # cross-check: also matches autograd.grad of yield_function
 n_ad = autograd.grad(
     lambda sig: model.yield_function(_state_with_stress(result_ad.state, sig))
 )(result_ad.stress)
-npt.assert_allclose(jac.dRdlambda_dsigma, n_ad, rtol=1e-10)
-print("  dRdlambda_dsigma == autograd.grad(f): PASS")
+npt.assert_allclose(jac.part["dlambda"]["stress"], n_ad, rtol=1e-10)
+print("  part[dlambda][stress] == autograd.grad(f): PASS")
 
-# --- dRsigma_ddlambda = C @ n (return mapping residual structure) ---
+# --- part["stress"]["dlambda"] = C @ n (return mapping residual structure) ---
 Cn = C @ n_analytical
-npt.assert_allclose(jac.dRsigma_ddlambda, Cn, rtol=1e-10)
-print("  dRsigma_ddlambda (= C @ n)     : PASS")
+npt.assert_allclose(jac.part["stress"]["dlambda"], Cn, rtol=1e-10)
+print("  part[stress][dlambda] (= C @ n): PASS")
 
-# --- dRdlambda_ddlambda = -H (for J2 linear isotropic hardening) ---
-npt.assert_allclose(float(jac.dRdlambda_ddlambda), -model.H, rtol=1e-10)
-print(f"  dRdlambda_ddlambda (= -H = {float(jac.dRdlambda_ddlambda):.1f}): PASS")
+# --- part["dlambda"]["dlambda"] = -H (for J2 linear isotropic hardening) ---
+npt.assert_allclose(float(jac.part["dlambda"]["dlambda"]), -model.H, rtol=1e-10)
+print(f"  part[dlambda][dlambda] (= -H = {float(jac.part['dlambda']['dlambda']):.1f}): PASS")
 
-# --- reduced hardening: state blocks are empty dicts ---
-assert jac.dRstate_dsigma == {}
-assert jac.dRstate_dstate == {}
-print("  state blocks (reduced model)   : empty dicts (correct)")
+# --- reduced hardening: only stress and dlambda rows ---
+assert set(jac.row_names()) == {"stress", "dlambda"}
+print("  row_names (reduced model)      : {stress, dlambda} (correct)")
 
 # --- full matrix shape ---
 assert jac.full.shape == (7, 7)  # ntens + 1 = 6 + 1
@@ -184,11 +183,11 @@ npt.assert_allclose(rm.ddsdde, ddsdde_an, rtol=1e-10)
 print(f"  Step {step_idx} user_defined_tangent: PASS")
 
 # Jacobian blocks for this step
-jac = ad_jacobian_blocks(model, rm, state_prev)
+jac = JacobianChecker(model).compute(rm, state_prev)
 n_step = autograd.grad(
     lambda sig: model.yield_function(_state_with_stress(rm.state, sig))
 )(rm.stress)
-npt.assert_allclose(jac.dRdlambda_dsigma, n_step, rtol=1e-10)
+npt.assert_allclose(jac.part["dlambda"]["stress"], n_step, rtol=1e-10)
 print(f"  Step {step_idx} Jacobian blocks: PASS")
 print()
 

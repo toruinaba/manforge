@@ -11,6 +11,7 @@ import numpy as np
 
 from manforge.simulation._residual import build_residual
 from manforge.simulation._layout import ResidualLayout
+from manforge.verification.comparator_base import _array_rel_err
 
 
 @dataclass
@@ -20,173 +21,220 @@ class JacobianBlocks:
     The residual / unknown vector layout follows :class:`~manforge.simulation._layout.ResidualLayout`:
     ``[σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]``.
 
-    Block naming convention: ``dR<row>_d<col>`` where the row / column labels are:
+    Blocks are accessed via ``part[row_residual_name][col_state_name]``.
+    Row names are residual labels (``effective_residual_name`` from the field
+    declaration, or ``model.dlambda_residual_name`` for the Δλ row).  Column
+    names are state names (``"stress"``, ``"dlambda"``, and any implicit
+    non-stress keys).
 
-    - ``sigma``   — the σ block (rows/cols 0 … ntens-1)
-    - ``dlambda`` — the Δλ row/col (index ntens)
-    - ``state``   — the implicit non-stress state block (rows/cols ntens+1 … )
+    **Block shape rule**::
 
-    State blocks are always ``dict[str, ndarray]`` (empty dict when there are no
-    implicit non-stress states), never ``None``.
+        part[row][col].shape == layout.slot_shape(row_state) + layout.slot_shape(col)
+
+    where ``row_state`` is the state name whose residual label equals ``row``
+    (``layout.residual_name_for(row_state) == row``).
+
+    Shape notation below mirrors the ``Implicit(shape=...)`` declaration:
+
+    - ``NTENS``  — resolves to ``(ntens,)`` at runtime
+    - ``SCALAR`` — resolves to ``()``  at runtime (0-d ndarray)
+
+    When ``residual_name`` is not set, row and column names are identical
+    (the default symmetric case):
+
+    - ``part["stress"]["stress"]``    — ∂R_σ / ∂σ,   shape ``(NTENS, NTENS)`` ≡ ``(ntens, ntens)``
+    - ``part["stress"]["dlambda"]``   — ∂R_σ / ∂Δλ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
+    - ``part["dlambda"]["stress"]``   — ∂R_Δλ / ∂σ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
+    - ``part["dlambda"]["dlambda"]``  — ∂R_Δλ / ∂Δλ, shape ``SCALAR``         ≡ ``()``
+    - ``part["alpha"]["stress"]``     — ∂R_α / ∂σ,   ``(NTENS, NTENS)`` if α declared ``NTENS``
+    - ``part["ep"]["alpha"]``         — ∂R_ep / ∂α,  ``(NTENS,)`` if ep is ``SCALAR``, α is ``NTENS``
+
+    With opt-in residual names (e.g. ``Implicit(residual_name="R_alpha")``,
+    ``dlambda_residual_name="R_yield"``):
+
+    - ``part["R_alpha"]["stress"]``   — ∂R_α / ∂σ
+    - ``part["R_yield"]["stress"]``   — ∂R_Δλ / ∂σ
 
     Attributes
     ----------
     layout : ResidualLayout
         Layout descriptor used to compute this Jacobian.
-    dRsigma_dsigma : ndarray, shape (ntens, ntens)
-        ∂R_σ / ∂σ
-    dRsigma_ddlambda : ndarray, shape (ntens,)
-        ∂R_σ / ∂Δλ
-    dRsigma_dstate : dict[str, ndarray]
-        ∂R_σ / ∂q_k for each implicit non-stress state key.
-    dRdlambda_dsigma : ndarray, shape (ntens,)
-        ∂R_Δλ / ∂σ  (gradient of the Δλ-row w.r.t. σ)
-    dRdlambda_ddlambda : float
-        ∂R_Δλ / ∂Δλ
-    dRdlambda_dstate : dict[str, ndarray]
-        ∂R_Δλ / ∂q_k for each implicit non-stress state key.
-    dRstate_dsigma : dict[str, ndarray]
-        ∂R_qj / ∂σ for each implicit non-stress key j.
-    dRstate_ddlambda : dict[str, ndarray]
-        ∂R_qj / ∂Δλ for each implicit non-stress key j.
-    dRstate_dstate : dict[str, dict[str, ndarray]]
-        ∂R_qj / ∂q_k (row j → col k → array).
+    part : dict[str, dict[str, ndarray]]
+        ``part[residual_row_name][state_col_name]`` → block array.
     full : ndarray, shape (n_unknown, n_unknown)
         Full Jacobian matrix.
     """
 
     layout: ResidualLayout
-
-    dRsigma_dsigma: anp.ndarray
-    dRsigma_ddlambda: anp.ndarray
-    dRsigma_dstate: dict
-
-    dRdlambda_dsigma: anp.ndarray
-    dRdlambda_ddlambda: float
-    dRdlambda_dstate: dict
-
-    dRstate_dsigma: dict
-    dRstate_ddlambda: dict
-    dRstate_dstate: dict
-
+    part: dict
     full: anp.ndarray
 
+    def row_names(self) -> tuple:
+        """Residual-row labels in canonical order."""
+        return self.layout.residual_names()
+
+    def col_names(self) -> tuple:
+        """State column names in canonical order: ``("stress", "dlambda", *implicit_keys)``."""
+        return ("stress", "dlambda", *self.layout.implicit_keys)
+
     def iter_blocks(self) -> Iterator[tuple[str, anp.ndarray]]:
-        """Iterate over all non-empty named blocks as ``(name, array)`` pairs.
+        """Iterate over all blocks as ``("row::col", array)`` pairs.
 
-        Scalar blocks are yielded as-is; dict blocks are expanded with
-        ``"block_name::key"`` labels.
-
-        Useful for :func:`compare_jacobians`.
+        Labels use the form ``"<residual_name>::<state_name>"``.
+        Useful for :meth:`JacobianChecker.compare`.
         """
-        ntens = self.layout.ntens
-
-        yield "dRsigma_dsigma",   self.dRsigma_dsigma
-        yield "dRsigma_ddlambda", self.dRsigma_ddlambda
-        yield "dRdlambda_dsigma",    self.dRdlambda_dsigma
-        yield "dRdlambda_ddlambda",  np.atleast_1d(self.dRdlambda_ddlambda)
-
-        for name, d in [
-            ("dRsigma_dstate",   self.dRsigma_dstate),
-            ("dRdlambda_dstate",    self.dRdlambda_dstate),
-            ("dRstate_dsigma",  self.dRstate_dsigma),
-            ("dRstate_ddlambda", self.dRstate_ddlambda),
-        ]:
-            for key, arr in d.items():
-                yield f"{name}::{key}", np.asarray(arr)
-
-        for row_key, col_dict in self.dRstate_dstate.items():
-            for col_key, arr in col_dict.items():
-                yield f"dRstate_dstate::{row_key}::{col_key}", np.asarray(arr)
+        col_names = self.col_names()
+        for row in self.row_names():
+            for col in col_names:
+                yield f"{row}::{col}", np.asarray(self.part[row][col])
 
 
-def ad_jacobian_blocks(
-    model, result, state_n: dict, *, stress_trial=None
-) -> JacobianBlocks:
-    """Compute the residual Jacobian at the converged point and decompose into blocks.
+@dataclass
+class JacobianComparisonResult:
+    """Result of comparing Jacobian blocks from two StressUpdateResults.
+
+    Attributes
+    ----------
+    passed : bool
+        ``True`` if every block is within ``rtol``.
+    blocks : dict[str, float]
+        Block label → maximum relative error.
+    max_rel_err : float
+        Maximum relative error across all blocks.
+    """
+
+    passed: bool
+    blocks: dict
+    max_rel_err: float
+
+
+class JacobianChecker:
+    """Compute and compare residual Jacobians for a material model.
+
+    Wraps the Jacobian computation and comparison operations for a fixed model,
+    mirroring the class-based interface of ``CrosscheckStrainDriver`` /
+    ``CrosscheckStressDriver``.
 
     Parameters
     ----------
     model : MaterialModel
-    result : StressUpdateResult or ReturnMappingResult
-        Converged result from a stress integration step.
-    state_n : dict
-        State at the beginning of the increment (must include ``"stress"``).
-    stress_trial : array-like, optional
-        Required when *result* is a :class:`~manforge.core.result.ReturnMappingResult`.
+    rtol : float, default 1e-8
+        Relative tolerance used by :meth:`compare`.
 
-    Returns
-    -------
-    JacobianBlocks
+    Examples
+    --------
+    ::
+
+        checker = JacobianChecker(model)
+        jac = checker.compute(result, state_n)
+        print(jac.part["dlambda"]["stress"])
+
+        # Manual crosscheck after a failed step
+        cmp = checker.compare(result_a, result_b, state_n)
+        if not cmp.passed:
+            print(cmp.blocks)
     """
-    from manforge.core.result import StressUpdateResult
 
-    if isinstance(result, StressUpdateResult):
-        if result.return_mapping is None:
-            stress = result.stress_trial
-            dlambda = anp.array(0.0)
-            stress_trial = result.stress_trial
-            state = result.state
+    def __init__(self, model, *, rtol: float = 1e-8):
+        self.model = model
+        self.rtol = rtol
+
+    def compute(self, result, state_n: dict, *, stress_trial=None) -> JacobianBlocks:
+        """Compute the residual Jacobian at the converged point and decompose into blocks.
+
+        Parameters
+        ----------
+        result : StressUpdateResult or ReturnMappingResult
+            Converged result from a stress integration step.
+        state_n : dict
+            State at the beginning of the increment (must include ``"stress"``).
+        stress_trial : array-like, optional
+            Required when *result* is a
+            :class:`~manforge.core.result.ReturnMappingResult`.
+
+        Returns
+        -------
+        JacobianBlocks
+        """
+        from manforge.core.result import StressUpdateResult
+
+        if isinstance(result, StressUpdateResult):
+            if result.return_mapping is None:
+                stress = result.stress_trial
+                dlambda = anp.array(0.0)
+                stress_trial = result.stress_trial
+                state = result.state
+            else:
+                stress = result.return_mapping.stress
+                dlambda = result.return_mapping.dlambda
+                stress_trial = result.stress_trial
+                state = result.return_mapping.state
         else:
-            stress = result.return_mapping.stress
-            dlambda = result.return_mapping.dlambda
-            stress_trial = result.stress_trial
-            state = result.return_mapping.state
-    else:
-        stress = result.stress
-        dlambda = result.dlambda
-        state = result.state
-        if stress_trial is None:
-            raise ValueError(
-                "stress_trial must be provided when passing a ReturnMappingResult "
-                "to ad_jacobian_blocks(). Use stress_update() instead, or pass "
-                "stress_trial=... explicitly."
-            )
+            stress = result.stress
+            dlambda = result.dlambda
+            state = result.state
+            if stress_trial is None:
+                raise ValueError(
+                    "stress_trial must be provided when passing a ReturnMappingResult "
+                    "to compute(). Use stress_update() instead, or pass "
+                    "stress_trial=... explicitly."
+                )
 
-    residual_fn, layout = build_residual(model, stress_trial, state_n)
-    ntens = layout.ntens
+        residual_fn, layout = build_residual(self.model, stress_trial, state_n)
 
-    # Build the converged x vector
-    q_imp = {k: state[k] for k in layout.implicit_keys}
-    x_conv = layout.pack(stress, dlambda, q_imp)
+        q_imp = {k: state[k] for k in layout.implicit_keys}
+        x_conv = layout.pack(stress, dlambda, q_imp)
 
-    J = autograd.jacobian(residual_fn)(anp.array(x_conv))
+        J = autograd.jacobian(residual_fn)(anp.array(x_conv))
 
-    dRsigma_dsigma    = J[:ntens, :ntens]
-    dRsigma_ddlambda  = J[:ntens, ntens]
-    dRdlambda_dsigma  = J[ntens, :ntens]
-    dRdlambda_ddlambda = J[ntens, ntens]
+        col_names = ("stress", "dlambda", *layout.implicit_keys)
+        part: dict = {}
+        for row_state in col_names:
+            row = layout.residual_name_for(row_state)
+            sl_row = layout.slot_slice(row_state)
+            shp_row = layout.slot_shape(row_state)
+            part[row] = {}
+            for col in col_names:
+                sl_col = layout.slot_slice(col)
+                shp_col = layout.slot_shape(col)
+                block = J[sl_row, sl_col]
+                part[row][col] = block.reshape(shp_row + shp_col)
 
-    q0 = ntens + 1
-    dRsigma_dstate:    dict = {}
-    dRdlambda_dstate:  dict = {}
-    dRstate_dsigma:    dict = {}
-    dRstate_ddlambda:  dict = {}
-    dRstate_dstate:    dict = {}
+        return JacobianBlocks(layout=layout, part=part, full=J)
 
-    for k in layout.implicit_keys:
-        sl = layout.state_slice(k)
-        q_sl = slice(q0 + sl.start, q0 + sl.stop)
-        dRsigma_dstate[k]   = J[:ntens, q_sl]
-        dRdlambda_dstate[k] = J[ntens, q_sl]
-        dRstate_dsigma[k]   = J[q_sl, :ntens]
-        dRstate_ddlambda[k] = J[q_sl, ntens]
-        dRstate_dstate[k]   = {}
-        for k2 in layout.implicit_keys:
-            sl2 = layout.state_slice(k2)
-            q_sl2 = slice(q0 + sl2.start, q0 + sl2.stop)
-            dRstate_dstate[k][k2] = J[q_sl, q_sl2]
+    def compare(
+        self, result_a, result_b, state_n: dict
+    ) -> JacobianComparisonResult:
+        """Compare Jacobian blocks from two StressUpdateResults.
 
-    return JacobianBlocks(
-        layout=layout,
-        dRsigma_dsigma=dRsigma_dsigma,
-        dRsigma_ddlambda=dRsigma_ddlambda,
-        dRsigma_dstate=dRsigma_dstate,
-        dRdlambda_dsigma=dRdlambda_dsigma,
-        dRdlambda_ddlambda=dRdlambda_ddlambda,
-        dRdlambda_dstate=dRdlambda_dstate,
-        dRstate_dsigma=dRstate_dsigma,
-        dRstate_ddlambda=dRstate_ddlambda,
-        dRstate_dstate=dRstate_dstate,
-        full=J,
-    )
+        Parameters
+        ----------
+        result_a : StressUpdateResult
+            First result (e.g. from ``PythonNumericalIntegrator``).
+        result_b : StressUpdateResult
+            Second result (e.g. from ``PythonAnalyticalIntegrator``).
+        state_n : dict
+            Initial state at the start of the step (before the increment).
+
+        Returns
+        -------
+        JacobianComparisonResult
+        """
+        jac_a = self.compute(result_a, state_n)
+        jac_b = self.compute(result_b, state_n)
+
+        block_errs: dict[str, float] = {}
+        blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
+
+        for label, arr_a in jac_a.iter_blocks():
+            arr_a = np.asarray(arr_a, dtype=float)
+            arr_b = np.asarray(blocks_b.get(label, np.zeros_like(arr_a)), dtype=float)
+            block_errs[label] = _array_rel_err(arr_a, arr_b)
+
+        max_err = max(block_errs.values()) if block_errs else 0.0
+
+        return JacobianComparisonResult(
+            passed=max_err <= self.rtol,
+            blocks=block_errs,
+            max_rel_err=max_err,
+        )
