@@ -58,7 +58,7 @@ single step::
                           initial_state=case["state_n"]):
         assert cr.passed
         # Jacobian inspection on failure:
-        # jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
+        # jac = JacobianChecker(model).compare(cr.result_a, cr.result_b, cr.state_n)
 """
 
 from __future__ import annotations
@@ -99,14 +99,14 @@ class CrosscheckCaseResult(CaseResult):
     ----------
     result_a : StressUpdateResult or None
         Raw result from integrator_a.  Pass to
-        :func:`~manforge.verification.compare_jacobians` with ``result_b``
+        :meth:`~manforge.verification.JacobianChecker.compare` with ``result_b``
         and ``state_n`` to diagnose Jacobian-level differences.
     result_b : StressUpdateResult or None
         Raw result from integrator_b.
     state_n : dict or None
         State dict at the *start* of this step (integrator_a side).
         Required as the ``state_n`` argument to
-        :func:`~manforge.verification.compare_jacobians`.
+        :meth:`~manforge.verification.JacobianChecker.compare`.
     """
 
     py_stress: np.ndarray | None = None

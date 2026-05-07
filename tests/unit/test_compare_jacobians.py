@@ -1,10 +1,10 @@
-"""Tests for compare_jacobians."""
+"""Tests for JacobianChecker.compare."""
 
 import numpy as np
 import pytest
 
 from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
-from manforge.verification.jacobian_compare import compare_jacobians, JacobianComparisonResult
+from manforge.verification.jacobian import JacobianChecker, JacobianComparisonResult
 
 
 def _result(model, strain_scale):
@@ -18,12 +18,12 @@ class TestCompareJacobiansJ2:
     def test_returns_result_type(self, model):
         r_ad, state0 = _result(model, 3e-3)
         r_an, _ = _result(model, 3e-3)
-        out = compare_jacobians(model, r_ad, r_an, state0)
+        out = JacobianChecker(model).compare(r_ad, r_an, state0)
         assert isinstance(out, JacobianComparisonResult)
 
     def test_identical_results_zero_error(self, model):
         r, state0 = _result(model, 3e-3)
-        out = compare_jacobians(model, r, r, state0)
+        out = JacobianChecker(model).compare(r, r, state0)
         assert out.passed
         assert out.max_rel_err == pytest.approx(0.0, abs=1e-15)
 
@@ -35,26 +35,26 @@ class TestCompareJacobiansJ2:
             np.array([3e-3] + [0.0] * (model.ntens - 1)),
             np.zeros(model.ntens), state0,
         )
-        out = compare_jacobians(model, r_ad, r_an_ud, state0, rtol=1e-8)
+        out = JacobianChecker(model, rtol=1e-8).compare(r_ad, r_an_ud, state0)
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
         )
 
     def test_elastic_step_does_not_raise(self, model):
-        """Elastic step (dlambda=0) should not raise in compare_jacobians."""
+        """Elastic step (dlambda=0) should not raise in compare."""
         r, state0 = _result(model, 1e-5)
         assert not r.is_plastic
-        out = compare_jacobians(model, r, r, state0)
+        out = JacobianChecker(model).compare(r, r, state0)
         assert out.passed
 
     def test_blocks_dict_populated(self, model):
         """blocks dict should contain at least the four base block keys."""
         r, state0 = _result(model, 3e-3)
-        out = compare_jacobians(model, r, r, state0)
+        out = JacobianChecker(model).compare(r, r, state0)
         for key in ("stress::stress", "stress::dlambda", "dlambda::stress", "dlambda::dlambda"):
             assert key in out.blocks
 
     def test_max_rel_err_equals_max_of_blocks(self, model):
         r, state0 = _result(model, 3e-3)
-        out = compare_jacobians(model, r, r, state0)
+        out = JacobianChecker(model).compare(r, r, state0)
         assert out.max_rel_err == pytest.approx(max(out.blocks.values()), abs=1e-15)

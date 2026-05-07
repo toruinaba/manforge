@@ -11,6 +11,7 @@ import numpy as np
 
 from manforge.simulation._residual import build_residual
 from manforge.simulation._layout import ResidualLayout
+from manforge.verification.comparator_base import _array_rel_err
 
 
 @dataclass
@@ -80,7 +81,7 @@ class JacobianBlocks:
         """Iterate over all blocks as ``("row::col", array)`` pairs.
 
         Labels use the form ``"<residual_name>::<state_name>"``.
-        Useful for :func:`compare_jacobians`.
+        Useful for :meth:`JacobianChecker.compare`.
         """
         col_names = self.col_names()
         for row in self.row_names():
@@ -88,67 +89,152 @@ class JacobianBlocks:
                 yield f"{row}::{col}", np.asarray(self.part[row][col])
 
 
-def ad_jacobian_blocks(
-    model, result, state_n: dict, *, stress_trial=None
-) -> JacobianBlocks:
-    """Compute the residual Jacobian at the converged point and decompose into blocks.
+@dataclass
+class JacobianComparisonResult:
+    """Result of comparing Jacobian blocks from two StressUpdateResults.
+
+    Attributes
+    ----------
+    passed : bool
+        ``True`` if every block is within ``rtol``.
+    blocks : dict[str, float]
+        Block label → maximum relative error.
+    max_rel_err : float
+        Maximum relative error across all blocks.
+    """
+
+    passed: bool
+    blocks: dict
+    max_rel_err: float
+
+
+class JacobianChecker:
+    """Compute and compare residual Jacobians for a material model.
+
+    Wraps the Jacobian computation and comparison operations for a fixed model,
+    mirroring the class-based interface of ``CrosscheckStrainDriver`` /
+    ``CrosscheckStressDriver``.
 
     Parameters
     ----------
     model : MaterialModel
-    result : StressUpdateResult or ReturnMappingResult
-        Converged result from a stress integration step.
-    state_n : dict
-        State at the beginning of the increment (must include ``"stress"``).
-    stress_trial : array-like, optional
-        Required when *result* is a :class:`~manforge.core.result.ReturnMappingResult`.
+    rtol : float, default 1e-8
+        Relative tolerance used by :meth:`compare`.
 
-    Returns
-    -------
-    JacobianBlocks
+    Examples
+    --------
+    ::
+
+        checker = JacobianChecker(model)
+        jac = checker.compute(result, state_n)
+        print(jac.part["dlambda"]["stress"])
+
+        # Manual crosscheck after a failed step
+        cmp = checker.compare(result_a, result_b, state_n)
+        if not cmp.passed:
+            print(cmp.blocks)
     """
-    from manforge.core.result import StressUpdateResult
 
-    if isinstance(result, StressUpdateResult):
-        if result.return_mapping is None:
-            stress = result.stress_trial
-            dlambda = anp.array(0.0)
-            stress_trial = result.stress_trial
-            state = result.state
+    def __init__(self, model, *, rtol: float = 1e-8):
+        self.model = model
+        self.rtol = rtol
+
+    def compute(self, result, state_n: dict, *, stress_trial=None) -> JacobianBlocks:
+        """Compute the residual Jacobian at the converged point and decompose into blocks.
+
+        Parameters
+        ----------
+        result : StressUpdateResult or ReturnMappingResult
+            Converged result from a stress integration step.
+        state_n : dict
+            State at the beginning of the increment (must include ``"stress"``).
+        stress_trial : array-like, optional
+            Required when *result* is a
+            :class:`~manforge.core.result.ReturnMappingResult`.
+
+        Returns
+        -------
+        JacobianBlocks
+        """
+        from manforge.core.result import StressUpdateResult
+
+        if isinstance(result, StressUpdateResult):
+            if result.return_mapping is None:
+                stress = result.stress_trial
+                dlambda = anp.array(0.0)
+                stress_trial = result.stress_trial
+                state = result.state
+            else:
+                stress = result.return_mapping.stress
+                dlambda = result.return_mapping.dlambda
+                stress_trial = result.stress_trial
+                state = result.return_mapping.state
         else:
-            stress = result.return_mapping.stress
-            dlambda = result.return_mapping.dlambda
-            stress_trial = result.stress_trial
-            state = result.return_mapping.state
-    else:
-        stress = result.stress
-        dlambda = result.dlambda
-        state = result.state
-        if stress_trial is None:
-            raise ValueError(
-                "stress_trial must be provided when passing a ReturnMappingResult "
-                "to ad_jacobian_blocks(). Use stress_update() instead, or pass "
-                "stress_trial=... explicitly."
-            )
+            stress = result.stress
+            dlambda = result.dlambda
+            state = result.state
+            if stress_trial is None:
+                raise ValueError(
+                    "stress_trial must be provided when passing a ReturnMappingResult "
+                    "to compute(). Use stress_update() instead, or pass "
+                    "stress_trial=... explicitly."
+                )
 
-    residual_fn, layout = build_residual(model, stress_trial, state_n)
+        residual_fn, layout = build_residual(self.model, stress_trial, state_n)
 
-    q_imp = {k: state[k] for k in layout.implicit_keys}
-    x_conv = layout.pack(stress, dlambda, q_imp)
+        q_imp = {k: state[k] for k in layout.implicit_keys}
+        x_conv = layout.pack(stress, dlambda, q_imp)
 
-    J = autograd.jacobian(residual_fn)(anp.array(x_conv))
+        J = autograd.jacobian(residual_fn)(anp.array(x_conv))
 
-    col_names = ("stress", "dlambda", *layout.implicit_keys)
-    part: dict = {}
-    for row_state in col_names:
-        row = layout.residual_name_for(row_state)
-        sl_row = layout.slot_slice(row_state)
-        shp_row = layout.slot_shape(row_state)
-        part[row] = {}
-        for col in col_names:
-            sl_col = layout.slot_slice(col)
-            shp_col = layout.slot_shape(col)
-            block = J[sl_row, sl_col]
-            part[row][col] = block.reshape(shp_row + shp_col)
+        col_names = ("stress", "dlambda", *layout.implicit_keys)
+        part: dict = {}
+        for row_state in col_names:
+            row = layout.residual_name_for(row_state)
+            sl_row = layout.slot_slice(row_state)
+            shp_row = layout.slot_shape(row_state)
+            part[row] = {}
+            for col in col_names:
+                sl_col = layout.slot_slice(col)
+                shp_col = layout.slot_shape(col)
+                block = J[sl_row, sl_col]
+                part[row][col] = block.reshape(shp_row + shp_col)
 
-    return JacobianBlocks(layout=layout, part=part, full=J)
+        return JacobianBlocks(layout=layout, part=part, full=J)
+
+    def compare(
+        self, result_a, result_b, state_n: dict
+    ) -> JacobianComparisonResult:
+        """Compare Jacobian blocks from two StressUpdateResults.
+
+        Parameters
+        ----------
+        result_a : StressUpdateResult
+            First result (e.g. from ``PythonNumericalIntegrator``).
+        result_b : StressUpdateResult
+            Second result (e.g. from ``PythonAnalyticalIntegrator``).
+        state_n : dict
+            Initial state at the start of the step (before the increment).
+
+        Returns
+        -------
+        JacobianComparisonResult
+        """
+        jac_a = self.compute(result_a, state_n)
+        jac_b = self.compute(result_b, state_n)
+
+        block_errs: dict[str, float] = {}
+        blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
+
+        for label, arr_a in jac_a.iter_blocks():
+            arr_a = np.asarray(arr_a, dtype=float)
+            arr_b = np.asarray(blocks_b.get(label, np.zeros_like(arr_a)), dtype=float)
+            block_errs[label] = _array_rel_err(arr_a, arr_b)
+
+        max_err = max(block_errs.values()) if block_errs else 0.0
+
+        return JacobianComparisonResult(
+            passed=max_err <= self.rtol,
+            blocks=block_errs,
+            max_rel_err=max_err,
+        )

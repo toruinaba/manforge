@@ -5,10 +5,10 @@ from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
 )
-from manforge.verification.jacobian import JacobianBlocks, ad_jacobian_blocks
-from manforge.verification.jacobian_compare import (
-    compare_jacobians,
+from manforge.verification.jacobian import (
+    JacobianBlocks,
     JacobianComparisonResult,
+    JacobianChecker,
 )
 from manforge.verification.fd_check import check_tangent, TangentCheckResult
 from manforge.verification.fortran_bridge import FortranModule
@@ -36,9 +36,8 @@ __all__ = [
     "ComparisonResult",
     # Jacobian block decomposition and comparison
     "JacobianBlocks",
-    "ad_jacobian_blocks",
-    "compare_jacobians",
     "JacobianComparisonResult",
+    "JacobianChecker",
     # Finite-difference tangent check
     "check_tangent",
     "TangentCheckResult",

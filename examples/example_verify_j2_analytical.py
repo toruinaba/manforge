@@ -5,7 +5,7 @@ Demonstrates the step-by-step workflow for verifying closed-form solutions:
 1. Run stress_update (numerical_newton) to get the numerical reference
 2. Call user_defined_return_mapping / user_defined_tangent to get analytical results
 3. Compare element-by-element with numpy.testing
-4. Use ad_jacobian_blocks to inspect individual derivative blocks
+4. Use JacobianChecker.compute to inspect individual derivative blocks
 
 This is the workflow a developer follows when implementing a new constitutive
 model: first derive the analytical formulas, then compare each quantity against
@@ -22,7 +22,7 @@ import numpy as np
 import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables float64
-from manforge.verification.jacobian import ad_jacobian_blocks
+from manforge.verification.jacobian import JacobianChecker
 from manforge.core.state import _state_with_stress
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.simulation.driver import StrainDriver
@@ -102,7 +102,7 @@ print("=" * 60)
 print("  Part 2: Jacobian block inspection")
 print("=" * 60)
 
-jac = ad_jacobian_blocks(model, result_ad, state0)
+jac = JacobianChecker(model).compute(result_ad, state0)
 
 # --- flow direction: part["dlambda"]["stress"] = df/dsigma = (3/2) s / sigma_vm ---
 s = model._dev(result_ad.stress)
@@ -183,7 +183,7 @@ npt.assert_allclose(rm.ddsdde, ddsdde_an, rtol=1e-10)
 print(f"  Step {step_idx} user_defined_tangent: PASS")
 
 # Jacobian blocks for this step
-jac = ad_jacobian_blocks(model, rm, state_prev)
+jac = JacobianChecker(model).compute(rm, state_prev)
 n_step = autograd.grad(
     lambda sig: model.yield_function(_state_with_stress(rm.state, sig))
 )(rm.stress)

@@ -259,10 +259,10 @@ print(result.params, result.residual)
 ```python
 import numpy.testing as npt
 from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification import ad_jacobian_blocks
+from manforge.verification import JacobianChecker
 
 result = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
-jac = ad_jacobian_blocks(model, result, state_n)
+jac = JacobianChecker(model).compute(result, state_n)
 
 # part[残差名][状態名] でブロックにアクセス（デフォルトは両者とも同じ名前）
 npt.assert_allclose(jac.part["dlambda"]["stress"], my_n, rtol=1e-8)   # 降伏面勾配
@@ -307,12 +307,13 @@ print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}"
 `iter_run` で失敗ステップを詳細デバッグできる:
 
 ```python
-from manforge.verification import compare_jacobians
+from manforge.verification import JacobianChecker
 
+checker = JacobianChecker(model)
 for cr in cc.iter_run(load):
     if not cr.passed:
-        jac = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
-        print(jac.blocks)
+        cmp = checker.compare(cr.result_a, cr.result_b, cr.state_n)
+        print(cmp.blocks)
         break
 ```
 
@@ -370,9 +371,8 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
 | `fit_params` | `manforge.fitting` |
 | `check_tangent` | `manforge.verification.fd_check` |
-| `ad_jacobian_blocks`, `JacobianBlocks` | `manforge.verification` |
+| `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
-| `compare_jacobians` | `manforge.verification` |
 | `FortranModule` | `manforge.verification` |
 | `generate_strain_history` | `manforge.verification` |
 | `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models.j2_isotropic` |
@@ -411,8 +411,7 @@ src/manforge/
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
 │   ├── fd_check.py        # check_tangent()
-│   ├── jacobian.py        # JacobianBlocks / ad_jacobian_blocks
-│   ├── jacobian_compare.py# compare_jacobians
+│   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
 │   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
 │   ├── fortran_bridge.py  # FortranModule
 │   └── test_cases.py      # generate_strain_history 等

@@ -5,7 +5,7 @@ Demonstrates all features of the manforge Fortran crosscheck API:
 * Part 0 — Fortran-sourced elastic stiffness (elastic_stiffness_subroutine=)
 * Part 1 — CrosscheckStrainDriver   (multi-step, analytical integrator, ddsdde)
 * Part 2 — iter_run streaming + early break on failure
-* Part 3 — Jacobian inspection      (compare_jacobians / ad_jacobian_blocks)
+* Part 3 — Jacobian inspection      (JacobianChecker.compare / .compute)
 * Part 4 — StressDriver path        (stress-controlled loading)
 * Part 5 — FortranIntegrator        (explicit state_to_args via default hooks,
                                      for non-standard UMAT with ndarray state)
@@ -39,9 +39,8 @@ from manforge.verification import (
     CrosscheckStrainDriver,
     CrosscheckStressDriver,
     generate_strain_history,
-    compare_jacobians,
+    JacobianChecker,
 )
-from manforge.verification.jacobian import ad_jacobian_blocks
 
 # ---------------------------------------------------------------------------
 # Shared setup
@@ -185,21 +184,22 @@ print()
 
 
 # =========================================================================
-# Part 3: Jacobian inspection — compare_jacobians / ad_jacobian_blocks
+# Part 3: Jacobian inspection — JacobianChecker
 # =========================================================================
 print("=" * 60)
 print("  Part 3: Jacobian inspection")
 print("=" * 60)
 
-# --- 3a: compare_jacobians で 2 つの結果のブロック誤差を取得 ---
+# --- 3a: JacobianChecker.compare で 2 つの結果のブロック誤差を取得 ---
 # CrosscheckCaseResult は result_a / result_b / state_n を保持しているので、
 # 失敗ステップや検証したいステップで直接呼べる。
 py_int3a = PythonNumericalIntegrator(model)
 cc3a = CrosscheckStrainDriver(py_int3a, PythonAnalyticalIntegrator(model))
-print("  3a: compare_jacobians (numerical_newton vs analytical, plastic step)")
+_jchecker = JacobianChecker(model)
+print("  3a: JacobianChecker.compare (numerical_newton vs analytical, plastic step)")
 for cr in cc3a.iter_run(load):
     if cr.result_a is not None and cr.result_a.is_plastic:
-        jac_cmp = compare_jacobians(model, cr.result_a, cr.result_b, cr.state_n)
+        jac_cmp = _jchecker.compare(cr.result_a, cr.result_b, cr.state_n)
         print(f"     passed      : {jac_cmp.passed}")
         print(f"     max_rel_err : {jac_cmp.max_rel_err:.2e}")
         print(f"     blocks      :")
@@ -209,9 +209,8 @@ for cr in cc3a.iter_run(load):
 
 print()
 
-# --- 3b: ad_jacobian_blocks で個々のブロックを直接取り出す ---
-# compare_jacobians を使わず、1 つの結果から JacobianBlocks を取得して
-# 各微分項を個別に参照したい場合。
+# --- 3b: JacobianChecker.compute で個々のブロックを直接取り出す ---
+# 1 つの結果から JacobianBlocks を取得して各微分項を個別に参照したい場合。
 from manforge.simulation.integrator import PythonIntegrator as _PyInt
 
 deps_plastic = np.zeros(model.ntens)
@@ -219,8 +218,8 @@ deps_plastic[0] = 5e-3          # 十分に塑性域
 state_n_base = model.initial_state()
 result_plastic = _PyInt(model).stress_update(deps_plastic, np.zeros(model.ntens), state_n_base)
 
-print("  3b: ad_jacobian_blocks — individual block access")
-jac = ad_jacobian_blocks(model, result_plastic, state_n_base)
+print("  3b: JacobianChecker.compute — individual block access")
+jac = _jchecker.compute(result_plastic, state_n_base)
 
 # ブロックは jac.part[残差名][状態名] でアクセス（デフォルトは両者とも同じ名前）
 # 応力残差の σ 偏微分ブロック（ntens × ntens）
@@ -250,7 +249,7 @@ state_n_ow = ow_model.initial_state()
 result_ow = _PyInt(ow_model).stress_update(deps_ow, np.zeros(ow_model.ntens), state_n_ow)
 
 print("  3b-2: augmented model (OWKinematic3D) — state residual blocks")
-jac_ow = ad_jacobian_blocks(ow_model, result_ow, state_n_ow)
+jac_ow = JacobianChecker(ow_model).compute(result_ow, state_n_ow)
 # ∂R_σ/∂q_alpha — 応力残差 の backstress 微分 (ntens × ntens)
 print(f"     part['stress']['alpha'] shape          : {np.asarray(jac_ow.part['stress']['alpha']).shape}")
 # ∂R_{alpha}/∂alpha — backstress 残差の自己微分 (ntens × ntens)
