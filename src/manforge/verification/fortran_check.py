@@ -61,6 +61,12 @@ def check_bindings(
         py_arr = np.asarray(py_out, dtype=float).ravel()
         f_arr = np.asarray(f_out, dtype=float).ravel()
 
+        if py_arr.size != f_arr.size:
+            raise ValueError(
+                f"check_bindings: shape mismatch for '{method_name}': "
+                f"Python returned size {py_arr.size}, Fortran returned size {f_arr.size}"
+            )
+
         max_rel_err = float(np.max(np.abs(py_arr - f_arr) / (np.abs(f_arr) + 1e-14)))
         results[method_name] = (max_rel_err < rtol, max_rel_err)
 
