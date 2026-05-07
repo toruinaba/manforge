@@ -48,10 +48,10 @@ class TestCompareJacobiansJ2:
         assert out.passed
 
     def test_blocks_dict_populated(self, model):
-        """blocks dict should contain at least the four scalar block keys."""
+        """blocks dict should contain at least the four base block keys."""
         r, state0 = _result(model, 3e-3)
         out = compare_jacobians(model, r, r, state0)
-        for key in ("dRsigma_dsigma", "dRsigma_ddlambda", "dRdlambda_dsigma", "dRdlambda_ddlambda"):
+        for key in ("stress::stress", "stress::dlambda", "dlambda::stress", "dlambda::dlambda"):
             assert key in out.blocks
 
     def test_max_rel_err_equals_max_of_blocks(self, model):

@@ -133,6 +133,12 @@ class StateField:
     default: Callable | None = field(default=None, compare=False)
     doc: str = field(default="", compare=False)
     name: str = field(default="", compare=False)
+    residual_name: str | None = field(default=None, compare=False)
+
+    @property
+    def effective_residual_name(self) -> str:
+        """Residual row label: residual_name if set, else the field name."""
+        return self.residual_name if self.residual_name else self.name
 
     def __post_init__(self):
         if self.kind not in ("implicit", "explicit"):
@@ -197,14 +203,16 @@ class StateField:
         return anp.zeros(shp)
 
 
-def Implicit(shape=(), default=None, doc="") -> StateField:
+def Implicit(shape=(), default=None, doc="", residual_name=None) -> StateField:
     """Create an implicit StateField (state variable solved as NR unknown)."""
-    return StateField(kind="implicit", shape=shape, default=default, doc=doc)
+    return StateField(kind="implicit", shape=shape, default=default, doc=doc,
+                      residual_name=residual_name)
 
 
-def Explicit(shape=(), default=None, doc="") -> StateField:
+def Explicit(shape=(), default=None, doc="", residual_name=None) -> StateField:
     """Create an explicit StateField (state variable updated in closed form)."""
-    return StateField(kind="explicit", shape=shape, default=default, doc=doc)
+    return StateField(kind="explicit", shape=shape, default=default, doc=doc,
+                      residual_name=residual_name)
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +288,10 @@ class DlambdaField:
     as the class attribute ``dlambda`` so that users can write
     ``self.dlambda(R_dl)`` inside ``state_residual``.
 
+    The ``name`` class attribute exposes ``"dlambda"`` for API symmetry (e.g.
+    :class:`~manforge.simulation._layout.ResidualLayout` uses it as the default
+    residual-row label for the Δλ slot).
+
     Example::
 
         def state_residual(self, state_new, dlambda, state_n, state_trial):
@@ -289,6 +301,7 @@ class DlambdaField:
     """
 
     __slots__ = ()
+    name = "dlambda"
 
     def __call__(self, value) -> DlambdaResidual:
         return DlambdaResidual(value=value)

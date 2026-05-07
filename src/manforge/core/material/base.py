@@ -77,6 +77,10 @@ class MaterialModel(ABC):
     state_names: list[str] = []
     implicit_state_names: list[str] = []
 
+    # Residual-row label for the Δλ slot.  Override in subclasses to rename the
+    # Δλ row in JacobianBlocks.part (e.g. ``dlambda_residual_name = "R_yield"``).
+    dlambda_residual_name: str = "dlambda"
+
     # Framework-provided pseudo-field for the Δλ NR unknown.  Users can
     # optionally return self.dlambda(R_dl) from state_residual to override
     # the default R_dλ = yield_function(state).
@@ -104,6 +108,35 @@ class MaterialModel(ABC):
         cls.state_fields = fields
         cls.state_names = list(fields.keys())
         cls.implicit_state_names = [k for k, f in fields.items() if f.kind == "implicit"]
+        # Validate residual_name uniqueness: residual names must not collide with
+        # each other or with state names they do not belong to.
+        residual_names_seen: dict = {}  # residual_name → state_name
+        all_state_names = set(fields.keys())
+        for state_key, f in fields.items():
+            rname = f.effective_residual_name
+            if rname in residual_names_seen:
+                raise ValueError(
+                    f"{cls.__name__}: residual_name {rname!r} is used by both "
+                    f"{residual_names_seen[rname]!r} and {state_key!r}"
+                )
+            if rname != state_key and rname in all_state_names:
+                raise ValueError(
+                    f"{cls.__name__}: residual_name {rname!r} for field {state_key!r} "
+                    f"collides with another state name"
+                )
+            residual_names_seen[rname] = state_key
+        # Also check dlambda_residual_name
+        dl_rname = cls.dlambda_residual_name
+        if dl_rname in residual_names_seen:
+            raise ValueError(
+                f"{cls.__name__}: dlambda_residual_name {dl_rname!r} collides with "
+                f"residual_name of field {residual_names_seen[dl_rname]!r}"
+            )
+        if dl_rname in all_state_names:
+            raise ValueError(
+                f"{cls.__name__}: dlambda_residual_name {dl_rname!r} collides with "
+                f"a state name"
+            )
         implicit = set(cls.implicit_state_names)
         all_states = set(cls.state_names)
         # Explicit states excluding "stress" (stress default is handled by framework).

@@ -222,25 +222,25 @@ result_plastic = _PyInt(model).stress_update(deps_plastic, np.zeros(model.ntens)
 print("  3b: ad_jacobian_blocks — individual block access")
 jac = ad_jacobian_blocks(model, result_plastic, state_n_base)
 
+# ブロックは jac.part[残差名][状態名] でアクセス（デフォルトは両者とも同じ名前）
 # 応力残差の σ 偏微分ブロック（ntens × ntens）
-print(f"     dRsigma_dsigma  shape : {np.asarray(jac.dRsigma_dsigma).shape}")
+print(f"     part[stress][stress]   shape : {np.asarray(jac.part['stress']['stress']).shape}")
 # 降伏面の σ 勾配（ntens,）— 法線ベクトル
-print(f"     dRdlambda_dsigma shape: {np.asarray(jac.dRdlambda_dsigma).shape}")
+print(f"     part[dlambda][stress]  shape : {np.asarray(jac.part['dlambda']['stress']).shape}")
 # Δλ に対する降伏感度（スカラー）
-print(f"     dRdlambda_ddlambda    : {float(jac.dRdlambda_ddlambda):.6f}")
-# state ブロック（reduced model では {}; augmented では dict）
-print(f"     dRstate_dstate        : {jac.dRstate_dstate!r}")
+print(f"     part[dlambda][dlambda]       : {float(jac.part['dlambda']['dlambda']):.6f}")
+# reduced モデルでは stress と dlambda のみ
+print(f"     row_names (reduced)          : {jac.row_names()}")
 # 完全 Jacobian 行列（ntens+1 × ntens+1）
-print(f"     full matrix shape     : {np.asarray(jac.full).shape}")
+print(f"     full matrix shape            : {np.asarray(jac.full).shape}")
 print()
 
 # --- 3b-2: augmented モデル (OWKinematic3D) での残差 Jacobian state ブロック ---
-# reduced モデルでは {} だった dRsigma_dstate / dRstate_dstate が
-# augmented モデルでは状態変数名をキーとする dict になる。
-# フィールド名の意味（"dRsigma" はすべて応力残差 R_σ の微分）:
-#   dRsigma_dstate['alpha']         = ∂R_σ / ∂q_alpha   (ntens × ntens)
-#   dRstate_dstate['alpha']['alpha'] = ∂R_{q_alpha} / ∂q_alpha  (backstress 残差の自己微分)
-#   dRstate_dsigma['alpha']          = ∂R_{q_alpha} / ∂σ
+# augmented モデルでは state 変数ごとに行・列キーが増える。
+# アクセス例:
+#   part['stress']['alpha']    = ∂R_σ / ∂q_alpha   (ntens × ntens)
+#   part['alpha']['alpha']     = ∂R_{alpha} / ∂alpha  (backstress 残差の自己微分)
+#   part['alpha']['stress']    = ∂R_{alpha} / ∂σ   (ntens × ntens)
 from manforge.models.ow_kinematic import OWKinematic3D
 
 ow_model = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=5_000.0, gamma=50.0)
@@ -252,11 +252,11 @@ result_ow = _PyInt(ow_model).stress_update(deps_ow, np.zeros(ow_model.ntens), st
 print("  3b-2: augmented model (OWKinematic3D) — state residual blocks")
 jac_ow = ad_jacobian_blocks(ow_model, result_ow, state_n_ow)
 # ∂R_σ/∂q_alpha — 応力残差 の backstress 微分 (ntens × ntens)
-print(f"     dRsigma_dstate['alpha'] shape          : {np.asarray(jac_ow.dRsigma_dstate['alpha']).shape}")
-# ∂R_{q_alpha}/∂q_alpha — backstress 残差の自己微分 (ntens × ntens)
-print(f"     dRstate_dstate['alpha']['alpha'] shape : {np.asarray(jac_ow.dRstate_dstate['alpha']['alpha']).shape}")
-# ∂R_{q_alpha}/∂σ — backstress 残差の応力微分 (ntens × ntens)
-print(f"     dRstate_dsigma['alpha'] shape          : {np.asarray(jac_ow.dRstate_dsigma['alpha']).shape}")
+print(f"     part['stress']['alpha'] shape          : {np.asarray(jac_ow.part['stress']['alpha']).shape}")
+# ∂R_{alpha}/∂alpha — backstress 残差の自己微分 (ntens × ntens)
+print(f"     part['alpha']['alpha'] shape           : {np.asarray(jac_ow.part['alpha']['alpha']).shape}")
+# ∂R_{alpha}/∂σ — backstress 残差の応力微分 (ntens × ntens)
+print(f"     part['alpha']['stress'] shape          : {np.asarray(jac_ow.part['alpha']['stress']).shape}")
 # full: ntens+1+n_state = 6+1+(6+1) = 14
 print(f"     full matrix shape                     : {np.asarray(jac_ow.full).shape}")
 print()
