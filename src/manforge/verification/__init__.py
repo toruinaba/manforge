@@ -11,17 +11,17 @@ from manforge.verification.jacobian import (
     JacobianChecker,
 )
 from manforge.verification.tangent import check_tangent, TangentChecker, TangentCheckResult
-from manforge.verification.fortran_bridge import FortranModule
+from manforge.simulation.integrator.fortran_module import FortranModule
 from manforge.verification.test_cases import (
     estimate_yield_strain,
     generate_strain_history,
 )
-from manforge.verification.fortran_registry import (
+from manforge.core.material.fortran_binding import (
     FortranBinding,
     verified_against_fortran,
     collect_bindings,
-    check_bindings,
 )
+from manforge.verification.fortran_check import check_bindings
 from manforge.verification.crosscheck_driver import (
     CrosscheckCaseResult,
     CrosscheckResult,

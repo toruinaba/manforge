@@ -4,7 +4,7 @@ import pytest
 
 from manforge.core.material import MaterialModel3D
 from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.verification.fortran_registry import (
+from manforge.core.material.fortran_binding import (
     FortranBinding,
     collect_bindings,
     verified_against_fortran,

@@ -31,6 +31,7 @@ from manforge.simulation.integrator.python import (
     PythonAnalyticalIntegrator,
 )
 from manforge.simulation.integrator.fortran import FortranIntegrator
+from manforge.simulation.integrator.fortran_module import FortranModule
 
 __all__ = [
     "StressIntegrator",
@@ -39,4 +40,5 @@ __all__ = [
     "PythonNumericalIntegrator",
     "PythonAnalyticalIntegrator",
     "FortranIntegrator",
+    "FortranModule",
 ]
