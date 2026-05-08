@@ -90,7 +90,7 @@ class AFKinematic3D(MaterialModel3D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update (implicit, analytical).
@@ -101,10 +101,10 @@ class AFKinematic3D(MaterialModel3D):
         """
         alpha_n = state_n["alpha"]
         xi = state_trial["stress"] - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
+        alpha_new = (alpha_n + self.C_k * dlambda * s_hat) / (1.0 + self.gamma * dlambda)
         return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
@@ -147,16 +147,16 @@ class AFKinematicPS(MaterialModelPS):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
         alpha_n = state_n["alpha"]
         xi = state_trial["stress"] - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
+        alpha_new = (alpha_n + self.C_k * dlambda * s_hat) / (1.0 + self.gamma * dlambda)
         return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
@@ -198,14 +198,14 @@ class AFKinematic1D(MaterialModel1D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Armstrong-Frederick backstress update."""
         alpha_n = state_n["alpha"]
         xi = state_trial["stress"] - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-        alpha_new = (alpha_n + self.C_k * dlambda * n_hat) / (1.0 + self.gamma * dlambda)
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
+        alpha_new = (alpha_n + self.C_k * dlambda * s_hat) / (1.0 + self.gamma * dlambda)
         return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]

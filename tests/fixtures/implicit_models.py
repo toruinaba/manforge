@@ -4,12 +4,12 @@ These are test doubles used to validate the vector NR machinery. Mathematically
 identical to the corresponding explicit-path models at convergence.
 
 The explicit update for alpha is:
-    alpha_new = (alpha_n + C_k * dlambda * n_hat) / (1 + gamma * dlambda)
+    alpha_new = (alpha_n + C_k * dlambda * s_hat) / (1 + gamma * dlambda)
 
 Rearranged as a residual:
-    R_alpha = alpha_new * (1 + gamma * dlambda) - alpha_n - C_k * dlambda * n_hat = 0
+    R_alpha = alpha_new * (1 + gamma * dlambda) - alpha_n - C_k * dlambda * s_hat = 0
 
-n_hat is evaluated at (stress - alpha_n) — i.e., the OLD backstress — so both
+s_hat is evaluated at (stress - alpha_n) — i.e., the OLD backstress — so both
 paths are algebraically identical at convergence.
 
 Uses MRO override: re-declare ``stress``, ``alpha`` and ``ep`` as ``Implicit`` to
@@ -32,13 +32,13 @@ class _AFKinematicImplicit3D(AFKinematic3D):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
@@ -54,13 +54,13 @@ class _AFKinematicImplicitPS(AFKinematicPS):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
@@ -80,12 +80,12 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]

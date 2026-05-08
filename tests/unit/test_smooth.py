@@ -251,19 +251,19 @@ class TestSmoothDirection:
 # ---------------------------------------------------------------------------
 
 class TestAFPattern:
-    """Verify the AF model's n_hat computation pattern works with smooth_abs."""
+    """Verify the AF model's s_hat computation pattern works with smooth_abs."""
 
     def test_n_hat_finite_at_zero_xi(self):
-        """When xi = 0 (stress = alpha), n_hat should be finite, not NaN."""
+        """When xi = 0 (stress = alpha), s_hat should be finite, not NaN."""
         import manforge
         from manforge.models.af_kinematic import AFKinematic3D
 
         model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         xi = anp.zeros(6)
-        s_xi = model._dev(xi)
-        vm_safe = smooth_abs(model._vonmises(xi))
-        n_hat = s_xi / vm_safe
-        assert anp.all(anp.isfinite(n_hat)), f"n_hat has NaN/inf at xi=0: {n_hat}"
+        s_xi = model.dev(xi)
+        vm_safe = smooth_abs(model.vonmises(xi))
+        s_hat = s_xi / vm_safe
+        assert anp.all(anp.isfinite(s_hat)), f"s_hat has NaN/inf at xi=0: {s_hat}"
 
     def test_n_hat_finite_gradient_at_zero_xi(self):
         """Gradient of alpha w.r.t. dlambda should be finite when xi ≈ 0.

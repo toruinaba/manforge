@@ -23,13 +23,13 @@ class MaterialModel3D(MaterialModel):
     Provides concrete implementations of the operator methods used by concrete
     material models:
 
-    * :meth:`_hydrostatic` — p = (σ11 + σ22 + σ33) / 3
-    * :meth:`_dev`         — s = σ − p δ
+    * :meth:`hydrostatic` — p = (σ11 + σ22 + σ33) / 3
+    * :meth:`dev`         — s = σ − p δ
     * :meth:`isotropic_C`  — submatrix extraction from the full 6×6 tensor
-    * :meth:`_I_vol`       — δ⊗δ / 3
-    * :meth:`_I_dev`       — I − P_vol
+    * :meth:`I_vol`       — δ⊗δ / 3
+    * :meth:`I_dev`       — I − P_vol
 
-    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    :meth:`vonmises` is inherited from :class:`MaterialModel` (uses
     ``smooth_sqrt`` with n_missing=0, equivalent to √(3/2 s:s)).
 
     Subclasses still must implement the required material methods:
@@ -62,16 +62,16 @@ class MaterialModel3D(MaterialModel):
     # Operator methods — concrete for full-rank stress states
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = (σ11 + σ22 + σ33) / 3.
 
         All three direct components are stored, so no correction is needed.
         """
         return (stress[0] + stress[1] + stress[2]) / 3.0
 
-    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress s = σ − p δ."""
-        p = self._hydrostatic(stress)
+        p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
@@ -101,14 +101,14 @@ class MaterialModel3D(MaterialModel):
         idx = anp.array([0, 1, 2, 3])
         return C6[anp.ix_(idx, idx)]
 
-    def _I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.dimension.identity_np
         return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
-        return anp.eye(self.ntens) - self._I_vol()
+        return anp.eye(self.ntens) - self.I_vol()
 
 
 class MaterialModelPS(MaterialModel):
@@ -121,13 +121,13 @@ class MaterialModelPS(MaterialModel):
 
     Provides concrete implementations of the operator methods:
 
-    * :meth:`_hydrostatic` — p = (σ11 + σ22) / 3  (σ33 = 0)
-    * :meth:`_dev`         — s = σ − p δ  (stored components only)
+    * :meth:`hydrostatic` — p = (σ11 + σ22) / 3  (σ33 = 0)
+    * :meth:`dev`         — s = σ − p δ  (stored components only)
     * :meth:`isotropic_C`  — Schur complement (static condensation of σ33)
-    * :meth:`_I_vol`       — δ⊗δ / 3  (δ = [1, 1, 0] for ntens=3)
-    * :meth:`_I_dev`       — I − P_vol
+    * :meth:`I_vol`       — δ⊗δ / 3  (δ = [1, 1, 0] for ntens=3)
+    * :meth:`I_dev`       — I − P_vol
 
-    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    :meth:`vonmises` is inherited from :class:`MaterialModel` (uses
     ``smooth_sqrt`` with n_missing=1, giving √(3/2 (s:s + p²))).
 
     Parameters
@@ -155,16 +155,16 @@ class MaterialModelPS(MaterialModel):
     # Operator methods — concrete for PLANE_STRESS
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = (σ11 + σ22) / 3.
 
         σ33 = 0 is enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return (stress[0] + stress[1]) / 3.0
 
-    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored components, s = σ − p δ."""
-        p = self._hydrostatic(stress)
+        p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np  # δ = [1, 1, 0]
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
@@ -196,14 +196,14 @@ class MaterialModelPS(MaterialModel):
         C_cc = C4[2, 2]
         return C_rr - anp.outer(C_rc, C_rc) / C_cc
 
-    def _I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.dimension.identity_np  # [1, 1, 0]
         return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
-        return anp.eye(self.ntens) - self._I_vol()
+        return anp.eye(self.ntens) - self.I_vol()
 
 
 class MaterialModel1D(MaterialModel):
@@ -215,13 +215,13 @@ class MaterialModel1D(MaterialModel):
 
     Provides concrete implementations of the operator methods:
 
-    * :meth:`_hydrostatic` — p = σ11 / 3  (σ22 = σ33 = 0)
-    * :meth:`_dev`         — s = σ − p δ  (stored component only)
+    * :meth:`hydrostatic` — p = σ11 / 3  (σ22 = σ33 = 0)
+    * :meth:`dev`         — s = σ − p δ  (stored component only)
     * :meth:`isotropic_C`  — [[E]] where E = μ(3λ + 2μ) / (λ + μ)
-    * :meth:`_I_vol`       — [[1/3]]
-    * :meth:`_I_dev`       — [[2/3]]
+    * :meth:`I_vol`       — [[1/3]]
+    * :meth:`I_dev`       — [[2/3]]
 
-    :meth:`_vonmises` is inherited from :class:`MaterialModel` (uses
+    :meth:`vonmises` is inherited from :class:`MaterialModel` (uses
     ``smooth_sqrt`` with n_missing=2, giving √(3/2 (s11² + 2p²)) ≈ |σ11|).
 
     Parameters
@@ -247,16 +247,16 @@ class MaterialModel1D(MaterialModel):
     # Operator methods — concrete for UNIAXIAL_1D
     # ------------------------------------------------------------------
 
-    def _hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
         """Mean normal stress p = σ11 / 3.
 
         σ22 = σ33 = 0 are enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return stress[0] / 3.0
 
-    def _dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: anp.ndarray) -> anp.ndarray:
         """Deviatoric stress of the stored component, s = σ − p δ."""
-        p = self._hydrostatic(stress)
+        p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np  # δ = [1.0]
 
     def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
@@ -274,11 +274,11 @@ class MaterialModel1D(MaterialModel):
         E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
         return anp.array([[E]])
 
-    def _I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> anp.ndarray:
         """Volumetric projection tensor [[1/3]] for ntens=1."""
         delta = self.dimension.identity_np  # [1.0]
         return anp.outer(delta, delta) / 3.0
 
-    def _I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
-        return anp.eye(1) - self._I_vol()
+        return anp.eye(1) - self.I_vol()

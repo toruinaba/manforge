@@ -53,7 +53,7 @@ def test_hydrostatic_isotropic(ss):
     m = _Stub3D(ss)
     p = 150.0
     stress = anp.array([p, p, p] + [0.0] * (ss.ntens - 3))
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), p)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), p)
 
 
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
@@ -62,14 +62,14 @@ def test_hydrostatic_uniaxial(ss):
     m = _Stub3D(ss)
     sigma = 300.0
     stress = (lambda _a: (_a.__setitem__(0, sigma), _a)[1])(np.zeros(ss.ntens))
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), sigma / 3.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), sigma / 3.0)
 
 
 def test_hydrostatic_shear_only():
     """Pure shear contributes nothing to hydrostatic pressure."""
     m = _Stub3D(SOLID_3D)
     stress = anp.array([0.0, 0.0, 0.0, 100.0, 50.0, 25.0])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), 0.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ def test_dev_trace_zero(ss):
     """Trace of deviatoric stress must be zero."""
     m = _Stub3D(ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
-    s = m._dev(stress)
+    s = m.dev(stress)
     # Trace = sum of direct components
     np.testing.assert_allclose(float(anp.sum(s[:3])), 0.0, atol=1e-12)
 
@@ -91,7 +91,7 @@ def test_dev_shape(ss):
     """_dev returns a vector of the same shape as the input."""
     m = _Stub3D(ss)
     stress = anp.ones(ss.ntens)
-    assert m._dev(stress).shape == (ss.ntens,)
+    assert m.dev(stress).shape == (ss.ntens,)
 
 
 def test_dev_isotropic_stress_is_zero():
@@ -99,7 +99,7 @@ def test_dev_isotropic_stress_is_zero():
     m = _Stub3D(SOLID_3D)
     p = 200.0
     stress = anp.array([p, p, p, 0.0, 0.0, 0.0])
-    np.testing.assert_allclose(np.asarray(m._dev(stress)), 0.0, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(m.dev(stress)), 0.0, atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ def test_vonmises_uniaxial_solid_3d():
     m = _Stub3D(SOLID_3D)
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
-    np.testing.assert_allclose(float(m._vonmises(stress)), sigma, rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
 
 
 def test_vonmises_pure_shear_solid_3d():
@@ -120,7 +120,7 @@ def test_vonmises_pure_shear_solid_3d():
     tau = 100.0
     stress = anp.array([0.0, 0.0, 0.0, tau, 0.0, 0.0])
     expected = float(anp.sqrt(3.0) * tau)
-    np.testing.assert_allclose(float(m._vonmises(stress)), expected, rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), expected, rtol=1e-6)
 
 
 def test_vonmises_plane_strain_uniaxial():
@@ -128,7 +128,7 @@ def test_vonmises_plane_strain_uniaxial():
     m = _Stub3D(PLANE_STRAIN)
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0, 0.0])
-    np.testing.assert_allclose(float(m._vonmises(stress)), sigma, rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
 
 
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
@@ -136,7 +136,7 @@ def test_vonmises_nonnegative(ss):
     """Von Mises stress is always non-negative."""
     m = _Stub3D(ss)
     stress = anp.array([-200.0, 100.0, 50.0] + [-30.0] * (ss.ntens - 3))
-    assert float(m._vonmises(stress)) >= 0.0
+    assert float(m.vonmises(stress)) >= 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ def test_isotropic_C_plane_strain_is_submatrix():
 def test_I_vol_plus_I_dev_equals_identity(ss):
     """P_vol + P_dev must equal the ntens×ntens identity."""
     m = _Stub3D(ss)
-    np.testing.assert_allclose(np.asarray(m._I_vol() + m._I_dev()), np.eye(ss.ntens), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(m.I_vol() + m.I_dev()), np.eye(ss.ntens), atol=1e-12)
 
 
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
@@ -201,8 +201,8 @@ def test_I_vol_projects_to_hydrostatic(ss):
     """P_vol @ σ must equal p δ (volumetric part only)."""
     m = _Stub3D(ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
-    p = m._hydrostatic(stress)
-    vol_part = m._I_vol() @ stress
+    p = m.hydrostatic(stress)
+    vol_part = m.I_vol() @ stress
     expected = p * ss.identity_jnp
     np.testing.assert_allclose(np.asarray(vol_part), np.asarray(expected), atol=1e-10)
 
@@ -212,7 +212,7 @@ def test_I_dev_projects_to_deviatoric(ss):
     """P_dev @ σ must equal _dev(σ)."""
     m = _Stub3D(ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
-    np.testing.assert_allclose(np.asarray(m._I_dev() @ stress), np.asarray(m._dev(stress)), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(m.I_dev() @ stress), np.asarray(m.dev(stress)), atol=1e-10)
 
 
 # ===========================================================================
@@ -253,7 +253,7 @@ def test_ps_hydrostatic_uniaxial():
     m = _StubPS()
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), sigma / 3.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), sigma / 3.0)
 
 
 def test_ps_hydrostatic_equal_biaxial():
@@ -261,14 +261,14 @@ def test_ps_hydrostatic_equal_biaxial():
     m = _StubPS()
     sigma = 200.0
     stress = anp.array([sigma, sigma, 0.0])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), 2.0 * sigma / 3.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), 2.0 * sigma / 3.0)
 
 
 def test_ps_hydrostatic_shear_only():
     """Pure shear contributes nothing to hydrostatic pressure."""
     m = _StubPS()
     stress = anp.array([0.0, 0.0, 100.0])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), 0.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +279,18 @@ def test_ps_dev_trace_zero():
     """Trace of stored deviatoric components must be zero (σ11+σ22 part)."""
     m = _StubPS()
     stress = anp.array([100.0, -50.0, 20.0])
-    s = m._dev(stress)
+    s = m.dev(stress)
     # sum of direct stored components (indices 0,1) minus correction
     # σ11 + σ22 - 2p = σ11 + σ22 - 2(σ11+σ22)/3 = (σ11+σ22)/3
     # The full 3D trace s11+s22+s33 = 0; here we verify s11+s22 = -s33 = p
-    p = m._hydrostatic(stress)
+    p = m.hydrostatic(stress)
     np.testing.assert_allclose(float(s[0] + s[1]), float(p), atol=1e-12)
 
 
 def test_ps_dev_shape():
     m = _StubPS()
     stress = anp.ones(3)
-    assert m._dev(stress).shape == (3,)
+    assert m.dev(stress).shape == (3,)
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ def test_ps_vonmises_uniaxial():
     m = _StubPS()
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0])
-    np.testing.assert_allclose(float(m._vonmises(stress)), sigma, rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
 
 
 def test_ps_vonmises_equal_biaxial():
@@ -310,7 +310,7 @@ def test_ps_vonmises_equal_biaxial():
     m = _StubPS()
     sigma = 200.0
     stress = anp.array([sigma, sigma, 0.0])
-    np.testing.assert_allclose(float(m._vonmises(stress)), sigma, rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
 
 
 def test_ps_vonmises_pure_shear():
@@ -318,7 +318,7 @@ def test_ps_vonmises_pure_shear():
     m = _StubPS()
     tau = 100.0
     stress = anp.array([0.0, 0.0, tau])
-    np.testing.assert_allclose(float(m._vonmises(stress)), float(anp.sqrt(3.0) * tau), rtol=1e-6)
+    np.testing.assert_allclose(float(m.vonmises(stress)), float(anp.sqrt(3.0) * tau), rtol=1e-6)
 
 
 def test_ps_vonmises_matches_3d_reference():
@@ -328,7 +328,7 @@ def test_ps_vonmises_matches_3d_reference():
     # A stress that is valid in both: [σ11, σ22, σ12] plane-stress = [σ11, σ22, 0, σ12, 0, 0]
     sigma = anp.array([200.0, -100.0, 50.0])
     sigma_3d = anp.array([200.0, -100.0, 0.0, 50.0, 0.0, 0.0])
-    np.testing.assert_allclose(float(m_ps._vonmises(sigma)), float(m_3d._vonmises(sigma_3d)), rtol=1e-6)
+    np.testing.assert_allclose(float(m_ps.vonmises(sigma)), float(m_3d.vonmises(sigma_3d)), rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -366,14 +366,14 @@ def test_ps_isotropic_C_known_values():
 
 def test_ps_I_vol_plus_I_dev_equals_identity():
     m = _StubPS()
-    np.testing.assert_allclose(np.asarray(m._I_vol() + m._I_dev()), np.eye(3), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(m.I_vol() + m.I_dev()), np.eye(3), atol=1e-12)
 
 
 def test_ps_I_dev_projects_to_deviatoric():
     """P_dev @ σ must equal _dev(σ) for plane stress."""
     m = _StubPS()
     stress = anp.array([100.0, -50.0, 20.0])
-    np.testing.assert_allclose(np.asarray(m._I_dev() @ stress), np.asarray(m._dev(stress)), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(m.I_dev() @ stress), np.asarray(m.dev(stress)), atol=1e-10)
 
 
 # ===========================================================================
@@ -414,7 +414,7 @@ def test_1d_hydrostatic_uniaxial():
     m = _Stub1D()
     sigma = 300.0
     stress = anp.array([sigma])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), sigma / 3.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), sigma / 3.0)
 
 
 def test_1d_hydrostatic_compressive():
@@ -422,7 +422,7 @@ def test_1d_hydrostatic_compressive():
     m = _Stub1D()
     sigma = -200.0
     stress = anp.array([sigma])
-    np.testing.assert_allclose(float(m._hydrostatic(stress)), sigma / 3.0)
+    np.testing.assert_allclose(float(m.hydrostatic(stress)), sigma / 3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -434,13 +434,13 @@ def test_1d_dev_value():
     m = _Stub1D()
     sigma = 300.0
     stress = anp.array([sigma])
-    s = m._dev(stress)
+    s = m.dev(stress)
     np.testing.assert_allclose(float(s[0]), 2.0 * sigma / 3.0, rtol=1e-8)
 
 
 def test_1d_dev_shape():
     m = _Stub1D()
-    assert m._dev(anp.array([100.0])).shape == (1,)
+    assert m.dev(anp.array([100.0])).shape == (1,)
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +452,7 @@ def test_1d_vonmises_equals_abs_stress():
     m = _Stub1D()
     for sigma in [300.0, -200.0, 0.0]:
         stress = anp.array([sigma])
-        np.testing.assert_allclose(float(m._vonmises(stress)), abs(sigma), atol=1e-8)
+        np.testing.assert_allclose(float(m.vonmises(stress)), abs(sigma), atol=1e-8)
 
 
 def test_1d_vonmises_matches_3d_reference():
@@ -462,7 +462,7 @@ def test_1d_vonmises_matches_3d_reference():
     sigma = 350.0
     stress_1d = anp.array([sigma])
     stress_3d = anp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
-    np.testing.assert_allclose(float(m_1d._vonmises(stress_1d)), float(m_3d._vonmises(stress_3d)), rtol=1e-6)
+    np.testing.assert_allclose(float(m_1d.vonmises(stress_1d)), float(m_3d.vonmises(stress_3d)), rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -491,20 +491,20 @@ def test_1d_isotropic_C_equals_E():
 
 def test_1d_I_vol_plus_I_dev_equals_identity():
     m = _Stub1D()
-    np.testing.assert_allclose(np.asarray(m._I_vol() + m._I_dev()), np.eye(1), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(m.I_vol() + m.I_dev()), np.eye(1), atol=1e-12)
 
 
 def test_1d_I_vol_value():
     """P_vol must equal [[1/3]] for 1D."""
     m = _Stub1D()
-    np.testing.assert_allclose(np.asarray(m._I_vol()), np.array([[1.0 / 3.0]]), atol=1e-12)
+    np.testing.assert_allclose(np.asarray(m.I_vol()), np.array([[1.0 / 3.0]]), atol=1e-12)
 
 
 def test_1d_I_dev_projects_to_deviatoric():
     """P_dev @ σ must equal _dev(σ) for 1D."""
     m = _Stub1D()
     stress = anp.array([300.0])
-    np.testing.assert_allclose(np.asarray(m._I_dev() @ stress), np.asarray(m._dev(stress)), atol=1e-10)
+    np.testing.assert_allclose(np.asarray(m.I_dev() @ stress), np.asarray(m.dev(stress)), atol=1e-10)
 
 
 # ---------------------------------------------------------------------------

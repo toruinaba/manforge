@@ -37,7 +37,7 @@ def test_stress_auto_attached_as_explicit():
         ep = Explicit(shape=())
 
         def yield_function(self, state):
-            return self._vonmises(state["stress"]) - 250.0
+            return self.vonmises(state["stress"]) - 250.0
 
         def update_state(self, dlambda, state_n, state_trial):
             return [self.ep(state_n["ep"] + dlambda)]
@@ -56,7 +56,7 @@ def test_stress_implicit_declaration():
         ep = Implicit(shape=())
 
         def yield_function(self, state):
-            return self._vonmises(state["stress"]) - 250.0
+            return self.vonmises(state["stress"]) - 250.0
 
         def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
             return [self.ep(state_new["ep"] - state_n["ep"] - dlambda)]
@@ -140,19 +140,19 @@ class _CustomStressResidual(MaterialModel3D):
 
     def yield_function(self, state):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(state["stress"]) - sigma_y
+        return self.vonmises(state["stress"]) - sigma_y
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         # Hand-coded J2 associative R_stress using correct Mandel-scaled flow direction.
-        # n_hat = (3/2) * s * m² / σ_vm  (m = Mandel factors; m²=[1,1,1,2,2,2] for 3D)
+        # s_hat = (3/2) * s * m² / σ_vm  (m = Mandel factors; m²=[1,1,1,2,2,2] for 3D)
         # This matches autograd.grad(yield_function w.r.t. stress) without nested autograd.
         stress = state_new["stress"]
         C = self.elastic_stiffness(state_new)
-        s = self._dev(stress)
-        vm = self._vonmises(stress)
+        s = self.dev(stress)
+        vm = self.vonmises(stress)
         m2 = anp.array(self.dimension.mandel_factors_np) ** 2
-        n_hat = 1.5 * (s * m2) / vm
-        R_stress = stress - stress_trial + dlambda * (C @ n_hat)
+        s_hat = 1.5 * (s * m2) / vm
+        R_stress = stress - stress_trial + dlambda * (C @ s_hat)
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return [self.stress(R_stress), self.ep(R_ep)]
 

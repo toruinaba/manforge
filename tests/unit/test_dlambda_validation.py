@@ -28,7 +28,7 @@ class _NoStateModel(MaterialModel3D):
         self.sigma_y0 = sigma_y0
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -43,7 +43,7 @@ class _DlambdaOnlyModel(MaterialModel3D):
         self.sigma_y0 = sigma_y0
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -64,7 +64,7 @@ class _AlphaModel(MaterialModel3D):
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -84,7 +84,7 @@ class _DuplicateDlambdaModel(MaterialModel3D):
         self.sigma_y0 = sigma_y0
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -108,7 +108,7 @@ class _BadItemModel(MaterialModel3D):
         self.sigma_y0 = sigma_y0
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -127,7 +127,7 @@ class _DlambdaInUpdateState(MaterialModel3D):
         self.sigma_y0 = sigma_y0
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
