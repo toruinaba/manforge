@@ -405,7 +405,7 @@ class StressDriver(DriverBase):
 # ---------------------------------------------------------------------------
 
 def _validate_idx_arg(name: str, seq, ntens: int) -> list[int]:
-    """Validate a Voigt index sequence; return a sorted list."""
+    """Validate a Voigt index sequence; return list in original order."""
     try:
         lst = list(seq)
     except TypeError:
@@ -421,7 +421,7 @@ def _validate_idx_arg(name: str, seq, ntens: int) -> list[int]:
             raise ValueError(
                 f"{name} index {v} is out of range for ntens={ntens}"
             )
-    return sorted(ints)
+    return ints
 
 
 class MixedDriver(DriverBase):
@@ -442,11 +442,14 @@ class MixedDriver(DriverBase):
         Constitutive integrator.
     prescribed_strain_idx : Sequence[int]
         Voigt indices whose strain is prescribed by the caller (P components).
-        Must not be empty.
+        Must not be empty.  The order of indices determines the column order
+        expected in ``load.data``: ``load.data[:, k]`` is the history for
+        ``prescribed_strain_idx[k]``.
     prescribed_stress_idx : Sequence[int] or None, optional
         Voigt indices whose stress is prescribed (F components).  If ``None``
         (default), inferred as the complement of ``prescribed_strain_idx`` in
-        ``range(ntens)``.
+        ascending index order.  When provided explicitly, the order determines
+        the column order of ``prescribed_stress_history``.
     max_iter : int, optional
         Maximum inner Newton-Raphson iterations per step (default 20).
     tol : float, optional
@@ -459,6 +462,10 @@ class MixedDriver(DriverBase):
 
     The union of ``prescribed_strain_idx`` and ``prescribed_stress_idx`` must
     equal ``range(ntens)`` exactly; the intersection must be empty.
+
+    Index order is preserved: ``load.data[:, k]`` maps to
+    ``prescribed_strain_idx[k]``, and ``prescribed_stress_history[:, k]``
+    maps to ``prescribed_stress_idx[k]``.
 
     When ``len(prescribed_stress_idx) == 0`` (full strain control), the inner
     NR is skipped and the driver behaves identically to :class:`StrainDriver`.

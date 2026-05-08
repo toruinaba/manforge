@@ -164,7 +164,7 @@ def test_uniaxial_elastic_lateral_stress_zero(model_3d, integ_3d):
     result = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(load)
 
     np.testing.assert_allclose(result.stress[:, 1:], 0.0, atol=1e-6,
-                               err_msg="σ_other must be ~0 under uniaxial strain control")
+                               err_msg="σ_other must be ~0 under uniaxial stress control (σ=0 prescribed)")
 
 
 def test_uniaxial_elastic_lateral_strains(model_3d, integ_3d):

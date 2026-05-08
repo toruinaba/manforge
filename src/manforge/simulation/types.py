@@ -398,11 +398,18 @@ class DriverStep:
     result : StressUpdateResult
         Full stress-update result: stress, state, ddsdde, dlambda, is_plastic, etc.
     converged : bool
-        Outer NR convergence flag (StressDriver only; always ``True`` for StrainDriver).
+        NR convergence flag.  Always ``True`` for :class:`~manforge.simulation.driver.StrainDriver`.
+        For :class:`~manforge.simulation.driver.StressDriver` and
+        :class:`~manforge.simulation.driver.MixedDriver` reflects whether the
+        outer / inner Newton-Raphson loop converged within ``max_iter``.
     n_outer_iter : int
-        Number of outer NR iterations (StressDriver only; ``1`` for StrainDriver).
+        Number of NR iterations taken.  ``1`` for
+        :class:`~manforge.simulation.driver.StrainDriver`; the outer-loop count
+        for :class:`~manforge.simulation.driver.StressDriver`; the inner-loop
+        count for :class:`~manforge.simulation.driver.MixedDriver`.
     residual_inf : float
-        Final L∞ residual of outer NR (StressDriver only; ``0.0`` for StrainDriver).
+        Final L∞ norm of the NR residual.  ``0.0`` for
+        :class:`~manforge.simulation.driver.StrainDriver`.
 
     Examples
     --------
@@ -413,7 +420,7 @@ class DriverStep:
                 print(f"Plasticity onset at step {step.i}")
                 break
 
-    Inspect StressDriver convergence details::
+    Inspect NR convergence diagnostics (StressDriver / MixedDriver)::
 
         for step in driver.iter_run(model, load):
             print(step.i, step.n_outer_iter, step.residual_inf)
