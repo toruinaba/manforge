@@ -224,7 +224,7 @@ class _ResidualNameModel(MaterialModel3D):
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"] - state["alpha"]) - (self.sigma_y0 + self.H * state["ep"])
+        return self.vonmises(state["stress"] - state["alpha"]) - (self.sigma_y0 + self.H * state["ep"])
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         import autograd as _ag

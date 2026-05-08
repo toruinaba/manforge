@@ -103,7 +103,7 @@ class OWKinematic3D(MaterialModel3D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual.
@@ -117,17 +117,17 @@ class OWKinematic3D(MaterialModel3D):
         stress_new = state_new["stress"]
 
         xi = stress_new - alpha_new
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
 
-        alpha_vm = self._vonmises(alpha_new)
+        alpha_vm = self.vonmises(alpha_new)
 
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
-            - self.C_k * dlambda * n_hat
+            - self.C_k * dlambda * s_hat
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
@@ -173,22 +173,22 @@ class OWKinematicPS(MaterialModelPS):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual (plane stress)."""
         alpha_new = state_new["alpha"]
         stress_new = state_new["stress"]
         xi = stress_new - alpha_new
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-        alpha_vm = self._vonmises(alpha_new)
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
+        alpha_vm = self.vonmises(alpha_new)
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
-            - self.C_k * dlambda * n_hat
+            - self.C_k * dlambda * s_hat
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
@@ -233,22 +233,22 @@ class OWKinematic1D(MaterialModel1D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function in relative stress space: f = σ_vm(σ − α) − σ_y0."""
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial) -> list:
         """Ohno-Wang implicit backstress residual (1D)."""
         alpha_new = state_new["alpha"]
         stress_new = state_new["stress"]
         xi = stress_new - alpha_new
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
-        alpha_vm = self._vonmises(alpha_new)
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
+        alpha_vm = self.vonmises(alpha_new)
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = (
             alpha_new
             - state_n["alpha"]
-            - self.C_k * dlambda * n_hat
+            - self.C_k * dlambda * s_hat
             + self.gamma * dlambda * alpha_vm * alpha_new
         )
         R_ep = state_new["ep"] - state_n["ep"] - dlambda

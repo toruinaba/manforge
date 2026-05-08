@@ -428,7 +428,7 @@ class MaterialModel(ABC):
         """
         return state_trial["stress"]
 
-    def _vonmises(self, stress: anp.ndarray) -> anp.ndarray:
+    def vonmises(self, stress: anp.ndarray) -> anp.ndarray:
         """Von Mises equivalent stress with missing-component correction.
 
         Computes √(3/2 · (‖s_m‖² + n_missing · p²)) using ``smooth_sqrt``
@@ -442,7 +442,7 @@ class MaterialModel(ABC):
         * ``PLANE_STRESS``:              n_missing=1 → √(3/2 (s:s + p²))
         * ``UNIAXIAL_1D``:               n_missing=2 → |σ11|
 
-        Uses :meth:`_dev` and :meth:`_hydrostatic` as defined by the
+        Uses :meth:`dev` and :meth:`hydrostatic` as defined by the
         stress-state base class.
 
         Parameters
@@ -453,8 +453,8 @@ class MaterialModel(ABC):
         -------
         anp.ndarray, scalar
         """
-        s = self._dev(stress)
-        p = self._hydrostatic(stress)
+        s = self.dev(stress)
+        p = self.hydrostatic(stress)
         s_m = s * self.dimension.mandel_factors_np
         sq_norm = anp.dot(s_m, s_m) + self.dimension.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)

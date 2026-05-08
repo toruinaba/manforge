@@ -41,11 +41,11 @@ class _AFAlphaImplicit(AFKinematic3D):
         alpha_n = state_n["alpha"]
         stress = state_trial["stress"]
         xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         return [self.alpha(R_alpha)]
 
 
@@ -67,12 +67,12 @@ class _AFAlphaImplicitStress(AFKinematic3D):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
-        s_xi = self._dev(xi)
-        vm_safe = self._vonmises(xi)
-        n_hat = s_xi / vm_safe
+        s_xi = self.dev(xi)
+        vm_safe = self.vonmises(xi)
+        s_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * n_hat
+        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         return [self.stress(R_stress), self.alpha(R_alpha)]
 
 

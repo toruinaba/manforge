@@ -60,7 +60,7 @@ class _J2ScalarWithDlambdaOverride(MaterialModel3D):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def update_state(self, dlambda, state_n, state_trial):
         return [self.ep(state_n["ep"] + dlambda)]
@@ -86,7 +86,7 @@ class _J2ScalarDefault(MaterialModel3D):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - self.sigma_y0
+        return self.vonmises(state["stress"]) - self.sigma_y0
 
     def update_state(self, dlambda, state_n, state_trial):
         return [self.ep(state_n["ep"] + dlambda)]
@@ -166,11 +166,11 @@ class _KinematicWithDlambdaOverride(MaterialModel3D):
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         xi_new = state_new["stress"] - state_new["alpha"]
-        f_new = self._vonmises(xi_new) - self.sigma_y0
+        f_new = self.vonmises(xi_new) - self.sigma_y0
         # flow direction n = df/dσ at current iterate
         import autograd
         from manforge.core.state import _state_with_stress
@@ -202,7 +202,7 @@ class _KinematicDefault(MaterialModel3D):
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
         import autograd

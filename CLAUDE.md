@@ -110,7 +110,7 @@ Stress-state base classes (choose the appropriate one):
 - `MaterialModelPS` — PLANE_STRESS (ntens=3); applies Schur condensation in `isotropic_C`
 - `MaterialModel1D` — UNIAXIAL_1D (ntens=1); used for uniaxial fitting
 
-Each base provides branch-free operator methods (`_dev`, `_vonmises`, `isotropic_C`, `_I_vol`, `_I_dev`) tailored to its stress state. The `_vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
+Each base provides branch-free operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) tailored to its stress state. The `vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
 
 Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR).
 

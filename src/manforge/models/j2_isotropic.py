@@ -38,7 +38,7 @@ class J2Isotropic3D(MaterialModel3D):
     ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
 
     Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
-    (``_dev``, ``_vonmises``, ``isotropic_C``, ``_I_vol``, ``_I_dev``), which
+    (``dev``, ``vonmises``, ``isotropic_C``, ``I_vol``, ``I_dev``), which
     provide branch-free implementations valid when all direct stress components
     are stored (``ndi == ndi_phys``).
 
@@ -91,7 +91,7 @@ class J2Isotropic3D(MaterialModel3D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(state["stress"]) - sigma_y
+        return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
@@ -125,8 +125,8 @@ class J2Isotropic3D(MaterialModel3D):
         ep_n = state_n["ep"]
 
         sigma_y = self.sigma_y0 + self.H * ep_n
-        s_trial = self._dev(stress_trial)
-        sigma_vm_trial = self._vonmises(stress_trial)
+        s_trial = self.dev(stress_trial)
+        sigma_vm_trial = self.vonmises(stress_trial)
         f_trial = sigma_vm_trial - sigma_y  # > 0 (caller ensures plasticity)
 
         # Δλ = f_trial / (3μ + H)
@@ -170,11 +170,11 @@ class J2Isotropic3D(MaterialModel3D):
         theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
 
         # dev(σ_new) = θ · s_trial  →  s_trial = dev(σ_new) / θ
-        s_trial = self._dev(stress) / theta
+        s_trial = self.dev(stress) / theta
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + self.H) * sigma_vm_trial ** 3)
 
-        I_vol = self._I_vol()
-        I_dev = self._I_dev()
+        I_vol = self.I_vol()
+        I_dev = self.I_dev()
 
         return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)
 
@@ -215,7 +215,7 @@ class J2IsotropicPS(MaterialModelPS):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(state["stress"]) - sigma_y
+        return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
@@ -227,7 +227,9 @@ class J2Isotropic1D(MaterialModel1D):
 
     Uses the scalar NR path (all non-stress states explicit): implements
     ``update_state`` (Δep = Δλ). Provides closed-form ``user_defined_return_mapping``
-    and ``user_defined_tangent`` using the 1D radial return mapping.
+    and ``user_defined_tangent`` using the 1D radial return mapping, written in
+    the same ``dev`` / ``vonmises`` / ``I_vol`` / ``I_dev`` form as
+    :class:`J2Isotropic3D` (with ``E`` replacing ``3μ`` due to static condensation).
 
     Parameters
     ----------
@@ -257,7 +259,7 @@ class J2Isotropic1D(MaterialModel1D):
     def yield_function(self, state) -> anp.ndarray:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self._vonmises(state["stress"]) - sigma_y
+        return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(self, dlambda, state_n, state_trial) -> list:
         """Δep = Δλ (von Mises associative flow)."""
@@ -268,10 +270,21 @@ class J2Isotropic1D(MaterialModel1D):
     # ------------------------------------------------------------------
 
     def user_defined_return_mapping(self, stress_trial, C, state_n):
-        """1D J2 radial return — closed-form.
+        """1D J2 radial return — closed-form, 3D-analogous form.
 
-        Δλ = (|σ_trial| − σ_y) / (E + H)
-        σ_new = σ_trial − E · Δλ · sign(σ_trial)
+        Notes
+        -----
+        For 1D, ``C n_voigt = E · n_voigt`` holds (``n_voigt = sign(σ)``),
+        so the radial return reduces to a single scalar equation in Δλ.
+        This is structurally analogous to the 3D identity
+        ``C n_voigt = 3μ s/σ_vm``, with ``3μ`` replaced by ``E`` due to
+        static condensation (ndi=1, ndi_phys=3).
+
+        ``n_voigt = (3/2) · dev(σ) / vonmises(σ) = sign(σ)`` for 1D,
+        so the update ``σ_new = σ_trial − Δλ · C n_voigt`` is written as
+        ``σ_new = σ_trial − 1.5 · E · Δλ / σ_vm · s_trial``, mirroring
+        the 3D formula with ``s_trial`` and ``vonmises`` in place of
+        raw ``abs`` and ``sign``.
 
         Parameters
         ----------
@@ -286,11 +299,17 @@ class J2Isotropic1D(MaterialModel1D):
         E = C[0, 0]
         ep_n = state_n["ep"]
         sigma_y = self.sigma_y0 + self.H * ep_n
-        sigma_vm_trial = anp.abs(stress_trial[0])
+        s_trial = self.dev(stress_trial)
+        sigma_vm_trial = self.vonmises(stress_trial)
         f_trial = sigma_vm_trial - sigma_y  # > 0 (caller ensures plasticity)
+
+        # Δλ = f_trial / (E + H)  [1D analogue of f_trial / (3μ + H)]
         dlambda = f_trial / (E + self.H)
-        n = stress_trial / sigma_vm_trial  # sign(σ_trial) as length-1 array
-        stress_new = stress_trial - E * dlambda * n
+
+        # Radial return: σ_new = σ_trial − Δλ · C n_voigt
+        # n_voigt = (3/2) s_trial / σ_vm = sign(σ_trial) for 1D
+        stress_new = stress_trial - 1.5 * (E * dlambda / sigma_vm_trial) * s_trial
+
         return ReturnMappingResult(
             stress=stress_new,
             state={"stress": stress_new, "ep": ep_n + dlambda},
@@ -300,7 +319,11 @@ class J2Isotropic1D(MaterialModel1D):
         )
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n):
-        """1D consistent tangent D^ep = [[E · H / (E + H)]].
+        """1D consistent tangent — closed-form, 3D-analogous form.
+
+        Structurally mirrors the 3D formula
+        ``D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)``
+        with ``E`` in place of ``3μ``.  Reduces to ``[[E·H/(E+H)]]`` for 1D.
 
         Parameters
         ----------
@@ -308,11 +331,25 @@ class J2Isotropic1D(MaterialModel1D):
         state : dict  (unused)
         dlambda : anp.ndarray, scalar
         C : anp.ndarray, shape (1, 1)
-        state_n : dict  (unused)
+        state_n : dict with key ``ep``
 
         Returns
         -------
         anp.ndarray, shape (1, 1)
         """
         E = C[0, 0]
-        return anp.array([[E * self.H / (E + self.H)]])
+        ep_n = state_n["ep"]
+        sigma_y = self.sigma_y0 + self.H * ep_n
+        sigma_vm_trial = sigma_y + (E + self.H) * dlambda
+        theta = 1.0 - E * dlambda / sigma_vm_trial  # 1D analogue of (1 − 3μΔλ/σ_vm)
+
+        # s_trial = dev(σ_new) / θ  (same reconstruction as 3D)
+        s_trial = self.dev(stress) / theta
+        # β: 1D analogue of 9μ²σ_y / ((3μ+H)σ_vm³), with 3μ → E and
+        # the (3/2)² factor from n_voigt = (3/2) s/σ_vm absorbed into s⊗s
+        beta = 1.5 * E ** 2 * sigma_y / ((E + self.H) * sigma_vm_trial ** 3)
+
+        I_vol = self.I_vol()  # [[1/3]]
+        I_dev = self.I_dev()  # [[2/3]]
+
+        return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)

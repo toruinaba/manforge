@@ -104,8 +104,8 @@ print("=" * 60)
 jac = JacobianChecker(model).compute(result_ad, state0)
 
 # --- flow direction: part["dlambda"]["stress"] = df/dsigma = (3/2) s / sigma_vm ---
-s = model._dev(result_ad.stress)
-sigma_vm = model._vonmises(result_ad.stress)
+s = model.dev(result_ad.stress)
+sigma_vm = model.vonmises(result_ad.stress)
 n_analytical = (3.0 / 2.0) * s / sigma_vm
 
 npt.assert_allclose(jac.part["dlambda"]["stress"], n_analytical, rtol=1e-10)
