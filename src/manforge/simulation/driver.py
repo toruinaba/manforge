@@ -1,4 +1,4 @@
-"""Simulation drivers: strain-controlled and stress-controlled loading.
+"""Simulation drivers: strain-controlled, stress-controlled, and mixed loading.
 
 All drivers share the same interface via :class:`DriverBase`:
 
@@ -386,6 +386,315 @@ class StressDriver(DriverBase):
         strain_rows = []
         for step in self.iter_run(load, raise_on_nonconverged=True,
                                   initial_stress=initial_stress, initial_state=initial_state):
+            step_results.append(step.result)
+            strain_rows.append(step.strain)
+        strain_out = (
+            np.stack(strain_rows)
+            if strain_rows
+            else np.zeros((0, self.integrator.ntens))
+        )
+        return DriverResult(
+            step_results=step_results,
+            strain=strain_out,
+            collect_state=collect_state,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Mixed boundary-condition driver
+# ---------------------------------------------------------------------------
+
+def _validate_idx_arg(name: str, seq, ntens: int) -> list[int]:
+    """Validate a Voigt index sequence; return a sorted list."""
+    try:
+        lst = list(seq)
+    except TypeError:
+        raise TypeError(f"{name} must be iterable, got {type(seq).__name__!r}")
+    for v in lst:
+        if not isinstance(v, (int, np.integer)):
+            raise TypeError(f"All elements of {name} must be int, got {type(v).__name__!r}")
+    ints = [int(v) for v in lst]
+    if len(ints) != len(set(ints)):
+        raise ValueError(f"{name} contains duplicate indices: {ints}")
+    for v in ints:
+        if not (0 <= v < ntens):
+            raise ValueError(
+                f"{name} index {v} is out of range for ntens={ntens}"
+            )
+    return sorted(ints)
+
+
+class MixedDriver(DriverBase):
+    """Mixed strain/stress boundary-condition driver.
+
+    Some Voigt components are strain-controlled (prescribed history) while the
+    remaining components are stress-controlled (target stress, default zero).
+    The driver solves the free strain components by inner Newton-Raphson on the
+    consistent tangent (ddsdde[F, F]).
+
+    Typical use case: 3-D solid (ntens=6) with ε11 ramped and σ22..σ23 = 0,
+    recovering a uniaxial-stress test from a 3-D model without writing a 1-D
+    wrapper.
+
+    Parameters
+    ----------
+    integrator : StressIntegrator
+        Constitutive integrator.
+    prescribed_strain_idx : Sequence[int]
+        Voigt indices whose strain is prescribed by the caller (P components).
+        Must not be empty.
+    prescribed_stress_idx : Sequence[int] or None, optional
+        Voigt indices whose stress is prescribed (F components).  If ``None``
+        (default), inferred as the complement of ``prescribed_strain_idx`` in
+        ``range(ntens)``.
+    max_iter : int, optional
+        Maximum inner Newton-Raphson iterations per step (default 20).
+    tol : float, optional
+        Convergence tolerance on the L∞ norm of the stress residual on the
+        F components (default 1e-8).
+
+    Notes
+    -----
+    Voigt order is ``[11, 22, 33, 12, 13, 23]`` (engineering shear).
+
+    The union of ``prescribed_strain_idx`` and ``prescribed_stress_idx`` must
+    equal ``range(ntens)`` exactly; the intersection must be empty.
+
+    When ``len(prescribed_stress_idx) == 0`` (full strain control), the inner
+    NR is skipped and the driver behaves identically to :class:`StrainDriver`.
+
+    If ``D_FF = ddsdde[F, F]`` becomes singular (rare for J2-associative
+    models), ``numpy.linalg.LinAlgError`` propagates to the caller.
+    """
+
+    def __init__(
+        self,
+        integrator,
+        *,
+        prescribed_strain_idx,
+        prescribed_stress_idx=None,
+        max_iter: int = 20,
+        tol: float = 1e-8,
+    ) -> None:
+        super().__init__(integrator)
+        ntens = integrator.ntens
+
+        P = _validate_idx_arg("prescribed_strain_idx", prescribed_strain_idx, ntens)
+        if len(P) == 0:
+            raise ValueError(
+                "prescribed_strain_idx must not be empty; use StressDriver instead"
+            )
+
+        if prescribed_stress_idx is None:
+            F = sorted(set(range(ntens)) - set(P))
+        else:
+            F = _validate_idx_arg("prescribed_stress_idx", prescribed_stress_idx, ntens)
+
+        if set(P) | set(F) != set(range(ntens)):
+            raise ValueError(
+                f"Union of prescribed_strain_idx and prescribed_stress_idx must cover all "
+                f"{ntens} components.  Got P={P}, F={F}."
+            )
+        if set(P) & set(F):
+            raise ValueError(
+                "prescribed_strain_idx and prescribed_stress_idx must be disjoint.  "
+                f"Overlap: {sorted(set(P) & set(F))}"
+            )
+
+        self._P = np.array(P, dtype=int)
+        self._F = np.array(F, dtype=int)
+        self.max_iter = max_iter
+        self.tol = tol
+
+    def iter_run(
+        self,
+        load: FieldHistory,
+        *,
+        prescribed_stress_history=None,
+        raise_on_nonconverged: bool = True,
+        initial_stress=None,
+        initial_state=None,
+    ) -> Iterator[DriverStep]:
+        """Yield per-step results for mixed strain/stress boundary conditions.
+
+        Parameters
+        ----------
+        load : FieldHistory
+            Must have ``type = FieldType.STRAIN``.  ``load.data`` shape
+            ``(N, len(prescribed_strain_idx))`` — cumulative prescribed strain
+            at each step for the P components.
+        prescribed_stress_history : array-like of shape (N, len(prescribed_stress_idx)) or None
+            Target stress values for the F components at each step.  If ``None``
+            (default), all F components are held at zero.
+        raise_on_nonconverged : bool, optional
+            If ``True`` (default), raise :exc:`RuntimeError` when inner NR does
+            not converge.  If ``False``, yield a :class:`DriverStep` with
+            ``converged=False`` and immediately stop iteration.
+        initial_stress : array-like or None, optional
+            Full stress tensor (ntens,) at the start of the history.
+        initial_state : dict or None, optional
+            State dict at the start of the history.
+
+        Yields
+        ------
+        DriverStep
+            Includes ``n_outer_iter`` and ``residual_inf`` for NR diagnostics.
+        """
+        integrator = self.integrator
+        ntens = integrator.ntens
+        P, F = self._P, self._F
+        nP, nF = len(P), len(F)
+
+        if load.type != FieldType.STRAIN:
+            raise ValueError(
+                f"MixedDriver expects load.type=FieldType.STRAIN, got {load.type!r}"
+            )
+        eps_P_hist = np.asarray(load.data, dtype=float)
+        if eps_P_hist.ndim != 2 or eps_P_hist.shape[1] != nP:
+            raise ValueError(
+                f"load.data must have shape (N, {nP}), got {eps_P_hist.shape}"
+            )
+        N = eps_P_hist.shape[0]
+
+        if prescribed_stress_history is None:
+            if nF == 0:
+                sigF_hist = np.zeros((N, 0))
+            else:
+                sigF_hist = np.zeros((N, nF))
+        else:
+            if nF == 0:
+                raise ValueError(
+                    "prescribed_stress_history provided but there are no "
+                    "stress-prescribed components (nF=0)"
+                )
+            sigF_hist = np.asarray(prescribed_stress_history, dtype=float)
+            if sigF_hist.shape != (N, nF):
+                raise ValueError(
+                    f"prescribed_stress_history must have shape ({N}, {nF}), "
+                    f"got {sigF_hist.shape}"
+                )
+
+        stress_n = (
+            np.zeros(ntens) if initial_stress is None
+            else np.array(initial_stress, dtype=float)
+        )
+        state_n = (
+            integrator.initial_state() if initial_state is None
+            else {k: np.asarray(v) for k, v in initial_state.items()}
+        )
+        eps_total = np.zeros(ntens)
+
+        for i in range(N):
+            deps = np.zeros(ntens)
+            deps[P] = eps_P_hist[i] - eps_total[P]
+
+            if nF == 0:
+                rm = integrator.stress_update(deps, stress_n, state_n)
+                converged = True
+                k = 0
+                residual_inf = 0.0
+            else:
+                sigma_F_target = sigF_hist[i]
+
+                # Initial estimate: elastic compliance restricted to F-F block
+                if hasattr(integrator, "elastic_stiffness"):
+                    C0 = np.array(integrator.elastic_stiffness(state_n))
+                else:
+                    rm0 = integrator.stress_update(np.zeros(ntens), stress_n, state_n)
+                    C0 = np.array(rm0.ddsdde)
+                C0_FF = C0[np.ix_(F, F)]
+                C0_FP = C0[np.ix_(F, P)]
+                rhs0 = (sigma_F_target - stress_n[F]) - C0_FP @ deps[P]
+                deps[F] = np.linalg.solve(C0_FF, rhs0)
+
+                converged = False
+                residual_F = np.full(nF, np.inf)
+                rm = None
+                k = 0
+                for k in range(self.max_iter):
+                    rm = integrator.stress_update(deps, stress_n, state_n)
+                    residual_F = sigma_F_target - np.array(rm.stress)[F]
+                    if float(np.max(np.abs(residual_F))) < self.tol:
+                        converged = True
+                        break
+                    D_FF = np.array(rm.ddsdde)[np.ix_(F, F)]
+                    deps[F] = deps[F] + np.linalg.solve(D_FF, residual_F)
+
+                residual_inf = float(np.max(np.abs(residual_F)))
+
+            if not converged:
+                if raise_on_nonconverged:
+                    raise RuntimeError(
+                        f"MixedDriver: NR did not converge at step {i} "
+                        f"(||residual_F||_inf = {residual_inf:.3e}, "
+                        f"tol = {self.tol:.3e})"
+                    )
+                yield DriverStep(
+                    i=i,
+                    strain=eps_total.copy(),
+                    result=rm,
+                    converged=False,
+                    n_outer_iter=k + 1,
+                    residual_inf=residual_inf,
+                )
+                return
+
+            eps_total = eps_total + deps
+            stress_n = rm.stress
+            state_n = rm.state
+            yield DriverStep(
+                i=i,
+                strain=eps_total.copy(),
+                result=rm,
+                converged=True,
+                n_outer_iter=k + 1,
+                residual_inf=residual_inf,
+            )
+
+    def run(
+        self,
+        load: FieldHistory,
+        *,
+        prescribed_stress_history=None,
+        collect_state: dict[str, FieldType] | None = None,
+        initial_stress=None,
+        initial_state=None,
+    ) -> DriverResult:
+        """Run the mixed strain/stress loading history.
+
+        Parameters
+        ----------
+        load : FieldHistory
+            Must have ``type = FieldType.STRAIN`` and shape
+            ``(N, len(prescribed_strain_idx))``.
+        prescribed_stress_history : array-like of shape (N, len(prescribed_stress_idx)) or None
+            Target stress for the F components.  Defaults to zero.
+        collect_state : dict[str, FieldType] or None, optional
+            State variables to include in the result.
+        initial_stress : array-like or None, optional
+            Stress tensor at the start (default zero).
+        initial_state : dict or None, optional
+            State dict at the start (default integrator initial state).
+
+        Returns
+        -------
+        DriverResult
+
+        Raises
+        ------
+        RuntimeError
+            If inner NR does not converge within ``max_iter`` iterations at
+            any step.
+        """
+        step_results = []
+        strain_rows = []
+        for step in self.iter_run(
+            load,
+            prescribed_stress_history=prescribed_stress_history,
+            raise_on_nonconverged=True,
+            initial_stress=initial_stress,
+            initial_state=initial_state,
+        ):
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (

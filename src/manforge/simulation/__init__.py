@@ -3,6 +3,7 @@ from manforge.simulation.driver import (
     DriverBase,
     StrainDriver,
     StressDriver,
+    MixedDriver,
 )
 from manforge.simulation.integrator import (
     StressIntegrator,
@@ -19,6 +20,7 @@ __all__ = [
     "DriverBase",
     "StrainDriver",
     "StressDriver",
+    "MixedDriver",
     "DriverStep",
     "StressIntegrator",
     "PythonIntegrator",
