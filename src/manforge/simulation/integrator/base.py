@@ -140,7 +140,7 @@ class _PythonIntegratorBase:
             if norm < self._tol:
                 converged = True
                 break
-            J = autograd.jacobian(residual_fn)(x)
+            J = autograd.jacobian(residual_fn)(x)  # type: ignore[call-arg]
             dx = np.linalg.solve(np.array(J), np.array(R))
             x = x - anp.array(dx)
             n_iterations += 1
@@ -180,7 +180,7 @@ class _PythonIntegratorBase:
         state_full = _wrap_state(state_with_stress_dict, model)
         C_n = model.elastic_stiffness(state_n)
         C_conv = model.elastic_stiffness(state_full)
-        n_conv = autograd.grad(
+        n_conv = autograd.grad(  # type: ignore[call-arg]
             lambda s: model.yield_function(_state_with_stress(state_full, s))
         )(anp.array(stress))
         stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
@@ -190,7 +190,7 @@ class _PythonIntegratorBase:
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)
 
-        A = autograd.jacobian(residual_fn)(anp.array(x_conv))
+        A = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[call-arg]
         rhs = np.vstack(
             [np.array(C_n), np.zeros((layout.n_unknown - ntens, ntens))]
         )

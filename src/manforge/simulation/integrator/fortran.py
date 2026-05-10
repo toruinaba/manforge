@@ -9,6 +9,7 @@ import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension, SOLID_3D
+from manforge._typing import StateDict
 
 
 _EPS_INTEGRATOR = 1e-300
@@ -248,8 +249,10 @@ class FortranIntegrator:
     def ntens(self) -> int:
         return self.dimension.ntens
 
-    def initial_state(self) -> dict:
-        return _resolve_callable_or_value(self._initial_state)
+    def initial_state(self) -> StateDict:
+        result = _resolve_callable_or_value(self._initial_state)
+        assert isinstance(result, dict)
+        return result
 
     def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
         strain_inc = np.asarray(strain_inc, dtype=np.float64)

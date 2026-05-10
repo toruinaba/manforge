@@ -322,6 +322,7 @@ class StressDriver(DriverBase):
                     break
                 deps = deps + np.linalg.solve(np.array(rm.ddsdde), residual)
 
+            assert rm is not None  # at least 1 iteration always runs (max_iter >= 1)
             residual_inf = float(np.max(np.abs(residual)))
 
             if not converged:
@@ -631,6 +632,7 @@ class MixedDriver(DriverBase):
                     D_FF = np.array(rm.ddsdde)[np.ix_(F, F)]
                     deps[F] = deps[F] + np.linalg.solve(D_FF, residual_F)
 
+                assert rm is not None  # at least 1 iteration always runs (max_iter >= 1)
                 residual_inf = float(np.max(np.abs(residual_F)))
 
             if not converged:

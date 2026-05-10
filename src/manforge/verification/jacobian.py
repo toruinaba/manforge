@@ -181,6 +181,7 @@ class JacobianChecker:
                     "stress_trial=... explicitly."
                 )
 
+        assert stress_trial is not None
         residual_fn, layout = build_residual(self.model, stress_trial, state_n)
 
         q_imp = {k: state[k] for k in layout.implicit_keys}

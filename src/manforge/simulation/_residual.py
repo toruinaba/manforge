@@ -1,5 +1,10 @@
 """Residual builder for return-mapping systems."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 import autograd.numpy as anp
 import numpy as np
 
@@ -7,13 +12,17 @@ from manforge.core.state import (
     StateResidual, StateUpdate, _validate_state_items, State,
 )
 from manforge.simulation._layout import ResidualLayout
+from manforge._typing import FloatArray, StressVec, StateDict
+
+if TYPE_CHECKING:
+    from manforge.core.material import MaterialModel
 
 
 # ---------------------------------------------------------------------------
 # State wrapping helper
 # ---------------------------------------------------------------------------
 
-def _wrap_state(data: dict, model) -> State:
+def _wrap_state(data: StateDict, model: "MaterialModel") -> State:
     """Wrap a plain dict in a State with the model's field ordering."""
     return State(data, tuple(model.state_names))
 
@@ -22,7 +31,11 @@ def _wrap_state(data: dict, model) -> State:
 # Unified residual builder
 # ---------------------------------------------------------------------------
 
-def build_residual(model, stress_trial, state_n):
+def build_residual(
+    model: "MaterialModel",
+    stress_trial: StressVec,
+    state_n: StateDict,
+) -> tuple[Callable[[FloatArray], FloatArray], ResidualLayout]:
     """Build the unified NR/tangent residual function.
 
     Unknown / residual vector layout (declaration order, stress-first)::
@@ -66,23 +79,25 @@ def build_residual(model, stress_trial, state_n):
         state_trial_for_update["stress"] = sigma
 
         # Explicit non-stress states
-        q_exp: dict = {}
+        q_exp: StateDict = {}
         if layout.explicit_keys:
             expected_explicit = set(layout.explicit_keys)
             state_n_wrapped = _wrap_state(state_n, model)
             trial_wrapped = _wrap_state(state_trial_for_update, model)
             returned = model.update_state(dlambda, state_n_wrapped, trial_wrapped)
-            q_exp = _validate_state_items(
+            raw = _validate_state_items(
                 returned, expected_explicit, StateUpdate,
                 "update_state", model_name,
             )
+            assert isinstance(raw, dict)
+            q_exp = raw
 
         # Assemble full state
         q_full = {"stress": sigma, **q_imp, **q_exp}
         q_full_state = _wrap_state(q_full, model)
 
         # Collect R_state and optional R_Δλ from state_residual
-        R_state_dict: dict = {}
+        R_state_dict: StateDict = {}
         r_dl_override = None
         if user_has_state_residual:
             expected_implicit = set(layout.implicit_keys)
@@ -103,12 +118,14 @@ def build_residual(model, stress_trial, state_n):
                 " for associative flow, or self.stress(R_custom) for non-associative"
                 if layout.is_stress_implicit else ""
             )
-            R_state_dict, r_dl_override = _validate_state_items(
+            raw2 = _validate_state_items(
                 returned, expected_implicit, StateResidual,
                 "state_residual", model_name,
                 extract_dlambda=True,
                 hint=hint,
             )
+            assert isinstance(raw2, tuple)
+            R_state_dict, r_dl_override = raw2
 
         # Δλ row
         R_dl = r_dl_override if r_dl_override is not None else model.yield_function(q_full_state)
@@ -133,7 +150,12 @@ def build_residual(model, stress_trial, state_n):
 # Post-convergence state reconstruction
 # ---------------------------------------------------------------------------
 
-def build_state_from_x(model, x_conv, state_n, layout: ResidualLayout) -> dict:
+def build_state_from_x(
+    model: "MaterialModel",
+    x_conv: FloatArray,
+    state_n: StateDict,
+    layout: ResidualLayout,
+) -> StateDict:
     """Reconstruct the full state dict from a converged NR solution vector.
 
     Calls ``update_state`` once to obtain explicit non-stress states, then
@@ -154,15 +176,17 @@ def build_state_from_x(model, x_conv, state_n, layout: ResidualLayout) -> dict:
         Full state dict including ``"stress"``.
     """
     sigma, dlambda, q_imp = layout.unpack(np.asarray(x_conv))
-    q_exp: dict = {}
+    q_exp: StateDict = {}
     if layout.explicit_keys:
         state_trial_dict = dict(state_n)
         state_trial_dict["stress"] = sigma
         state_n_wrapped = _wrap_state(state_n, model)
         trial_wrapped = _wrap_state(state_trial_dict, model)
         returned = model.update_state(dlambda, state_n_wrapped, trial_wrapped)
-        q_exp = _validate_state_items(
+        raw = _validate_state_items(
             returned, set(layout.explicit_keys), StateUpdate,
             "update_state", type(model).__name__,
         )
+        assert isinstance(raw, dict)
+        q_exp = raw
     return {"stress": sigma, **q_imp, **q_exp}

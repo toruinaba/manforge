@@ -119,7 +119,7 @@ def fit_params(
         result = differential_evolution(
             _scalar_obj,
             de_bounds,
-            seed=0,
+            seed=0,  # type: ignore[call-arg]  # scipy stubs omit seed
             tol=1e-8,
             maxiter=1000,
             callback=lambda xk, convergence=None: _callback(xk),

@@ -401,7 +401,7 @@ class MaterialModel(ABC):
             raise ValueError("default_stress_residual: stress_trial is required")
         stress = state_new["stress"]
         C = self.elastic_stiffness(state_new)
-        n = autograd.grad(
+        n = autograd.grad(  # type: ignore[call-arg]
             lambda s: self.yield_function(_state_with_stress(state_new, s))
         )(stress)
         return stress - stress_trial + dlambda * (C @ n)

@@ -1,5 +1,9 @@
 """Concrete Python integrator classes."""
 
+from __future__ import annotations
+
+from typing import ClassVar, Literal
+
 from manforge.simulation.integrator.base import _PythonIntegratorBase
 
 
@@ -20,7 +24,7 @@ class PythonIntegrator(_PythonIntegratorBase):
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """
 
-    _method = "auto"
+    _method: ClassVar[Literal["auto", "numerical_newton", "user_defined"]] = "auto"
 
 
 class PythonNumericalIntegrator(_PythonIntegratorBase):
@@ -37,7 +41,7 @@ class PythonNumericalIntegrator(_PythonIntegratorBase):
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """
 
-    _method = "numerical_newton"
+    _method: ClassVar[Literal["auto", "numerical_newton", "user_defined"]] = "numerical_newton"
 
 
 class PythonAnalyticalIntegrator(_PythonIntegratorBase):
@@ -56,4 +60,4 @@ class PythonAnalyticalIntegrator(_PythonIntegratorBase):
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
     """
 
-    _method = "user_defined"
+    _method: ClassVar[Literal["auto", "numerical_newton", "user_defined"]] = "user_defined"

@@ -71,9 +71,10 @@ import numpy as np
 
 if TYPE_CHECKING:
     from manforge.core.result import StressUpdateResult
+    from manforge._typing import FloatArray, StateDict
 
 from manforge.simulation.driver import StrainDriver, StressDriver
-from manforge.simulation.types import FieldType
+from manforge.simulation.types import FieldType, FieldHistory
 from manforge.verification.comparator_base import (
     CaseResult,
     ComparisonResult,
@@ -110,19 +111,19 @@ class CrosscheckCaseResult(CaseResult):
     """
 
     py_stress: np.ndarray | None = None
-    py_state: dict | None = None
+    py_state: StateDict | None = None
     py_ddsdde: np.ndarray | None = None
     py_dlambda: float | None = None
     f_stress: np.ndarray | None = None
-    f_state: dict | None = None
+    f_state: StateDict | None = None
     f_ddsdde: np.ndarray | None = None
     result_a: StressUpdateResult | None = None
     result_b: StressUpdateResult | None = None
-    state_n: dict | None = None
+    state_n: StateDict | None = None
     a_n_iterations: int = 0
-    a_residual_history: list = field(default_factory=list)
+    a_residual_history: list[float] = field(default_factory=list)
     b_n_iterations: int = 0
-    b_residual_history: list = field(default_factory=list)
+    b_residual_history: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -133,7 +134,7 @@ class CrosscheckResult(ComparisonResult):
     per-case list typed as :class:`CrosscheckCaseResult`.
     """
 
-    cases: list[CrosscheckCaseResult] = field(default_factory=list)  # type: ignore[assignment]
+    cases: list[CrosscheckCaseResult] = field(default_factory=list)  # type: ignore[assignment]  # narrowed subtype
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +154,8 @@ class _CrosscheckDriverBase(Comparator):
 
     def __init__(
         self,
-        integrator_a,
-        integrator_b,
+        integrator_a: object,
+        integrator_b: object,
         *,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
@@ -166,18 +167,18 @@ class _CrosscheckDriverBase(Comparator):
         self.tangent_tol = tangent_tol
         self.state_tol = state_tol
 
-    def _make_driver(self, integrator):
+    def _make_driver(self, integrator: object) -> StrainDriver | StressDriver:
         raise NotImplementedError
 
-    def _iter_driver(self, driver, load, **kwargs):
+    def _iter_driver(self, driver: StrainDriver | StressDriver, load: FieldHistory, **kwargs):  # type: ignore[return]
         raise NotImplementedError
 
     def iter_run(
         self,
-        load,
+        load: FieldHistory,
         *,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: FloatArray | None = None,
+        initial_state: StateDict | None = None,
         **kwargs,
     ) -> Iterator[CrosscheckCaseResult]:
         if load.type != self._expected_field_type:
@@ -361,8 +362,8 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
 
     def __init__(
         self,
-        integrator_a,
-        integrator_b,
+        integrator_a: object,
+        integrator_b: object,
         *,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
@@ -386,13 +387,13 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
     def _iter_driver(self, driver, load, **kwargs):
         return driver.iter_run(load, **kwargs)
 
-    def iter_run(  # type: ignore[override]
+    def iter_run(
         self,
-        load,
+        load: FieldHistory,
         *,
         raise_on_nonconverged: bool = True,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: FloatArray | None = None,
+        initial_state: StateDict | None = None,
     ) -> Iterator[CrosscheckCaseResult]:
         """Yield per-step crosscheck results.
 
