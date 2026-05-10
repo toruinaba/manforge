@@ -603,7 +603,7 @@ class MixedDriver(DriverBase):
             else:
                 sigma_F_target = sigF_hist[i]
 
-                # Initial estimate: elastic compliance restricted to F-F block
+                # Initial estimate: solve C0[F,F] @ deps[F] = rhs from elastic stiffness
                 if hasattr(integrator, "elastic_stiffness"):
                     C0 = np.array(integrator.elastic_stiffness(state_n))
                 else:

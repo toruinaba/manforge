@@ -9,6 +9,7 @@ from manforge.core.dimension import (
     UNIAXIAL_1D,
     StressDimension,
 )
+from manforge.utils.smooth import smooth_sqrt
 
 
 class MaterialModel3D(MaterialModel):
@@ -204,6 +205,61 @@ class MaterialModelPS(MaterialModel):
     def I_dev(self) -> anp.ndarray:
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
+
+    # ------------------------------------------------------------------
+    # Helpers for kinematic hardening with deviatoric backstress
+    # ------------------------------------------------------------------
+
+    def lift_kin_to_3d(self, stress, alpha) -> anp.ndarray:
+        """Lift relative stress ξ = σ − α to a full 6-component Voigt vector.
+
+        For plane stress, σ33 = 0 but the backstress α33 = −(α11 + α22) is
+        nonzero if α is deviatoric.  This helper enforces that identity so that
+        ``vonmises_kin`` can compute the correct von Mises norm of ξ.
+
+        Parameters
+        ----------
+        stress : array, shape (3,)  — [σ11, σ22, σ12] (σ33 = 0)
+        alpha  : array, shape (3,)  — [α11, α22, α12] (stored components)
+
+        Returns
+        -------
+        anp.ndarray, shape (6,)  — [ξ11, ξ22, ξ33, ξ12, 0, 0]
+            where ξ33 = 0 − α33 = α11 + α22
+        """
+        a33 = -(alpha[0] + alpha[1])
+        xi12 = stress[2] - alpha[2]
+        return anp.array([
+            stress[0] - alpha[0],
+            stress[1] - alpha[1],
+            -a33,       # ξ33 = 0 - α33 = α11 + α22
+            xi12,
+            0.0,
+            0.0,
+        ])
+
+    def vonmises_kin(self, xi6) -> anp.ndarray:
+        """Von Mises norm of a 6-component relative-stress vector (no missing correction).
+
+        Uses the standard 3D formula √(3/2 s:s) with Mandel factors on shear
+        components (×√2).  Intended for evaluating ``σ_vm(ξ)`` after lifting
+        via :meth:`lift_kin_to_3d`.
+
+        Parameters
+        ----------
+        xi6 : array, shape (6,)
+
+        Returns
+        -------
+        scalar
+        """
+        p = (xi6[0] + xi6[1] + xi6[2]) / 3.0
+        delta6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        s = xi6 - p * delta6
+        mandel6 = anp.array([1.0, 1.0, 1.0,
+                              anp.sqrt(2.0), anp.sqrt(2.0), anp.sqrt(2.0)])
+        s_m = s * mandel6
+        return smooth_sqrt(1.5 * anp.dot(s_m, s_m))
 
 
 class MaterialModel1D(MaterialModel):
