@@ -3,13 +3,46 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension, SOLID_3D
-from manforge._typing import StateDict
+from manforge._typing import FloatArray, StateDict, Stiffness, StressVec
+
+if TYPE_CHECKING:
+    from manforge.core.material import MaterialModel
+    from manforge.simulation.integrator import FortranModule
+
+
+# ---------------------------------------------------------------------------
+# Callback Protocols for FortranIntegrator hooks
+# ---------------------------------------------------------------------------
+
+class StateToArgsFn(Protocol):
+    """``state_to_args(state) -> (arg1, arg2, ...)`` — packs state dict into UMAT positional args."""
+    def __call__(self, state: StateDict) -> tuple[Any, ...]: ...
+
+
+class ParseUmatReturnFn(Protocol):
+    """``parse_umat_return(ret) -> (stress, state_dict)`` — unpacks f2py return tuple."""
+    def __call__(self, ret: tuple[Any, ...]) -> tuple[StressVec, StateDict]: ...
+
+
+class ParseUmatDdsddeFn(Protocol):
+    """``parse_umat_ddsdde(ret) -> stiffness`` — extracts tangent from f2py return."""
+    def __call__(self, ret: tuple[Any, ...]) -> Stiffness: ...
+
+
+class ParamFn(Protocol):
+    """``param_fn() -> (p1, p2, ...)`` — returns material parameters in UMAT positional order."""
+    def __call__(self) -> tuple[Any, ...]: ...
+
+
+class ElasticStiffnessFn(Protocol):
+    """``elastic_stiffness_fn(state=None) -> stiffness`` — returns elastic stiffness matrix."""
+    def __call__(self, state: StateDict | None = None) -> Stiffness: ...
 
 
 _EPS_INTEGRATOR = 1e-300
@@ -18,7 +51,7 @@ _EPS_INTEGRATOR = 1e-300
 _NAN = math.nan
 
 
-def _resolve_callable_or_value(x):
+def _resolve_callable_or_value(x: Any) -> Any:
     """Return x() if callable, else x as-is (supports both lambda and ndarray)."""
     return x() if callable(x) else x
 
@@ -86,18 +119,18 @@ class FortranIntegrator:
 
     def __init__(
         self,
-        fortran,
+        fortran: "FortranModule",
         subroutine: str,
         *,
         dimension: StressDimension = SOLID_3D,
-        initial_state,
-        param_fn: Callable[[], tuple],
+        initial_state: StateDict | Callable[[], StateDict],
+        param_fn: ParamFn,
         state_names: list[str],
-        elastic_stiffness_fn: Callable | None = None,
+        elastic_stiffness_fn: ElasticStiffnessFn | None = None,
         elastic_stiffness_subroutine: str | None = None,
-        state_to_args: Callable[[dict], tuple] | None = None,
-        parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
-        parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
+        state_to_args: StateToArgsFn | None = None,
+        parse_umat_return: ParseUmatReturnFn | None = None,
+        parse_umat_ddsdde: ParseUmatDdsddeFn | None = None,
     ) -> None:
         if elastic_stiffness_fn is not None and elastic_stiffness_subroutine is not None:
             raise ValueError(
@@ -126,19 +159,19 @@ class FortranIntegrator:
             )
 
         n_state = len(self._state_names)
-        self._s2a: Callable[[dict], tuple] = (
+        self._s2a: StateToArgsFn = (
             state_to_args
             if state_to_args is not None
             else lambda s: _default_state_to_args(s, self._state_names)
         )
-        self._pur: Callable[[tuple], tuple[np.ndarray, dict]] = (
+        self._pur: ParseUmatReturnFn = (
             parse_umat_return
             if parse_umat_return is not None
             else lambda ret: _default_parse_umat_return(
                 ret, self._state_names, self.initial_state()
             )
         )
-        self._pudd: Callable[[tuple], np.ndarray] = (
+        self._pudd: ParseUmatDdsddeFn = (
             parse_umat_ddsdde
             if parse_umat_ddsdde is not None
             else lambda ret: _default_parse_umat_ddsdde(ret, n_state)
@@ -147,19 +180,19 @@ class FortranIntegrator:
     @classmethod
     def from_model(
         cls,
-        fortran,
+        fortran: "FortranModule",
         subroutine: str,
-        model,
+        model: "MaterialModel",
         *,
         dimension: StressDimension | None = None,
-        param_fn: Callable[[], tuple] | None = None,
+        param_fn: ParamFn | None = None,
         state_names: list[str] | None = None,
-        initial_state=None,
-        elastic_stiffness_fn: Callable | None = None,
+        initial_state: StateDict | Callable[[], StateDict] | None = None,
+        elastic_stiffness_fn: ElasticStiffnessFn | None = None,
         elastic_stiffness_subroutine: str | None = None,
-        state_to_args: Callable[[dict], tuple] | None = None,
-        parse_umat_return: Callable[[tuple], tuple[np.ndarray, dict]] | None = None,
-        parse_umat_ddsdde: Callable[[tuple], np.ndarray] | None = None,
+        state_to_args: StateToArgsFn | None = None,
+        parse_umat_return: ParseUmatReturnFn | None = None,
+        parse_umat_ddsdde: ParseUmatDdsddeFn | None = None,
     ) -> "FortranIntegrator":
         """Build a FortranIntegrator from a MaterialModel.
 
@@ -254,7 +287,7 @@ class FortranIntegrator:
         assert isinstance(result, dict)
         return result
 
-    def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
+    def stress_update(self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict) -> StressUpdateResult:
         strain_inc = np.asarray(strain_inc, dtype=np.float64)
         stress_n   = np.asarray(stress_n,   dtype=np.float64)
 
@@ -299,7 +332,7 @@ class FortranIntegrator:
 # Default hook helpers (mirrors those in crosscheck_driver.py)
 # ---------------------------------------------------------------------------
 
-def _default_state_to_args(state: dict[str, Any], state_names: list[str]) -> tuple:
+def _default_state_to_args(state: StateDict, state_names: list[str]) -> tuple[Any, ...]:
     out = []
     for name in state_names:
         v = state[name]
@@ -311,17 +344,17 @@ def _default_state_to_args(state: dict[str, Any], state_names: list[str]) -> tup
 
 
 def _default_parse_umat_return(
-    ret: tuple,
+    ret: tuple[Any, ...],
     state_names: list[str],
-    initial_state: dict[str, Any],
-) -> tuple[np.ndarray, dict[str, Any]]:
+    initial_state: StateDict,
+) -> tuple[FloatArray, StateDict]:
     stress = np.asarray(ret[0], dtype=np.float64)
-    state_out: dict[str, Any] = {}
+    state_out: StateDict = {}
     for i, name in enumerate(state_names, start=1):
         ref = initial_state[name]
         v = ret[i]
         if np.ndim(ref) == 0:
-            state_out[name] = float(v)
+            state_out[name] = np.array(float(v))
         else:
             state_out[name] = np.asarray(v, dtype=np.float64).reshape(
                 np.asarray(ref).shape
@@ -329,7 +362,7 @@ def _default_parse_umat_return(
     return stress, state_out
 
 
-def _default_parse_umat_ddsdde(ret: tuple, n_state: int) -> np.ndarray:
+def _default_parse_umat_ddsdde(ret: tuple[Any, ...], n_state: int) -> FloatArray:
     trailing = ret[1 + n_state:]
     for v in trailing:
         arr = np.asarray(v)

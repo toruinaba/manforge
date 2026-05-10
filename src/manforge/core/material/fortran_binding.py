@@ -8,7 +8,9 @@ attribute only — runtime behaviour is unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable, TypeVar
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,7 @@ def verified_against_fortran(
     *,
     test: str | None = None,
     notes: str = "",
-) -> Callable:
+) -> Callable[[_F], _F]:
     """Attach a :class:`FortranBinding` to a method.  Runtime behaviour unchanged.
 
     Usage::
@@ -51,14 +53,14 @@ def verified_against_fortran(
     """
     binding = FortranBinding(subroutine=subroutine, test=test, notes=notes)
 
-    def decorator(fn: Callable) -> Callable:
-        fn.__fortran_binding__ = binding
+    def decorator(fn: _F) -> _F:
+        fn.__fortran_binding__ = binding  # type: ignore[attr-defined]
         return fn
 
     return decorator
 
 
-def collect_bindings(cls) -> dict[str, FortranBinding]:
+def collect_bindings(cls: type) -> dict[str, FortranBinding]:
     """Collect methods decorated with :func:`verified_against_fortran`.
 
     Traverses ``cls.__mro__`` from base to derived so that overrides in
