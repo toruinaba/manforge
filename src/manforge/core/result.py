@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 import autograd.numpy as anp
 
+from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
+
 
 @dataclass
 class ReturnMappingResult:
@@ -47,11 +49,11 @@ class ReturnMappingResult:
         therefore supply ``[float(f_trial), 0.0]``.
     """
 
-    stress: anp.ndarray
-    state: dict
-    dlambda: anp.ndarray
+    stress: StressVec
+    state: StateDict
+    dlambda: Scalar
     n_iterations: int = 0
-    residual_history: list = field(default_factory=list)
+    residual_history: list[float] = field(default_factory=list)
     converged: bool = True
 
 
@@ -81,27 +83,27 @@ class StressUpdateResult:
     """
 
     return_mapping: "ReturnMappingResult | None"
-    ddsdde: anp.ndarray
-    stress_trial: "anp.ndarray | None"
+    ddsdde: Stiffness
+    stress_trial: "StressVec | None"
     is_plastic: "bool | None"
-    _state_n: dict = field(repr=False)
+    _state_n: StateDict = field(repr=False)
 
     @property
-    def stress(self) -> anp.ndarray:
+    def stress(self) -> StressVec:
         """Converged stress σ_{n+1} (trial stress for elastic steps)."""
         if self.return_mapping is None:
-            return self.stress_trial
+            return self.stress_trial  # type: ignore[return-value]
         return self.return_mapping.stress
 
     @property
-    def state(self) -> dict:
+    def state(self) -> StateDict:
         """Converged internal state (unchanged state_n for elastic steps)."""
         if self.return_mapping is None:
             return self._state_n
         return self.return_mapping.state
 
     @property
-    def dlambda(self) -> anp.ndarray:
+    def dlambda(self) -> Scalar:
         """Plastic multiplier increment (0 for elastic steps)."""
         if self.return_mapping is None:
             return anp.array(0.0)
@@ -115,7 +117,7 @@ class StressUpdateResult:
         return self.return_mapping.n_iterations
 
     @property
-    def residual_history(self) -> list:
+    def residual_history(self) -> list[float]:
         """Residual norms from the framework NR solver (empty for elastic / user_defined)."""
         if self.return_mapping is None:
             return []

@@ -32,9 +32,10 @@ from collections.abc import Iterator
 import numpy as np
 
 from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
+from manforge._typing import StateDict, StressVec
 
 
-def _check_integrator(obj) -> None:
+def _check_integrator(obj: object) -> None:
     """Raise TypeError when obj is not a StressIntegrator."""
     if not (hasattr(obj, "stress_update") and callable(obj.stress_update)):
         raise TypeError(
@@ -60,7 +61,7 @@ class DriverBase(ABC):
         :class:`~manforge.simulation.integrator.FortranIntegrator`.
     """
 
-    def __init__(self, integrator) -> None:
+    def __init__(self, integrator: object) -> None:
         _check_integrator(integrator)
         self.integrator = integrator
 
@@ -68,6 +69,9 @@ class DriverBase(ABC):
     def iter_run(
         self,
         load: FieldHistory,
+        *,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results as a generator.
 
@@ -99,8 +103,8 @@ class DriverBase(ABC):
         load: FieldHistory,
         *,
         collect_state: dict[str, FieldType] | None = None,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> DriverResult:
         """Run the loading simulation.
 
@@ -165,8 +169,8 @@ class StrainDriver(DriverBase):
         self,
         load: FieldHistory,
         *,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the strain-controlled loading history.
 
@@ -240,7 +244,7 @@ class StressDriver(DriverBase):
         (default 1e-8).
     """
 
-    def __init__(self, integrator, *, max_iter: int = 20, tol: float = 1e-8):
+    def __init__(self, integrator: object, *, max_iter: int = 20, tol: float = 1e-8) -> None:
         super().__init__(integrator)
         self.max_iter = max_iter
         self.tol = tol
@@ -250,8 +254,8 @@ class StressDriver(DriverBase):
         load: FieldHistory,
         *,
         raise_on_nonconverged: bool = True,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for the stress-controlled loading history.
 
@@ -354,8 +358,8 @@ class StressDriver(DriverBase):
         load: FieldHistory,
         *,
         collect_state: dict[str, FieldType] | None = None,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> DriverResult:
         """Run the stress-controlled loading history.
 
@@ -519,8 +523,8 @@ class MixedDriver(DriverBase):
         *,
         prescribed_stress_history=None,
         raise_on_nonconverged: bool = True,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
         """Yield per-step results for mixed strain/stress boundary conditions.
 
@@ -664,8 +668,8 @@ class MixedDriver(DriverBase):
         *,
         prescribed_stress_history=None,
         collect_state: dict[str, FieldType] | None = None,
-        initial_stress=None,
-        initial_state=None,
+        initial_stress: "StressVec | None" = None,
+        initial_state: "StateDict | None" = None,
     ) -> DriverResult:
         """Run the mixed strain/stress loading history.
 

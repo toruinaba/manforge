@@ -25,10 +25,11 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.state import Explicit, SCALAR
+from manforge.core.state import Explicit, SCALAR, State, StateUpdate, StateResidual
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
 from manforge.core.material import verified_against_fortran
+from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
 
 
 class J2Isotropic3D(MaterialModel3D):
@@ -85,15 +86,17 @@ class J2Isotropic3D(MaterialModel3D):
         "j2_isotropic_3d_elastic_stiffness",
         test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
     )
-    def elastic_stiffness(self, state=None) -> anp.ndarray:
+    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
         return super().elastic_stiffness(state)
 
-    def yield_function(self, state) -> anp.ndarray:
+    def yield_function(self, state: "State | StateDict") -> ScalarType:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self.vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, state_n, state_trial) -> list:
+    def update_state(
+        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+    ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
 
@@ -101,7 +104,9 @@ class J2Isotropic3D(MaterialModel3D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_return_mapping(self, stress_trial, C, state_n):
+    def user_defined_return_mapping(
+        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
+    ) -> ReturnMappingResult:
         """J2 radial return — closed-form plastic correction.
 
         Notes
@@ -143,7 +148,10 @@ class J2Isotropic3D(MaterialModel3D):
             residual_history=[float(f_trial), 0.0],
         )
 
-    def user_defined_tangent(self, stress, state, dlambda, C, state_n):
+    def user_defined_tangent(
+        self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
+        C: Stiffness, state_n: StateDict
+    ) -> Stiffness:
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
 
             D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)
@@ -212,12 +220,14 @@ class J2IsotropicPS(MaterialModelPS):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def yield_function(self, state) -> anp.ndarray:
+    def yield_function(self, state: "State | StateDict") -> ScalarType:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self.vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, state_n, state_trial) -> list:
+    def update_state(
+        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+    ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
 
@@ -256,12 +266,14 @@ class J2Isotropic1D(MaterialModel1D):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    def yield_function(self, state) -> anp.ndarray:
+    def yield_function(self, state: "State | StateDict") -> ScalarType:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self.vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, state_n, state_trial) -> list:
+    def update_state(
+        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+    ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
 
@@ -269,7 +281,9 @@ class J2Isotropic1D(MaterialModel1D):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_return_mapping(self, stress_trial, C, state_n):
+    def user_defined_return_mapping(
+        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
+    ) -> ReturnMappingResult:
         """1D J2 radial return — closed-form, 3D-analogous form.
 
         Notes
@@ -318,7 +332,10 @@ class J2Isotropic1D(MaterialModel1D):
             residual_history=[float(f_trial), 0.0],
         )
 
-    def user_defined_tangent(self, stress, state, dlambda, C, state_n):
+    def user_defined_tangent(
+        self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
+        C: Stiffness, state_n: StateDict
+    ) -> Stiffness:
         """1D consistent tangent — closed-form, 3D-analogous form.
 
         Structurally mirrors the 3D formula

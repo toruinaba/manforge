@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pyright>=1.1.380"]
 examples = ["matplotlib"]
 fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 
@@ -41,3 +41,14 @@ markers = [
     "slow: measured >1s (fitting, long cyclic loops) -- deselect with -m 'not slow'",
     "fortran: requires compiled Fortran modules (f2py). Auto-skipped if module missing -- deselect with -m 'not fortran'",
 ]
+
+[tool.pyright]
+include = ["src/manforge"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportGeneralTypeIssues = "warning"
+reportAttributeAccessIssue = "none"
