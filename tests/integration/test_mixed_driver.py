@@ -325,28 +325,53 @@ def test_raise_on_nonconverged_false_yields_and_stops(model_3d, integ_3d):
 # initial_stress / initial_state
 # ---------------------------------------------------------------------------
 
-def test_initial_stress_and_state_accepted(model_3d, integ_3d):
-    """initial_stress / initial_state must be accepted and simulation must converge."""
-    sigma_y0 = model_3d.sigma_y0
-    E = model_3d.E
-    N = 10
-    # First run: get a mid-point state
-    eps_first = np.linspace(0, sigma_y0 / E, N).reshape(-1, 1)
-    res_first = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(strain_load(eps_first))
-
-    mid_stress = res_first.step_results[-1].stress
-    mid_state = res_first.step_results[-1].state
-
-    # Second run continuing from that state
-    eps_second = np.linspace(sigma_y0 / E, 2.0 * sigma_y0 / E, N).reshape(-1, 1)
+def test_initial_stress_zero_increment_preserves_prestress(model_3d, integ_3d):
+    """A zero strain increment from a prestressed state must leave stress unchanged."""
+    prestress = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    load = strain_load(np.zeros((1, 1)))  # ε11 increment = 0
     driver = MixedDriver(integ_3d, prescribed_strain_idx=[0])
-    result = driver.run(
-        strain_load(eps_second),
-        initial_stress=mid_stress,
-        initial_state=mid_state,
+    steps = list(driver.iter_run(load, initial_stress=prestress))
+    np.testing.assert_allclose(
+        np.array(steps[0].result.stress_trial), prestress, atol=1e-12,
+        err_msg="Zero increment from prestressed state must keep trial stress == prestress",
     )
-    assert result.stress.shape == (N, 6)
-    assert all(s.converged for s in result.step_results)
+
+
+def test_initial_state_shifts_yield_surface(model_3d, integ_3d):
+    """Non-zero initial ep must raise the yield surface (step stays elastic when hardened)."""
+    import autograd.numpy as anp
+    sigma_y0, E, H = model_3d.sigma_y0, model_3d.E, model_3d.H
+    eps_y = sigma_y0 / E
+    load = strain_load(np.array([[eps_y * 1.5]]))  # 1.5× yield strain — plastic without hardening
+
+    driver = MixedDriver(integ_3d, prescribed_strain_idx=[0])
+    step_fresh = list(driver.iter_run(load))[0]
+    assert step_fresh.result.is_plastic, "Should be plastic without prior hardening"
+
+    # ep large enough that sigma_y0 + H*ep > sigma_VM(trial)
+    # sigma_VM(trial) for uniaxial eps_y*1.5 in 3D ~ E*eps_y*1.5 ≈ 375 MPa.
+    # Need: 250 + 1000*ep > 375 → ep > 0.125; use ep=0.2 for margin.
+    large_ep = anp.array(0.2)
+    step_hardened = list(driver.iter_run(load, initial_state={"ep": large_ep}))[0]
+    assert not step_hardened.result.is_plastic, "Should be elastic with large initial ep"
+
+
+def test_initial_stress_state_run_forwards(model_3d, integ_3d):
+    """run() must accept and forward initial_stress / initial_state without error,
+    and initial_stress must be reflected in the first step's trial stress."""
+    sigma_y0 = model_3d.sigma_y0
+    prestress = np.array([sigma_y0 * 0.5, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    # Zero strain increment: trial stress must equal prestress
+    load = strain_load(np.zeros((1, 1)))
+    result = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(
+        load, initial_stress=prestress
+    )
+    assert result.stress.shape == (1, 6)
+    np.testing.assert_allclose(
+        np.array(result.step_results[0].stress_trial), prestress, atol=1e-12,
+        err_msg="run() must forward initial_stress: trial stress must equal prestress for zero increment",
+    )
 
 
 # ---------------------------------------------------------------------------
