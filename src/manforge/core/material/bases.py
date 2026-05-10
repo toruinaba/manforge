@@ -225,7 +225,7 @@ class MaterialModelPS(MaterialModel):
         Returns
         -------
         anp.ndarray, shape (6,)  — [ξ11, ξ22, ξ33, ξ12, 0, 0]
-            where ξ33 = −(ξ11_diag_lift) = α11 + α22
+            where ξ33 = 0 − α33 = α11 + α22
         """
         a33 = -(alpha[0] + alpha[1])
         xi12 = stress[2] - alpha[2]

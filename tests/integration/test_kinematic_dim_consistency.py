@@ -147,10 +147,6 @@ def test_af_1d_linear_analytical():
     """AF gamma=0: α should equal C_k * ep (effective backstress definition)."""
     model = AFKinematic1D(**_PARAMS_LINEAR)
     load = _strain_history_1d(n=30)
-    r = _run_1d(model, load)
-    ep = r.fields["ep"].data
-    alpha = r.fields.get("alpha")
-    # Run again collecting alpha
     integ = PythonIntegrator(model)
     r2 = StrainDriver(integ).run(
         load, collect_state={"ep": FieldType.STRAIN, "alpha": FieldType.STRESS}
