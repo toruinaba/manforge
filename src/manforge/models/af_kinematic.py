@@ -86,9 +86,9 @@ class AFKinematic3D(MaterialModel3D):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_trial["stress"]) - alpha_n
+        s_xi = self.dev(state_new["stress"]) - alpha_n
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
         alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
                   / (1.0 + self.gamma * dlambda)
@@ -126,9 +126,9 @@ class AFKinematicPS(MaterialModelPS):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_trial["stress"]) - alpha_n
+        s_xi = self.dev(state_new["stress"]) - alpha_n
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
         alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
                   / (1.0 + self.gamma * dlambda)
@@ -168,9 +168,9 @@ class AFKinematic1D(MaterialModel1D):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_trial["stress"]) - alpha_n
+        s_xi = self.dev(state_new["stress"]) - alpha_n
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
         alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
                   / (1.0 + self.gamma * dlambda)

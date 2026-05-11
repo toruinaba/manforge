@@ -216,7 +216,7 @@ def test_method_analytical_raises_if_no_hooks():
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - self.sigma_y0
 
-        def update_state(self, dlambda, state_n, state_trial):
+        def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
             return []
 
     minimal_model = MinimalModel()

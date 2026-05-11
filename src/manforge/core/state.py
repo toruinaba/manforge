@@ -29,13 +29,13 @@ Returning residuals / updates
 ``StateField.__call__`` wraps a computed value as ``StateResidual`` (implicit)
 or ``StateUpdate`` (explicit), giving a concise return idiom::
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         ...
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         ...
-        return [self.stress(sig_new), self.alpha(alpha_new), self.ep(ep_new)]
+        return [self.alpha(alpha_new), self.ep(ep_new)]
 
 The framework validates the returned list at the call boundary via
 ``_validate_state_items``.
@@ -316,7 +316,7 @@ class DlambdaField:
 
     Example::
 
-        def state_residual(self, state_new, dlambda, state_n, state_trial):
+        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
             f = self.yield_function(state_new)
             R_dl = f - self.eta * dlambda / self.dt   # Perzyna
             return [self.dlambda(R_dl), self.alpha(R_alpha)]

@@ -10,7 +10,7 @@ from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
 from manforge.core.state import _state_with_stress
-from manforge._typing import Stiffness, StressVec, StateDict
+from manforge._typing import FloatArray, Stiffness, StressVec, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +117,15 @@ class _PythonIntegratorBase:
             )
         return None
 
-    def _numerical_newton(self, stress_trial: StressVec, state_n: StateDict) -> tuple:
+    def _numerical_newton(
+        self, stress_trial: StressVec, state_n: StateDict, strain_inc: "FloatArray | None" = None
+    ) -> tuple:
         """Unified NR return mapping.
 
         Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
         """
         model = self._model
-        residual_fn, layout = build_residual(model, stress_trial, state_n)
+        residual_fn, layout = build_residual(model, stress_trial, state_n, strain_inc)
 
         x = layout.pack(
             stress_trial, 0.0,
@@ -153,7 +155,7 @@ class _PythonIntegratorBase:
                 f"tol = {self._tol:.3e})"
             )
 
-        state_new = build_state_from_x(model, x, state_n, layout)
+        state_new = build_state_from_x(model, x, state_n, layout, stress_trial, strain_inc)
         sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
 
         return (
@@ -166,7 +168,8 @@ class _PythonIntegratorBase:
         )
 
     def _consistent_tangent(
-        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict
+        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict,
+        strain_inc: "FloatArray | None" = None,
     ) -> Stiffness:
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
         model = self._model
@@ -185,7 +188,7 @@ class _PythonIntegratorBase:
         )(anp.array(stress))
         stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
 
-        residual_fn, layout = build_residual(model, stress_trial, state_n)
+        residual_fn, layout = build_residual(model, stress_trial, state_n, strain_inc)
 
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)
@@ -197,7 +200,10 @@ class _PythonIntegratorBase:
         dxde = np.linalg.solve(np.array(A), rhs)
         return anp.array(dxde[:ntens, :])
 
-    def return_mapping(self, stress_trial: StressVec, state_n: StateDict) -> ReturnMappingResult:
+    def return_mapping(
+        self, stress_trial: StressVec, state_n: StateDict,
+        strain_inc: "FloatArray | None" = None,
+    ) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)
         rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
@@ -205,7 +211,7 @@ class _PythonIntegratorBase:
             return rm
 
         stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(
-            stress_trial, state_n,
+            stress_trial, state_n, strain_inc,
         )
         return ReturnMappingResult(
             stress=stress,
@@ -235,11 +241,11 @@ class _PythonIntegratorBase:
                 _state_n=state_n,
             )
 
-        rm = self.return_mapping(stress_trial, state_n)
+        rm = self.return_mapping(stress_trial, state_n, strain_inc)
 
         ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n)
         if ddsdde is None:
-            ddsdde = self._consistent_tangent(rm, stress_n, state_n)
+            ddsdde = self._consistent_tangent(rm, stress_n, state_n, strain_inc)
 
         return StressUpdateResult(
             return_mapping=rm,

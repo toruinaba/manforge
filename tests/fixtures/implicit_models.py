@@ -28,7 +28,7 @@ class _AFKinematicImplicit3D(AFKinematic3D):
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
@@ -50,7 +50,7 @@ class _AFKinematicImplicitPS(AFKinematicPS):
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n
@@ -76,7 +76,7 @@ class _AFKinematicImplicitPE(AFKinematic3D):
         super().__init__(dimension=PLANE_STRAIN,
                          E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n

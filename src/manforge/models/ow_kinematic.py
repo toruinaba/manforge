@@ -92,7 +92,7 @@ class OWKinematic3D(MaterialModel3D):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_new = state_new["alpha"]
         s_xi = self.dev(state_new["stress"]) - alpha_new
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
@@ -139,7 +139,7 @@ class OWKinematicPS(MaterialModelPS):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_new = state_new["alpha"]
         s_xi = self.dev(state_new["stress"]) - alpha_new
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
@@ -188,7 +188,7 @@ class OWKinematic1D(MaterialModel1D):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_new = state_new["alpha"]
         s_xi = self.dev(state_new["stress"]) - alpha_new
         n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)

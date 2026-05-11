@@ -18,7 +18,7 @@ class _Stub3D(MaterialModel3D):
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         raise NotImplementedError
 
 
@@ -32,7 +32,7 @@ class _StubPS(MaterialModelPS):
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         raise NotImplementedError
 
 
@@ -46,7 +46,7 @@ class _Stub1D(MaterialModel1D):
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         raise NotImplementedError
 
 
@@ -65,5 +65,5 @@ class _StubWithParams(MaterialModel3D):
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         raise NotImplementedError

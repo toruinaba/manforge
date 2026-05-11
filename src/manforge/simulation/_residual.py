@@ -35,6 +35,7 @@ def build_residual(
     model: "MaterialModel",
     stress_trial: StressVec,
     state_n: StateDict,
+    strain_inc: "FloatArray | None" = None,
 ) -> tuple[Callable[[FloatArray], FloatArray], ResidualLayout]:
     """Build the unified NR/tangent residual function.
 
@@ -47,10 +48,14 @@ def build_residual(
     phase (iterated until convergence) and the tangent/Jacobian phase
     (Jacobian evaluated at the converged point).
 
-    ``state_trial["stress"]`` passed to ``update_state`` and ``state_residual``
-    is always the **current σ NR iterate**.  For models with
-    ``stress = Implicit``, the fixed elastic predictor σ_trial is provided
-    separately via the ``stress_trial`` keyword argument to ``state_residual``.
+    ``state_new`` passed to ``update_state`` and ``state_residual`` holds the
+    **current NR iterate**: ``state_new["stress"] = σ_k``,
+    ``state_new[implicit_key] = current iterate``.  Explicit non-stress keys
+    carry ``state_n`` values when passed to ``update_state``; after
+    ``update_state`` returns, its results are merged before calling
+    ``state_residual``.  The fixed elastic predictor ``stress_trial`` and the
+    strain increment ``strain_inc`` are forwarded as keyword arguments to both
+    methods.
 
     Returns
     -------
@@ -63,6 +68,7 @@ def build_residual(
     layout = ResidualLayout.from_model(model)
     model_name = type(model).__name__
     stress_trial_arr = anp.array(stress_trial)
+    strain_inc_arr = anp.array(strain_inc) if strain_inc is not None else None
     user_has_state_residual = (type(model).state_residual is not _MaterialModel.state_residual)
 
     if layout.is_stress_implicit and not user_has_state_residual:
@@ -74,17 +80,20 @@ def build_residual(
     def residual_fn(x):
         sigma, dlambda, q_imp = layout.unpack(x)
 
-        # state_trial["stress"] = current σ iterate for update_state
-        state_trial_for_update = dict(state_n)
-        state_trial_for_update["stress"] = sigma
+        # state_new for update_state: σ_k + implicit iterates + state_n for explicit keys
+        state_new_for_update: StateDict = {**state_n, "stress": sigma, **q_imp}
 
         # Explicit non-stress states
         q_exp: StateDict = {}
         if layout.explicit_keys:
             expected_explicit = set(layout.explicit_keys)
             state_n_wrapped = _wrap_state(state_n, model)
-            trial_wrapped = _wrap_state(state_trial_for_update, model)
-            returned = model.update_state(dlambda, state_n_wrapped, trial_wrapped)
+            state_new_wrapped = _wrap_state(state_new_for_update, model)
+            returned = model.update_state(
+                dlambda, state_new_wrapped, state_n_wrapped,
+                stress_trial=stress_trial_arr,
+                strain_inc=strain_inc_arr,
+            )
             raw = _validate_state_items(
                 returned, expected_explicit, StateUpdate,
                 "update_state", model_name,
@@ -92,7 +101,7 @@ def build_residual(
             assert isinstance(raw, dict)
             q_exp = raw
 
-        # Assemble full state
+        # Assemble full state (explicit keys now hold updated values)
         q_full = {"stress": sigma, **q_imp, **q_exp}
         q_full_state = _wrap_state(q_full, model)
 
@@ -103,15 +112,12 @@ def build_residual(
             expected_implicit = set(layout.implicit_keys)
             if layout.is_stress_implicit:
                 expected_implicit = expected_implicit | {"stress"}
-            state_new_wrapped = _wrap_state(q_full, model)
+            state_new_full_wrapped = _wrap_state(q_full, model)
             state_n_wrapped = _wrap_state(state_n, model)
-            # state_trial["stress"] = current σ iterate (for flow direction / backstress)
-            state_trial_for_residual = dict(state_n)
-            state_trial_for_residual["stress"] = sigma
-            trial_wrapped = _wrap_state(state_trial_for_residual, model)
             returned = model.state_residual(
-                state_new_wrapped, dlambda, state_n_wrapped, trial_wrapped,
+                state_new_full_wrapped, dlambda, state_n_wrapped,
                 stress_trial=stress_trial_arr,
+                strain_inc=strain_inc_arr,
             )
             hint = (
                 "add self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))"
@@ -155,6 +161,8 @@ def build_state_from_x(
     x_conv: FloatArray,
     state_n: StateDict,
     layout: ResidualLayout,
+    stress_trial: "FloatArray | None" = None,
+    strain_inc: "FloatArray | None" = None,
 ) -> StateDict:
     """Reconstruct the full state dict from a converged NR solution vector.
 
@@ -169,6 +177,10 @@ def build_state_from_x(
     state_n : dict
         State at the beginning of the increment.
     layout : ResidualLayout
+    stress_trial : array-like, optional
+        Fixed elastic predictor forwarded to ``update_state``.
+    strain_inc : array-like, optional
+        Strain increment forwarded to ``update_state``.
 
     Returns
     -------
@@ -178,11 +190,16 @@ def build_state_from_x(
     sigma, dlambda, q_imp = layout.unpack(np.asarray(x_conv))
     q_exp: StateDict = {}
     if layout.explicit_keys:
-        state_trial_dict = dict(state_n)
-        state_trial_dict["stress"] = sigma
+        state_new_dict: StateDict = {**state_n, "stress": sigma, **q_imp}
         state_n_wrapped = _wrap_state(state_n, model)
-        trial_wrapped = _wrap_state(state_trial_dict, model)
-        returned = model.update_state(dlambda, state_n_wrapped, trial_wrapped)
+        state_new_wrapped = _wrap_state(state_new_dict, model)
+        stress_trial_arr = np.asarray(stress_trial) if stress_trial is not None else None
+        strain_inc_arr = np.asarray(strain_inc) if strain_inc is not None else None
+        returned = model.update_state(
+            dlambda, state_new_wrapped, state_n_wrapped,
+            stress_trial=stress_trial_arr,
+            strain_inc=strain_inc_arr,
+        )
         raw = _validate_state_items(
             returned, set(layout.explicit_keys), StateUpdate,
             "update_state", type(model).__name__,
