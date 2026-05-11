@@ -50,6 +50,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, ItemsView, KeysView, Literal, ValuesView
 
+import autograd.numpy as anp
+
 from manforge._typing import FloatArray, StateDict
 
 
@@ -205,7 +207,6 @@ class StateField:
 
     def initial_value(self, model: Any) -> FloatArray:
         """Compute the initial (zero) value for this field."""
-        import autograd.numpy as anp
         if self.default is not None:
             return self.default(model)
         shp = self.resolve_shape(model.ntens)
@@ -408,7 +409,7 @@ def _validate_state_items(
             raise ValueError(
                 f"{model_name}.{method_name}: duplicate entry for {item.name!r}"
             )
-        out[item.name] = item.value
+        out[item.name] = anp.array(item.value)
     if extract_dlambda and len(dl_items) > 1:
         raise ValueError(
             f"{model_name}.{method_name}: duplicate self.dlambda(...) entries"
@@ -426,7 +427,7 @@ def _validate_state_items(
             parts.append(f"unexpected: {sorted(extra)}")
         raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
     if extract_dlambda:
-        r_dl = dl_items[0].value if dl_items else None
+        r_dl = anp.array(dl_items[0].value) if dl_items else None
         return out, r_dl
     return out
 

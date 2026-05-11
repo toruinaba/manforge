@@ -208,13 +208,13 @@ class ResidualLayout:
         """
         ntens = self.ntens
         sigma = x[:ntens]
-        dlambda = x[ntens]
+        dlambda = anp.array(x[ntens])
         q_imp: StateDict = {}
         idx = ntens + 1
         for k, shp in self._shapes:
             size = int(np.prod(shp))
             chunk = x[idx: idx + size]
-            q_imp[k] = chunk.reshape(shp) if shp else chunk[0]
+            q_imp[k] = chunk.reshape(shp) if shp else anp.array(chunk[0])
             idx += size
         return sigma, dlambda, q_imp
 

@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-from numpy.typing import NDArray
 from scipy.optimize import minimize, differential_evolution
 from typing_extensions import TypeAlias
 
