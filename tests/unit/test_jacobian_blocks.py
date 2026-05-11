@@ -226,7 +226,7 @@ class _ResidualNameModel(MaterialModel3D):
     def yield_function(self, state):
         return self.vonmises(state["stress"] - state["alpha"]) - (self.sigma_y0 + self.H * state["ep"])
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         import autograd as _ag
         from manforge.core.state import _state_with_stress
         stress = state_new["stress"]

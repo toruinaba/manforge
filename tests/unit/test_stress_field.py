@@ -39,7 +39,7 @@ def test_stress_auto_attached_as_explicit():
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - 250.0
 
-        def update_state(self, dlambda, state_n, state_trial):
+        def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
             return [self.ep(state_n["ep"] + dlambda)]
 
     assert "stress" in _M.state_fields
@@ -58,7 +58,7 @@ def test_stress_implicit_declaration():
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - 250.0
 
-        def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
             return [self.ep(state_new["ep"] - state_n["ep"] - dlambda)]
 
     assert _M.state_fields["stress"].kind == "implicit"
@@ -142,7 +142,7 @@ class _CustomStressResidual(MaterialModel3D):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self.vonmises(state["stress"]) - sigma_y
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         # Hand-coded J2 associative R_stress using correct Mandel-scaled flow direction.
         # s_hat = (3/2) * s * m² / σ_vm  (m = Mandel factors; m²=[1,1,1,2,2,2] for 3D)
         # This matches autograd.grad(yield_function w.r.t. stress) without nested autograd.

@@ -48,7 +48,7 @@ class _DlambdaOnlyModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         return [self.dlambda(self.yield_function(state_new))]
 
 
@@ -69,7 +69,7 @@ class _AlphaModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         R_alpha = state_new["alpha"] - state_n["alpha"]
         return [self.alpha(R_alpha)]
 
@@ -89,7 +89,7 @@ class _DuplicateDlambdaModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         R_alpha = state_new["alpha"] - state_n["alpha"]
         return [
             self.alpha(R_alpha),
@@ -113,7 +113,7 @@ class _BadItemModel(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         return [42]  # wrong type
 
 
@@ -132,7 +132,7 @@ class _DlambdaInUpdateState(MaterialModel3D):
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         return [
             self.ep(state_n["ep"] + dlambda),
             self.dlambda(anp.array(0.0)),  # not allowed
@@ -225,7 +225,7 @@ def test_state_residual_with_dlambda_override_extracts_correctly():
     from manforge.simulation._residual import _wrap_state
     state_wrapped = _wrap_state(state_n, model)
     returned = model.state_residual(
-        state_wrapped, anp.array(0.0), state_wrapped, state_wrapped,
+        state_wrapped, anp.array(0.0), state_wrapped,
         stress_trial=anp.zeros(6),
     )
     result_dict, r_dl = _validate_state_items(
@@ -244,7 +244,7 @@ def test_state_residual_without_dlambda_extracts_none():
     from manforge.simulation._residual import _wrap_state
     state_wrapped = _wrap_state(state_n, model)
     returned = model.state_residual(
-        state_wrapped, anp.array(0.0), state_wrapped, state_wrapped,
+        state_wrapped, anp.array(0.0), state_wrapped,
         stress_trial=anp.zeros(6),
     )
     result_dict, r_dl = _validate_state_items(

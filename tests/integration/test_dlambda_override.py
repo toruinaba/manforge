@@ -62,10 +62,10 @@ class _J2ScalarWithDlambdaOverride(MaterialModel3D):
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         # Explicit override that is mathematically identical to the default
         return [self.dlambda(self.yield_function(state_new))]
 
@@ -88,7 +88,7 @@ class _J2ScalarDefault(MaterialModel3D):
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         return [self.ep(state_n["ep"] + dlambda)]
 
 
@@ -168,7 +168,7 @@ class _KinematicWithDlambdaOverride(MaterialModel3D):
         xi = state["stress"] - state["alpha"]
         return self.vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         xi_new = state_new["stress"] - state_new["alpha"]
         f_new = self.vonmises(xi_new) - self.sigma_y0
         # flow direction n = df/dσ at current iterate
@@ -204,7 +204,7 @@ class _KinematicDefault(MaterialModel3D):
         xi = state["stress"] - state["alpha"]
         return self.vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         import autograd
         from manforge.core.state import _state_with_stress
         n = autograd.grad(

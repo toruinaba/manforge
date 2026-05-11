@@ -34,12 +34,12 @@ class _AFAlphaImplicit(AFKinematic3D):
 
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_n = state_n["alpha"]
-        stress = state_trial["stress"]
+        stress = state_new["stress"]
         xi = stress - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
@@ -59,11 +59,11 @@ class _AFAlphaImplicitStress(AFKinematic3D):
     stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         # stress is Implicit: only return the explicit ep key
         return [self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         alpha_n = state_n["alpha"]
         stress = state_new["stress"]
         xi = stress - alpha_n

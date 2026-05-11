@@ -95,7 +95,8 @@ class J2Isotropic3D(MaterialModel3D):
         return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(
-        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
+        *, stress_trial: "StressVec | None" = None, strain_inc=None,
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
@@ -226,7 +227,8 @@ class J2IsotropicPS(MaterialModelPS):
         return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(
-        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
+        *, stress_trial: "StressVec | None" = None, strain_inc=None,
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
@@ -272,7 +274,8 @@ class J2Isotropic1D(MaterialModel1D):
         return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(
-        self, dlambda: ScalarType, state_n: "State | StateDict", state_trial: "State | StateDict"
+        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
+        *, stress_trial: "StressVec | None" = None, strain_inc=None,
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]

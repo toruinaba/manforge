@@ -75,27 +75,27 @@ class MyModel(MaterialModel3D):
 User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
 
 - `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.**
-- `update_state(self, dlambda, state_n, state_trial)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
-- `state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
+- `update_state(self, dlambda, state_new, state_n, *, stress_trial, strain_inc)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
+- `state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
 
-`state_trial["stress"]` semantics: always the **current σ NR iterate** (same in both `update_state` and `state_residual`). The fixed elastic predictor σ_trial = σ_n + C Δε is provided as the keyword argument `stress_trial` to `state_residual`. Use `self.default_stress_residual(state_new, dlambda, stress_trial)` to compute the associative R_stress.
+`state_new` semantics (both methods): the **current NR iterate** at step n+1. `state_new["stress"]` = σ_k (current σ NR iterate); `state_new[implicit_key]` = current implicit iterate (e.g. α_k); `state_new[explicit_key]` = `state_n` value in `update_state` (not yet updated), or the value returned by `update_state` in `state_residual` (already updated). `stress_trial` = fixed elastic predictor σ_n + C Δε (keyword-only, not part of `state_new`). `strain_inc` = Δε for the current load step (keyword-only; useful for elastic/plastic strain decomposition).
 
 Use `StateField.__call__` to wrap return values (produces `StateResidual` or `StateUpdate` depending on field kind):
 
 ```python
-def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
     R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
     ...
     return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
 
-def update_state(self, dlambda, state_n, state_trial):
+def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
     ...
     return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate (no stress)
 ```
 
 The framework validates the list at the boundary: wrong kind (`StateResidual` where `StateUpdate` expected), duplicate names, missing or extra fields all raise `TypeError` / `ValueError` immediately.
 
-The base class provides a default `state_residual = q_{n+1} − update_state(...)` so models with a closed-form update can opt into implicit NR without rewriting the physics. Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys.
+Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys. When `state_residual` is called, `state_new[explicit_key]` already holds the result of `update_state` for the current iteration.
 
 `result.state` from the solver always contains `"stress"` — `model.yield_function(result.state)` works directly.
 
@@ -130,7 +130,7 @@ autograd computes yield function gradients and the Hessian needed for the tangen
 
 - `simulation/integrator/` (package): `_PythonIntegratorBase.stress_update(strain_inc, stress_n, state_n)` → `StressUpdateResult` — full constitutive integration (elastic trial → yield check → return mapping → consistent tangent). Equivalent to one UMAT call. `_PythonIntegratorBase.return_mapping(stress_trial, state_n)` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.state_fields["stress"].kind` and `model.implicit_state_names`: scalar NR on Δλ when stress is Explicit and no other implicit states; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` (when `stress = Implicit`) otherwise (max 50 iter, tol=1e-10). `_method` class variable on subclasses: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`). NR logic lives in `integrator/base.py`; consistent tangent via implicit differentiation in the same file (`_consistent_tangent`).
 - `simulation/_layout.py`: `ResidualLayout` frozen dataclass — single source of truth for the NR unknown vector layout `x = [σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]`. Created via `ResidualLayout.from_model(model)`; provides `pack`, `unpack`, `state_slice`, `slot_slice(name)`, `slot_shape(name)`, `residual_name_for(state_name)`, `residual_names()` helpers. `slot_slice` / `slot_shape` accept `"stress"`, `"dlambda"`, or any implicit key and return absolute slices / shapes in the full vector.
-- `simulation/_residual.py`: `build_residual(model, stress_trial, state_n)` → `(residual_fn, layout)` — unified autograd-differentiable residual for both NR and tangent phases. `residual_fn(x)` returns a flat array. `build_state_from_x(model, x_conv, state_n, layout)` reconstructs the full state dict from a converged NR vector.
+- `simulation/_residual.py`: `build_residual(model, stress_trial, state_n, strain_inc=None)` → `(residual_fn, layout)` — unified autograd-differentiable residual for both NR and tangent phases. `residual_fn(x)` returns a flat array. `build_state_from_x(model, x_conv, state_n, layout, stress_trial=None, strain_inc=None)` reconstructs the full state dict from a converged NR vector.
 - `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Two APIs: `run(load, *, initial_stress=None, initial_state=None, collect_state)` → `DriverResult` (batch); `iter_run(load, *, initial_stress=None, initial_state=None)` → `Iterator[DriverStep]` (step-by-step, supports early break / mid-loop branching). `DriverStep` fields: `i`, `strain` (cumulative), `result` (`StressUpdateResult`), `converged`, `n_outer_iter`, `residual_inf`. `StressDriver.iter_run` accepts `raise_on_nonconverged=False` to yield non-converged steps instead of raising. `DriverResult` fields: `step_results: list[StressUpdateResult]` (primary); `stress`, `strain`, `fields` are derived properties.
 - `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`
 - `verification/fd_check.py`: Compares AD tangent vs central finite differences

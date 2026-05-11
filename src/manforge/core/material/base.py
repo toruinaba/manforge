@@ -49,9 +49,9 @@ class MaterialModel(ABC):
 
     Required methods depend on which states are explicit vs implicit:
 
-    - ``update_state(dlambda, state_n, state_trial)`` — required when any
+    - ``update_state(dlambda, state_new, state_n, *, stress_trial, strain_inc)`` — required when any
       non-stress state is explicit; returns only the explicit-state keys.
-    - ``state_residual(state_new, dlambda, state_n, state_trial)`` — required
+    - ``state_residual(state_new, dlambda, state_n, *, stress_trial, strain_inc)`` — required
       when any state is implicit; returns only the implicit-state keys.
 
     The framework auto-injects the associative stress default
@@ -234,12 +234,15 @@ class MaterialModel(ABC):
     def update_state(
         self,
         dlambda: Scalar,
+        state_new: "State | StateDict",
         state_n: "State | StateDict",
-        state_trial: "State | StateDict",
+        *,
+        stress_trial: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> list[StateUpdate | StateResidual]:
         """Return updated non-stress explicit state variables after a plastic increment.
 
-        Closed-form (explicit) update rule: given (Δλ, state_n, state_trial),
+        Closed-form (explicit) update rule: given (Δλ, state_new, state_n),
         returns the explicit **non-stress** state keys as a list of
         :class:`StateUpdate`.  Required when any non-stress state is explicit.
 
@@ -250,11 +253,21 @@ class MaterialModel(ABC):
         ----------
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ ≥ 0.
+        state_new : State or dict
+            Current NR iterate.  ``state_new["stress"]`` = σ_k (current σ NR iterate);
+            ``state_new[implicit_key]`` = current implicit iterate.  Explicit
+            non-stress keys carry ``state_n`` values at the time this method is
+            called (not yet updated).
         state_n : State or dict
             State at the beginning of the increment.
-        state_trial : State or dict
-            Trial state.  ``state_trial["stress"]`` is the **current σ NR iterate**
-            (use it to evaluate flow directions at the current state).
+        stress_trial : anp.ndarray, shape (ntens,), keyword-only
+            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this when the
+            closed-form update depends on the trial stress (e.g. elastic-strain
+            tracking via Δε_e = C⁻¹(σ_trial − σ_n) − Δλ n̂).
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε for the current load step.  Use this when the
+            update depends on the total strain increment (e.g. elastic/plastic
+            strain decomposition).
 
         Returns
         -------
@@ -277,39 +290,37 @@ class MaterialModel(ABC):
         state_new: "State | StateDict",
         dlambda: Scalar,
         state_n: "State | StateDict",
-        state_trial: "State | StateDict",
         *,
         stress_trial: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> list[StateResidual | DlambdaResidual]:
         """Residual of the implicit state evolution equations.
 
-        Defines R_h(state_new, Δλ, state_n, state_trial) = 0 for state
-        variables listed in :attr:`implicit_state_names`.  When stress is
-        declared ``Implicit``, return ``self.stress(R_stress)`` in the list
-        as well.
+        Defines R_h(state_new, Δλ, state_n) = 0 for state variables listed in
+        :attr:`implicit_state_names`.  When stress is declared ``Implicit``,
+        return ``self.stress(R_stress)`` in the list as well.
 
         Parameters
         ----------
         state_new : State or dict
-            Proposed state values at step n+1 (NR unknowns).
-            ``state_new["stress"]`` is always the **current σ NR iterate**.
+            Current NR iterate at step n+1.  ``state_new["stress"]`` = σ_k
+            (current σ NR iterate); ``state_new[implicit_key]`` = current
+            implicit iterate; ``state_new[explicit_key]`` = updated value
+            already returned by ``update_state`` for this iteration.
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
         state_n : State or dict
             State at the beginning of the increment.
-        state_trial : State or dict
-            Trial state.  ``state_trial["stress"]`` is the **current σ NR iterate**
-            (same as ``state_new["stress"]``), available for evaluating flow
-            directions at the current state.
         stress_trial : anp.ndarray, shape (ntens,), keyword-only
-            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this (not
-            ``state_trial["stress"]``) when you need the fixed trial stress for
-            the associative residual formula::
+            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this when you
+            need the fixed trial stress for the associative residual formula::
 
                 R_stress = σ − stress_trial + Δλ·C·∂f/∂σ
 
             Call :meth:`default_stress_residual` which accepts ``stress_trial``
             directly, or use this kwarg to compute R_stress manually.
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε for the current load step.
 
         Returns
         -------
@@ -405,39 +416,6 @@ class MaterialModel(ABC):
             lambda s: self.yield_function(_state_with_stress(state_new, s))
         )(stress)
         return stress - stress_trial + dlambda * (C @ n)
-
-    def default_stress_update(
-        self,
-        dlambda: Scalar,
-        state_n: "State | StateDict",
-        state_trial: "State | StateDict",
-    ) -> StressVec:
-        """Return the current σ NR iterate from ``state_trial``.
-
-        In ``update_state``, ``state_trial["stress"]`` is the **current σ NR
-        iterate**.  This helper is a no-op that returns it, provided for
-        symmetry with :meth:`default_stress_residual`.
-
-        .. deprecated::
-            ``stress`` must no longer be returned from ``update_state``.
-            This method exists only for models that have not yet been updated.
-            The framework ignores any ``stress`` value returned by
-            ``update_state``; the NR system drives σ directly.
-
-        Parameters
-        ----------
-        dlambda : scalar
-            Unused.
-        state_n : State or dict
-            Unused.
-        state_trial : State or dict
-            ``state_trial["stress"]`` is the current σ NR iterate.
-
-        Returns
-        -------
-        anp.ndarray, shape (ntens,)
-        """
-        return state_trial["stress"]
 
     def vonmises(self, stress: StressVec) -> Scalar:
         """Von Mises equivalent stress with missing-component correction.
