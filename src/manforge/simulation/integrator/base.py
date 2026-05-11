@@ -10,7 +10,7 @@ from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
 from manforge.core.state import _state_with_stress
-from manforge._typing import Stiffness, StressVec, StateDict
+from manforge._typing import FloatArray, Stiffness, StressVec, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ class _PythonIntegratorBase:
         return None
 
     def _numerical_newton(
-        self, stress_trial: StressVec, state_n: StateDict, strain_inc: "StressVec | None" = None
+        self, stress_trial: StressVec, state_n: StateDict, strain_inc: "FloatArray | None" = None
     ) -> tuple:
         """Unified NR return mapping.
 
@@ -169,7 +169,7 @@ class _PythonIntegratorBase:
 
     def _consistent_tangent(
         self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict,
-        strain_inc: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> Stiffness:
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
         model = self._model
@@ -202,7 +202,7 @@ class _PythonIntegratorBase:
 
     def return_mapping(
         self, stress_trial: StressVec, state_n: StateDict,
-        strain_inc: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)

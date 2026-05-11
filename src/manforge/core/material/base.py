@@ -291,7 +291,7 @@ class MaterialModel(ABC):
         dlambda: Scalar,
         state_n: "State | StateDict",
         *,
-        stress_trial: "StressVec | None" = None,
+        stress_trial: "StressVec",
         strain_inc: "FloatArray | None" = None,
     ) -> list[StateResidual | DlambdaResidual]:
         """Residual of the implicit state evolution equations.

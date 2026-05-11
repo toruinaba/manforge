@@ -75,8 +75,8 @@ class MyModel(MaterialModel3D):
 User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
 
 - `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.**
-- `update_state(self, dlambda, state_new, state_n, *, stress_trial, strain_inc)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
-- `state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
+- `update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
+- `state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
 
 `state_new` semantics (both methods): the **current NR iterate** at step n+1. `state_new["stress"]` = σ_k (current σ NR iterate); `state_new[implicit_key]` = current implicit iterate (e.g. α_k); `state_new[explicit_key]` = `state_n` value in `update_state` (not yet updated), or the value returned by `update_state` in `state_residual` (already updated). `stress_trial` = fixed elastic predictor σ_n + C Δε (keyword-only, not part of `state_new`). `strain_inc` = Δε for the current load step (keyword-only; useful for elastic/plastic strain decomposition).
 
