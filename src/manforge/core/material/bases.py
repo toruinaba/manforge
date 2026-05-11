@@ -10,7 +10,7 @@ from manforge.core.dimension import (
     UNIAXIAL_1D,
     StressDimension,
 )
-from manforge.utils.smooth import smooth_sqrt
+from manforge.utils.smooth import smooth_sqrt, smooth_abs
 
 
 class MaterialModel3D(MaterialModel):
@@ -112,6 +112,14 @@ class MaterialModel3D(MaterialModel):
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
+    def vonmises_norm(self, s: StressVec) -> Scalar:
+        """Von Mises norm of a deviatoric tensor s: √(3/2 s:s).
+
+        Caller guarantees tr s = 0.  For 3D/PE all components are stored,
+        so this delegates to :meth:`vonmises` with n_missing=0.
+        """
+        return self.vonmises(s)
+
 
 class MaterialModelPS(MaterialModel):
     """Stress-state base class for plane-stress elements (PLANE_STRESS).
@@ -207,60 +215,14 @@ class MaterialModelPS(MaterialModel):
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
-    # ------------------------------------------------------------------
-    # Helpers for kinematic hardening with deviatoric backstress
-    # ------------------------------------------------------------------
+    def vonmises_norm(self, s: StressVec) -> Scalar:
+        """Von Mises norm of a deviatoric tensor s: √(3/2 s:s).
 
-    def lift_kin_to_3d(self, stress: StressVec, alpha: StressVec) -> FloatArray:
-        """Lift relative stress ξ = σ − α to a full 6-component Voigt vector.
-
-        For plane stress, σ33 = 0 but the backstress α33 = −(α11 + α22) is
-        nonzero if α is deviatoric.  This helper enforces that identity so that
-        ``vonmises_kin`` can compute the correct von Mises norm of ξ.
-
-        Parameters
-        ----------
-        stress : array, shape (3,)  — [σ11, σ22, σ12] (σ33 = 0)
-        alpha  : array, shape (3,)  — [α11, α22, α12] (stored components)
-
-        Returns
-        -------
-        anp.ndarray, shape (6,)  — [ξ11, ξ22, ξ33, ξ12, 0, 0]
-            where ξ33 = 0 − α33 = α11 + α22
+        Caller guarantees tr s = 0.  For plane stress the unstored component
+        s33 = −(s11 + s22) is reconstructed from the deviatoric identity.
         """
-        a33 = -(alpha[0] + alpha[1])
-        xi12 = stress[2] - alpha[2]
-        return anp.array([
-            stress[0] - alpha[0],
-            stress[1] - alpha[1],
-            -a33,       # ξ33 = 0 - α33 = α11 + α22
-            xi12,
-            0.0,
-            0.0,
-        ])
-
-    def vonmises_kin(self, xi6: FloatArray) -> Scalar:
-        """Von Mises norm of a 6-component relative-stress vector (no missing correction).
-
-        Uses the standard 3D formula √(3/2 s:s) with Mandel factors on shear
-        components (×√2).  Intended for evaluating ``σ_vm(ξ)`` after lifting
-        via :meth:`lift_kin_to_3d`.
-
-        Parameters
-        ----------
-        xi6 : array, shape (6,)
-
-        Returns
-        -------
-        scalar
-        """
-        p = (xi6[0] + xi6[1] + xi6[2]) / 3.0
-        delta6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
-        s = xi6 - p * delta6
-        mandel6 = anp.array([1.0, 1.0, 1.0,
-                              anp.sqrt(2.0), anp.sqrt(2.0), anp.sqrt(2.0)])
-        s_m = s * mandel6
-        return smooth_sqrt(1.5 * anp.dot(s_m, s_m))
+        s33 = -(s[0] + s[1])
+        return smooth_sqrt(1.5 * (s[0]*s[0] + s[1]*s[1] + s33*s33 + 2.0*s[2]*s[2]))
 
 
 class MaterialModel1D(MaterialModel):
@@ -339,3 +301,12 @@ class MaterialModel1D(MaterialModel):
     def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
         return anp.eye(1) - self.I_vol()
+
+    def vonmises_norm(self, s: StressVec) -> Scalar:
+        """Von Mises norm of a deviatoric tensor s: √(3/2 s:s).
+
+        Caller guarantees tr s = 0.  For 1D the stored component is the
+        deviatoric value s11_dev; missing components s22 = s33 = −s11_dev/2
+        contribute so that √(3/2 s:s) = (3/2)|s11_dev|.
+        """
+        return smooth_abs(1.5 * s[0])

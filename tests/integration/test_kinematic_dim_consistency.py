@@ -144,7 +144,11 @@ def test_af_ps_vs_3d_cyclic():
 # ---------------------------------------------------------------------------
 
 def test_af_1d_linear_analytical():
-    """AF gamma=0: α should equal C_k * ep (effective backstress definition)."""
+    """AF gamma=0: stored α11_dev should equal (2/3) * C_k * ep.
+
+    The stored quantity is the deviatoric component α11_dev.  The effective
+    backstress is α_eff = (3/2) * α11_dev = C_k * ep.
+    """
     model = AFKinematic1D(**_PARAMS_LINEAR)
     load = _strain_history_1d(n=30)
     integ = PythonIntegrator(model)
@@ -153,14 +157,14 @@ def test_af_1d_linear_analytical():
     )
     alpha_11 = r2.fields["alpha"].data[:, 0]
     ep_arr = r2.fields["ep"].data
-    # After yielding: α = C_k * ep for linear AF
+    # After yielding: α11_dev = (2/3) * C_k * ep  (effective backstress = C_k * ep)
     plastic = ep_arr > 1e-10
     if plastic.any():
         np.testing.assert_allclose(
             alpha_11[plastic],
-            _PARAMS_LINEAR["C_k"] * ep_arr[plastic],
+            (2.0 / 3.0) * _PARAMS_LINEAR["C_k"] * ep_arr[plastic],
             rtol=1e-4,
-            err_msg="AF 1D linear: α ≠ C_k * ep (effective backstress broken)",
+            err_msg="AF 1D linear: α11_dev ≠ (2/3) * C_k * ep",
         )
 
 
