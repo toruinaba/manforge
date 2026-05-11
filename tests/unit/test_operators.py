@@ -1,4 +1,12 @@
-"""Unit tests for autodiff.operators."""
+"""Unit tests for tensor operator helpers.
+
+Covers both:
+- Free-function operators in :mod:`manforge.autodiff.operators`
+  (identity_voigt, hydrostatic, dev, vonmises, norm_mandel, I_dev/I_vol).
+- :class:`~manforge.core.material.base.MaterialModel` methods
+  (inner_product, deviatoric_inner_product, strain_norm) defined in
+  :mod:`manforge.core.material.base`.
+"""
 
 import math
 
@@ -258,12 +266,13 @@ def test_strain_norm_uniaxial_1d():
 
 
 def test_strain_norm_pure_shear_3d():
-    # Physical shear ε12=γ_phys → ε_eq = γ_phys * 2/√3
+    # Engineering shear γ12 → tensor ε12 = γ/2
+    # ε_eq = √(2/3 × 2ε12²×2) = √(2/3 × γ²/2) = γ/√3
     m = _model3d()
-    g = 0.005
-    eps = anp.array([0.0, 0.0, 0.0, g, 0.0, 0.0])
-    expected = g * 2.0 / math.sqrt(3.0)
-    np.testing.assert_allclose(float(m.strain_norm(eps)), expected, rtol=1e-10)
+    g = 0.005  # engineering shear γ12 (driver convention)
+    eps_eng = anp.array([0.0, 0.0, 0.0, g, 0.0, 0.0])
+    expected = g / math.sqrt(3.0)
+    np.testing.assert_allclose(float(m.strain_norm(eps_eng)), expected, rtol=1e-10)
 
 
 def test_strain_norm_conjugate_to_vonmises():

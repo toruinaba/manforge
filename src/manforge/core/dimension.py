@@ -40,6 +40,19 @@ class StressDimension:
         """Mandel scaling factors as a numpy array, shape (ntens,)."""
         return np.array(self.mandel_factors)
 
+    @property
+    def eng_to_phys_strain_factors_np(self) -> np.ndarray:
+        """Conversion factors from engineering shear to physical shear, shape (ntens,).
+
+        Divide a strain Voigt vector by these factors to convert from the
+        engineering-shear convention (γ12 = 2 ε12, used by drivers, stiffness,
+        and the ABAQUS UMAT interface) to physical shear (ε12, used by stress
+        and stress-like quantities).  Direct components are unchanged (factor = 1).
+
+        Equivalent to [1, ..., 1 (ndi times), 2, ..., 2 (nshr times)].
+        """
+        return np.array([1.0] * self.ndi + [2.0] * self.nshr)
+
     # backward-compat alias
     @property
     def mandel_factors_jnp(self) -> np.ndarray:

@@ -113,9 +113,9 @@ Stress-state base classes (choose the appropriate one):
 Each base provides branch-free operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) tailored to its stress state. The `vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
 
 Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, all stress states):
-- `inner_product(a, b)` — Mandel inner product A:B over stored components (shear ×2 automatic). Use when missing components are physically zero (e.g. σ:Δε with σ33=0 in plane stress).
-- `deviatoric_inner_product(s, t)` — Double contraction for deviatoric tensors (caller guarantees tr s = tr t = 0); reconstructs missing direct components from `tr=0` and includes them. Generalises `vonmises_norm`. Used for s:s, α:dα, s:e, etc.
-- `strain_norm(strain)` — Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to `vonmises`. Assumes isochoric plastic strain with **physical shear** convention. Uses `deviatoric_inner_product` so missing-component correction is automatic for PS/1D.
+- `inner_product(a, b)` — Mandel inner product A:B over stored components (shear ×2 automatic). Both arguments must be **physical-shear** (stress-like) quantities. Use when missing components are physically zero (e.g. σ:σ, α:α). To compute σ:Δε with engineering-shear Δε, divide shear components by `dimension.eng_to_phys_strain_factors_np` first.
+- `deviatoric_inner_product(s, t)` — Double contraction for **physical-shear deviatoric** tensors (caller guarantees tr s = tr t = 0); reconstructs missing direct components from `tr=0` and includes them. Generalises `vonmises_norm`. Used for s:s, α:dα, etc.
+- `strain_norm(strain)` — Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to `vonmises`. Accepts **engineering-shear** strain (driver/UMAT convention, γ12 = 2ε12); converts internally. Assumes isochoric plastic strain with missing-component correction automatic for PS/1D.
 
 Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR).
 
@@ -148,7 +148,14 @@ autograd computes yield function gradients and the Hessian needed for the tangen
 
 ### Voigt convention
 
-For 3D solid elements, stress/strain vectors are 6-component: `[11, 22, 33, 12, 13, 23]` with physical shear (not engineering shear). For other element types the component count is `ntens` per the associated `StressDimension`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
+For 3D solid elements, stress/strain vectors are 6-component `[11, 22, 33, 12, 13, 23]` following the **ABAQUS UMAT convention**:
+
+- **Stress** (σ, s, backstress α, and other stress-like quantities): **physical shear** — the tensor component (σ12 = ε12_tensor).
+- **Strain** (ε, plastic strain ε_p, strain increment Δε): **engineering shear** (γ12 = 2 ε12_tensor) — matching the ABAQUS `DSTRAN` interface, the elastic stiffness `σ = C : ε`, and all driver inputs.
+
+For other element types the component count is `ntens` per the associated `StressDimension`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
+
+`StressDimension.eng_to_phys_strain_factors_np` returns `[1,...,1, 2,...,2]` (direct=1, shear=2). Divide an engineering-shear strain vector by these factors to obtain physical shear.
 
 ### State variables
 
