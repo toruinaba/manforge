@@ -4,7 +4,19 @@ All functions are composed entirely of autograd/numpy primitives and are
 fully differentiable everywhere, including at the singular points of their
 non-smooth counterparts.
 
-Default: ``eps = 1e-30``.  With float64, ``sqrt(1e-30) ≈ 3e-16``.
+Functions and their parameters:
+
+  smooth_sqrt(x, eps=1e-30)        √(x + ε²)                  ε: denominator stabiliser
+  smooth_abs(x, eps=1e-30)         √(x² + ε²)                 ε: denominator stabiliser
+  smooth_norm(v, eps=1e-30)        √(v·v + ε²)                ε: denominator stabiliser
+  smooth_macaulay(x, eps=1e-30)    (x + smooth_abs(x)) / 2    ε: denominator stabiliser
+  smooth_direction(v, eps=1e-30)   v / smooth_norm(v)          ε: denominator stabiliser
+  smooth_heaviside(x, beta=50.0)   0.5·(1 + tanh(β·x/2))      β: transition sharpness
+  smooth_min(a, b, eps=1e-30)      (a+b - smooth_abs(a-b)) / 2  ε: denominator stabiliser
+  smooth_max(a, b, eps=1e-30)      (a+b + smooth_abs(a-b)) / 2  ε: denominator stabiliser
+
+``eps`` regularises denominators at zero; with float64, ``sqrt(1e-30) ≈ 3e-16``.
+``beta`` controls the steepness of the Heaviside step: larger β → sharper transition.
 """
 
 import autograd.numpy as anp
@@ -35,3 +47,22 @@ def smooth_macaulay(x: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
 def smooth_direction(v: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
     """Smooth unit direction: v / smooth_norm(v)."""
     return v / smooth_norm(v, eps)
+
+
+def smooth_heaviside(x: anp.ndarray, beta: float = 50.0) -> anp.ndarray:
+    """Smooth Heaviside step: 0.5·(1 + tanh(β·x/2)).
+
+    tanh formulation avoids exp overflow that would arise from 1/(1+exp(-βx)).
+    At x=0 returns exactly 0.5; larger β gives a sharper transition.
+    """
+    return 0.5 * (1.0 + anp.tanh(0.5 * beta * x))
+
+
+def smooth_min(a: anp.ndarray, b: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
+    """Smooth minimum: (a + b - smooth_abs(a - b)) / 2."""
+    return 0.5 * (a + b - smooth_abs(a - b, eps))
+
+
+def smooth_max(a: anp.ndarray, b: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
+    """Smooth maximum: (a + b + smooth_abs(a - b)) / 2."""
+    return 0.5 * (a + b + smooth_abs(a - b, eps))

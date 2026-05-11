@@ -19,6 +19,9 @@ from manforge.utils.smooth import (
     smooth_norm,
     smooth_macaulay,
     smooth_direction,
+    smooth_heaviside,
+    smooth_min,
+    smooth_max,
     _DEFAULT_EPS,
 )
 
@@ -286,3 +289,142 @@ class TestAFPattern:
         # Gradient at dlambda=0 (where xi = stress - alpha = 0)
         grad = autograd.grad(alpha_sq_norm)(anp.array(0.0))
         assert np.isfinite(float(grad)), f"gradient is not finite: {grad}"
+
+
+# ---------------------------------------------------------------------------
+# smooth_heaviside
+# ---------------------------------------------------------------------------
+
+class TestSmoothHeaviside:
+    def test_large_positive_approaches_one(self):
+        """For x >> 0: smooth_heaviside(x) ≈ 1."""
+        val = float(smooth_heaviside(anp.array(100.0)))
+        np.testing.assert_allclose(val, 1.0, atol=1e-10)
+
+    def test_large_negative_approaches_zero(self):
+        """For x << 0: smooth_heaviside(x) ≈ 0."""
+        val = float(smooth_heaviside(anp.array(-100.0)))
+        np.testing.assert_allclose(val, 0.0, atol=1e-10)
+
+    def test_at_zero_returns_half(self):
+        """At x=0: value = 0.5 exactly."""
+        val = float(smooth_heaviside(anp.array(0.0)))
+        np.testing.assert_allclose(val, 0.5, atol=1e-15)
+
+    def test_gradient_positive_at_zero(self):
+        """At x=0: gradient > 0 (monotone increasing)."""
+        grad = float(autograd.grad(smooth_heaviside)(anp.array(0.0)))
+        assert grad > 0.0, f"Expected positive gradient, got {grad}"
+
+    def test_gradient_finite_everywhere(self):
+        """Gradient is finite for a range of inputs."""
+        xs = anp.linspace(-10.0, 10.0, 201)
+        for x in xs:
+            g = float(autograd.grad(smooth_heaviside)(x))
+            assert np.isfinite(g), f"gradient not finite at x={x}: {g}"
+
+    def test_larger_beta_sharper_transition(self):
+        """Larger beta gives value closer to 1 at small positive x."""
+        x = anp.array(0.1)
+        val_low = float(smooth_heaviside(x, beta=1.0))
+        val_high = float(smooth_heaviside(x, beta=50.0))
+        assert val_high > val_low, "larger beta should give sharper step"
+
+    def test_array_broadcast(self):
+        """Works on arrays element-wise."""
+        xs = anp.array([-10.0, 0.0, 10.0])
+        result = smooth_heaviside(xs)
+        assert result.shape == (3,)
+        assert float(result[1]) == pytest.approx(0.5, abs=1e-15)
+
+
+# ---------------------------------------------------------------------------
+# smooth_min
+# ---------------------------------------------------------------------------
+
+class TestSmoothMin:
+    def test_min_of_two_distinct(self):
+        """smooth_min(2, 3) ≈ 2."""
+        val = float(smooth_min(anp.array(2.0), anp.array(3.0)))
+        np.testing.assert_allclose(val, 2.0, rtol=1e-10)
+
+    def test_min_negative(self):
+        """smooth_min(-1, 5) ≈ -1."""
+        val = float(smooth_min(anp.array(-1.0), anp.array(5.0)))
+        np.testing.assert_allclose(val, -1.0, rtol=1e-10)
+
+    def test_equal_inputs(self):
+        """smooth_min(x, x) ≈ x (continuous at a=b)."""
+        x = anp.array(3.0)
+        val = float(smooth_min(x, x))
+        np.testing.assert_allclose(val, 3.0, rtol=1e-10)
+
+    def test_gradient_finite(self):
+        """Gradient w.r.t. first argument is finite."""
+        grad = float(autograd.grad(lambda a: smooth_min(a, anp.array(1.0)))(anp.array(0.5)))
+        assert np.isfinite(grad)
+
+    def test_symmetric(self):
+        """smooth_min(a, b) == smooth_min(b, a)."""
+        a, b = anp.array(2.0), anp.array(5.0)
+        np.testing.assert_allclose(float(smooth_min(a, b)), float(smooth_min(b, a)), rtol=1e-12)
+
+    def test_array_broadcast(self):
+        """Works on arrays element-wise."""
+        a = anp.array([1.0, 5.0, -2.0])
+        b = anp.array([3.0, 2.0,  1.0])
+        result = smooth_min(a, b)
+        expected = anp.array([1.0, 2.0, -2.0])
+        np.testing.assert_allclose(np.array(result), np.array(expected), rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# smooth_max
+# ---------------------------------------------------------------------------
+
+class TestSmoothMax:
+    def test_max_of_two_distinct(self):
+        """smooth_max(2, 3) ≈ 3."""
+        val = float(smooth_max(anp.array(2.0), anp.array(3.0)))
+        np.testing.assert_allclose(val, 3.0, rtol=1e-10)
+
+    def test_max_negative(self):
+        """smooth_max(-1, 5) ≈ 5."""
+        val = float(smooth_max(anp.array(-1.0), anp.array(5.0)))
+        np.testing.assert_allclose(val, 5.0, rtol=1e-10)
+
+    def test_equal_inputs(self):
+        """smooth_max(x, x) ≈ x."""
+        x = anp.array(3.0)
+        val = float(smooth_max(x, x))
+        np.testing.assert_allclose(val, 3.0, rtol=1e-10)
+
+    def test_gradient_finite(self):
+        """Gradient w.r.t. first argument is finite."""
+        grad = float(autograd.grad(lambda a: smooth_max(a, anp.array(1.0)))(anp.array(2.0)))
+        assert np.isfinite(grad)
+
+    def test_symmetric(self):
+        """smooth_max(a, b) == smooth_max(b, a)."""
+        a, b = anp.array(2.0), anp.array(5.0)
+        np.testing.assert_allclose(float(smooth_max(a, b)), float(smooth_max(b, a)), rtol=1e-12)
+
+    def test_array_broadcast(self):
+        """Works on arrays element-wise."""
+        a = anp.array([1.0, 5.0, -2.0])
+        b = anp.array([3.0, 2.0,  1.0])
+        result = smooth_max(a, b)
+        expected = anp.array([3.0, 5.0, 1.0])
+        np.testing.assert_allclose(np.array(result), np.array(expected), rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# smooth_min / smooth_max consistency
+# ---------------------------------------------------------------------------
+
+class TestSmoothMinMaxConsistency:
+    def test_min_plus_max_equals_sum(self):
+        """smooth_min(a,b) + smooth_max(a,b) == a + b."""
+        a, b = anp.array(2.7), anp.array(-1.3)
+        total = float(smooth_min(a, b)) + float(smooth_max(a, b))
+        np.testing.assert_allclose(total, float(a + b), rtol=1e-12)
