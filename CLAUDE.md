@@ -112,6 +112,11 @@ Stress-state base classes (choose the appropriate one):
 
 Each base provides branch-free operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) tailored to its stress state. The `vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
 
+Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, all stress states):
+- `inner_product(a, b)` — Mandel inner product A:B over stored components (shear ×2 automatic). Use when missing components are physically zero (e.g. σ:Δε with σ33=0 in plane stress).
+- `deviatoric_inner_product(s, t)` — Double contraction for deviatoric tensors (caller guarantees tr s = tr t = 0); reconstructs missing direct components from `tr=0` and includes them. Generalises `vonmises_norm`. Used for s:s, α:dα, s:e, etc.
+- `strain_norm(strain)` — Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to `vonmises`. Assumes isochoric plastic strain with **physical shear** convention. Uses `deviatoric_inner_product` so missing-component correction is automatic for PS/1D.
+
 Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR).
 
 The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotropic3D, J2IsotropicPS, J2Isotropic1D).

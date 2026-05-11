@@ -448,6 +448,91 @@ class MaterialModel(ABC):
         sq_norm = anp.dot(s_m, s_m) + self.dimension.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
+    def inner_product(self, a: StressVec, b: StressVec) -> Scalar:
+        """Double contraction A:B over stored components (Mandel inner product).
+
+        Equivalent to the tensor double contraction for stored components only.
+        Shear components are weighted ×2 via Mandel scaling, so physical shear
+        storage (ε12 not γ12) is assumed for both arguments.
+
+        Use this when missing components are physically zero (e.g. σ:Δε in
+        plane stress where σ33=0).  When both tensors are deviatoric and you
+        need missing-component reconstruction, use
+        :meth:`deviatoric_inner_product` instead.
+
+        Parameters
+        ----------
+        a, b : anp.ndarray, shape (ntens,)
+            Voigt vectors using physical shear convention.
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        mf = self.dimension.mandel_factors_np
+        return anp.dot(a * mf, b * mf)
+
+    def _missing_dev_components(self, s: StressVec) -> StressVec:
+        """Deviatoric direct components not stored in the Voigt vector.
+
+        Returns an empty array for states where all direct components are
+        stored (SOLID_3D, PLANE_STRAIN).  Overridden in MaterialModelPS and
+        MaterialModel1D to reconstruct the missing component(s) from tr s = 0.
+        """
+        return anp.zeros(self.dimension.n_missing)
+
+    def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:
+        """Double contraction s:t for deviatoric tensors (missing-component corrected).
+
+        Assumes both s and t satisfy tr s = tr t = 0.  For states where direct
+        components are partially stored (PLANE_STRESS, UNIAXIAL_1D) the missing
+        deviatoric components are reconstructed via :meth:`_missing_dev_components`
+        and included in the sum.
+
+        For SOLID_3D and PLANE_STRAIN this is identical to
+        :meth:`inner_product`.
+
+        Parameters
+        ----------
+        s, t : anp.ndarray, shape (ntens,)
+            Deviatoric Voigt vectors (caller guarantees tr = 0).
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        base = self.inner_product(s, t)
+        if self.dimension.n_missing == 0:
+            return base
+        s_miss = self._missing_dev_components(s)
+        t_miss = self._missing_dev_components(t)
+        return base + anp.dot(s_miss, t_miss)
+
+    def strain_norm(self, strain: StressVec) -> Scalar:
+        """Equivalent strain norm ε_eq = √(2/3 ε:ε) conjugate to vonmises stress.
+
+        Designed for **incompressible (isochoric) plastic strain** stored with the
+        physical shear convention (ε12, not γ12 = 2ε12) — the same convention
+        used for stress throughout this package.  For engineering shear storage
+        (γ = 2ε), divide shear components by 2 before calling.
+
+        For PLANE_STRESS and UNIAXIAL_1D the missing direct strain components
+        (ε33 = −(ε11+ε22) for PS; ε22 = ε33 = −ε11/2 for 1D) are reconstructed
+        from the incompressibility constraint tr ε_p = 0, via
+        :meth:`_missing_dev_components`.  If the input strain is not isochoric,
+        the result is undefined.
+
+        Parameters
+        ----------
+        strain : anp.ndarray, shape (ntens,)
+            Isochoric plastic strain Voigt vector using physical shear convention.
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        return smooth_sqrt((2.0 / 3.0) * self.deviatoric_inner_product(strain, strain))
+
     def user_defined_return_mapping(
         self,
         stress_trial: StressVec,
