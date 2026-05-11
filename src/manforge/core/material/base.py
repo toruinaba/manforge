@@ -448,6 +448,100 @@ class MaterialModel(ABC):
         sq_norm = anp.dot(s_m, s_m) + self.dimension.n_missing * p ** 2
         return smooth_sqrt(1.5 * sq_norm)
 
+    def inner_product(self, a: StressVec, b: StressVec) -> Scalar:
+        """Mandel double contraction A:B over stored components.
+
+        Both arguments must use **physical shear** convention — the storage used
+        by stress and stress-like quantities (σ, s, α, flow direction ∂f/∂σ)
+        throughout this package.  Shear components are weighted ×2 by Mandel
+        scaling.
+
+        Do **not** pass engineering-shear strain vectors (γ12 = 2 ε12) directly.
+        To compute σ:Δε with engineering-shear Δε, first convert:
+        ``Δε_phys = Δε / self.dimension.eng_to_phys_strain_factors_np``.
+        For the conjugate equivalent-strain norm use :meth:`strain_norm`, which
+        accepts engineering shear directly.
+
+        When both tensors are deviatoric and PS/1D missing-component
+        reconstruction is needed, use :meth:`deviatoric_inner_product`.
+
+        Parameters
+        ----------
+        a, b : anp.ndarray, shape (ntens,)
+            Voigt vectors using physical shear convention (stress-like).
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        mf = self.dimension.mandel_factors_np
+        return anp.dot(a * mf, b * mf)
+
+    def _missing_dev_components(self, s: StressVec) -> StressVec:
+        """Deviatoric direct components not stored in the Voigt vector.
+
+        Returns an empty array for states where all direct components are
+        stored (SOLID_3D, PLANE_STRAIN).  Overridden in MaterialModelPS and
+        MaterialModel1D to reconstruct the missing component(s) from tr s = 0.
+        """
+        return anp.zeros(self.dimension.n_missing)
+
+    def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:
+        """Double contraction s:t for stress-like deviatoric tensors.
+
+        Both arguments must be **stress-like (physical shear)** deviatoric
+        tensors with tr s = tr t = 0 (e.g. deviatoric stress s, backstress α,
+        flow direction components).  For states where direct components are
+        partially stored (PLANE_STRESS, UNIAXIAL_1D) the missing deviatoric
+        components are reconstructed via :meth:`_missing_dev_components`.
+
+        For SOLID_3D and PLANE_STRAIN this is identical to
+        :meth:`inner_product`.
+
+        Parameters
+        ----------
+        s, t : anp.ndarray, shape (ntens,)
+            Physical-shear deviatoric Voigt vectors (caller guarantees tr = 0).
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        base = self.inner_product(s, t)
+        if self.dimension.n_missing == 0:
+            return base
+        s_miss = self._missing_dev_components(s)
+        t_miss = self._missing_dev_components(t)
+        return base + anp.dot(s_miss, t_miss)
+
+    def strain_norm(self, strain: StressVec) -> Scalar:
+        """Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to von Mises stress.
+
+        Input convention — **engineering shear** (γ12 = 2 ε12), matching the
+        package-wide strain convention used by drivers, the elastic stiffness
+        ``σ = C : ε``, and the ABAQUS UMAT interface.  Plastic strain histories
+        collected by :class:`~manforge.simulation.driver.StrainDriver` can be
+        passed directly without manual conversion.
+
+        Internally the shear components are halved to recover physical-shear
+        form before the Mandel double contraction.
+
+        Assumes the input is incompressible (tr ε_p = 0).  For PLANE_STRESS and
+        UNIAXIAL_1D the missing direct components are reconstructed from this
+        constraint via :meth:`_missing_dev_components`.
+
+        Parameters
+        ----------
+        strain : anp.ndarray, shape (ntens,)
+            Isochoric plastic strain using engineering shear convention (γ = 2ε).
+
+        Returns
+        -------
+        anp.ndarray, scalar
+        """
+        strain_phys = strain / self.dimension.eng_to_phys_strain_factors_np
+        return smooth_sqrt((2.0 / 3.0) * self.deviatoric_inner_product(strain_phys, strain_phys))
+
     def user_defined_return_mapping(
         self,
         stress_trial: StressVec,

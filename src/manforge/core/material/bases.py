@@ -215,6 +215,13 @@ class MaterialModelPS(MaterialModel):
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
+    def _missing_dev_components(self, s: StressVec) -> StressVec:
+        """Reconstruct missing deviatoric direct component from tr s = 0.
+
+        For plane stress (ndi=2, n_missing=1): s33 = −(s11 + s22).
+        """
+        return anp.array([-(s[0] + s[1])])
+
     def vonmises_norm(self, s: StressVec) -> Scalar:
         """Von Mises norm of a deviatoric tensor s: √(3/2 s:s).
 
@@ -301,6 +308,14 @@ class MaterialModel1D(MaterialModel):
     def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
         return anp.eye(1) - self.I_vol()
+
+    def _missing_dev_components(self, s: StressVec) -> StressVec:
+        """Reconstruct missing deviatoric direct components from tr s = 0.
+
+        For uniaxial 1D (ndi=1, n_missing=2): s22 = s33 = −s11/2.
+        """
+        half = s[0] / 2.0
+        return anp.array([-half, -half])
 
     def vonmises_norm(self, s: StressVec) -> Scalar:
         """Von Mises norm of a deviatoric tensor s: √(3/2 s:s).
