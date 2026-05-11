@@ -16,12 +16,12 @@ gamma    : Dynamic recovery parameter (Ohno-Wang nonlinearity)
 
 Internal state
 --------------
-alpha : backstress tensor (shape (ntens,))
+alpha : backstress tensor (shape (ntens,), deviatoric)
 ep    : equivalent plastic strain (scalar, ≥ 0)
 
 Yield function
 --------------
-f(state) = σ_vm(state["stress"] − state["alpha"]) − σ_y0
+f(state) = vonmises_norm(dev(σ) − α) − σ_y0
 
 Ohno-Wang backstress evolution
 -------------------------------
@@ -31,27 +31,23 @@ Standard Armstrong-Frederick has linear dynamic recovery:
 
 The Ohno-Wang variant weights the recovery by the current backstress norm:
 
-    dα = (2/3) C_k dp n̂ − γ dp ‖α‖ α
+    dα = (2/3) C_k dp n̂ − γ dp vonmises_norm(α) α
 
 Backward-Euler discretisation as residual:
 
-    R_α = α_{n+1} − α_n − (2/3) C_k Δλ n̂ + γ Δλ ‖α_{n+1}‖ α_{n+1} = 0
-
-The (2/3) factor combines with the (3/2) inside n̂ to reproduce the classic
-kinematic-hardening slope C_k under uniaxial loading.
+    R_α = α_{n+1} − α_n − (2/3) C_k Δλ n̂ + γ Δλ vonmises_norm(α_{n+1}) α_{n+1} = 0
 
 Dimensional notes
 -----------------
-The three concrete classes share a single ``state_residual`` and
-``yield_function`` implementation via ``KinematicOWMixin``.  Each stress-state
-base class provides dimension-specific ``vonmises_relative``, ``flow_direction``,
-and ``alpha_norm`` operators.
+The three concrete classes share identical yield_function / state_residual
+implementations.  Each stress-state base class provides dimension-specific
+dev / vonmises_norm that encapsulate per-dimension arithmetic.
 
 * **3D** (OWKinematic3D): α is a 6-component deviatoric tensor.
-* **PS** (OWKinematicPS): α stores [α11, α22, α12]; operators use
+* **PS** (OWKinematicPS): α stores [α11, α22, α12]; vonmises_norm reconstructs
   α33 = −(α11+α22) without constructing a 6-component intermediate vector.
 * **1D** (OWKinematic1D): α stores the deviatoric component α11_dev;
-  operators account for α22 = α33 = −α11_dev/2.
+  vonmises_norm gives (3/2)|α11_dev|.
 
 Notes
 -----
@@ -60,12 +56,11 @@ Notes
 """
 
 from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.material.kinematic import KinematicOWMixin
 from manforge.core.state import Implicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
-class OWKinematic3D(KinematicOWMixin, MaterialModel3D):
+class OWKinematic3D(MaterialModel3D):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -81,7 +76,7 @@ class OWKinematic3D(KinematicOWMixin, MaterialModel3D):
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress")
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
@@ -93,8 +88,26 @@ class OWKinematic3D(KinematicOWMixin, MaterialModel3D):
         self.C_k = C_k
         self.gamma = gamma
 
+    def yield_function(self, state):
+        s_xi = self.dev(state["stress"]) - state["alpha"]
+        return self.vonmises_norm(s_xi) - self.sigma_y0
 
-class OWKinematicPS(KinematicOWMixin, MaterialModelPS):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+        alpha_new = state_new["alpha"]
+        s_xi = self.dev(state_new["stress"]) - alpha_new
+        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
+        a_norm = self.vonmises_norm(alpha_new)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_alpha = (
+            alpha_new - state_n["alpha"]
+            - (2.0 / 3.0) * self.C_k * dlambda * n_hat
+            + self.gamma * dlambda * a_norm * alpha_new
+        )
+        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+
+
+class OWKinematicPS(MaterialModelPS):
     """J2 + Ohno-Wang kinematic hardening for plane-stress elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -110,7 +123,7 @@ class OWKinematicPS(KinematicOWMixin, MaterialModelPS):
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress")
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape=NTENS, doc="backstress tensor")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
@@ -122,8 +135,26 @@ class OWKinematicPS(KinematicOWMixin, MaterialModelPS):
         self.C_k = C_k
         self.gamma = gamma
 
+    def yield_function(self, state):
+        s_xi = self.dev(state["stress"]) - state["alpha"]
+        return self.vonmises_norm(s_xi) - self.sigma_y0
 
-class OWKinematic1D(KinematicOWMixin, MaterialModel1D):
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+        alpha_new = state_new["alpha"]
+        s_xi = self.dev(state_new["stress"]) - alpha_new
+        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
+        a_norm = self.vonmises_norm(alpha_new)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_alpha = (
+            alpha_new - state_n["alpha"]
+            - (2.0 / 3.0) * self.C_k * dlambda * n_hat
+            + self.gamma * dlambda * a_norm * alpha_new
+        )
+        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+
+
+class OWKinematic1D(MaterialModel1D):
     """J2 + Ohno-Wang kinematic hardening for uniaxial elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -141,7 +172,7 @@ class OWKinematic1D(KinematicOWMixin, MaterialModel1D):
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress")
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric component)")
+    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric component α11_dev)")
     ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
@@ -152,3 +183,21 @@ class OWKinematic1D(KinematicOWMixin, MaterialModel1D):
         self.sigma_y0 = sigma_y0
         self.C_k = C_k
         self.gamma = gamma
+
+    def yield_function(self, state):
+        s_xi = self.dev(state["stress"]) - state["alpha"]
+        return self.vonmises_norm(s_xi) - self.sigma_y0
+
+    def state_residual(self, state_new, dlambda, state_n, state_trial, *, stress_trial):
+        alpha_new = state_new["alpha"]
+        s_xi = self.dev(state_new["stress"]) - alpha_new
+        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
+        a_norm = self.vonmises_norm(alpha_new)
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_alpha = (
+            alpha_new - state_n["alpha"]
+            - (2.0 / 3.0) * self.C_k * dlambda * n_hat
+            + self.gamma * dlambda * a_norm * alpha_new
+        )
+        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
