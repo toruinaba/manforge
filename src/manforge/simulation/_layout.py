@@ -10,13 +10,15 @@ and verification/jacobian.py share a single source of truth.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import autograd.numpy as anp
 import numpy as np
 
+from manforge._typing import FloatArray, StateDict
+
 if TYPE_CHECKING:
-    pass
+    from manforge.core.material.base import MaterialModel
 
 
 @dataclass(frozen=True)
@@ -45,11 +47,11 @@ class ResidualLayout:
     """
 
     ntens: int
-    stress_kind: str                                        # "implicit" | "explicit"
-    implicit_keys: tuple                                    # declaration order, stress excluded
-    explicit_keys: tuple                                    # declaration order, stress excluded
-    _shapes: tuple                                          # (name, shape) for implicit_keys
-    _residual_names: tuple = ()                             # (state_name, residual_name) pairs
+    stress_kind: Literal["implicit", "explicit"]
+    implicit_keys: tuple[str, ...]
+    explicit_keys: tuple[str, ...]
+    _shapes: tuple[tuple[str, tuple[int, ...]], ...]
+    _residual_names: tuple[tuple[str, str], ...] = ()
     dlambda_residual_name: str = "dlambda"
 
     # ------------------------------------------------------------------
@@ -57,7 +59,7 @@ class ResidualLayout:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_model(cls, model) -> "ResidualLayout":
+    def from_model(cls, model: "MaterialModel") -> "ResidualLayout":
         """Build a ResidualLayout from a MaterialModel instance."""
         ntens = model.ntens
         stress_kind = model.state_fields["stress"].kind
@@ -144,7 +146,7 @@ class ResidualLayout:
         q0 = self.ntens + 1
         return slice(q0 + sl.start, q0 + sl.stop)
 
-    def slot_shape(self, name: str) -> tuple:
+    def slot_shape(self, name: str) -> tuple[int, ...]:
         """Return the resolved shape tuple for the named slot.
 
         Always returns a concrete Python tuple (never a NTENS/SCALAR sentinel)
@@ -171,7 +173,7 @@ class ResidualLayout:
                 return r
         raise KeyError(f"ResidualLayout: {state_name!r} not found in _residual_names")
 
-    def residual_names(self) -> tuple:
+    def residual_names(self) -> tuple[str, ...]:
         """Residual-row labels in canonical order: (stress, dlambda, *implicit_keys)."""
         return tuple(r for _, r in self._residual_names)
 
@@ -179,7 +181,7 @@ class ResidualLayout:
     # Pack / unpack
     # ------------------------------------------------------------------
 
-    def pack(self, sigma, dlambda, q_imp: dict):
+    def pack(self, sigma: FloatArray, dlambda: "FloatArray | float", q_imp: StateDict) -> FloatArray:
         """Assemble the unknown vector x from its components.
 
         Parameters
@@ -195,7 +197,7 @@ class ResidualLayout:
             parts.append(anp.reshape(v, (-1,)) if shp else anp.atleast_1d(v))
         return anp.concatenate(parts) if len(parts) > 1 else parts[0]
 
-    def unpack(self, x) -> tuple:
+    def unpack(self, x: FloatArray) -> tuple[FloatArray, FloatArray, StateDict]:
         """Decompose x into (sigma, dlambda, q_imp_dict).
 
         Returns
@@ -206,17 +208,17 @@ class ResidualLayout:
         """
         ntens = self.ntens
         sigma = x[:ntens]
-        dlambda = x[ntens]
-        q_imp: dict = {}
+        dlambda = anp.array(x[ntens])
+        q_imp: StateDict = {}
         idx = ntens + 1
         for k, shp in self._shapes:
             size = int(np.prod(shp))
             chunk = x[idx: idx + size]
-            q_imp[k] = chunk.reshape(shp) if shp else chunk[0]
+            q_imp[k] = chunk.reshape(shp) if shp else anp.array(chunk[0])
             idx += size
         return sigma, dlambda, q_imp
 
-    def pack_residual(self, R_stress, R_dlambda, R_state: dict):
+    def pack_residual(self, R_stress: FloatArray, R_dlambda: "FloatArray | float", R_state: StateDict) -> FloatArray:
         """Assemble the residual vector R from its components.
 
         Parameters

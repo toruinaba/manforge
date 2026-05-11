@@ -1,13 +1,22 @@
 """Abstract base class for constitutive material models."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import ClassVar
 
 import autograd.numpy as anp
 
-from manforge.core.state import StateField, State, collect_state_fields, _make, NTENS, DLAMBDA_FIELD
+from manforge.core.state import (
+    StateField, State, DlambdaField, DlambdaResidual,
+    StateResidual, StateUpdate,
+    collect_state_fields, _make, NTENS, DLAMBDA_FIELD,
+)
 from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.utils.smooth import smooth_sqrt
 from manforge.core.material.fortran_binding import collect_bindings as _collect_bindings
+from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
+from manforge.core.result import ReturnMappingResult
 
 
 class MaterialModel(ABC):
@@ -85,10 +94,10 @@ class MaterialModel(ABC):
     # Framework-provided pseudo-field for the Δλ NR unknown.  Users can
     # optionally return self.dlambda(R_dl) from state_residual to override
     # the default R_dλ = yield_function(state).
-    dlambda = DLAMBDA_FIELD
+    dlambda: ClassVar[DlambdaField] = DLAMBDA_FIELD
 
     @property
-    def params(self) -> dict:
+    def params(self) -> dict[str, float]:
         """Material parameters as a dict keyed by :attr:`param_names`."""
         return {name: getattr(self, name) for name in self.param_names}
 
@@ -172,7 +181,7 @@ class MaterialModel(ABC):
     # Abstract interface — must be implemented by subclasses
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self, state=None) -> anp.ndarray:
+    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
         """Return the elastic stiffness tensor in Voigt notation.
 
         Default implementation derives λ, μ from ``self.E`` and ``self.nu``
@@ -204,8 +213,8 @@ class MaterialModel(ABC):
     @abstractmethod
     def yield_function(
         self,
-        state,
-    ) -> anp.ndarray:
+        state: "State | StateDict",
+    ) -> Scalar:
         """Evaluate the yield function f(state).
 
         The material is in the elastic domain when f ≤ 0.
@@ -224,10 +233,10 @@ class MaterialModel(ABC):
 
     def update_state(
         self,
-        dlambda: anp.ndarray,
-        state_n,
-        state_trial,
-    ) -> list:
+        dlambda: Scalar,
+        state_n: "State | StateDict",
+        state_trial: "State | StateDict",
+    ) -> list[StateUpdate | StateResidual]:
         """Return updated non-stress explicit state variables after a plastic increment.
 
         Closed-form (explicit) update rule: given (Δλ, state_n, state_trial),
@@ -265,13 +274,13 @@ class MaterialModel(ABC):
 
     def state_residual(
         self,
-        state_new,
-        dlambda: anp.ndarray,
-        state_n,
-        state_trial,
+        state_new: "State | StateDict",
+        dlambda: Scalar,
+        state_n: "State | StateDict",
+        state_trial: "State | StateDict",
         *,
-        stress_trial: anp.ndarray = None,
-    ) -> list:
+        stress_trial: "StressVec | None" = None,
+    ) -> list[StateResidual | DlambdaResidual]:
         """Residual of the implicit state evolution equations.
 
         Defines R_h(state_new, Δλ, state_n, state_trial) = 0 for state
@@ -317,7 +326,7 @@ class MaterialModel(ABC):
     # Default helpers provided by the framework
     # ------------------------------------------------------------------
 
-    def initial_state(self) -> dict:
+    def initial_state(self) -> StateDict:
         """Return zero-initialised state dict (including ``stress``).
 
         The default implementation uses the ``StateField`` descriptors to
@@ -353,10 +362,10 @@ class MaterialModel(ABC):
 
     def default_stress_residual(
         self,
-        state_new,
-        dlambda: anp.ndarray,
-        stress_trial: anp.ndarray,
-    ) -> anp.ndarray:
+        state_new: "State | StateDict",
+        dlambda: Scalar,
+        stress_trial: "StressVec | None",
+    ) -> StressVec:
         """Associative default R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
 
         Call this from :meth:`state_residual` when the model uses associative
@@ -388,19 +397,21 @@ class MaterialModel(ABC):
         """
         import autograd
         from manforge.core.state import _state_with_stress
+        if stress_trial is None:
+            raise ValueError("default_stress_residual: stress_trial is required")
         stress = state_new["stress"]
         C = self.elastic_stiffness(state_new)
-        n = autograd.grad(
+        n = autograd.grad(  # type: ignore[call-arg]
             lambda s: self.yield_function(_state_with_stress(state_new, s))
         )(stress)
         return stress - stress_trial + dlambda * (C @ n)
 
     def default_stress_update(
         self,
-        dlambda: anp.ndarray,
-        state_n,
-        state_trial,
-    ) -> anp.ndarray:
+        dlambda: Scalar,
+        state_n: "State | StateDict",
+        state_trial: "State | StateDict",
+    ) -> StressVec:
         """Return the current σ NR iterate from ``state_trial``.
 
         In ``update_state``, ``state_trial["stress"]`` is the **current σ NR
@@ -428,7 +439,7 @@ class MaterialModel(ABC):
         """
         return state_trial["stress"]
 
-    def vonmises(self, stress: anp.ndarray) -> anp.ndarray:
+    def vonmises(self, stress: StressVec) -> Scalar:
         """Von Mises equivalent stress with missing-component correction.
 
         Computes √(3/2 · (‖s_m‖² + n_missing · p²)) using ``smooth_sqrt``
@@ -461,10 +472,10 @@ class MaterialModel(ABC):
 
     def user_defined_return_mapping(
         self,
-        stress_trial: anp.ndarray,
-        C: anp.ndarray,
-        state_n: dict,
-    ):
+        stress_trial: StressVec,
+        C: Stiffness,
+        state_n: StateDict,
+    ) -> "ReturnMappingResult | None":
         """User-supplied return mapping (optional).
 
         Override to provide a model-specific plastic correction algorithm.
@@ -497,12 +508,12 @@ class MaterialModel(ABC):
 
     def user_defined_tangent(
         self,
-        stress: anp.ndarray,
-        state: dict,
-        dlambda: anp.ndarray,
-        C: anp.ndarray,
-        state_n: dict,
-    ):
+        stress: StressVec,
+        state: "State | StateDict",
+        dlambda: Scalar,
+        C: Stiffness,
+        state_n: StateDict,
+    ) -> "Stiffness | None":
         """User-supplied consistent tangent (optional).
 
         Override to provide a model-specific analytical expression for

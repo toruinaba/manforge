@@ -1,12 +1,39 @@
 """Objective (loss) function construction for parameter fitting."""
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Protocol
+
 import numpy as np
+from typing_extensions import NotRequired, TypedDict
 
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.simulation.integrator import PythonIntegrator
+from manforge._typing import FloatArray
+
+if TYPE_CHECKING:
+    from manforge.core.material import MaterialModel
+    from manforge.simulation.driver import DriverBase
 
 
-def residual_sum_of_squares(stress_computed, stress_experiment, weights=None):
+class ExpData(TypedDict):
+    """Experimental stress-strain data for parameter fitting."""
+    strain: FloatArray
+    stress: FloatArray
+    weights: NotRequired[FloatArray | None]
+
+
+class DriverFactoryFn(Protocol):
+    """``driver_factory(integrator) -> DriverBase`` — constructs a driver for one objective evaluation."""
+    def __call__(self, integrator: object) -> "DriverBase": ...
+
+
+def residual_sum_of_squares(
+    stress_computed: FloatArray,
+    stress_experiment: FloatArray,
+    weights: FloatArray | None = None,
+) -> float:
     """Weighted sum of squared residuals."""
     sc = np.asarray(stress_computed, dtype=float)
     se = np.asarray(stress_experiment, dtype=float)
@@ -23,7 +50,12 @@ def residual_sum_of_squares(stress_computed, stress_experiment, weights=None):
     return float(np.sum(sq))
 
 
-def build_objective(model, driver_factory, exp_data, fixed_params=None):
+def build_objective(
+    model: "MaterialModel",
+    driver_factory: DriverFactoryFn,
+    exp_data: ExpData,
+    fixed_params: dict[str, float] | None = None,
+) -> Callable[[dict[str, float]], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
     Parameters
@@ -54,9 +86,9 @@ def build_objective(model, driver_factory, exp_data, fixed_params=None):
     stress_exp = np.asarray(exp_data["stress"], dtype=float)
     weights = exp_data.get("weights", None)
 
-    def objective(free_params: dict) -> float:
+    def objective(free_params: dict[str, float]) -> float:
         all_params = {**fixed, **free_params}
-        m = model_cls(dimension=dimension, **all_params)
+        m = model_cls(dimension=dimension, **all_params)  # type: ignore[call-arg]
         integrator = PythonIntegrator(m)
         result = driver_factory(integrator).run(load)
         stress_comp = result.stress

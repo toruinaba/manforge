@@ -3,6 +3,7 @@
 import autograd.numpy as anp
 
 from manforge.core.material.base import MaterialModel
+from manforge._typing import FloatArray, Scalar, Stiffness, StressVec
 from manforge.core.dimension import (
     SOLID_3D,
     PLANE_STRESS,
@@ -63,19 +64,19 @@ class MaterialModel3D(MaterialModel):
     # Operator methods — concrete for full-rank stress states
     # ------------------------------------------------------------------
 
-    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: StressVec) -> Scalar:
         """Mean normal stress p = (σ11 + σ22 + σ33) / 3.
 
         All three direct components are stored, so no correction is needed.
         """
         return (stress[0] + stress[1] + stress[2]) / 3.0
 
-    def dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: StressVec) -> StressVec:
         """Deviatoric stress s = σ − p δ."""
         p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np
 
-    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> Stiffness:
         """Isotropic elastic stiffness via submatrix extraction.
 
         Builds the full 6×6 tensor, then extracts the ntens×ntens subblock
@@ -102,12 +103,12 @@ class MaterialModel3D(MaterialModel):
         idx = anp.array([0, 1, 2, 3])
         return C6[anp.ix_(idx, idx)]
 
-    def I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> Stiffness:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.dimension.identity_np
         return anp.outer(delta, delta) / 3.0
 
-    def I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
@@ -156,19 +157,19 @@ class MaterialModelPS(MaterialModel):
     # Operator methods — concrete for PLANE_STRESS
     # ------------------------------------------------------------------
 
-    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: StressVec) -> Scalar:
         """Mean normal stress p = (σ11 + σ22) / 3.
 
         σ33 = 0 is enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return (stress[0] + stress[1]) / 3.0
 
-    def dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: StressVec) -> StressVec:
         """Deviatoric stress of the stored components, s = σ − p δ."""
         p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np  # δ = [1, 1, 0]
 
-    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> Stiffness:
         """Plane-stress isotropic stiffness via static condensation.
 
         Starts from the 4×4 plane-strain submatrix and applies the Schur
@@ -197,12 +198,12 @@ class MaterialModelPS(MaterialModel):
         C_cc = C4[2, 2]
         return C_rr - anp.outer(C_rc, C_rc) / C_cc
 
-    def I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> Stiffness:
         """Volumetric projection tensor P_vol = δ⊗δ / 3."""
         delta = self.dimension.identity_np  # [1, 1, 0]
         return anp.outer(delta, delta) / 3.0
 
-    def I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
@@ -210,7 +211,7 @@ class MaterialModelPS(MaterialModel):
     # Helpers for kinematic hardening with deviatoric backstress
     # ------------------------------------------------------------------
 
-    def lift_kin_to_3d(self, stress, alpha) -> anp.ndarray:
+    def lift_kin_to_3d(self, stress: StressVec, alpha: StressVec) -> FloatArray:
         """Lift relative stress ξ = σ − α to a full 6-component Voigt vector.
 
         For plane stress, σ33 = 0 but the backstress α33 = −(α11 + α22) is
@@ -238,7 +239,7 @@ class MaterialModelPS(MaterialModel):
             0.0,
         ])
 
-    def vonmises_kin(self, xi6) -> anp.ndarray:
+    def vonmises_kin(self, xi6: FloatArray) -> Scalar:
         """Von Mises norm of a 6-component relative-stress vector (no missing correction).
 
         Uses the standard 3D formula √(3/2 s:s) with Mandel factors on shear
@@ -303,19 +304,19 @@ class MaterialModel1D(MaterialModel):
     # Operator methods — concrete for UNIAXIAL_1D
     # ------------------------------------------------------------------
 
-    def hydrostatic(self, stress: anp.ndarray) -> anp.ndarray:
+    def hydrostatic(self, stress: StressVec) -> Scalar:
         """Mean normal stress p = σ11 / 3.
 
         σ22 = σ33 = 0 are enforced externally; ndi_phys = 3 so we divide by 3.
         """
         return stress[0] / 3.0
 
-    def dev(self, stress: anp.ndarray) -> anp.ndarray:
+    def dev(self, stress: StressVec) -> StressVec:
         """Deviatoric stress of the stored component, s = σ − p δ."""
         p = self.hydrostatic(stress)
         return stress - p * self.dimension.identity_np  # δ = [1.0]
 
-    def isotropic_C(self, lam: float, mu: float) -> anp.ndarray:
+    def isotropic_C(self, lam: float, mu: float) -> Stiffness:
         """1D elastic stiffness [[E]] where E = μ(3λ + 2μ) / (λ + μ).
 
         Parameters
@@ -330,11 +331,11 @@ class MaterialModel1D(MaterialModel):
         E = mu * (3.0 * lam + 2.0 * mu) / (lam + mu)
         return anp.array([[E]])
 
-    def I_vol(self) -> anp.ndarray:
+    def I_vol(self) -> Stiffness:
         """Volumetric projection tensor [[1/3]] for ntens=1."""
         delta = self.dimension.identity_np  # [1.0]
         return anp.outer(delta, delta) / 3.0
 
-    def I_dev(self) -> anp.ndarray:
+    def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
         return anp.eye(1) - self.I_vol()

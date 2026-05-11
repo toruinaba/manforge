@@ -12,6 +12,7 @@ import numpy as np
 from manforge.simulation._residual import build_residual
 from manforge.simulation._layout import ResidualLayout
 from manforge.verification.comparator_base import _array_rel_err
+from manforge._typing import FloatArray, StressVec, StateDict
 
 
 @dataclass
@@ -66,14 +67,14 @@ class JacobianBlocks:
     """
 
     layout: ResidualLayout
-    part: dict
-    full: anp.ndarray
+    part: dict[str, dict[str, FloatArray]]
+    full: FloatArray
 
-    def row_names(self) -> tuple:
+    def row_names(self) -> tuple[str, ...]:
         """Residual-row labels in canonical order."""
         return self.layout.residual_names()
 
-    def col_names(self) -> tuple:
+    def col_names(self) -> tuple[str, ...]:
         """State column names in canonical order: ``("stress", "dlambda", *implicit_keys)``."""
         return ("stress", "dlambda", *self.layout.implicit_keys)
 
@@ -104,7 +105,7 @@ class JacobianComparisonResult:
     """
 
     passed: bool
-    blocks: dict
+    blocks: dict[str, float]
     max_rel_err: float
 
 
@@ -139,7 +140,7 @@ class JacobianChecker:
         self.model = model
         self.rtol = rtol
 
-    def compute(self, result, state_n: dict, *, stress_trial=None) -> JacobianBlocks:
+    def compute(self, result: object, state_n: StateDict, *, stress_trial: "StressVec | None" = None) -> JacobianBlocks:
         """Compute the residual Jacobian at the converged point and decompose into blocks.
 
         Parameters
@@ -180,15 +181,16 @@ class JacobianChecker:
                     "stress_trial=... explicitly."
                 )
 
+        assert stress_trial is not None
         residual_fn, layout = build_residual(self.model, stress_trial, state_n)
 
         q_imp = {k: state[k] for k in layout.implicit_keys}
-        x_conv = layout.pack(stress, dlambda, q_imp)
+        x_conv = layout.pack(stress, dlambda, q_imp)  # type: ignore[arg-type]
 
-        J = autograd.jacobian(residual_fn)(anp.array(x_conv))
+        J = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[arg-type]
 
         col_names = ("stress", "dlambda", *layout.implicit_keys)
-        part: dict = {}
+        part: dict[str, dict[str, FloatArray]] = {}
         for row_state in col_names:
             row = layout.residual_name_for(row_state)
             sl_row = layout.slot_slice(row_state)
@@ -203,7 +205,7 @@ class JacobianChecker:
         return JacobianBlocks(layout=layout, part=part, full=J)
 
     def compare(
-        self, result_a, result_b, state_n: dict
+        self, result_a: object, result_b: object, state_n: StateDict
     ) -> JacobianComparisonResult:
         """Compare Jacobian blocks from two StressUpdateResults.
 

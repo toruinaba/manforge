@@ -1,8 +1,12 @@
 """Finite-difference verification of the consistent tangent."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 import numpy as np
+
+from manforge._typing import FloatArray, StateDict, Stiffness
 
 
 @dataclass
@@ -11,9 +15,9 @@ class TangentCheckResult:
 
     passed: bool
     max_rel_err: float
-    ddsdde_ad: np.ndarray
-    ddsdde_fd: np.ndarray
-    rel_err_matrix: np.ndarray
+    ddsdde_ad: Stiffness
+    ddsdde_fd: Stiffness
+    rel_err_matrix: FloatArray
 
 
 class TangentChecker:
@@ -42,14 +46,14 @@ class TangentChecker:
     >>> assert result.passed
     """
 
-    def __init__(self, integrator, *, eps: float = 1e-7, tol: float = 1e-5,
-                 denom_offset: float = 1e-2):
+    def __init__(self, integrator: object, *, eps: float = 1e-7, tol: float = 1e-5,
+                 denom_offset: float = 1e-2) -> None:
         self.integrator = integrator
         self.eps = eps
         self.tol = tol
         self.denom_offset = denom_offset
 
-    def check(self, stress, state, strain_inc) -> TangentCheckResult:
+    def check(self, stress: FloatArray, state: StateDict, strain_inc: FloatArray) -> TangentCheckResult:
         """Run the FD vs AD tangent comparison.
 
         Parameters
@@ -73,7 +77,7 @@ class TangentChecker:
             rel_err_matrix=rel_err_matrix,
         )
 
-    def _fd_tangent(self, strain_inc, stress_n, state_n):
+    def _fd_tangent(self, strain_inc: FloatArray, stress_n: FloatArray, state_n: StateDict) -> Stiffness:
         ntens = self.integrator.ntens
         ddsdde_fd = np.zeros((ntens, ntens))
         strain_inc = np.array(strain_inc)
@@ -91,8 +95,15 @@ class TangentChecker:
         return ddsdde_fd
 
 
-def check_tangent(integrator, stress, state, strain_inc, eps=1e-7, tol=1e-5,
-                  denom_offset=1e-2) -> TangentCheckResult:
+def check_tangent(
+    integrator: object,
+    stress: FloatArray,
+    state: StateDict,
+    strain_inc: FloatArray,
+    eps: float = 1e-7,
+    tol: float = 1e-5,
+    denom_offset: float = 1e-2,
+) -> TangentCheckResult:
     """Compare AD consistent tangent against central-difference approximation.
 
     Backward-compatible function form — delegates to :class:`TangentChecker`.

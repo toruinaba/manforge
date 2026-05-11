@@ -7,14 +7,20 @@ instance.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from manforge.core.material.fortran_binding import FortranBinding
 
+if TYPE_CHECKING:
+    from manforge.core.material import MaterialModel
+    from manforge.simulation.integrator import FortranModule
+
 
 def check_bindings(
-    model,
-    fortran,
+    model: "MaterialModel",
+    fortran: "FortranModule",
     cases: dict[str, tuple[tuple, tuple]],
     *,
     rtol: float = 1e-10,

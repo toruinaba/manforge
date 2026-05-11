@@ -48,7 +48,11 @@ through the raw dict values unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Iterator, ItemsView, KeysView, Literal, ValuesView
+
+import autograd.numpy as anp
+
+from manforge._typing import FloatArray, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +100,9 @@ def _get_scalar_sentinel():
 
 SCALAR = _ScalarSentinel()
 
+ShapeSpec = _NtensSentinel | _ScalarSentinel | int | tuple[int, ...]
+"""Type alias for valid ``shape`` arguments to ``Implicit`` / ``Explicit``."""
+
 
 # ---------------------------------------------------------------------------
 # StateField descriptor
@@ -128,9 +135,9 @@ class StateField:
         attribute.  Do not pass this manually.
     """
 
-    kind: str                           # "implicit" | "explicit"
-    shape: Any                          # NTENS | tuple | int
-    default: Callable | None = field(default=None, compare=False)
+    kind: Literal["implicit", "explicit"]
+    shape: ShapeSpec  # NTENS | SCALAR | int | tuple[int, ...]
+    default: Callable[..., FloatArray] | None = field(default=None, compare=False)
     doc: str = field(default="", compare=False)
     name: str = field(default="", compare=False)
     residual_name: str | None = field(default=None, compare=False)
@@ -160,7 +167,7 @@ class StateField:
     def __set_name__(self, owner, attr_name: str):
         object.__setattr__(self, "name", attr_name)
 
-    def __call__(self, value) -> "StateResidual | StateUpdate":
+    def __call__(self, value: FloatArray | float) -> "StateResidual | StateUpdate":
         """Wrap *value* as :class:`StateResidual` (implicit) or :class:`StateUpdate` (explicit).
 
         Usage inside ``state_residual`` / ``update_state``::
@@ -188,7 +195,7 @@ class StateField:
             return StateResidual(name=self.name, value=value)
         return StateUpdate(name=self.name, value=value)
 
-    def resolve_shape(self, ntens: int) -> tuple:
+    def resolve_shape(self, ntens: int) -> tuple[int, ...]:
         """Return the concrete shape with NTENS/SCALAR substituted."""
         if self.shape is NTENS:
             return (ntens,)
@@ -196,11 +203,10 @@ class StateField:
             return ()
         if isinstance(self.shape, int):
             return (self.shape,)
-        return tuple(self.shape)
+        return tuple(self.shape)  # type: ignore[arg-type]
 
-    def initial_value(self, model) -> Any:
+    def initial_value(self, model: Any) -> FloatArray:
         """Compute the initial (zero) value for this field."""
-        import autograd.numpy as anp
         if self.default is not None:
             return self.default(model)
         shp = self.resolve_shape(model.ntens)
@@ -209,13 +215,23 @@ class StateField:
         return anp.zeros(shp)
 
 
-def Implicit(shape=(), default=None, doc="", residual_name=None) -> StateField:
+def Implicit(
+    shape: ShapeSpec = SCALAR,
+    default: Callable[..., FloatArray] | None = None,
+    doc: str = "",
+    residual_name: str | None = None,
+) -> StateField:
     """Create an implicit StateField (state variable solved as NR unknown)."""
     return StateField(kind="implicit", shape=shape, default=default, doc=doc,
                       residual_name=residual_name)
 
 
-def Explicit(shape=(), default=None, doc="", residual_name=None) -> StateField:
+def Explicit(
+    shape: ShapeSpec = SCALAR,
+    default: Callable[..., FloatArray] | None = None,
+    doc: str = "",
+    residual_name: str | None = None,
+) -> StateField:
     """Create an explicit StateField (state variable updated in closed form)."""
     return StateField(kind="explicit", shape=shape, default=default, doc=doc,
                       residual_name=residual_name)
@@ -242,7 +258,7 @@ class StateResidual:
     """
 
     name: str
-    value: Any
+    value: FloatArray | float
 
 
 @dataclass(frozen=True)
@@ -262,7 +278,7 @@ class StateUpdate:
     """
 
     name: str
-    value: Any
+    value: FloatArray | float
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +298,7 @@ class DlambdaResidual:
     yield surface.
     """
 
-    value: Any
+    value: FloatArray | float
 
 
 class DlambdaField:
@@ -309,7 +325,7 @@ class DlambdaField:
     __slots__ = ()
     name = "dlambda"
 
-    def __call__(self, value) -> DlambdaResidual:
+    def __call__(self, value: FloatArray | float) -> DlambdaResidual:
         return DlambdaResidual(value=value)
 
 
@@ -321,15 +337,15 @@ DLAMBDA_FIELD = DlambdaField()
 # ---------------------------------------------------------------------------
 
 def _validate_state_items(
-    returned,
-    expected_names: set,
-    expected_cls,
+    returned: Any,
+    expected_names: set[str],
+    expected_cls: type,
     method_name: str,
     model_name: str,
     *,
     extract_dlambda: bool = False,
     hint: str = "",
-) -> "dict | tuple[dict, Any]":
+) -> "StateDict | tuple[StateDict, FloatArray | None]":
     """Validate a list of StateResidual / StateUpdate and return a name→value dict.
 
     Called at the framework boundary (residual.py / solver.py) after
@@ -393,7 +409,7 @@ def _validate_state_items(
             raise ValueError(
                 f"{model_name}.{method_name}: duplicate entry for {item.name!r}"
             )
-        out[item.name] = item.value
+        out[item.name] = anp.array(item.value)
     if extract_dlambda and len(dl_items) > 1:
         raise ValueError(
             f"{model_name}.{method_name}: duplicate self.dlambda(...) entries"
@@ -411,7 +427,7 @@ def _validate_state_items(
             parts.append(f"unexpected: {sorted(extra)}")
         raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
     if extract_dlambda:
-        r_dl = dl_items[0].value if dl_items else None
+        r_dl = anp.array(dl_items[0].value) if dl_items else None
         return out, r_dl
     return out
 
@@ -461,35 +477,35 @@ class State:
 
     __slots__ = ("_data", "_fields")
 
-    def __init__(self, data: dict, fields: tuple):
+    def __init__(self, data: StateDict, fields: tuple[str, ...]) -> None:
         object.__setattr__(self, "_data", data)
         object.__setattr__(self, "_fields", fields)
 
-    def __getitem__(self, key: str):
-        return self._data[key]
+    def __getitem__(self, key: str) -> FloatArray:
+        return self._data[key]  # type: ignore[return-value]
 
-    def __contains__(self, key: str):
+    def __contains__(self, key: object) -> bool:
         return key in self._data
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._fields)
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         return self._data.keys()
 
-    def values(self):
-        return self._data.values()
+    def values(self) -> ValuesView[FloatArray]:
+        return self._data.values()  # type: ignore[return-value]
 
-    def items(self):
-        return self._data.items()
+    def items(self) -> ItemsView[str, FloatArray]:
+        return self._data.items()  # type: ignore[return-value]
 
-    def with_stress(self, new_stress) -> "State":
+    def with_stress(self, new_stress: FloatArray) -> "State":
         """Return a new State with only the ``stress`` entry replaced."""
         data = dict(self._data)
-        data["stress"] = new_stress
-        return State(data, self._fields)
+        data["stress"] = new_stress  # type: ignore[assignment]
+        return State(data, self._fields)  # type: ignore[arg-type]
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> StateDict:
         """Return the underlying dict (no copy — values are shared)."""
         return self._data
 
@@ -501,7 +517,7 @@ class State:
 # make_state factory helper
 # ---------------------------------------------------------------------------
 
-def _make(required_keys: set, factory_name: str, kwargs: dict) -> dict:
+def _make(required_keys: set[str], factory_name: str, kwargs: dict[str, FloatArray]) -> StateDict:
     """Validate and assemble a state dict.
 
     Raises ``TypeError`` listing all missing and unexpected keys so users
@@ -524,7 +540,7 @@ def _make(required_keys: set, factory_name: str, kwargs: dict) -> dict:
 # stress-replacement helper (used by residual.py to build ∂f/∂σ via autograd)
 # ---------------------------------------------------------------------------
 
-def _state_with_stress(state, new_stress) -> "State | dict":
+def _state_with_stress(state: "State | StateDict", new_stress: FloatArray) -> "State | StateDict":
     """Return a copy of *state* with only the ``stress`` entry replaced.
 
     Used by the framework to build ``autograd.grad(lambda s: model.yield_function(

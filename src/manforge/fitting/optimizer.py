@@ -3,13 +3,22 @@
 Main entry point: :func:`fit_params`.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from scipy.optimize import minimize, differential_evolution
+from typing_extensions import TypeAlias
 
-from manforge.fitting.objective import build_objective
+from manforge.fitting.objective import ExpData, DriverFactoryFn, build_objective
+from manforge._typing import FloatArray
+
+if TYPE_CHECKING:
+    from manforge.core.material import MaterialModel
+
+FitConfig: TypeAlias = dict[str, tuple[float, tuple[float | None, float | None] | None]]
 
 
 @dataclass
@@ -18,7 +27,7 @@ class FitResult:
 
     Attributes
     ----------
-    params : dict
+    params : dict[str, float]
         Optimised parameter values (free + fixed).
     residual : float
         Objective function value at the optimum.
@@ -28,26 +37,26 @@ class FitResult:
         Number of objective function evaluations.
     message : str
         Optimiser status message.
-    history : list[dict]
+    history : list[dict[str, float]]
         Parameter values at each optimiser callback (populated only when
         ``method="L-BFGS-B"`` or ``"Nelder-Mead"``; empty otherwise).
     """
 
-    params: dict
+    params: dict[str, float]
     residual: float
     success: bool
     n_iter: int
     message: str = ""
-    history: list = field(default_factory=list)
+    history: list[dict[str, float]] = field(default_factory=list)
 
 
 def fit_params(
-    model,
-    driver_factory,
-    exp_data: dict,
-    fit_config: dict,
-    fixed_params: dict | None = None,
-    method: str = "L-BFGS-B",
+    model: "MaterialModel",
+    driver_factory: DriverFactoryFn,
+    exp_data: ExpData,
+    fit_config: FitConfig,
+    fixed_params: dict[str, float] | None = None,
+    method: Literal["L-BFGS-B", "Nelder-Mead", "differential_evolution"] = "L-BFGS-B",
 ) -> FitResult:
     """Fit material parameters to experimental stress-strain data.
 
@@ -90,23 +99,25 @@ def fit_params(
     bounds = [fit_config[n][1] for n in free_names]  # list of (lb, ub) or None
 
     # Normalise bounds: replace None with (-inf, inf)
-    bounds_clean = [
-        ((-np.inf if b is None else b[0]),
-         ( np.inf if b is None else b[1]))
-        if b is not None else (-np.inf, np.inf)
-        for b in bounds
-    ]
+    def _norm_bound(b: tuple[float | None, float | None] | None) -> tuple[float, float]:
+        if b is None:
+            return (-np.inf, np.inf)
+        lo = b[0] if b[0] is not None else -np.inf
+        hi = b[1] if b[1] is not None else np.inf
+        return (lo, hi)
+
+    bounds_clean = [_norm_bound(b) for b in bounds]
 
     # Build objective — accepts a dict of free params
     obj_fn = build_objective(model, driver_factory, exp_data, fixed_params=fixed)
 
-    history: list[dict] = []
+    history: list[dict[str, float]] = []
 
-    def _scalar_obj(x: np.ndarray) -> float:
-        free = dict(zip(free_names, x))
+    def _scalar_obj(x: FloatArray) -> float:
+        free: dict[str, float] = dict(zip(free_names, x))
         return obj_fn(free)
 
-    def _callback(x: np.ndarray) -> None:
+    def _callback(x: FloatArray) -> None:
         history.append(dict(zip(free_names, x.tolist())))
 
     # ------------------------------------------------------------------ #
@@ -119,7 +130,7 @@ def fit_params(
         result = differential_evolution(
             _scalar_obj,
             de_bounds,
-            seed=0,
+            seed=0,  # type: ignore[call-arg]  # scipy stubs omit seed
             tol=1e-8,
             maxiter=1000,
             callback=lambda xk, convergence=None: _callback(xk),

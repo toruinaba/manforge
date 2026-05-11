@@ -10,6 +10,7 @@ from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
 from manforge.core.state import _state_with_stress
+from manforge._typing import Stiffness, StressVec, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -31,14 +32,14 @@ class StressIntegrator:
     def ntens(self) -> int:
         return self.dimension.ntens
 
-    def initial_state(self) -> dict:
+    def initial_state(self) -> StateDict:
         raise NotImplementedError
 
-    def elastic_stiffness(self) -> np.ndarray:
+    def elastic_stiffness(self) -> Stiffness:
         raise NotImplementedError
 
     def stress_update(
-        self, strain_inc, stress_n, state_n
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
     ) -> StressUpdateResult:
         raise NotImplementedError
 
@@ -76,13 +77,15 @@ class _PythonIntegratorBase:
     def ntens(self) -> int:
         return self._model.ntens
 
-    def initial_state(self) -> dict:
+    def initial_state(self) -> StateDict:
         return self._model.initial_state()
 
-    def elastic_stiffness(self, state=None) -> np.ndarray:
+    def elastic_stiffness(self, state: "StateDict | None" = None) -> Stiffness:
         return self._model.elastic_stiffness(state)
 
-    def _try_user_return_mapping(self, stress_trial, C, state_n):
+    def _try_user_return_mapping(
+        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
+    ) -> "ReturnMappingResult | None":
         """Attempt user_defined_return_mapping; return ReturnMappingResult or None."""
         if self._method == "numerical_newton":
             return None
@@ -96,7 +99,9 @@ class _PythonIntegratorBase:
             )
         return None
 
-    def _try_user_tangent(self, rm, stress_n, state_n, C):
+    def _try_user_tangent(
+        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict, C: Stiffness
+    ) -> "Stiffness | None":
         """Attempt user_defined_tangent; return ddsdde array or None."""
         if self._method == "numerical_newton":
             return None
@@ -112,7 +117,7 @@ class _PythonIntegratorBase:
             )
         return None
 
-    def _numerical_newton(self, stress_trial, state_n):
+    def _numerical_newton(self, stress_trial: StressVec, state_n: StateDict) -> tuple:
         """Unified NR return mapping.
 
         Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
@@ -135,7 +140,7 @@ class _PythonIntegratorBase:
             if norm < self._tol:
                 converged = True
                 break
-            J = autograd.jacobian(residual_fn)(x)
+            J = autograd.jacobian(residual_fn)(x)  # type: ignore[call-arg]
             dx = np.linalg.solve(np.array(J), np.array(R))
             x = x - anp.array(dx)
             n_iterations += 1
@@ -160,7 +165,9 @@ class _PythonIntegratorBase:
             converged,
         )
 
-    def _consistent_tangent(self, rm, stress_n, state_n):
+    def _consistent_tangent(
+        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict
+    ) -> Stiffness:
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
         model = self._model
         ntens = model.ntens
@@ -173,7 +180,7 @@ class _PythonIntegratorBase:
         state_full = _wrap_state(state_with_stress_dict, model)
         C_n = model.elastic_stiffness(state_n)
         C_conv = model.elastic_stiffness(state_full)
-        n_conv = autograd.grad(
+        n_conv = autograd.grad(  # type: ignore[call-arg]
             lambda s: model.yield_function(_state_with_stress(state_full, s))
         )(anp.array(stress))
         stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
@@ -183,14 +190,14 @@ class _PythonIntegratorBase:
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)
 
-        A = autograd.jacobian(residual_fn)(anp.array(x_conv))
+        A = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[call-arg]
         rhs = np.vstack(
             [np.array(C_n), np.zeros((layout.n_unknown - ntens, ntens))]
         )
         dxde = np.linalg.solve(np.array(A), rhs)
         return anp.array(dxde[:ntens, :])
 
-    def return_mapping(self, stress_trial, state_n) -> ReturnMappingResult:
+    def return_mapping(self, stress_trial: StressVec, state_n: StateDict) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)
         rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
@@ -209,7 +216,9 @@ class _PythonIntegratorBase:
             converged=converged,
         )
 
-    def stress_update(self, strain_inc, stress_n, state_n) -> StressUpdateResult:
+    def stress_update(
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
+    ) -> StressUpdateResult:
         """Perform a complete constitutive stress update for one load increment."""
         C_n = self._model.elastic_stiffness(state_n)
         stress_trial = stress_n + C_n @ strain_inc

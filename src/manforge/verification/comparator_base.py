@@ -17,6 +17,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from manforge._typing import FloatArray, StateDict
+
 import numpy as np
 
 # Stress rel-err denominator: additive offset avoids 0/0 on unloading to zero stress.
@@ -25,14 +27,14 @@ _STRESS_NORM = 1.0
 _EPS = 1e-300
 
 
-def _stress_rel_err(ref: np.ndarray, cand: np.ndarray) -> float:
+def _stress_rel_err(ref: FloatArray, cand: FloatArray) -> float:
     """Max component-wise stress relative error with additive denominator."""
     return float(np.max(np.abs(cand - ref) / (np.abs(ref) + _STRESS_NORM)))
 
 
 def _state_rel_err(
-    ref_dict: dict[str, Any],
-    cand_dict: dict[str, Any],
+    ref_dict: StateDict,
+    cand_dict: StateDict,
 ) -> dict[str, float]:
     """Per state-variable relative error."""
     errs: dict[str, float] = {}
@@ -43,7 +45,7 @@ def _state_rel_err(
     return errs
 
 
-def _tangent_rel_err(ref: Any, cand: Any) -> float | None:
+def _tangent_rel_err(ref: "FloatArray | None", cand: "FloatArray | None") -> float | None:
     """Max tangent relative error; returns None if either arg is None."""
     if ref is None or cand is None:
         return None
@@ -120,7 +122,7 @@ class Comparator(ABC):
 
     _result_cls: type[ComparisonResult] = ComparisonResult
 
-    def _aggregate_extra(self, cases: list[CaseResult]) -> dict:
+    def _aggregate_extra(self, cases: list[CaseResult]) -> dict[str, Any]:
         """Extra kwargs to pass to ``_result_cls``. Override in subclasses."""
         return {}
 
