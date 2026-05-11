@@ -10,7 +10,7 @@ from manforge.core.dimension import (
     UNIAXIAL_1D,
     StressDimension,
 )
-from manforge.utils.smooth import smooth_sqrt
+from manforge.utils.smooth import smooth_sqrt, smooth_abs
 
 
 class MaterialModel3D(MaterialModel):
@@ -112,6 +112,23 @@ class MaterialModel3D(MaterialModel):
         """Deviatoric projection tensor P_dev = I − P_vol."""
         return anp.eye(self.ntens) - self.I_vol()
 
+    # ------------------------------------------------------------------
+    # Kinematic-hardening operators (α deviatoric assumed)
+    # ------------------------------------------------------------------
+
+    def vonmises_relative(self, stress: StressVec, alpha: StressVec) -> Scalar:
+        """Von Mises norm of ξ = σ − α (all components stored for 3D/PE)."""
+        return self.vonmises(stress - alpha)
+
+    def flow_direction(self, stress: StressVec, alpha: StressVec) -> StressVec:
+        """Plastic flow direction n̂ = (3/2) dev(ξ) / σ_vm(ξ)."""
+        xi = stress - alpha
+        return 1.5 * self.dev(xi) / self.vonmises(xi)
+
+    def alpha_norm(self, alpha: StressVec) -> Scalar:
+        """Von Mises norm of deviatoric backstress α (n_missing=0 for 3D/PE)."""
+        return self.vonmises(alpha)
+
 
 class MaterialModelPS(MaterialModel):
     """Stress-state base class for plane-stress elements (PLANE_STRESS).
@@ -208,59 +225,42 @@ class MaterialModelPS(MaterialModel):
         return anp.eye(self.ntens) - self.I_vol()
 
     # ------------------------------------------------------------------
-    # Helpers for kinematic hardening with deviatoric backstress
+    # Kinematic-hardening operators (α deviatoric assumed)
     # ------------------------------------------------------------------
 
-    def lift_kin_to_3d(self, stress: StressVec, alpha: StressVec) -> FloatArray:
-        """Lift relative stress ξ = σ − α to a full 6-component Voigt vector.
+    def vonmises_relative(self, stress: StressVec, alpha: StressVec) -> Scalar:
+        """Von Mises norm of ξ = σ − α with α deviatoric (α33 = −(α11+α22)).
 
-        For plane stress, σ33 = 0 but the backstress α33 = −(α11 + α22) is
-        nonzero if α is deviatoric.  This helper enforces that identity so that
-        ``vonmises_kin`` can compute the correct von Mises norm of ξ.
-
-        Parameters
-        ----------
-        stress : array, shape (3,)  — [σ11, σ22, σ12] (σ33 = 0)
-        alpha  : array, shape (3,)  — [α11, α22, α12] (stored components)
-
-        Returns
-        -------
-        anp.ndarray, shape (6,)  — [ξ11, ξ22, ξ33, ξ12, 0, 0]
-            where ξ33 = 0 − α33 = α11 + α22
+        For plane stress σ33 = 0, so ξ33 = −α33 = α11+α22.  The hydrostatic
+        part of ξ depends only on σ (the α contributions cancel), so all
+        required quantities are computable from the three stored components.
         """
+        p = (stress[0] + stress[1]) / 3.0   # p_ξ = p_σ  (α deviatoric ⇒ tr α = 0)
+        s11 = stress[0] - alpha[0] - p
+        s22 = stress[1] - alpha[1] - p
+        s33 = (alpha[0] + alpha[1]) - p      # ξ33 − p = −α33 − p
+        s12 = stress[2] - alpha[2]
+        return smooth_sqrt(1.5 * (s11*s11 + s22*s22 + s33*s33 + 2.0*s12*s12))
+
+    def flow_direction(self, stress: StressVec, alpha: StressVec) -> StressVec:
+        """Plastic flow direction n̂ = ∂f/∂σ = (3/2) s_ξ / σ_vm(ξ).
+
+        Returns the three stored PS components of n̂.  Uses the same
+        α-deviatoric identity as :meth:`vonmises_relative`.
+        """
+        p = (stress[0] + stress[1]) / 3.0
+        s11 = stress[0] - alpha[0] - p
+        s22 = stress[1] - alpha[1] - p
+        s12 = stress[2] - alpha[2]
+        vm = self.vonmises_relative(stress, alpha)
+        return 1.5 * anp.array([s11, s22, s12]) / vm
+
+    def alpha_norm(self, alpha: StressVec) -> Scalar:
+        """Von Mises norm of deviatoric backstress α (α33 = −(α11+α22))."""
         a33 = -(alpha[0] + alpha[1])
-        xi12 = stress[2] - alpha[2]
-        return anp.array([
-            stress[0] - alpha[0],
-            stress[1] - alpha[1],
-            -a33,       # ξ33 = 0 - α33 = α11 + α22
-            xi12,
-            0.0,
-            0.0,
-        ])
-
-    def vonmises_kin(self, xi6: FloatArray) -> Scalar:
-        """Von Mises norm of a 6-component relative-stress vector (no missing correction).
-
-        Uses the standard 3D formula √(3/2 s:s) with Mandel factors on shear
-        components (×√2).  Intended for evaluating ``σ_vm(ξ)`` after lifting
-        via :meth:`lift_kin_to_3d`.
-
-        Parameters
-        ----------
-        xi6 : array, shape (6,)
-
-        Returns
-        -------
-        scalar
-        """
-        p = (xi6[0] + xi6[1] + xi6[2]) / 3.0
-        delta6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
-        s = xi6 - p * delta6
-        mandel6 = anp.array([1.0, 1.0, 1.0,
-                              anp.sqrt(2.0), anp.sqrt(2.0), anp.sqrt(2.0)])
-        s_m = s * mandel6
-        return smooth_sqrt(1.5 * anp.dot(s_m, s_m))
+        return smooth_sqrt(1.5 * (
+            alpha[0]*alpha[0] + alpha[1]*alpha[1] + a33*a33 + 2.0*alpha[2]*alpha[2]
+        ))
 
 
 class MaterialModel1D(MaterialModel):
@@ -339,3 +339,26 @@ class MaterialModel1D(MaterialModel):
     def I_dev(self) -> Stiffness:
         """Deviatoric projection tensor [[2/3]] for ntens=1."""
         return anp.eye(1) - self.I_vol()
+
+    # ------------------------------------------------------------------
+    # Kinematic-hardening operators (α deviatoric assumed)
+    # ------------------------------------------------------------------
+
+    def vonmises_relative(self, stress: StressVec, alpha: StressVec) -> Scalar:
+        """Von Mises norm of ξ = σ − (3/2)α_dev.
+
+        For 1D, α stores the deviatoric component α11_dev.  The missing
+        components α22 = α33 = −α11_dev/2 contribute to the 3D relative
+        stress ξ22 = ξ33 = α11_dev/2, so the effective relative stress is
+        σ_vm(ξ) = |σ11 − (3/2)·α11_dev|.
+        """
+        return smooth_abs(stress[0] - 1.5 * alpha[0])
+
+    def flow_direction(self, stress: StressVec, alpha: StressVec) -> StressVec:
+        """Plastic flow direction n̂_11 = sign(σ11 − (3/2)·α11_dev)."""
+        diff = stress[0] - 1.5 * alpha[0]
+        return anp.array([diff / smooth_abs(diff)])
+
+    def alpha_norm(self, alpha: StressVec) -> Scalar:
+        """Von Mises norm of deviatoric backstress α (α22=α33=−α/2)."""
+        return smooth_abs(1.5 * alpha[0])
