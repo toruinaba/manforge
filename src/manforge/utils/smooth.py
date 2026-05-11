@@ -12,10 +12,10 @@ Functions and their parameters:
   smooth_macaulay(x, eps=1e-30)    (x + smooth_abs(x)) / 2    ε: denominator stabiliser
   smooth_direction(v, eps=1e-30)   v / smooth_norm(v)          ε: denominator stabiliser
   smooth_heaviside(x, beta=50.0)   0.5·(1 + tanh(β·x/2))      β: transition sharpness
-  smooth_min(a, b, eps=1e-30)      (a+b - smooth_abs(a-b)) / 2  ε: denominator stabiliser
-  smooth_max(a, b, eps=1e-30)      (a+b + smooth_abs(a-b)) / 2  ε: denominator stabiliser
+  smooth_min(a, b, eps=1e-30)      b + (d - smooth_abs(d)) / 2  ε: denominator stabiliser
+  smooth_max(a, b, eps=1e-30)      b + (d + smooth_abs(d)) / 2  ε: denominator stabiliser
 
-``eps`` regularises denominators at zero; with float64, ``sqrt(1e-30) ≈ 3e-16``.
+``eps`` regularises denominators at zero; with float64, ``sqrt(1e-30) ≈ 1e-15``.
 ``beta`` controls the steepness of the Heaviside step: larger β → sharper transition.
 """
 
@@ -59,10 +59,20 @@ def smooth_heaviside(x: anp.ndarray, beta: float = 50.0) -> anp.ndarray:
 
 
 def smooth_min(a: anp.ndarray, b: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
-    """Smooth minimum: (a + b - smooth_abs(a - b)) / 2."""
-    return 0.5 * (a + b - smooth_abs(a - b, eps))
+    """Smooth minimum: b + (d - smooth_abs(d)) / 2, where d = a - b.
+
+    Avoids the a+b intermediate to prevent overflow when a and b are large
+    with the same sign.
+    """
+    d = a - b
+    return b + 0.5 * (d - smooth_abs(d, eps))
 
 
 def smooth_max(a: anp.ndarray, b: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
-    """Smooth maximum: (a + b + smooth_abs(a - b)) / 2."""
-    return 0.5 * (a + b + smooth_abs(a - b, eps))
+    """Smooth maximum: b + (d + smooth_abs(d)) / 2, where d = a - b.
+
+    Avoids the a+b intermediate to prevent overflow when a and b are large
+    with the same sign.
+    """
+    d = a - b
+    return b + 0.5 * (d + smooth_abs(d, eps))
