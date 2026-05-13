@@ -19,9 +19,24 @@ Functions and their parameters:
 ``beta`` controls the steepness of the Heaviside step: larger β → sharper transition.
 """
 
+import numpy as _np
 import autograd.numpy as anp
+from autograd.extend import defvjp, primitive
 
 _DEFAULT_EPS: float = 1e-30
+
+
+@primitive
+def _stable_tanh(x):
+    """autograd primitive whose VJP uses ``1 − tanh(x)²`` instead of
+    ``1 / cosh(x)²``, avoiding float64 overflow at ``|x| ≳ 354``.
+    Forward value is identical to ``np.tanh``; only :func:`smooth_heaviside`
+    uses this; global ``anp.tanh`` is untouched.
+    """
+    return _np.tanh(x)
+
+
+defvjp(_stable_tanh, lambda ans, x: lambda g: g * (1.0 - ans * ans))
 
 
 def smooth_sqrt(x: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
@@ -52,10 +67,12 @@ def smooth_direction(v: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
 def smooth_heaviside(x: anp.ndarray, beta: float = 50.0) -> anp.ndarray:
     """Smooth Heaviside step: 0.5·(1 + tanh(β·x/2)).
 
-    tanh formulation avoids exp overflow that would arise from 1/(1+exp(-βx)).
+    Uses :func:`_stable_tanh` so the autograd VJP follows ``1 − tanh²``
+    instead of ``1 / cosh²``, avoiding overflow at ``|β·x/2| ≳ 354``
+    (i.e. ``|x| ≳ 709/β``; with default β=50, ``|x| ≳ 14.2``).
     At x=0 returns exactly 0.5; larger β gives a sharper transition.
     """
-    return 0.5 * (1.0 + anp.tanh(0.5 * beta * x))
+    return 0.5 * (1.0 + _stable_tanh(0.5 * beta * x))
 
 
 def smooth_min(a: anp.ndarray, b: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:

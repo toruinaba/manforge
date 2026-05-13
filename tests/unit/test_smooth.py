@@ -317,11 +317,27 @@ class TestSmoothHeaviside:
         assert grad > 0.0, f"Expected positive gradient, got {grad}"
 
     def test_gradient_finite_everywhere(self):
-        """Gradient is finite for a range of inputs."""
-        xs = anp.linspace(-10.0, 10.0, 201)
+        """Gradient is finite for a range of inputs including saturation."""
+        xs = anp.linspace(-20.0, 20.0, 401)
         for x in xs:
             g = float(autograd.grad(smooth_heaviside)(x))
             assert np.isfinite(g), f"gradient not finite at x={x}: {g}"
+
+    def test_gradient_no_overflow_warning_at_saturation(self):
+        """Saturation region must not raise overflow RuntimeWarning.
+
+        Regression: autograd's default tanh VJP computes ``g / cosh(x)**2``
+        which overflows float64 at ``|x| ≳ 354``.  _stable_tanh replaces
+        the VJP with ``g * (1 - tanh(x)**2)`` to eliminate the warning.
+        """
+        import warnings
+
+        grad_fn = autograd.grad(smooth_heaviside)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            for x_val in [15.0, 100.0, 1000.0, -15.0, -1000.0]:
+                g = float(grad_fn(anp.array(x_val)))
+                assert np.isfinite(g), f"grad not finite at x={x_val}: {g}"
 
     def test_larger_beta_sharper_transition(self):
         """Larger beta gives value closer to 1 at small positive x."""
