@@ -19,7 +19,7 @@ Functions and their parameters:
 ``beta`` controls the steepness of the Heaviside step: larger β → sharper transition.
 """
 
-import numpy as _np
+import numpy as np
 import autograd.numpy as anp
 from autograd.extend import defvjp, primitive
 
@@ -27,13 +27,13 @@ _DEFAULT_EPS: float = 1e-30
 
 
 @primitive
-def _stable_tanh(x):
+def _stable_tanh(x: anp.ndarray) -> anp.ndarray:
     """autograd primitive whose VJP uses ``1 − tanh(x)²`` instead of
     ``1 / cosh(x)²``, avoiding float64 overflow at ``|x| ≳ 354``.
     Forward value is identical to ``np.tanh``; only :func:`smooth_heaviside`
     uses this; global ``anp.tanh`` is untouched.
     """
-    return _np.tanh(x)
+    return np.tanh(x)
 
 
 defvjp(_stable_tanh, lambda ans, x: lambda g: g * (1.0 - ans * ans))
