@@ -82,7 +82,7 @@ class MaterialModel(ABC):
     param_names: list[str]
     dimension: StressDimension = SOLID_3D
 
-    def __init__(self, *, dimension: StressDimension = SOLID_3D, **kwargs):
+    def __init__(self, *, dimension: StressDimension = SOLID_3D):
         self.dimension = dimension
 
     # Derived by __init_subclass__ from StateField descriptors:
@@ -481,24 +481,31 @@ class MaterialModel(ABC):
         return anp.dot(a * mf, b * mf)
 
     def hydrostatic(self, stress: StressVec) -> "Scalar":
+        """Mean normal stress; delegates to :meth:`StressDimension.hydrostatic`."""
         return self.dimension.hydrostatic(stress)
 
     def dev(self, stress: StressVec) -> StressVec:
+        """Deviatoric stress; delegates to :meth:`StressDimension.dev`."""
         return self.dimension.dev(stress)
 
     def isotropic_C(self, lam: float, mu: float) -> "Stiffness":
+        """Isotropic elastic stiffness; delegates to :meth:`StressDimension.isotropic_C`."""
         return self.dimension.isotropic_C(lam, mu)
 
     def I_vol(self) -> "Stiffness":
+        """Volumetric projection tensor; delegates to :meth:`StressDimension.I_vol`."""
         return self.dimension.I_vol()
 
     def I_dev(self) -> "Stiffness":
+        """Deviatoric projection tensor; delegates to :meth:`StressDimension.I_dev`."""
         return self.dimension.I_dev()
 
     def vonmises_norm(self, s: StressVec) -> "Scalar":
+        """Von Mises norm of a deviatoric tensor; delegates to :meth:`StressDimension.vonmises_norm`."""
         return self.dimension.vonmises_norm(s)
 
     def _missing_dev_components(self, s: StressVec) -> StressVec:
+        """Unstored deviatoric direct components; delegates to :meth:`StressDimension.missing_dev_components`."""
         return self.dimension.missing_dev_components(s)
 
     def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:

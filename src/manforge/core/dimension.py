@@ -1,7 +1,6 @@
 """StressDimension: dimensionality descriptor for stress/strain analyses."""
 
 import math
-from abc import ABC
 from dataclasses import dataclass
 
 import autograd.numpy as anp
@@ -11,12 +10,13 @@ from manforge.utils.smooth import smooth_sqrt, smooth_abs
 
 
 @dataclass(frozen=True)
-class StressDimension(ABC):
+class StressDimension:
     """Dimensionality descriptor for a stress analysis.
 
-    Concrete subclasses implement the operator methods (dev, hydrostatic, etc.).
-    Direct instantiation of this class is supported for structural validation
-    tests, but operators will raise NotImplementedError.
+    Operator methods (dev, hydrostatic, isotropic_C, I_vol, I_dev,
+    vonmises_norm) are implemented by the concrete derived classes
+    (_Solid3DLikeDimension, _PlaneStressDimension, _Uniaxial1DDimension).
+    Calling them on the bare base class raises NotImplementedError.
     """
 
     name: str
