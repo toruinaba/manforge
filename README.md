@@ -137,21 +137,30 @@ model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 **Implicit-state (Ohno-Wang 型)** — `update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し `state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
 
 ```python
+from manforge.core import Implicit, NTENS, SCALAR
+from manforge.core.dimension import SOLID_3D, StressDimension
+from manforge.core.material import MaterialModel
+
 class MyImplicitModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")
     alpha  = Implicit(shape=NTENS, doc="backstress tensor")
     ep     = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
+    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0, C_k, gamma):
+        super().__init__(dimension=dimension)
+        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
+        self.C_k = C_k; self.gamma = gamma
+
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
-        return self._vonmises(xi) - self.sigma_y0
+        return self.vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, state_trial):
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
         R_alpha = ...         # shape (ntens,)
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.alpha(R_alpha), self.ep(R_ep)]
-        # self.stress を省略すると framework が associative R_stress を自動装着
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 ```
 
 参照実装: `src/manforge/models/ow_kinematic.py`

@@ -55,6 +55,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 ```python
 from manforge.core import Implicit, Explicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, StressDimension
+from manforge.core.material import MaterialModel
 
 class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0"]
