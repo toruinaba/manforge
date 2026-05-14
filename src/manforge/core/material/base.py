@@ -82,6 +82,9 @@ class MaterialModel(ABC):
     param_names: list[str]
     dimension: StressDimension = SOLID_3D
 
+    def __init__(self, *, dimension: StressDimension = SOLID_3D, **kwargs):
+        self.dimension = dimension
+
     # Derived by __init_subclass__ from StateField descriptors:
     state_fields: dict[str, StateField] = {}
     state_names: list[str] = []
@@ -477,14 +480,26 @@ class MaterialModel(ABC):
         mf = self.dimension.mandel_factors_np
         return anp.dot(a * mf, b * mf)
 
-    def _missing_dev_components(self, s: StressVec) -> StressVec:
-        """Deviatoric direct components not stored in the Voigt vector.
+    def hydrostatic(self, stress: StressVec) -> "Scalar":
+        return self.dimension.hydrostatic(stress)
 
-        Returns an empty array for states where all direct components are
-        stored (SOLID_3D, PLANE_STRAIN).  Overridden in MaterialModelPS and
-        MaterialModel1D to reconstruct the missing component(s) from tr s = 0.
-        """
-        return anp.zeros(self.dimension.n_missing)
+    def dev(self, stress: StressVec) -> StressVec:
+        return self.dimension.dev(stress)
+
+    def isotropic_C(self, lam: float, mu: float) -> "Stiffness":
+        return self.dimension.isotropic_C(lam, mu)
+
+    def I_vol(self) -> "Stiffness":
+        return self.dimension.I_vol()
+
+    def I_dev(self) -> "Stiffness":
+        return self.dimension.I_dev()
+
+    def vonmises_norm(self, s: StressVec) -> "Scalar":
+        return self.dimension.vonmises_norm(s)
+
+    def _missing_dev_components(self, s: StressVec) -> StressVec:
+        return self.dimension.missing_dev_components(s)
 
     def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:
         """Double contraction s:t for stress-like deviatoric tensors.
