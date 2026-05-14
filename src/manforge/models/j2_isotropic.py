@@ -24,7 +24,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 
 import autograd.numpy as anp
 
-from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.material import MaterialModel
 from manforge.core.state import Explicit, SCALAR, State, StateUpdate, StateResidual
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
@@ -32,16 +32,11 @@ from manforge.core.material import verified_against_fortran
 from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
 
 
-class J2Isotropic3D(MaterialModel3D):
+class J2Isotropic3D(MaterialModel):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
     Uses the scalar NR path (all non-stress states explicit): implements
     ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
-
-    Inherits operator methods from :class:`~manforge.core.material.MaterialModel3D`
-    (``dev``, ``vonmises``, ``isotropic_C``, ``I_vol``, ``I_dev``), which
-    provide branch-free implementations valid when all direct stress components
-    are stored (``ndi == ndi_phys``).
 
     Provides closed-form ``user_defined_return_mapping`` and
     ``user_defined_tangent`` using the identity ``C @ n_dev = 2μ · n_dev``,
@@ -53,8 +48,7 @@ class J2Isotropic3D(MaterialModel3D):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must satisfy ``dimension.ndi == dimension.ndi_phys``.
-        Defaults to ``SOLID_3D``.  The guard is enforced by the parent.
+        Defaults to ``SOLID_3D``.
     E : float
         Young's modulus.
     nu : float
@@ -63,12 +57,6 @@ class J2Isotropic3D(MaterialModel3D):
         Initial yield stress.
     H : float
         Isotropic hardening modulus (linear).
-
-    Raises
-    ------
-    ValueError
-        If ``dimension.ndi != dimension.ndi_phys`` (raised by
-        :class:`~manforge.core.material.MaterialModel3D`).
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
@@ -76,7 +64,7 @@ class J2Isotropic3D(MaterialModel3D):
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -188,7 +176,7 @@ class J2Isotropic3D(MaterialModel3D):
         return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)
 
 
-class J2IsotropicPS(MaterialModelPS):
+class J2IsotropicPS(MaterialModel):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
     Uses the scalar NR path (all non-stress states explicit): implements
@@ -198,7 +186,6 @@ class J2IsotropicPS(MaterialModelPS):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must satisfy ``dimension.is_plane_stress``.
         Defaults to ``PLANE_STRESS``.
     E : float
         Young's modulus.
@@ -215,7 +202,7 @@ class J2IsotropicPS(MaterialModelPS):
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -234,7 +221,7 @@ class J2IsotropicPS(MaterialModelPS):
         return [self.ep(state_n["ep"] + dlambda)]
 
 
-class J2Isotropic1D(MaterialModel1D):
+class J2Isotropic1D(MaterialModel):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
     Uses the scalar NR path (all non-stress states explicit): implements
@@ -246,7 +233,7 @@ class J2Isotropic1D(MaterialModel1D):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
+        Defaults to ``UNIAXIAL_1D``.
     E : float
         Young's modulus.
     nu : float
@@ -262,7 +249,7 @@ class J2Isotropic1D(MaterialModel1D):
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0

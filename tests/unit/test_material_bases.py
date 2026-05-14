@@ -1,7 +1,7 @@
-"""Tests for stress-state base classes (MaterialModel3D, MaterialModelPS, MaterialModel1D).
+"""Tests for MaterialModel operator methods across stress states.
 
 Covers:
-- Constructor validation (accepted / rejected StressStates)
+- Constructor dimension acceptance
 - _hydrostatic, _dev, _vonmises operators — values and shapes
 - isotropic_C — shape, symmetry, known values
 - _I_vol, _I_dev — projection identity: P_vol + P_dev == I
@@ -11,36 +11,26 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.material import MaterialModel
 from manforge.core.state import NTENS
 from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
 
 # ---------------------------------------------------------------------------
-# Constructor validation
+# Constructor dimension
 # ---------------------------------------------------------------------------
 
-def test_materialmodel3d_accepts_solid_3d():
+def test_stub3d_accepts_solid_3d():
     m = _Stub3D(SOLID_3D)
     assert m.dimension is SOLID_3D
     assert m.ntens == 6
 
 
-def test_materialmodel3d_accepts_plane_strain():
+def test_stub3d_accepts_plane_strain():
     m = _Stub3D(PLANE_STRAIN)
     assert m.dimension is PLANE_STRAIN
     assert m.ntens == 4
-
-
-def test_materialmodel3d_rejects_plane_stress():
-    with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        _Stub3D(PLANE_STRESS)
-
-
-def test_materialmodel3d_rejects_uniaxial_1d():
-    with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        _Stub3D(UNIAXIAL_1D)
 
 
 # ---------------------------------------------------------------------------
@@ -223,25 +213,10 @@ def test_I_dev_projects_to_deviatoric(ss):
 # Constructor validation
 # ---------------------------------------------------------------------------
 
-def test_materialmodelps_accepts_plane_stress():
+def test_stubps_accepts_plane_stress():
     m = _StubPS(PLANE_STRESS)
     assert m.dimension is PLANE_STRESS
     assert m.ntens == 3
-
-
-def test_materialmodelps_rejects_solid_3d():
-    with pytest.raises(ValueError, match="is_plane_stress"):
-        _StubPS(SOLID_3D)
-
-
-def test_materialmodelps_rejects_plane_strain():
-    with pytest.raises(ValueError, match="is_plane_stress"):
-        _StubPS(PLANE_STRAIN)
-
-
-def test_materialmodelps_rejects_uniaxial_1d():
-    with pytest.raises(ValueError, match="is_plane_stress"):
-        _StubPS(UNIAXIAL_1D)
 
 
 # ---------------------------------------------------------------------------
@@ -384,25 +359,10 @@ def test_ps_I_dev_projects_to_deviatoric():
 # Constructor validation
 # ---------------------------------------------------------------------------
 
-def test_materialmodel1d_accepts_uniaxial_1d():
+def test_stub1d_accepts_uniaxial_1d():
     m = _Stub1D(UNIAXIAL_1D)
     assert m.dimension is UNIAXIAL_1D
     assert m.ntens == 1
-
-
-def test_materialmodel1d_rejects_solid_3d():
-    with pytest.raises(ValueError, match="ntens=1"):
-        _Stub1D(SOLID_3D)
-
-
-def test_materialmodel1d_rejects_plane_strain():
-    with pytest.raises(ValueError, match="ntens=1"):
-        _Stub1D(PLANE_STRAIN)
-
-
-def test_materialmodel1d_rejects_plane_stress():
-    with pytest.raises(ValueError, match="ntens=1"):
-        _Stub1D(PLANE_STRESS)
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +475,7 @@ def test_explicit_state_without_update_state_raises():
     """Model with an Explicit field but no update_state must raise TypeError."""
     from manforge.core.state import Explicit
     with pytest.raises(TypeError, match="update_state"):
-        class Bad(MaterialModel3D):
+        class Bad(MaterialModel):
             param_names = []
             ep = Explicit(shape=())
 
@@ -530,7 +490,7 @@ def test_implicit_state_without_state_residual_raises():
     """Model with an Implicit field but no state_residual must raise TypeError."""
     from manforge.core.state import Implicit
     with pytest.raises(TypeError, match="state_residual"):
-        class Bad(MaterialModel3D):
+        class Bad(MaterialModel):
             param_names = []
             alpha = Implicit(shape=NTENS)
 
@@ -545,7 +505,7 @@ def test_implicit_state_without_state_residual_raises():
 def test_mixed_implicit_explicit_requires_both_methods():
     """Partial implicit (some explicit, some implicit) requires both methods."""
     from manforge.core.state import Implicit, Explicit
-    class OK(MaterialModel3D):
+    class OK(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
         ep = Explicit(shape=())
@@ -568,7 +528,7 @@ def test_mixed_implicit_explicit_requires_both_methods():
 def test_all_implicit_states_no_update_state_needed():
     """Model with all states implicit does not need update_state."""
     from manforge.core.state import Implicit
-    class OKImplicit(MaterialModel3D):
+    class OKImplicit(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
         ep = Implicit(shape=())
@@ -587,7 +547,7 @@ def test_all_implicit_states_no_update_state_needed():
 
 def test_no_state_fields_no_methods_needed():
     """Model with no StateField declarations needs neither update_state nor state_residual."""
-    class OKStateless(MaterialModel3D):
+    class OKStateless(MaterialModel):
         param_names = []
 
         def elastic_stiffness(self, state=None):

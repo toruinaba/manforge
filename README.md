@@ -83,33 +83,35 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 
 ### 5.1 モデルを定義する
 
-応力状態に合わせた基底クラスを選択する:
+`MaterialModel` を直接継承し、`dimension=` 引数で応力状態を指定する:
 
-| 基底クラス | 対応 StressDimension | NTENS |
-|-----------|----------------|-------|
-| `MaterialModel3D` | `SOLID_3D`, `PLANE_STRAIN` | 6, 4 |
-| `MaterialModelPS` | `PLANE_STRESS` | 3 |
-| `MaterialModel1D` | `UNIAXIAL_1D` | 1 |
+| `dimension` | NTENS | 想定要素 |
+|------------|-------|---------|
+| `SOLID_3D` (default) | 6 | C3D8 等 3D ソリッド |
+| `PLANE_STRAIN` | 4 | CPE4 / CAX4 |
+| `PLANE_STRESS` | 3 | CPS4 / シェル |
+| `UNIAXIAL_1D` | 1 | 1D トラス / フィッティング用 |
 
 **Explicit-state (J2 型)** — 状態変数を `Explicit` として宣言し `update_state` に closed-form 更新を書く。NR はスカラー Δλ のみ解く。
 
 ```python
 import autograd.numpy as anp
 from manforge.core import Implicit, Explicit, NTENS, SCALAR
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
+from manforge.core.dimension import SOLID_3D, StressDimension
 
-class MyModel(MaterialModel3D):
+class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
-    def __init__(self, *, E, nu, sigma_y0, H):
-        super().__init__()
+    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0, H):
+        super().__init__(dimension=dimension)
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
 
     def yield_function(self, state):
-        return self._vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
+        return self.vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
 
-    def update_state(self, dlambda, state_n, state_trial):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         return [self.ep(state_n["ep"] + dlambda)]
 ```
 
@@ -135,7 +137,7 @@ model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 **Implicit-state (Ohno-Wang 型)** — `update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し `state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
 
 ```python
-class MyImplicitModel(MaterialModel3D):
+class MyImplicitModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
     stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")
     alpha  = Implicit(shape=NTENS, doc="backstress tensor")
@@ -365,7 +367,7 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 
 | シンボル | import パス |
 |---------|------------|
-| `MaterialModel3D`, `MaterialModelPS`, `MaterialModel1D` | `manforge.core.material` |
+| `MaterialModel` | `manforge.core.material` |
 | `Implicit`, `Explicit`, `NTENS` | `manforge.core` |
 | `SOLID_3D`, `PLANE_STRAIN`, `PLANE_STRESS`, `UNIAXIAL_1D` | `manforge.core.dimension` |
 | `ReturnMappingResult`, `StressUpdateResult` | `manforge.core` |
@@ -390,8 +392,7 @@ src/manforge/
 ├── core/
 │   ├── dimension.py       # StressDimension (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material/
-│   │   ├── base.py        # MaterialModel (ABC)
-│   │   └── bases.py       # MaterialModel3D / MaterialModelPS / MaterialModel1D
+│   │   └── base.py        # MaterialModel (ABC)
 │   ├── result.py          # ReturnMappingResult / StressUpdateResult
 │   └── state.py           # Implicit / Explicit / StateField / State
 ├── autodiff/

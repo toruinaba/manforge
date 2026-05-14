@@ -3,7 +3,7 @@
 import pytest
 
 from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 from manforge.simulation._layout import ResidualLayout
 
 
@@ -22,7 +22,7 @@ class TestResidualNameValidation:
 
     def test_dlambda_residual_name_empty_string_raises(self):
         with pytest.raises(ValueError, match="non-empty str"):
-            class _Bad(MaterialModel3D):
+            class _Bad(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = ""
                 def __init__(self, E, nu, sigma_y0): ...
@@ -30,7 +30,7 @@ class TestResidualNameValidation:
 
     def test_dlambda_residual_name_none_raises(self):
         with pytest.raises(ValueError, match="non-empty str"):
-            class _Bad(MaterialModel3D):
+            class _Bad(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = None
                 def __init__(self, E, nu, sigma_y0): ...
@@ -66,7 +66,7 @@ class TestEffectiveResidualName:
 class TestCollisionDetection:
     def test_residual_name_collision_between_fields(self):
         with pytest.raises(ValueError, match="R_clash"):
-            class _Bad(MaterialModel3D):
+            class _Bad(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 alpha = Implicit(shape=NTENS, residual_name="R_clash")
                 ep    = Implicit(shape=SCALAR, residual_name="R_clash")
@@ -77,7 +77,7 @@ class TestCollisionDetection:
 
     def test_residual_name_collides_with_other_state_name(self):
         with pytest.raises(ValueError, match="collides"):
-            class _Bad2(MaterialModel3D):
+            class _Bad2(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 alpha = Implicit(shape=NTENS, residual_name="ep")  # clashes with ep name
                 ep    = Implicit(shape=SCALAR)
@@ -88,7 +88,7 @@ class TestCollisionDetection:
 
     def test_dlambda_residual_name_collides_with_residual_name(self):
         with pytest.raises(ValueError, match="R_alpha"):
-            class _Bad3(MaterialModel3D):
+            class _Bad3(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = "R_alpha"
                 alpha = Implicit(shape=NTENS, residual_name="R_alpha")
@@ -99,7 +99,7 @@ class TestCollisionDetection:
 
     def test_dlambda_residual_name_collides_with_state_name(self):
         with pytest.raises(ValueError, match="alpha"):
-            class _Bad4(MaterialModel3D):
+            class _Bad4(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = "alpha"
                 alpha = Implicit(shape=NTENS)
@@ -109,7 +109,7 @@ class TestCollisionDetection:
                 def state_residual(self, s, d, sn, *, stress_trial, strain_inc=None): ...
 
     def test_no_collision_is_fine(self):
-        class _Ok(MaterialModel3D):
+        class _Ok(MaterialModel):
             param_names = ["E", "nu", "sigma_y0"]
             dlambda_residual_name = "R_yield"
             alpha = Implicit(shape=NTENS, residual_name="R_alpha")
@@ -139,7 +139,7 @@ class TestResidualLayout:
         assert layout.residual_names() == ("stress", "dlambda", "alpha", "ep")
 
     def test_custom_residual_names(self):
-        class _Custom(MaterialModel3D):
+        class _Custom(MaterialModel):
             param_names = ["E", "nu", "sigma_y0"]
             dlambda_residual_name = "R_yield"
             alpha = Implicit(shape=NTENS, residual_name="R_alpha")

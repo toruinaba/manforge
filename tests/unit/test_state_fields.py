@@ -20,18 +20,21 @@ from manforge.core.state import (
     Implicit, Explicit, StateField, collect_state_fields, State, _make, NTENS, SCALAR,
     StateResidual, StateUpdate, _validate_state_items,
 )
-from manforge.core.material import MaterialModel3D, MaterialModel1D
-from manforge.core.dimension import SOLID_3D, UNIAXIAL_1D
+from manforge.core.material import MaterialModel
+from manforge.core.dimension import SOLID_3D
 
 
 # ---------------------------------------------------------------------------
 # Helpers — minimal concrete models
 # ---------------------------------------------------------------------------
 
-class _EP(MaterialModel3D):
+class _EP(MaterialModel):
     """Single explicit ep field."""
     param_names = []
     ep = Explicit(shape=(), doc="plastic strain")
+
+    def __init__(self, dimension=SOLID_3D):
+        super().__init__(dimension=dimension)
 
     def yield_function(self, state):
         return anp.array(0.0)
@@ -40,11 +43,14 @@ class _EP(MaterialModel3D):
         return [self.ep(state_n["ep"] + dlambda)]
 
 
-class _AlphaEP(MaterialModel3D):
+class _AlphaEP(MaterialModel):
     """alpha (Implicit) and ep (Explicit) mixed model."""
     param_names = []
     alpha = Implicit(shape=NTENS, doc="backstress")
     ep = Explicit(shape=(), doc="plastic strain")
+
+    def __init__(self, dimension=SOLID_3D):
+        super().__init__(dimension=dimension)
 
     def yield_function(self, state):
         return anp.array(0.0)
@@ -56,11 +62,14 @@ class _AlphaEP(MaterialModel3D):
         return [self.alpha(state_new["alpha"] - state_n["alpha"])]
 
 
-class _AllImplicit(MaterialModel3D):
+class _AllImplicit(MaterialModel):
     """Both alpha and ep implicit."""
     param_names = []
     alpha = Implicit(shape=NTENS)
     ep = Implicit(shape=())
+
+    def __init__(self, dimension=SOLID_3D):
+        super().__init__(dimension=dimension)
 
     def yield_function(self, state):
         return anp.array(0.0)

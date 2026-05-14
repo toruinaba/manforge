@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import autograd.numpy as anp
 
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 from manforge.core.state import Implicit, Explicit, NTENS
 from manforge.core.dimension import SOLID_3D
 from manforge.simulation.integrator import PythonIntegrator
@@ -41,7 +41,7 @@ _MU = _E / (2.0 * (1.0 + _NU))
 # Model 1: scalar-NR, dlambda override ≡ yield_function (identity check)
 # ---------------------------------------------------------------------------
 
-class _J2ScalarWithDlambdaOverride(MaterialModel3D):
+class _J2ScalarWithDlambdaOverride(MaterialModel):
     """J2 without hardening.  state_residual returns self.dlambda(yield_function)
     which is semantically identical to the default.  Used to verify that the
     scalar-NR path produces the same result whether the override is present or not.
@@ -70,7 +70,7 @@ class _J2ScalarWithDlambdaOverride(MaterialModel3D):
         return [self.dlambda(self.yield_function(state_new))]
 
 
-class _J2ScalarDefault(MaterialModel3D):
+class _J2ScalarDefault(MaterialModel):
     """Same model without the dlambda override — uses default yield_function path."""
     param_names = ["E", "nu", "sigma_y0"]
     stress = Explicit(shape=NTENS, doc="stress")
@@ -143,7 +143,7 @@ def test_scalar_nr_dlambda_override_is_plastic(scalar_with_override):
 # Model 2: vector-NR, kinematic hardening, Perzyna-like dlambda override
 # ---------------------------------------------------------------------------
 
-class _KinematicWithDlambdaOverride(MaterialModel3D):
+class _KinematicWithDlambdaOverride(MaterialModel):
     """Kinematic hardening (AF).  state_residual returns self.dlambda(R_dl)
     where R_dl = f − c·Δλ  with  c = 0.0  (reduces to standard plasticity).
 
@@ -185,7 +185,7 @@ class _KinematicWithDlambdaOverride(MaterialModel3D):
         return [self.alpha(R_alpha), self.dlambda(R_dl)]
 
 
-class _KinematicDefault(MaterialModel3D):
+class _KinematicDefault(MaterialModel):
     """Same AF model without dlambda override (uses yield_function default)."""
     param_names = ["E", "nu", "sigma_y0", "H_k"]
     alpha = Implicit(shape=NTENS, doc="backstress")

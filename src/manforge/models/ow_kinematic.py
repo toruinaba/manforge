@@ -55,12 +55,12 @@ Notes
 * The plastic increment is always solved via the vector NR (σ is Implicit).
 """
 
-from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
+from manforge.core.material import MaterialModel
 from manforge.core.state import Implicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
-class OWKinematic3D(MaterialModel3D):
+class OWKinematic3D(MaterialModel):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -68,7 +68,6 @@ class OWKinematic3D(MaterialModel3D):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must satisfy ``dimension.ndi == dimension.ndi_phys``.
         Defaults to ``SOLID_3D``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
@@ -81,7 +80,7 @@ class OWKinematic3D(MaterialModel3D):
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -107,7 +106,7 @@ class OWKinematic3D(MaterialModel3D):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
-class OWKinematicPS(MaterialModelPS):
+class OWKinematicPS(MaterialModel):
     """J2 + Ohno-Wang kinematic hardening for plane-stress elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -115,7 +114,6 @@ class OWKinematicPS(MaterialModelPS):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must satisfy ``dimension.is_plane_stress``.
         Defaults to ``PLANE_STRESS``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
@@ -128,7 +126,7 @@ class OWKinematicPS(MaterialModelPS):
 
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0
@@ -154,7 +152,7 @@ class OWKinematicPS(MaterialModelPS):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
-class OWKinematic1D(MaterialModel1D):
+class OWKinematic1D(MaterialModel):
     """J2 + Ohno-Wang kinematic hardening for uniaxial elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -165,7 +163,7 @@ class OWKinematic1D(MaterialModel1D):
     Parameters
     ----------
     dimension : StressDimension, optional
-        Must have ``ntens == 1``.  Defaults to ``UNIAXIAL_1D``.
+        Defaults to ``UNIAXIAL_1D``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
@@ -177,7 +175,7 @@ class OWKinematic1D(MaterialModel1D):
 
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension)
+        super().__init__(dimension=dimension)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0

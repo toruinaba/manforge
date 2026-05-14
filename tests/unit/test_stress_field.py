@@ -15,7 +15,7 @@ import autograd
 import autograd.numpy as anp
 
 from manforge.core.state import Implicit, Explicit, NTENS, _state_with_stress
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 from manforge.core.dimension import SOLID_3D
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.models.ow_kinematic import OWKinematic3D
@@ -32,7 +32,7 @@ _J2_PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 def test_stress_auto_attached_as_explicit():
     """Models without stress declaration get stress=Explicit automatically."""
-    class _M(MaterialModel3D):
+    class _M(MaterialModel):
         param_names = []
         ep = Explicit(shape=())
 
@@ -50,7 +50,7 @@ def test_stress_auto_attached_as_explicit():
 
 def test_stress_implicit_declaration():
     """stress = Implicit(shape=NTENS) puts stress in implicit_state_names."""
-    class _M(MaterialModel3D):
+    class _M(MaterialModel):
         param_names = []
         stress = Implicit(shape=NTENS, doc="Cauchy stress")
         ep = Implicit(shape=())
@@ -120,7 +120,7 @@ def test_stress_implicit_ow_yield_consistency(deps_vec):
 # Custom R_stress via state_residual (stress = Implicit + return self.stress(...))
 # ---------------------------------------------------------------------------
 
-class _CustomStressResidual(MaterialModel3D):
+class _CustomStressResidual(MaterialModel):
     """J2-like model that provides a custom R_stress via state_residual.
 
     Uses a hand-coded associative R_stress for J2 (deviatoric part only),
@@ -132,7 +132,7 @@ class _CustomStressResidual(MaterialModel3D):
     ep = Implicit(shape=())
 
     def __init__(self, *, E, nu, sigma_y0, H):
-        super().__init__(SOLID_3D)
+        super().__init__(dimension=SOLID_3D)
         self.E = E
         self.nu = nu
         self.sigma_y0 = sigma_y0

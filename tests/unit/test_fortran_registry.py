@@ -2,7 +2,7 @@
 
 import pytest
 
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.material.fortran_binding import (
     FortranBinding,
@@ -73,7 +73,7 @@ def test_collect_bindings_excludes_dunders():
 
 def test_abstract_base_has_no_fortran_bindings():
     """Intermediate abstract classes must not get _fortran_bindings."""
-    assert not hasattr(MaterialModel3D, "_fortran_bindings")
+    assert not hasattr(MaterialModel, "_fortran_bindings")
 
 
 def test_j2_concrete_has_fortran_bindings():

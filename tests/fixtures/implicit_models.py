@@ -66,7 +66,7 @@ class _AFKinematicImplicitPS(AFKinematicPS):
 
 
 class _AFKinematicImplicitPE(AFKinematic3D):
-    """Plane-strain variant of the implicit AF model (uses MaterialModel3D with PLANE_STRAIN)."""
+    """Plane-strain variant of the implicit AF model (uses PLANE_STRAIN dimension)."""
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")

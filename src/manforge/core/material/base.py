@@ -28,7 +28,7 @@ class MaterialModel(ABC):
 
         from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
 
-        class MyModel(MaterialModel3D):
+        class MyModel(MaterialModel):
             param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
             stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
             alpha  = Implicit(shape=NTENS,   doc="backstress tensor")

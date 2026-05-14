@@ -10,7 +10,7 @@ from manforge.simulation.integrator import PythonIntegrator
 from manforge.models.af_kinematic import AFKinematic3D
 from manforge.models.ow_kinematic import OWKinematic3D
 from manforge.core import Implicit, NTENS, SCALAR
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 
 
 @pytest.fixture
@@ -213,7 +213,7 @@ class TestReturnMappingResultPath:
 # residual_name opt-in
 # ---------------------------------------------------------------------------
 
-class _ResidualNameModel(MaterialModel3D):
+class _ResidualNameModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
     dlambda_residual_name = "R_yield"
     stress = Implicit(shape=NTENS, doc="Cauchy stress")

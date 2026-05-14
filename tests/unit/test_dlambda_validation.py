@@ -8,7 +8,7 @@ from manforge.core.state import (
     DlambdaResidual, DlambdaField, DLAMBDA_FIELD,
     StateResidual, StateUpdate,
 )
-from manforge.core.material import MaterialModel3D, MaterialModel1D
+from manforge.core.material import MaterialModel
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ _LAM = 115384.0
 _MU = 76923.0
 
 
-class _NoStateModel(MaterialModel3D):
+class _NoStateModel(MaterialModel):
     """No state fields beyond stress (scalar-NR path)."""
     param_names = ["sigma_y0"]
 
@@ -34,7 +34,7 @@ class _NoStateModel(MaterialModel3D):
         return self.isotropic_C(_LAM, _MU)
 
 
-class _DlambdaOnlyModel(MaterialModel3D):
+class _DlambdaOnlyModel(MaterialModel):
     """state_residual returns only self.dlambda(R) — no other implicit states."""
     param_names = ["sigma_y0"]
 
@@ -52,7 +52,7 @@ class _DlambdaOnlyModel(MaterialModel3D):
         return [self.dlambda(self.yield_function(state_new))]
 
 
-class _AlphaModel(MaterialModel3D):
+class _AlphaModel(MaterialModel):
     """Vector-NR: alpha Implicit."""
     param_names = ["sigma_y0", "H_k"]
     alpha = Implicit(shape=NTENS, doc="backstress")
@@ -74,7 +74,7 @@ class _AlphaModel(MaterialModel3D):
         return [self.alpha(R_alpha)]
 
 
-class _DuplicateDlambdaModel(MaterialModel3D):
+class _DuplicateDlambdaModel(MaterialModel):
     """Intentionally returns self.dlambda(...) twice — should error."""
     param_names = ["sigma_y0"]
     alpha = Implicit(shape=NTENS, doc="backstress")
@@ -98,7 +98,7 @@ class _DuplicateDlambdaModel(MaterialModel3D):
         ]
 
 
-class _BadItemModel(MaterialModel3D):
+class _BadItemModel(MaterialModel):
     """state_residual returns a non-StateResidual / non-DlambdaResidual item."""
     param_names = ["sigma_y0"]
     alpha = Implicit(shape=NTENS, doc="backstress")
@@ -117,7 +117,7 @@ class _BadItemModel(MaterialModel3D):
         return [42]  # wrong type
 
 
-class _DlambdaInUpdateState(MaterialModel3D):
+class _DlambdaInUpdateState(MaterialModel):
     """update_state mistakenly returns self.dlambda(R) — should error."""
     param_names = ["sigma_y0"]
     ep = Explicit(shape=(), doc="ep")
