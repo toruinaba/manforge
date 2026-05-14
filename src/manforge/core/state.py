@@ -3,8 +3,9 @@
 Usage in a model class::
 
     from manforge.core import Implicit, Explicit, NTENS, SCALAR
+    from manforge.core.material import MaterialModel
 
-    class OWKinematic3D(MaterialModel3D):
+    class OWKinematic3D(MaterialModel):
         stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
         alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
         ep     = Implicit(shape=SCALAR,  doc="equivalent plastic strain")

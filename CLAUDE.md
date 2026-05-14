@@ -48,18 +48,24 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Three-layer design
 
-**1. Material model layer** — `src/manforge/core/material/` (`base.py` for `MaterialModel`, `bases.py` for `MaterialModel3D` / `MaterialModelPS` / `MaterialModel1D`; both re-exported from `manforge.core.material`)
+**1. Material model layer** — `src/manforge/core/material/base.py` (`MaterialModel` ABC, re-exported from `manforge.core.material`)
 
-`MaterialModel` is the internal ABC. Users subclass one of the stress-state base classes and implement the required material-physics methods. State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
+`MaterialModel` is the ABC users subclass directly. Pass `dimension=` to the constructor to select the stress state (default: `SOLID_3D`). State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
 
 ```python
 from manforge.core import Implicit, Explicit, NTENS, SCALAR
+from manforge.core.dimension import SOLID_3D, StressDimension
+from manforge.core.material import MaterialModel
 
-class MyModel(MaterialModel3D):
+class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0"]
     ep    = Explicit(shape=SCALAR, doc="equivalent plastic strain")
     alpha = Implicit(shape=NTENS,  doc="backstress tensor")
     stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")  # optional
+
+    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0):
+        super().__init__(dimension=dimension)
+        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
 ```
 
 - `Explicit(shape, doc, residual_name=None)` — state updated in closed form via `update_state`; no NR unknown.
@@ -105,12 +111,13 @@ Material parameters are passed at construction time (`model = J2Isotropic3D(E=21
 
 `__init_subclass__` validates the required method is implemented at class definition time.
 
-Stress-state base classes (choose the appropriate one):
-- `MaterialModel3D` — SOLID_3D (ntens=6) and PLANE_STRAIN (ntens=4); requires `ndi == ndi_phys`
-- `MaterialModelPS` — PLANE_STRESS (ntens=3); applies Schur condensation in `isotropic_C`
-- `MaterialModel1D` — UNIAXIAL_1D (ntens=1); used for uniaxial fitting
+Select the stress state via `dimension=` argument (or class variable). Available `StressDimension` instances:
+- `SOLID_3D` — ntens=6 (default)
+- `PLANE_STRAIN` — ntens=4
+- `PLANE_STRESS` — ntens=3; applies Schur condensation in `isotropic_C`
+- `UNIAXIAL_1D` — ntens=1; used for uniaxial fitting
 
-Each base provides branch-free operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) tailored to its stress state. The `vonmises` in `MaterialModelPS` and `MaterialModel1D` includes the missing-component correction (n_missing × p²).
+Operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) are provided on `MaterialModel` and delegate to the `StressDimension` instance. `vonmises` includes the missing-component correction (n_missing × p²) for PLANE_STRESS and UNIAXIAL_1D automatically.
 
 Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, all stress states):
 - `inner_product(a, b)` — Mandel inner product A:B over stored components (shear ×2 automatic). Both arguments must be **physical-shear** (stress-like) quantities. Use when missing components are physically zero (e.g. σ:σ, α:α). To compute σ:Δε with engineering-shear Δε, divide shear components by `dimension.eng_to_phys_strain_factors_np` first.

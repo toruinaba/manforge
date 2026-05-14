@@ -1,16 +1,19 @@
-"""Minimal concrete subclasses of base material models for unit tests.
+"""Minimal concrete subclasses of MaterialModel for unit tests.
 
-These stubs let tests instantiate the abstract base classes without providing
+These stubs let tests instantiate MaterialModel without providing
 a full material model implementation.
 """
 
-from manforge.core.material import MaterialModel3D, MaterialModelPS, MaterialModel1D
-from manforge.core.dimension import SOLID_3D
+from manforge.core.material import MaterialModel
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 
 
-class _Stub3D(MaterialModel3D):
-    """Concrete stub — lets us instantiate MaterialModel3D for operator tests."""
+class _Stub3D(MaterialModel):
+    """Concrete stub for full-rank stress state operator tests."""
     param_names = []
+
+    def __init__(self, dimension=SOLID_3D):
+        super().__init__(dimension=dimension)
 
     def elastic_stiffness(self, state=None):
         raise NotImplementedError
@@ -22,9 +25,12 @@ class _Stub3D(MaterialModel3D):
         raise NotImplementedError
 
 
-class _StubPS(MaterialModelPS):
-    """Concrete stub for MaterialModelPS operator tests."""
+class _StubPS(MaterialModel):
+    """Concrete stub for plane-stress operator tests."""
     param_names = []
+
+    def __init__(self, dimension=PLANE_STRESS):
+        super().__init__(dimension=dimension)
 
     def elastic_stiffness(self, state=None):
         raise NotImplementedError
@@ -36,9 +42,12 @@ class _StubPS(MaterialModelPS):
         raise NotImplementedError
 
 
-class _Stub1D(MaterialModel1D):
-    """Concrete stub for MaterialModel1D operator tests."""
+class _Stub1D(MaterialModel):
+    """Concrete stub for uniaxial (1D) operator tests."""
     param_names = []
+
+    def __init__(self, dimension=UNIAXIAL_1D):
+        super().__init__(dimension=dimension)
 
     def elastic_stiffness(self, state=None):
         raise NotImplementedError
@@ -50,12 +59,12 @@ class _Stub1D(MaterialModel1D):
         raise NotImplementedError
 
 
-class _StubWithParams(MaterialModel3D):
+class _StubWithParams(MaterialModel):
     """Stub with param_names to test the params property."""
     param_names = ["a", "b"]
 
     def __init__(self, a=1.0, b=2.0, **kwargs):
-        super().__init__(SOLID_3D)
+        super().__init__(dimension=SOLID_3D)
         self.a = a
         self.b = b
 

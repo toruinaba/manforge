@@ -44,15 +44,6 @@ def test_j2isotropic3d_accepts_plane_strain():
     assert model.ntens == 4
 
 
-def test_j2isotropic3d_rejects_plane_stress():
-    with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        J2Isotropic3D(PLANE_STRESS, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-
-
-def test_j2isotropic3d_rejects_uniaxial_1d():
-    with pytest.raises(ValueError, match="ndi == ndi_phys"):
-        J2Isotropic3D(UNIAXIAL_1D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

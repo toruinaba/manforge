@@ -12,7 +12,7 @@ import numpy as np
 import autograd.numpy as anp
 import pytest
 
-from manforge.core.material import MaterialModel3D
+from manforge.core.material import MaterialModel
 from manforge.simulation.integrator import (
     PythonIntegrator,
     PythonNumericalIntegrator,
@@ -199,7 +199,7 @@ def test_analytical_tangent_fd_check_plastic(model, strain_inc_vec):
 def test_method_analytical_raises_if_no_hooks():
     """PythonAnalyticalIntegrator raises NotImplementedError for a model without hooks."""
 
-    class MinimalModel(MaterialModel3D):
+    class MinimalModel(MaterialModel):
         param_names = ["E", "nu", "sigma_y0"]
 
         def __init__(self):

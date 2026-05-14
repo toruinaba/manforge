@@ -1,16 +1,6 @@
-"""Material model base classes.
-
-Re-exports MaterialModel and its three stress-state base classes so
-that ``from manforge.core.material import MaterialModel3D`` continues to
-work after the split into ``base.py`` / ``bases.py``.
-"""
+"""Material model base classes."""
 
 from manforge.core.material.base import MaterialModel
-from manforge.core.material.bases import (
-    MaterialModel3D,
-    MaterialModelPS,
-    MaterialModel1D,
-)
 from manforge.core.material.fortran_binding import (
     FortranBinding,
     verified_against_fortran,
@@ -19,9 +9,6 @@ from manforge.core.material.fortran_binding import (
 
 __all__ = [
     "MaterialModel",
-    "MaterialModel3D",
-    "MaterialModelPS",
-    "MaterialModel1D",
     "FortranBinding",
     "verified_against_fortran",
     "collect_bindings",
