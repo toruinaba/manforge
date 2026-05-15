@@ -115,24 +115,50 @@ class MyModel(MaterialModel):
         return [self.ep(state_n["ep"] + dlambda)]
 ```
 
-`elastic_stiffness` は `self.E` と `self.nu` から自動生成。状態依存の場合のみ `elastic_stiffness(self, state=None)` を override する。参照実装: `src/manforge/models/j2_isotropic.py`
+`elastic_stiffness` は `self.E` と `self.nu` から自動生成。状態依存の場合のみ `elastic_stiffness(self, state=None)` を override する。
 
-**要素タイプの切り替え**
+**要素タイプの切り替え (モデル使用者向け)**
+
+組み込みモデルは stress-state ごとに専用クラスを提供する。対応するクラスを選ぶだけでよい:
 
 ```python
-from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+from manforge.models import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 
-model_pe = J2Isotropic3D(PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+model_3d = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # SOLID_3D
+model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # PLANE_STRESS
+model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # UNIAXIAL_1D
 ```
 
-| インスタンス | NTENS | 想定要素 |
-|------------|-------|---------|
-| `SOLID_3D` | 6 | C3D8 等 3D ソリッド |
-| `PLANE_STRAIN` | 4 | CPE4 / CAX4 |
-| `PLANE_STRESS` | 3 | CPS4 / シェル |
-| `UNIAXIAL_1D` | 1 | 1D トラス / フィッティング用 |
+平面ひずみは専用クラスが無いため、親クラス `J2Isotropic` に `dimension=PLANE_STRAIN` を渡して直接インスタンス化する:
+
+```python
+from manforge.models import J2Isotropic
+from manforge.core.dimension import PLANE_STRAIN
+
+model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+```
+
+**新しいモデルを開発する場合 (モデル開発者向け)**
+
+物理ロジック (yield_function / update_state 等) は stress-state に依存しないため、親クラスに 1 度だけ実装する。stress-state ごとの専用クラスはデフォルト `dimension` の指定と閉形式 override のみを担う:
+
+```python
+from manforge.core.material import MaterialModel
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+
+class MyModel(MaterialModel):            # 親クラス: 物理ロジックを 1 度実装
+    ...
+
+class MyModel3D(MyModel):                # デフォルト dimension のみ指定
+    def __init__(self, *, dimension: StressDimension = SOLID_3D, **kwargs):
+        super().__init__(dimension=dimension, **kwargs)
+
+class MyModelPS(MyModel):
+    def __init__(self, *, dimension: StressDimension = PLANE_STRESS, **kwargs):
+        super().__init__(dimension=dimension, **kwargs)
+```
+
+参照実装: `src/manforge/models/j2_isotropic.py`
 
 **Implicit-state (Ohno-Wang 型)** — `update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し `state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
 
@@ -177,6 +203,8 @@ from manforge.models import AFKinematic3D, OWKinematic3D
 model_af = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
 model_ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=0.05)
 ```
+
+`J2Isotropic` / `AFKinematic` / `OWKinematic` は親クラスとしても直接使用でき、3D / PS / 1D 派生 (`*3D`, `*PS`, `*1D`) を提供する (例: `AFKinematicPS`, `OWKinematic1D`)。
 
 ---
 
@@ -389,8 +417,9 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
 | `FortranModule` | `manforge.verification` |
 | `generate_strain_history` | `manforge.verification` |
-| `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models.j2_isotropic` |
-| `AFKinematic3D`, `OWKinematic3D` | `manforge.models` |
+| `J2Isotropic`, `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models` |
+| `AFKinematic`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D` | `manforge.models` |
+| `OWKinematic`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D` | `manforge.models` |
 
 ---
 
@@ -401,33 +430,36 @@ src/manforge/
 ├── core/
 │   ├── dimension.py       # StressDimension (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material/
-│   │   └── base.py        # MaterialModel (ABC)
+│   │   ├── base.py             # MaterialModel (ABC)
+│   │   └── fortran_binding.py  # @verified_against_fortran / FortranBinding / collect_bindings
 │   ├── result.py          # ReturnMappingResult / StressUpdateResult
 │   └── state.py           # Implicit / Explicit / StateField / State
 ├── autodiff/
 │   ├── backend.py         # autograd バックエンド
 │   └── operators.py       # dev, vonmises, hydrostatic, norm_mandel 等
 ├── models/
-│   ├── j2_isotropic.py    # J2 等方硬化 (参照実装)
-│   ├── af_kinematic.py    # Armstrong-Frederick 移動硬化
-│   └── ow_kinematic.py    # Ohno-Wang 修正 AF
+│   ├── j2_isotropic.py    # J2Isotropic 親 + 3D/PS/1D 派生 (参照実装)
+│   ├── af_kinematic.py    # AFKinematic 親 + 3D/PS/1D 派生 (Armstrong-Frederick)
+│   └── ow_kinematic.py    # OWKinematic 親 + 3D/PS/1D 派生 (Ohno-Wang 修正 AF)
 ├── simulation/
 │   ├── types.py           # FieldType / FieldHistory / DriverResult
 │   ├── driver.py          # StrainDriver / StressDriver
 │   ├── _residual.py       # make_nr_residual / make_tangent_residual
 │   └── integrator/
-│       ├── base.py        # _PythonIntegratorBase (NR + consistent tangent)
-│       ├── python.py      # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
-│       └── fortran.py     # FortranIntegrator
+│       ├── base.py            # _PythonIntegratorBase (NR + consistent tangent)
+│       ├── python.py          # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
+│       ├── fortran.py         # FortranIntegrator
+│       └── fortran_module.py  # FortranModule (f2py 薄ラッパ)
 ├── fitting/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── tangent.py         # TangentChecker / check_tangent()
-│   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
-│   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
-│   ├── fortran_bridge.py  # FortranModule
-│   └── test_cases.py      # generate_strain_history 等
+│   ├── comparator_base.py     # Comparator 抽象基底
+│   ├── tangent.py             # TangentChecker / check_tangent()
+│   ├── jacobian.py            # JacobianChecker / JacobianBlocks / JacobianComparisonResult
+│   ├── crosscheck_driver.py   # CrosscheckStrainDriver / CrosscheckStressDriver
+│   ├── fortran_check.py       # check_bindings (Fortran ↔ Python ランタイム比較)
+│   └── test_cases.py          # generate_strain_history 等
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換
     ├── tensor.py          # 4 階テンソル演算
