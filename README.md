@@ -115,24 +115,50 @@ class MyModel(MaterialModel):
         return [self.ep(state_n["ep"] + dlambda)]
 ```
 
-`elastic_stiffness` は `self.E` と `self.nu` から自動生成。状態依存の場合のみ `elastic_stiffness(self, state=None)` を override する。参照実装: `src/manforge/models/j2_isotropic.py`
+`elastic_stiffness` は `self.E` と `self.nu` から自動生成。状態依存の場合のみ `elastic_stiffness(self, state=None)` を override する。
 
-**要素タイプの切り替え**
+**要素タイプの切り替え (モデル使用者向け)**
+
+組み込みモデルは stress-state ごとに専用クラスを提供する。対応するクラスを選ぶだけでよい:
 
 ```python
-from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+from manforge.models import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 
-model_pe = J2Isotropic3D(PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+model_3d = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # SOLID_3D
+model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # PLANE_STRESS
+model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # UNIAXIAL_1D
 ```
 
-| インスタンス | NTENS | 想定要素 |
-|------------|-------|---------|
-| `SOLID_3D` | 6 | C3D8 等 3D ソリッド |
-| `PLANE_STRAIN` | 4 | CPE4 / CAX4 |
-| `PLANE_STRESS` | 3 | CPS4 / シェル |
-| `UNIAXIAL_1D` | 1 | 1D トラス / フィッティング用 |
+平面ひずみは専用クラスが無いため、親クラス `J2Isotropic` に `dimension=PLANE_STRAIN` を渡して直接インスタンス化する:
+
+```python
+from manforge.models import J2Isotropic
+from manforge.core.dimension import PLANE_STRAIN
+
+model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+```
+
+**新しいモデルを開発する場合 (モデル開発者向け)**
+
+物理ロジック (yield_function / update_state 等) は stress-state に依存しないため、親クラスに 1 度だけ実装する。stress-state ごとの専用クラスはデフォルト `dimension` の指定と閉形式 override のみを担う:
+
+```python
+from manforge.core.material import MaterialModel
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+
+class MyModel(MaterialModel):            # 親クラス: 物理ロジックを 1 度実装
+    ...
+
+class MyModel3D(MyModel):                # デフォルト dimension のみ指定
+    def __init__(self, *, dimension: StressDimension = SOLID_3D, **kwargs):
+        super().__init__(dimension=dimension, **kwargs)
+
+class MyModelPS(MyModel):
+    def __init__(self, *, dimension: StressDimension = PLANE_STRESS, **kwargs):
+        super().__init__(dimension=dimension, **kwargs)
+```
+
+参照実装: `src/manforge/models/j2_isotropic.py`
 
 **Implicit-state (Ohno-Wang 型)** — `update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し `state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
 
