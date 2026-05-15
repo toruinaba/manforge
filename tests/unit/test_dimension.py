@@ -243,14 +243,14 @@ def test_projection_identity_no_ss():
 
 
 def test_isotropic_C_shapes():
-    from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+    from manforge.models.j2_isotropic import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
     from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 
     for model, expected_shape in [
-        (J2Isotropic3D(SOLID_3D, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (6, 6)),
-        (J2Isotropic3D(PLANE_STRAIN, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (4, 4)),
-        (J2IsotropicPS(PLANE_STRESS, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (3, 3)),
-        (J2Isotropic1D(UNIAXIAL_1D, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (1, 1)),
+        (J2Isotropic3D(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (6, 6)),
+        (J2Isotropic(dimension=PLANE_STRAIN, E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (4, 4)),
+        (J2IsotropicPS(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (3, 3)),
+        (J2Isotropic1D(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (1, 1)),
     ]:
         C = model.elastic_stiffness()
         assert C.shape == expected_shape, f"{model.dimension.name}: expected {expected_shape}, got {C.shape}"
@@ -270,7 +270,7 @@ def test_isotropic_C_1d():
     """C_1D[0,0] == E (Young's modulus for uniaxial stress)."""
     from manforge.models.j2_isotropic import J2Isotropic1D
     E, nu = 200e3, 0.3
-    model = J2Isotropic1D(UNIAXIAL_1D, E=E, nu=nu, sigma_y0=250.0, H=0.0)
+    model = J2Isotropic1D(E=E, nu=nu, sigma_y0=250.0, H=0.0)
     C = model.elastic_stiffness()
     np.testing.assert_allclose(C[0, 0], E, rtol=1e-10)
 
@@ -278,6 +278,6 @@ def test_isotropic_C_1d():
 def test_plane_stress_C_symmetry():
     """Plane-stress stiffness must be symmetric."""
     from manforge.models.j2_isotropic import J2IsotropicPS
-    model = J2IsotropicPS(PLANE_STRESS, E=200e3, nu=0.3, sigma_y0=250.0, H=0.0)
+    model = J2IsotropicPS(E=200e3, nu=0.3, sigma_y0=250.0, H=0.0)
     C = model.elastic_stiffness()
     np.testing.assert_allclose(C, C.T, atol=1e-10)

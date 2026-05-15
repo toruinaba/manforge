@@ -92,8 +92,6 @@ class J2Isotropic3D(J2Isotropic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``SOLID_3D``.
     E : float
         Young's modulus.
     nu : float
@@ -104,9 +102,8 @@ class J2Isotropic3D(J2Isotropic):
         Isotropic hardening modulus (linear).
     """
 
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
+        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
     @verified_against_fortran(
         "j2_isotropic_3d_elastic_stiffness",
@@ -211,8 +208,6 @@ class J2IsotropicPS(J2Isotropic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``PLANE_STRESS``.
     E : float
         Young's modulus.
     nu : float
@@ -223,9 +218,8 @@ class J2IsotropicPS(J2Isotropic):
         Isotropic hardening modulus (linear).
     """
 
-    def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
-                 E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
+        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
 
 class J2Isotropic1D(J2Isotropic):
@@ -239,8 +233,6 @@ class J2Isotropic1D(J2Isotropic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``UNIAXIAL_1D``.
     E : float
         Young's modulus.
     nu : float
@@ -251,9 +243,8 @@ class J2Isotropic1D(J2Isotropic):
         Isotropic hardening modulus (linear).
     """
 
-    def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
-                 E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
+        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
     # ------------------------------------------------------------------
     # Analytical solver hooks

@@ -104,15 +104,12 @@ class AFKinematic3D(AFKinematic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``SOLID_3D``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
 
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
 class AFKinematicPS(AFKinematic):
@@ -122,15 +119,12 @@ class AFKinematicPS(AFKinematic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``PLANE_STRESS``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
 
-    def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
 class AFKinematic1D(AFKinematic):
@@ -143,12 +137,9 @@ class AFKinematic1D(AFKinematic):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``UNIAXIAL_1D``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
 
-    def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
