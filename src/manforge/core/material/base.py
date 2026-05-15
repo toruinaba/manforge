@@ -232,6 +232,10 @@ class MaterialModel(ABC):
         anp.ndarray, scalar
             Yield function value.
         """
+        raise NotImplementedError(
+            f"{type(self).__name__}.yield_function() is not implemented. "
+            "Subclasses must override yield_function()."
+        )
 
     def update_state(
         self,
