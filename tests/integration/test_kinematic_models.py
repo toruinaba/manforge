@@ -16,8 +16,8 @@ import pytest
 import numpy as np
 import autograd.numpy as anp
 
-from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS, AFKinematic1D
-from manforge.models.ow_kinematic import OWKinematic3D, OWKinematicPS, OWKinematic1D
+from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D
+from manforge.models.ow_kinematic import OWKinematic, OWKinematic3D, OWKinematicPS, OWKinematic1D
 from manforge.core.dimension import PLANE_STRAIN
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
@@ -30,10 +30,10 @@ _FACTORIES_3D = {
     "ow": lambda: OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0),
 }
 _FACTORIES_PE = {
-    "af": lambda: AFKinematic3D(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
-                                C_k=10000.0, gamma=100.0),
-    "ow": lambda: OWKinematic3D(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
-                                C_k=10000.0, gamma=1.0),
+    "af": lambda: AFKinematic(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
+                              C_k=10000.0, gamma=100.0),
+    "ow": lambda: OWKinematic(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0,
+                              C_k=10000.0, gamma=1.0),
 }
 _FACTORIES_PS = {
     "af": lambda: AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0),

@@ -40,8 +40,9 @@ Backward-Euler discretisation as residual:
 Dimensional notes
 -----------------
 The three concrete classes share identical yield_function / state_residual
-implementations.  Each stress-state base class provides dimension-specific
-dev / vonmises_norm that encapsulate per-dimension arithmetic.
+implementations via the OWKinematic parent.  Each stress-state dimension
+provides dimension-specific dev / vonmises_norm that encapsulate
+per-dimension arithmetic.
 
 * **3D** (OWKinematic3D): α is a 6-component deviatoric tensor.
 * **PS** (OWKinematicPS): α stores [α11, α22, α12]; vonmises_norm reconstructs
@@ -60,8 +61,12 @@ from manforge.core.state import Implicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
-class OWKinematic3D(MaterialModel):
-    """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
+class OWKinematic(MaterialModel):
+    """J2 + Ohno-Wang kinematic hardening — common physics across stress states.
+
+    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    pre-built concrete classes (:class:`OWKinematic3D`, :class:`OWKinematicPS`,
+    :class:`OWKinematic1D`) which set appropriate defaults.
 
     Uses the vector NR path (σ, α, ep all implicit).
 
@@ -106,53 +111,37 @@ class OWKinematic3D(MaterialModel):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
-class OWKinematicPS(MaterialModel):
+class OWKinematic3D(OWKinematic):
+    """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
+
+    Uses the vector NR path (σ, α, ep all implicit).
+
+    Parameters
+    ----------
+    E, nu, sigma_y0, C_k, gamma : float
+        Material parameters.
+    """
+
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
+
+
+class OWKinematicPS(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for plane-stress elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``PLANE_STRESS``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
 
-    stress = Implicit(shape=NTENS, doc="Cauchy stress")
-    param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")
-    ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
-
-    def yield_function(self, state):
-        s_xi = self.dev(state["stress"]) - state["alpha"]
-        return self.vonmises_norm(s_xi) - self.sigma_y0
-
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_new = state_new["alpha"]
-        s_xi = self.dev(state_new["stress"]) - alpha_new
-        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
-        a_norm = self.vonmises_norm(alpha_new)
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = (
-            alpha_new - state_n["alpha"]
-            - (2.0 / 3.0) * self.C_k * dlambda * n_hat
-            + self.gamma * dlambda * a_norm * alpha_new
-        )
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
-class OWKinematic1D(MaterialModel):
+class OWKinematic1D(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for uniaxial elements.
 
     Uses the vector NR path (σ, α, ep all implicit).
@@ -162,40 +151,9 @@ class OWKinematic1D(MaterialModel):
 
     Parameters
     ----------
-    dimension : StressDimension, optional
-        Defaults to ``UNIAXIAL_1D``.
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
 
-    stress = Implicit(shape=NTENS, doc="Cauchy stress")
-    param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric component α11_dev)")
-    ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
-
-    def yield_function(self, state):
-        s_xi = self.dev(state["stress"]) - state["alpha"]
-        return self.vonmises_norm(s_xi) - self.sigma_y0
-
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_new = state_new["alpha"]
-        s_xi = self.dev(state_new["stress"]) - alpha_new
-        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
-        a_norm = self.vonmises_norm(alpha_new)
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = (
-            alpha_new - state_n["alpha"]
-            - (2.0 / 3.0) * self.C_k * dlambda * n_hat
-            + self.gamma * dlambda * a_norm * alpha_new
-        )
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

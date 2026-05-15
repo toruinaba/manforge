@@ -28,12 +28,12 @@ def stress_load(data, name="Stress"):
 
 @pytest.fixture
 def model_3d():
-    return J2Isotropic3D(SOLID_3D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    return J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture
 def model_1d():
-    return J2Isotropic1D(UNIAXIAL_1D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    return J2Isotropic1D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture

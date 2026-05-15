@@ -103,6 +103,36 @@ class StressDimension:
         """Default: zeros(n_missing) for states where all direct components are stored."""
         return anp.zeros(self.n_missing)
 
+    def vonmises(self, stress):
+        """Von Mises equivalent stress σ_vm = vonmises_norm(dev(stress))."""
+        return self.vonmises_norm(self.dev(stress))
+
+    def inner_product(self, a, b):
+        """Mandel double contraction A:B = dot(a·mf, b·mf) for physical-shear vectors."""
+        mf = self.mandel_factors_np
+        return anp.dot(a * mf, b * mf)
+
+    def deviatoric_inner_product(self, s, t):
+        """Double contraction s:t for deviatoric physical-shear tensors (tr s = tr t = 0).
+
+        Reconstructs missing direct components via missing_dev_components for
+        partially-stored states (PLANE_STRESS, UNIAXIAL_1D). For SOLID_3D and
+        PLANE_STRAIN the default missing_dev_components returns zeros(0), so
+        the extra dot product contributes zero without branching.
+        """
+        s_miss = self.missing_dev_components(s)
+        t_miss = self.missing_dev_components(t)
+        return self.inner_product(s, t) + anp.dot(s_miss, t_miss)
+
+    def strain_norm(self, strain):
+        """Equivalent strain ε_eq = √(2/3 ε:ε) for isochoric engineering-shear strain.
+
+        Input uses engineering-shear convention (γ12 = 2 ε12); shear components
+        are halved internally before the Mandel double contraction.
+        """
+        strain_phys = strain / self.eng_to_phys_strain_factors_np
+        return smooth_sqrt((2.0 / 3.0) * self.deviatoric_inner_product(strain_phys, strain_phys))
+
 
 # ---------------------------------------------------------------------------
 # Derived concrete classes

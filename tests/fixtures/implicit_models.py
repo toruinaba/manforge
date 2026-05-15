@@ -17,7 +17,7 @@ activate the vector NR path with σ as an NR unknown.
 """
 
 from manforge.core.state import Implicit, NTENS
-from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
+from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS
 from manforge.core.dimension import PLANE_STRAIN
 
 
@@ -65,7 +65,7 @@ class _AFKinematicImplicitPS(AFKinematicPS):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
-class _AFKinematicImplicitPE(AFKinematic3D):
+class _AFKinematicImplicitPE(AFKinematic):
     """Plane-strain variant of the implicit AF model (uses PLANE_STRAIN dimension)."""
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")

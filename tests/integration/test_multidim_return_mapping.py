@@ -1,14 +1,14 @@
 """Integration tests for multi-dimensionality: PLANE_STRAIN and constructor guards.
 
 Covers:
-- J2Isotropic3D constructor accepts SOLID_3D / PLANE_STRAIN, rejects others
+- J2Isotropic parent accepts any StressDimension (SOLID_3D, PLANE_STRAIN, etc.)
 - PLANE_STRAIN elastic step: shapes, stress == C@deps, tangent == C
 - PLANE_STRAIN plastic step: yield consistency, ep > 0
 - PLANE_STRAIN analytical tangent: finite-difference verification
 - PLANE_STRAIN analytical vs autodiff cross-check
 - Driver integration with 4-component arrays (UniaxialDriver, GeneralDriver)
 - Plane-strain signature: sigma_33 != 0 under axial loading
-- J2Isotropic3D(PLANE_STRAIN) autodiff path works correctly
+- J2Isotropic(PLANE_STRAIN) autodiff path works correctly
 - J2IsotropicPS (no plastic_corrector) raises NotImplementedError via PythonAnalyticalIntegrator
 """
 
@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS
+from manforge.models.j2_isotropic import J2Isotropic, J2Isotropic3D, J2IsotropicPS
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import (
     PythonIntegrator,
@@ -33,13 +33,13 @@ from manforge.verification.tangent import check_tangent
 # ---------------------------------------------------------------------------
 
 def test_j2isotropic3d_accepts_solid_3d():
-    model = J2Isotropic3D(SOLID_3D, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     assert model.dimension is SOLID_3D
     assert model.ntens == 6
 
 
-def test_j2isotropic3d_accepts_plane_strain():
-    model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+def test_j2isotropic_accepts_plane_strain():
+    model = J2Isotropic(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     assert model.dimension is PLANE_STRAIN
     assert model.ntens == 4
 
@@ -51,12 +51,23 @@ def test_j2isotropic3d_accepts_plane_strain():
 
 @pytest.fixture
 def pe_model():
-    return J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    return J2Isotropic(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 @pytest.fixture
 def pe_state(pe_model):
     return pe_model.initial_state()
+
+
+@pytest.fixture
+def pe_model_3d():
+    """J2Isotropic3D used as plane-strain via analytical hooks (SOLID_3D)."""
+    return J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+
+
+@pytest.fixture
+def pe_state_3d(pe_model_3d):
+    return pe_model_3d.initial_state()
 
 
 # ---------------------------------------------------------------------------
@@ -121,41 +132,41 @@ def test_plastic_ep_positive(pe_model, pe_state, strain_inc_vec):
 
 
 # ---------------------------------------------------------------------------
-# Analytical tangent — finite-difference verification
+# Analytical tangent — finite-difference verification (J2Isotropic3D, SOLID_3D)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
-    [2e-3, 0.0, 0.0, 0.0],
-    [1e-3, -5e-4, -5e-4, 0.0],
-    [0.0, 0.0, 0.0, 2e-3],
-    [1e-3, 5e-4, 2e-4, 1e-3],
+    [2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [1e-3, -5e-4, -5e-4, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
+    [1e-3, 5e-4, 2e-4, 1e-3, 0.0, 0.0],
 ])
-def test_analytical_tangent_fd_check(pe_model, pe_state, strain_inc_vec):
-    """Plane-strain analytical tangent passes finite-difference check."""
+def test_analytical_tangent_fd_check(pe_model_3d, pe_state_3d, strain_inc_vec):
+    """3D analytical tangent passes finite-difference check."""
     result = check_tangent(
-        PythonAnalyticalIntegrator(pe_model),
-        anp.zeros(4),
-        pe_state,
+        PythonAnalyticalIntegrator(pe_model_3d),
+        anp.zeros(6),
+        pe_state_3d,
         anp.array(strain_inc_vec),
     )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
 
 # ---------------------------------------------------------------------------
-# Analytical vs autodiff cross-check
+# Analytical vs autodiff cross-check (J2Isotropic3D, SOLID_3D)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("strain_inc_vec", [
-    [2e-3, 0.0, 0.0, 0.0],
-    [1e-3, -5e-4, -5e-4, 0.0],
-    [0.0, 0.0, 0.0, 2e-3],
-    [1e-3, 5e-4, 2e-4, 1e-3],
+    [2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [1e-3, -5e-4, -5e-4, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
+    [1e-3, 5e-4, 2e-4, 1e-3, 0.0, 0.0],
 ])
-def test_analytical_stress_matches_autodiff(pe_model, pe_state, strain_inc_vec):
+def test_analytical_stress_matches_autodiff(pe_model_3d, pe_state_3d, strain_inc_vec):
     """Analytical and autodiff stress must agree to atol=1e-6."""
     deps = anp.array(strain_inc_vec)
-    s_ad = PythonNumericalIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).stress
-    s_an = PythonAnalyticalIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).stress
+    s_ad = PythonNumericalIntegrator(pe_model_3d).stress_update(deps, anp.zeros(6), pe_state_3d).stress
+    s_an = PythonAnalyticalIntegrator(pe_model_3d).stress_update(deps, anp.zeros(6), pe_state_3d).stress
     np.testing.assert_allclose(
         np.asarray(s_an), np.asarray(s_ad), atol=1e-6,
         err_msg=f"max stress diff = {float(anp.max(anp.abs(s_an - s_ad))):.3e}",
@@ -163,15 +174,15 @@ def test_analytical_stress_matches_autodiff(pe_model, pe_state, strain_inc_vec):
 
 
 @pytest.mark.parametrize("strain_inc_vec", [
-    [2e-3, 0.0, 0.0, 0.0],
-    [1e-3, -5e-4, -5e-4, 0.0],
-    [0.0, 0.0, 0.0, 2e-3],
+    [2e-3, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [1e-3, -5e-4, -5e-4, 0.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 2e-3, 0.0, 0.0],
 ])
-def test_analytical_tangent_matches_autodiff(pe_model, pe_state, strain_inc_vec):
+def test_analytical_tangent_matches_autodiff(pe_model_3d, pe_state_3d, strain_inc_vec):
     """Analytical and autodiff tangent must agree within 1e-5 relative error."""
     deps = anp.array(strain_inc_vec)
-    D_ad = PythonNumericalIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).ddsdde
-    D_an = PythonAnalyticalIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).ddsdde
+    D_ad = PythonNumericalIntegrator(pe_model_3d).stress_update(deps, anp.zeros(6), pe_state_3d).ddsdde
+    D_an = PythonAnalyticalIntegrator(pe_model_3d).stress_update(deps, anp.zeros(6), pe_state_3d).ddsdde
     rel_err = anp.abs(D_an - D_ad) / (anp.abs(D_ad) + 1.0)
     assert float(anp.max(rel_err)) < 1e-5, \
         f"max tangent rel err = {float(anp.max(rel_err)):.3e}"
@@ -217,8 +228,8 @@ def test_plane_strain_sigma33_nonzero(pe_model):
 # ---------------------------------------------------------------------------
 
 def test_j2isotropic3d_autodiff_plane_strain(pe_state):
-    """J2Isotropic3D(PLANE_STRAIN) via PythonNumericalIntegrator works correctly."""
-    model = J2Isotropic3D(PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    """J2Isotropic(PLANE_STRAIN) via PythonNumericalIntegrator works correctly."""
+    model = J2Isotropic(dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     deps = anp.array([2e-3, 0.0, 0.0, 0.0])
     _r = PythonNumericalIntegrator(model).stress_update(deps, anp.zeros(4), pe_state)
     stress, state, ddsdde = _r.stress, _r.state, _r.ddsdde

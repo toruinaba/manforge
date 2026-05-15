@@ -20,7 +20,7 @@ import numpy as np
 import autograd.numpy as anp
 
 import manforge  # enables JAX float64
-from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS
+from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS
 from manforge.models.j2_isotropic import J2Isotropic3D
 from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS
 from manforge.simulation.integrator import PythonIntegrator
@@ -315,8 +315,8 @@ def test_augmented_matches_reduced_plane_strain():
     """Implicit AF plane-strain path must produce the same stress as the explicit path."""
     deps = anp.array([2e-3, -1e-3, 0.0, 1e-3])
 
-    explicit_model = AFKinematic3D(dimension=PLANE_STRAIN,
-                                   E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
+    explicit_model = AFKinematic(dimension=PLANE_STRAIN,
+                                 E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
     implicit_model = _AFKinematicImplicitPE()
     state0 = explicit_model.initial_state()
 
