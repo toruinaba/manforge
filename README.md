@@ -178,6 +178,8 @@ model_af = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma
 model_ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=0.05)
 ```
 
+`J2Isotropic` / `AFKinematic` / `OWKinematic` は親クラスとしても直接使用でき、3D / PS / 1D 派生 (`*3D`, `*PS`, `*1D`) を提供する (例: `AFKinematicPS`, `OWKinematic1D`)。
+
 ---
 
 ### 5.2 シミュレーションを実行する
@@ -389,8 +391,9 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
 | `FortranModule` | `manforge.verification` |
 | `generate_strain_history` | `manforge.verification` |
-| `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models.j2_isotropic` |
-| `AFKinematic3D`, `OWKinematic3D` | `manforge.models` |
+| `J2Isotropic`, `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models` |
+| `AFKinematic`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D` | `manforge.models` |
+| `OWKinematic`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D` | `manforge.models` |
 
 ---
 
@@ -401,33 +404,36 @@ src/manforge/
 ├── core/
 │   ├── dimension.py       # StressDimension (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
 │   ├── material/
-│   │   └── base.py        # MaterialModel (ABC)
+│   │   ├── base.py             # MaterialModel (ABC)
+│   │   └── fortran_binding.py  # @verified_against_fortran / FortranBinding / collect_bindings
 │   ├── result.py          # ReturnMappingResult / StressUpdateResult
 │   └── state.py           # Implicit / Explicit / StateField / State
 ├── autodiff/
 │   ├── backend.py         # autograd バックエンド
 │   └── operators.py       # dev, vonmises, hydrostatic, norm_mandel 等
 ├── models/
-│   ├── j2_isotropic.py    # J2 等方硬化 (参照実装)
-│   ├── af_kinematic.py    # Armstrong-Frederick 移動硬化
-│   └── ow_kinematic.py    # Ohno-Wang 修正 AF
+│   ├── j2_isotropic.py    # J2Isotropic 親 + 3D/PS/1D 派生 (参照実装)
+│   ├── af_kinematic.py    # AFKinematic 親 + 3D/PS/1D 派生 (Armstrong-Frederick)
+│   └── ow_kinematic.py    # OWKinematic 親 + 3D/PS/1D 派生 (Ohno-Wang 修正 AF)
 ├── simulation/
 │   ├── types.py           # FieldType / FieldHistory / DriverResult
 │   ├── driver.py          # StrainDriver / StressDriver
 │   ├── _residual.py       # make_nr_residual / make_tangent_residual
 │   └── integrator/
-│       ├── base.py        # _PythonIntegratorBase (NR + consistent tangent)
-│       ├── python.py      # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
-│       └── fortran.py     # FortranIntegrator
+│       ├── base.py            # _PythonIntegratorBase (NR + consistent tangent)
+│       ├── python.py          # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
+│       ├── fortran.py         # FortranIntegrator
+│       └── fortran_module.py  # FortranModule (f2py 薄ラッパ)
 ├── fitting/
 │   ├── objective.py       # 残差二乗和
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
-│   ├── tangent.py         # TangentChecker / check_tangent()
-│   ├── jacobian.py        # JacobianChecker / JacobianBlocks / JacobianComparisonResult
-│   ├── crosscheck_driver.py # CrosscheckStrainDriver / CrosscheckStressDriver
-│   ├── fortran_bridge.py  # FortranModule
-│   └── test_cases.py      # generate_strain_history 等
+│   ├── comparator_base.py     # Comparator 抽象基底
+│   ├── tangent.py             # TangentChecker / check_tangent()
+│   ├── jacobian.py            # JacobianChecker / JacobianBlocks / JacobianComparisonResult
+│   ├── crosscheck_driver.py   # CrosscheckStrainDriver / CrosscheckStressDriver
+│   ├── fortran_check.py       # check_bindings (Fortran ↔ Python ランタイム比較)
+│   └── test_cases.py          # generate_strain_history 等
 └── utils/
     ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換
     ├── tensor.py          # 4 階テンソル演算
