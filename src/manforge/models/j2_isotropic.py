@@ -32,18 +32,12 @@ from manforge.core.material import verified_against_fortran
 from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
 
 
-class J2Isotropic3D(MaterialModel):
-    """J2 plasticity with analytical radial return for full-rank stress states.
+class J2Isotropic(MaterialModel):
+    """J2 plasticity with isotropic hardening — common physics across stress states.
 
-    Uses the scalar NR path (all non-stress states explicit): implements
-    ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
-
-    Provides closed-form ``user_defined_return_mapping`` and
-    ``user_defined_tangent`` using the identity ``C @ n_dev = 2μ · n_dev``,
-    which holds exactly for SOLID_3D and PLANE_STRAIN but not for statically
-    condensed stress states (PLANE_STRESS, UNIAXIAL_1D).  For those, use
-    :class:`J2IsotropicPS` or :class:`J2Isotropic1D` with the autodiff
-    return-mapping path.
+    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    pre-built concrete classes (:class:`J2Isotropic3D`, :class:`J2IsotropicPS`,
+    :class:`J2Isotropic1D`) which set appropriate defaults.
 
     Parameters
     ----------
@@ -70,13 +64,6 @@ class J2Isotropic3D(MaterialModel):
         self.sigma_y0 = sigma_y0
         self.H = H
 
-    @verified_against_fortran(
-        "j2_isotropic_3d_elastic_stiffness",
-        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
-    )
-    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
-        return super().elastic_stiffness(state)
-
     def yield_function(self, state: "State | StateDict") -> ScalarType:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
         sigma_y = self.sigma_y0 + self.H * state["ep"]
@@ -88,6 +75,45 @@ class J2Isotropic3D(MaterialModel):
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
         return [self.ep(state_n["ep"] + dlambda)]
+
+
+class J2Isotropic3D(J2Isotropic):
+    """J2 plasticity with analytical radial return for full-rank stress states.
+
+    Uses the scalar NR path (all non-stress states explicit): implements
+    ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
+
+    Provides closed-form ``user_defined_return_mapping`` and
+    ``user_defined_tangent`` using the identity ``C @ n_dev = 2μ · n_dev``,
+    which holds exactly for SOLID_3D and PLANE_STRAIN but not for statically
+    condensed stress states (PLANE_STRESS, UNIAXIAL_1D).  For those, use
+    :class:`J2IsotropicPS` or :class:`J2Isotropic1D` with the autodiff
+    return-mapping path.
+
+    Parameters
+    ----------
+    dimension : StressDimension, optional
+        Defaults to ``SOLID_3D``.
+    E : float
+        Young's modulus.
+    nu : float
+        Poisson's ratio.
+    sigma_y0 : float
+        Initial yield stress.
+    H : float
+        Isotropic hardening modulus (linear).
+    """
+
+    def __init__(self, dimension: StressDimension = SOLID_3D, *,
+                 E: float, nu: float, sigma_y0: float, H: float):
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
+
+    @verified_against_fortran(
+        "j2_isotropic_3d_elastic_stiffness",
+        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
+    )
+    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
+        return super().elastic_stiffness(state)
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
@@ -176,7 +202,7 @@ class J2Isotropic3D(MaterialModel):
         return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)
 
 
-class J2IsotropicPS(MaterialModel):
+class J2IsotropicPS(J2Isotropic):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
     Uses the scalar NR path (all non-stress states explicit): implements
@@ -197,31 +223,12 @@ class J2IsotropicPS(MaterialModel):
         Isotropic hardening modulus (linear).
     """
 
-    param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.H = H
-
-    def yield_function(self, state: "State | StateDict") -> ScalarType:
-        """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
-        sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self.vonmises(state["stress"]) - sigma_y
-
-    def update_state(
-        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
-        *, stress_trial: "StressVec | None" = None, strain_inc=None,
-    ) -> list[StateUpdate | StateResidual]:
-        """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state_n["ep"] + dlambda)]
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
 
-class J2Isotropic1D(MaterialModel):
+class J2Isotropic1D(J2Isotropic):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
     Uses the scalar NR path (all non-stress states explicit): implements
@@ -244,28 +251,9 @@ class J2Isotropic1D(MaterialModel):
         Isotropic hardening modulus (linear).
     """
 
-    param_names = ["E", "nu", "sigma_y0", "H"]
-    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.H = H
-
-    def yield_function(self, state: "State | StateDict") -> ScalarType:
-        """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
-        sigma_y = self.sigma_y0 + self.H * state["ep"]
-        return self.vonmises(state["stress"]) - sigma_y
-
-    def update_state(
-        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
-        *, stress_trial: "StressVec | None" = None, strain_inc=None,
-    ) -> list[StateUpdate | StateResidual]:
-        """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state_n["ep"] + dlambda)]
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
     # ------------------------------------------------------------------
     # Analytical solver hooks

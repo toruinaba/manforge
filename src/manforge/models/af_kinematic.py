@@ -34,8 +34,9 @@ kinematic-hardening slope C_k under uniaxial loading in all dimensions.
 Dimensional notes
 -----------------
 The three concrete classes share identical yield_function / update_state
-implementations.  Each stress-state base class provides dimension-specific
-dev / vonmises_norm that encapsulate per-dimension arithmetic.
+implementations via the AFKinematic parent.  Each stress-state dimension
+provides dimension-specific dev / vonmises_norm that encapsulate
+per-dimension arithmetic.
 
 * **3D** (AFKinematic3D): α is a 6-component deviatoric tensor.
 * **PS** (AFKinematicPS): α stores [α11, α22, α12]; dev uses
@@ -55,10 +56,12 @@ from manforge.core.state import Explicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 
-class AFKinematic3D(MaterialModel):
-    """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
+class AFKinematic(MaterialModel):
+    """J2 + Armstrong-Frederick kinematic hardening — common physics across stress states.
 
-    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
+    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    pre-built concrete classes (:class:`AFKinematic3D`, :class:`AFKinematicPS`,
+    :class:`AFKinematic1D`) which set appropriate defaults.
 
     Parameters
     ----------
@@ -94,7 +97,25 @@ class AFKinematic3D(MaterialModel):
         return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
 
 
-class AFKinematicPS(MaterialModel):
+class AFKinematic3D(AFKinematic):
+    """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
+
+    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
+
+    Parameters
+    ----------
+    dimension : StressDimension, optional
+        Defaults to ``SOLID_3D``.
+    E, nu, sigma_y0, C_k, gamma : float
+        Material parameters.
+    """
+
+    def __init__(self, dimension: StressDimension = SOLID_3D, *,
+                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
+
+
+class AFKinematicPS(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
     Uses the scalar NR path (all non-stress states explicit via ``update_state``).
@@ -107,33 +128,12 @@ class AFKinematicPS(MaterialModel):
         Material parameters.
     """
 
-    param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Explicit(shape=NTENS, doc="backstress tensor (deviatoric)")
-    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
     def __init__(self, dimension: StressDimension = PLANE_STRESS, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
-
-    def yield_function(self, state):
-        s_xi = self.dev(state["stress"]) - state["alpha"]
-        return self.vonmises_norm(s_xi) - self.sigma_y0
-
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_new["stress"]) - alpha_n
-        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
-        alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
-                  / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
-class AFKinematic1D(MaterialModel):
+class AFKinematic1D(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
     Uses the scalar NR path (all non-stress states explicit via ``update_state``).
@@ -149,27 +149,6 @@ class AFKinematic1D(MaterialModel):
         Material parameters.
     """
 
-    param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
-    alpha = Explicit(shape=NTENS, doc="backstress tensor (deviatoric component α11_dev)")
-    ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
     def __init__(self, dimension: StressDimension = UNIAXIAL_1D, *,
                  E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
-
-    def yield_function(self, state):
-        s_xi = self.dev(state["stress"]) - state["alpha"]
-        return self.vonmises_norm(s_xi) - self.sigma_y0
-
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_new["stress"]) - alpha_n
-        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
-        alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
-                  / (1.0 + self.gamma * dlambda)
-        return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

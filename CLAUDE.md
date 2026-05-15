@@ -126,7 +126,7 @@ Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, a
 
 Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR).
 
-The reference implementation is `src/manforge/models/j2_isotropic.py` (J2Isotropic3D, J2IsotropicPS, J2Isotropic1D).
+The reference implementations live in `src/manforge/models/`. Each model family has a parent class that holds the shared physics (`J2Isotropic`, `AFKinematic`, `OWKinematic`) and three thin dimension-specialized subclasses that set the default `dimension=` value and, where applicable, provide closed-form solver hooks (`J2Isotropic3D` / `J2Isotropic1D`). All nine concrete classes (`J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D`) and the three parent classes are exported from `manforge.models`.
 
 **2. Solver layer** — `src/manforge/core/`
 
