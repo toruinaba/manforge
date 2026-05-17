@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat test test-unit test-integration test-e2e test-e2e-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
+.PHONY: fortran-build fortran-build-umat test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
 
 # ---------------------------------------------------------------------------
 # Fortran build (host)
@@ -38,6 +38,10 @@ test-e2e:
 ## Run slow e2e tests (fitting pipeline etc.)
 test-e2e-slow:
 	uv run pytest tests/e2e -m "slow" -v
+
+## Run all slow-marked tests across unit + integration + e2e
+test-slow:
+	uv run pytest tests/unit tests/integration tests/e2e -m "slow and not fortran" -v
 
 ## Run benchmark tests (Path A: analytical vs numerical; Fortran parts skipped)
 test-benchmarks:

@@ -15,6 +15,7 @@ make test-unit               # Unit tests only (fastest)
 make test-integration        # Integration tests excluding slow and fortran
 make test-e2e                # E2E tests: CLI subprocess + fitting smoke
 make test-e2e-slow           # Slow e2e tests (fitting pipeline, >1s)
+make test-slow               # All slow-marked tests across unit + integration + e2e
 make test-benchmarks         # Benchmark tests: analytical vs numerical (no Fortran)
 make test-benchmarks-fortran # Benchmark tests: Python NR vs Fortran UMAT (requires .so)
 make test-all                # Full suite including slow and fortran

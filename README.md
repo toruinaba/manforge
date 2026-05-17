@@ -477,6 +477,7 @@ make test-unit               # unit のみ
 make test-integration        # integration のみ
 make test-e2e                # E2E (CLI subprocess + fitting smoke)
 make test-e2e-slow           # 遅い e2e (フィッティングパイプライン全体)
+make test-slow               # unit + integration + e2e の slow マーカ付きテスト全て
 make test-benchmarks         # 数値同値ベンチ (解析解 vs NR; Fortran 不要)
 make test-benchmarks-fortran # 数値同値ベンチ (Python NR vs Fortran UMAT; .so 必須)
 make test-all                # 全スイート

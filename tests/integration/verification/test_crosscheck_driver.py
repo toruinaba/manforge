@@ -52,17 +52,23 @@ class TestCrosscheckTrajectory:
         assert any(cr.a_n_iterations >= 1 for cr in plastic_cases)
 
     def test_nonconverged_a_converged_flag_propagates(self, model):
-        py_int_a = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
+        # max_iter=1 forces non-convergence on plastic steps; elastic steps still converge.
+        py_int_a = PythonNumericalIntegrator(model, max_iter=1, raise_on_nonconverged=False)
         py_int_b = PythonAnalyticalIntegrator(model)
         cc = CrosscheckStrainDriver(py_int_a, py_int_b)
 
-        # Verify via direct iter_run using a tiny single-step load
-        # (elastic only — converged=True expected)
-        elastic_strain = np.zeros((2, model.ntens))
-        elastic_strain[0, 0] = 1e-6
-        elastic_strain[1, 0] = 2e-6
-        load = FieldHistory(FieldType.STRAIN, "eps", elastic_strain)
-        for cr in cc.iter_run(load):
+        # elastic step: converged=True
+        elastic_strain = np.zeros((1, model.ntens))
+        elastic_strain[0, 0] = 1e-7
+        load_e = FieldHistory(FieldType.STRAIN, "eps", elastic_strain)
+        for cr in cc.iter_run(load_e):
             assert cr.a_converged is True
+
+        # plastic step: max_iter=1 is insufficient → converged=False propagates
+        plastic_strain = np.zeros((1, model.ntens))
+        plastic_strain[0, 0] = 5e-3  # well into plastic regime
+        load_p = FieldHistory(FieldType.STRAIN, "eps", plastic_strain)
+        for cr in cc.iter_run(load_p):
+            assert cr.a_converged is False
 
 
