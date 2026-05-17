@@ -12,12 +12,14 @@ uv sync --all-extras         # All extras including matplotlib, meson/ninja
 # Test
 make test                    # Fast tests: unit + integration, excluding slow/fortran
 make test-unit               # Unit tests only (fastest)
-make test-integration        # Integration tests excluding slow
-make test-slow               # Slow tests (FD tangent, fitting, long loops)
-make test-fortran            # Fortran cross-validation (requires compiled .so)
+make test-integration        # Integration tests excluding slow and fortran
+make test-e2e                # E2E tests: CLI subprocess + fitting smoke
+make test-e2e-slow           # Slow e2e tests (fitting pipeline, >1s)
+make test-benchmarks         # Benchmark tests: analytical vs numerical (no Fortran)
+make test-benchmarks-fortran # Benchmark tests: Python NR vs Fortran UMAT (requires .so)
 make test-all                # Full suite including slow and fortran
-uv run pytest tests/integration/test_j2_elastic.py -v  # Single test file
-uv run pytest tests/ --durations=20                    # Show 20 slowest tests
+uv run pytest tests/benchmarks/j2_isotropic/ -m "not fortran" -v  # Single benchmark dir
+uv run pytest tests/ --durations=20                                 # Show 20 slowest tests
 
 # Fortran compilation (requires gfortran)
 # Option A: CLI (recommended for Python users)
@@ -30,8 +32,6 @@ uv run manforge clean --dry-run   # Preview what would be removed
 # Option B: Makefile (lower-level)
 make fortran-build           # Compile test_basic.f90 via f2py
 make fortran-build-umat      # Compile abaqus_stubs.f90 + j2_isotropic_3d.f90 via f2py → j2_isotropic_3d module
-make fortran-test            # Run Fortran basic tests
-make fortran-test-umat       # Run Fortran UMAT cross-validation tests
 
 # Docker (reproducible gfortran environment)
 make docker-build && make docker-test
@@ -45,6 +45,17 @@ There is no linter configured. No CI/CD workflows exist.
 ## Architecture
 
 manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via JAX autodiff), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines.
+
+### Test layout
+
+`tests/{unit,integration}/` mirrors `src/manforge/` 1:1 at the file level. `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
+
+| directory | purpose |
+|---|---|
+| `tests/unit/` | Pure-logic tests — no integrator, no driver |
+| `tests/integration/` | Orchestration tests — integrator + driver in the loop |
+| `tests/e2e/` | CLI subprocess + fitting pipeline smoke |
+| `tests/benchmarks/` | Numerical equivalence harnesses only |
 
 ### Three-layer design
 

@@ -35,7 +35,7 @@ packages = ["src/manforge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers"
+addopts = "--strict-markers --import-mode=importlib"
 pythonpath = ["."]
 markers = [
     "slow: measured >1s (fitting, long cyclic loops) -- deselect with -m 'not slow'",

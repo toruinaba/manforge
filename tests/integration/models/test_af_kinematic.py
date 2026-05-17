@@ -1,0 +1,43 @@
+import numpy as np
+"""AF (Armstrong-Frederick) model-specific tests.
+
+Covers physics unique to the AF model:
+- implicit_state_names == [] (all states explicit) for all variants
+- gamma=0 gives purely linear kinematic backstress (positive axial component)
+"""
+
+import pytest
+import autograd.numpy as anp
+
+from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS, AFKinematic1D
+from manforge.simulation.integrator import PythonIntegrator
+
+
+# ---------------------------------------------------------------------------
+# API detection: all AF states are explicit (no implicit_state_names)
+# ---------------------------------------------------------------------------
+
+def test_implicit_state_names_af3d():
+    assert AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
+
+
+def test_implicit_state_names_afps():
+    assert AFKinematicPS(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
+
+
+def test_implicit_state_names_af1d():
+    assert AFKinematic1D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0).implicit_state_names == []
+
+
+# ---------------------------------------------------------------------------
+# gamma=0 limit: purely linear kinematic backstress
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+def test_gamma0_backstress_purely_axial():
+    """With gamma=0 and uniaxial loading, backstress is purely axial (linear Prager)."""
+    model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=1000.0, gamma=0.0)
+    state0 = model.initial_state()
+    deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
+    _r = PythonIntegrator(model).stress_update(deps, anp.zeros(6), state0)
+    assert float(_r.state["alpha"][0]) > 0.0
