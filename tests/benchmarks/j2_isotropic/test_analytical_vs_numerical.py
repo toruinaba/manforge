@@ -92,16 +92,9 @@ def _run_and_compare(model, strain_history, *, check_tangent_flag=True):
 # ---------------------------------------------------------------------------
 
 def test_analytical_matches_numerical_trajectory(j2_scenario):
-    """Analytical and numerical integrators agree over full strain history.
-
-    Tangent comparison is enabled for 3D, disabled for 1D:
-    J2Isotropic1D.user_defined_tangent has a known pre-existing discrepancy
-    vs the autodiff NR tangent (the formula fails FD verification).
-    Stress, ep, and Δλ are still checked to full tolerance.
-    """
+    """Analytical and numerical integrators agree over full strain history."""
     model, strain_history = j2_scenario
-    check_tan = model.ntens != 1  # skip tangent comparison for 1D
-    errs = _run_and_compare(model, strain_history, check_tangent_flag=check_tan)
+    errs = _run_and_compare(model, strain_history, check_tangent_flag=True)
 
     assert errs["stress"] < 1e-6, \
         f"max stress error = {errs['stress']:.3e}"
@@ -109,9 +102,8 @@ def test_analytical_matches_numerical_trajectory(j2_scenario):
         f"max ep error = {errs['ep']:.3e}"
     assert errs["dlambda"] < 1e-10, \
         f"max Δλ error = {errs['dlambda']:.3e}"
-    if check_tan:
-        assert errs["tangent"] < 1e-5, \
-            f"max tangent rel err = {errs['tangent']:.3e}"
+    assert errs["tangent"] < 1e-5, \
+        f"max tangent rel err = {errs['tangent']:.3e}"
 
 
 # ---------------------------------------------------------------------------

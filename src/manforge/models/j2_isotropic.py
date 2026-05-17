@@ -305,37 +305,11 @@ class J2Isotropic1D(J2Isotropic):
         self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
         C: Stiffness, state_n: StateDict
     ) -> Stiffness:
-        """1D consistent tangent — closed-form, 3D-analogous form.
+        """1D consistent elastoplastic tangent for linear isotropic hardening.
 
-        Structurally mirrors the 3D formula
-        ``D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)``
-        with ``E`` in place of ``3μ``.  Reduces to ``[[E·H/(E+H)]]`` for 1D.
-
-        Parameters
-        ----------
-        stress : anp.ndarray, shape (1,)
-        state : dict  (unused)
-        dlambda : anp.ndarray, scalar
-        C : anp.ndarray, shape (1, 1)
-        state_n : dict with key ``ep``
-
-        Returns
-        -------
-        anp.ndarray, shape (1, 1)
+        For uniaxial J2 with linear hardening modulus H, the elastoplastic
+        tangent reduces exactly to ``D^ep = E·H/(E+H)`` independently of the
+        current plastic strain or step size. Returns a (1, 1) ndarray.
         """
         E = C[0, 0]
-        ep_n = state_n["ep"]
-        sigma_y = self.sigma_y0 + self.H * ep_n
-        sigma_vm_trial = sigma_y + (E + self.H) * dlambda
-        theta = 1.0 - E * dlambda / sigma_vm_trial  # 1D analogue of (1 − 3μΔλ/σ_vm)
-
-        # s_trial = dev(σ_new) / θ  (same reconstruction as 3D)
-        s_trial = self.dev(stress) / theta
-        # β: 1D analogue of 9μ²σ_y / ((3μ+H)σ_vm³), with 3μ → E and
-        # the (3/2)² factor from n_voigt = (3/2) s/σ_vm absorbed into s⊗s
-        beta = 1.5 * E ** 2 * sigma_y / ((E + self.H) * sigma_vm_trial ** 3)
-
-        I_vol = self.I_vol()  # [[1/3]]
-        I_dev = self.I_dev()  # [[2/3]]
-
-        return I_vol @ C + theta * (I_dev @ C) - beta * anp.outer(s_trial, s_trial)
+        return anp.array([[E * self.H / (E + self.H)]])
