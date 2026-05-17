@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-test fortran-test-umat test test-unit test-integration test-slow test-fortran test-all docker-build docker-test clean
+.PHONY: fortran-build fortran-build-umat test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
 
 # ---------------------------------------------------------------------------
 # Fortran build (host)
@@ -19,33 +19,37 @@ fortran-build-umat:
 # Test targets
 # ---------------------------------------------------------------------------
 
-## Run Fortran basic integration tests only
-fortran-test:
-	uv run pytest tests/test_fortran_basic.py -v
-
-## Run Fortran UMAT cross-validation tests only
-fortran-test-umat:
-	uv run pytest tests/test_fortran_umat.py -v
-
 ## Run fast tests: unit + integration, excluding slow and fortran (default)
 test:
-	uv run pytest tests/unit tests/integration -m "not slow" -v
+	uv run pytest tests/unit tests/integration -m "not slow and not fortran" -v
 
 ## Run unit tests only (fastest)
 test-unit:
-	uv run pytest tests/unit -v
+	uv run pytest tests/unit -m "not slow and not fortran" -v
 
-## Run integration tests only (no slow)
+## Run integration tests excluding slow
 test-integration:
-	uv run pytest tests/integration -m "not slow" -v
+	uv run pytest tests/integration -m "not slow and not fortran" -v
 
-## Run slow tests only (fitting, long FD tangent checks)
+## Run e2e tests (CLI subprocess + fitting smoke)
+test-e2e:
+	uv run pytest tests/e2e -m "not slow and not fortran" -v
+
+## Run slow e2e tests (fitting pipeline etc.)
+test-e2e-slow:
+	uv run pytest tests/e2e -m "slow" -v
+
+## Run all slow-marked tests across unit + integration + e2e
 test-slow:
-	uv run pytest tests/slow tests/integration tests/unit -m "slow" -v
+	uv run pytest tests/unit tests/integration tests/e2e -m "slow and not fortran" -v
 
-## Run Fortran-dependent tests (requires compiled .so)
-test-fortran:
-	uv run pytest tests/fortran -v
+## Run benchmark tests (Path A: analytical vs numerical; Fortran parts skipped)
+test-benchmarks:
+	uv run pytest tests/benchmarks -m "not fortran" -v
+
+## Run Fortran benchmark tests (Path B: Python NR vs Fortran UMAT; requires compiled .so)
+test-benchmarks-fortran:
+	uv run pytest tests/benchmarks -m "fortran" -v
 
 ## Run complete test suite (includes slow and fortran if modules present)
 test-all:
@@ -59,10 +63,10 @@ test-all:
 docker-build:
 	docker build -t manforge-fortran .
 
-## Run Fortran build and tests inside Docker container
+## Run Fortran build and Fortran benchmark tests inside Docker container
 docker-test:
 	docker run --rm -v $$(pwd):/workspace -w /workspace manforge-fortran \
-		bash -c "make fortran-build && make fortran-test"
+		bash -c "make fortran-build-umat && make test-benchmarks-fortran"
 
 # ---------------------------------------------------------------------------
 # Cleanup

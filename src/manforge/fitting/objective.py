@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
@@ -79,6 +80,7 @@ def build_objective(
     """
     model_cls = type(model)
     dimension = model.dimension
+    _accepts_dimension = "dimension" in inspect.signature(model_cls.__init__).parameters
     fixed = dict(fixed_params) if fixed_params else {}
     load = FieldHistory(
         FieldType.STRAIN, "Strain", np.asarray(exp_data["strain"], dtype=float)
@@ -88,7 +90,8 @@ def build_objective(
 
     def objective(free_params: dict[str, float]) -> float:
         all_params = {**fixed, **free_params}
-        m = model_cls(dimension=dimension, **all_params)  # type: ignore[call-arg]
+        extra = {"dimension": dimension} if _accepts_dimension else {}
+        m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
         integrator = PythonIntegrator(m)
         result = driver_factory(integrator).run(load)
         stress_comp = result.stress

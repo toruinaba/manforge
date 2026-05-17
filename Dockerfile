@@ -1,14 +1,14 @@
 # manforge — reproducible gfortran + Python 3.12 build environment
 #
 # Provides gfortran, f2py (via numpy), and all Python dependencies.
-# Used for Step 9 (basic f2py smoke test) and Step 10 (UMAT cross-validation).
+# Used to run Fortran-vs-Python equivalence benchmarks reproducibly.
 #
 # Build:
 #   docker build -t manforge-fortran .
 #
 # Run tests inside container:
 #   docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
-#       bash -c "make fortran-build && make fortran-test"
+#       bash -c "make fortran-build-umat && make test-benchmarks-fortran"
 
 FROM python:3.12-slim
 
@@ -25,5 +25,5 @@ RUN pip install --no-cache-dir uv \
 
 COPY . .
 
-# Default: run all Fortran tests
-CMD ["bash", "-c", "make fortran-build && make fortran-test"]
+# Default: compile UMAT and run Fortran equivalence benchmarks
+CMD ["bash", "-c", "make fortran-build-umat && make test-benchmarks-fortran"]

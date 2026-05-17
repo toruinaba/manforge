@@ -472,11 +472,15 @@ src/manforge/
 
 ```bash
 # テスト
-make test              # 高速テスト: unit + integration (slow・fortran 除く)
-make test-unit         # unit のみ
-make test-slow         # FD tangent, フィッティング, 長い cyclic ループ
-make test-fortran      # Fortran クロス検証 (コンパイル済み .so 必須)
-make test-all          # 全スイート
+make test                    # 高速テスト: unit + integration (slow・fortran 除く)
+make test-unit               # unit のみ
+make test-integration        # integration のみ
+make test-e2e                # E2E (CLI subprocess + fitting smoke)
+make test-e2e-slow           # 遅い e2e (フィッティングパイプライン全体)
+make test-slow               # unit + integration + e2e の slow マーカ付きテスト全て
+make test-benchmarks         # 数値同値ベンチ (解析解 vs NR; Fortran 不要)
+make test-benchmarks-fortran # 数値同値ベンチ (Python NR vs Fortran UMAT; .so 必須)
+make test-all                # 全スイート
 
 # CLI
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
