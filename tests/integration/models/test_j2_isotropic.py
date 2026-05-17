@@ -12,12 +12,14 @@ Covers:
 - J2IsotropicPS (no plastic_corrector) raises NotImplementedError via PythonAnalyticalIntegrator
 """
 
+import re
+
 import autograd.numpy as anp
 import numpy as np
 import pytest
 
 from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models.j2_isotropic import J2Isotropic, J2Isotropic3D, J2IsotropicPS
+from manforge.models.j2_isotropic import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import (
     PythonIntegrator,
@@ -247,3 +249,50 @@ def test_autodiff_only_model_analytical_raises():
     state0 = model.initial_state()
     with pytest.raises(NotImplementedError):
         PythonAnalyticalIntegrator(model).stress_update(deps, anp.zeros(3), state0)
+
+
+# ---------------------------------------------------------------------------
+# param_names / Fortran argument order contract (requires compiled .so)
+# ---------------------------------------------------------------------------
+
+def _extract_dummy_args(fortran_module, subroutine_name: str) -> list[str]:
+    """Parse argument names from the f2py-generated __doc__ for a subroutine."""
+    fn = getattr(fortran_module, subroutine_name)
+    doc = fn.__doc__ or ""
+    first_line = doc.split("\n")[0]
+    m = re.search(r"\(([^)]+)\)", first_line)
+    if not m:
+        return []
+    return [a.strip().lower() for a in m.group(1).split(",")]
+
+
+@pytest.mark.fortran
+@pytest.mark.parametrize("model_fn,module_name,subroutine", [
+    (lambda: J2Isotropic3D(E=210e3, nu=0.3, sigma_y0=250.0, H=1000.0), "j2_isotropic_3d", "j2_isotropic_3d"),
+    (lambda: J2IsotropicPS(E=210e3, nu=0.3, sigma_y0=250.0, H=1000.0), "j2_isotropic_3d", "j2_isotropic_3d"),
+    (lambda: J2Isotropic1D(E=210e3, nu=0.3, sigma_y0=250.0, H=1000.0), "j2_isotropic_3d", "j2_isotropic_3d"),
+])
+def test_param_names_match_fortran_arg_order(model_fn, module_name, subroutine):
+    """model.param_names order must match the first N Fortran dummy argument names.
+
+    Enforces the project convention that PROPS order == param_names order so that
+    FortranIntegrator.from_model() can auto-generate param_fn safely.
+    """
+    from manforge.verification import FortranModule
+    pytest.importorskip(
+        module_name,
+        reason=f"{module_name} not compiled -- run: uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
+    )
+    model = model_fn()
+    fortran = FortranModule(module_name)
+    dummy_args = _extract_dummy_args(fortran.module, subroutine)
+    n = len(model.param_names)
+    assert len(dummy_args) >= n, \
+        f"{subroutine}: expected at least {n} dummy args, got {len(dummy_args)}"
+    expected = [name.lower() for name in model.param_names]
+    actual = dummy_args[:n]
+    assert actual == expected, (
+        f"{type(model).__name__}.param_names {model.param_names!r} "
+        f"does not match first {n} Fortran args {dummy_args[:n]!r} "
+        f"of subroutine '{subroutine}'"
+    )

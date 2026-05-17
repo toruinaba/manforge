@@ -32,12 +32,7 @@ from manforge.verification.tangent import check_tangent
 # ---------------------------------------------------------------------------
 
 def _run_and_compare(model, strain_history, *, check_tangent_flag=True):
-    """Step through strain_history with both integrators; return max errors.
-
-    check_tangent_flag=False skips tangent comparison (used for 1D models
-    where J2Isotropic1D.user_defined_tangent has a known pre-existing bug —
-    the tangent fails FD verification; stress/ep/dlambda are still checked).
-    """
+    """Step through strain_history with both integrators; return max errors."""
     numerical = PythonNumericalIntegrator(model)
     analytical = PythonAnalyticalIntegrator(model)
 
