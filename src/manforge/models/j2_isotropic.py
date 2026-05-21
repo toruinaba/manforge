@@ -162,7 +162,8 @@ class J2Isotropic3D(J2Isotropic):
 
     def user_defined_tangent(
         self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
-        C: Stiffness, state_n: StateDict
+        C: Stiffness, state_n: StateDict,
+        *, stress_trial: "StressVec | None" = None, strain_inc: "FloatArray | None" = None,
     ) -> Stiffness:
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
 
@@ -177,6 +178,9 @@ class J2Isotropic3D(J2Isotropic):
         dlambda : anp.ndarray, scalar
         C : anp.ndarray, shape (ntens, ntens)
         state_n : dict with key ``ep``
+        stress_trial : anp.ndarray, shape (ntens,), optional
+            Elastic trial stress σ_trial.  When provided, s_trial is read
+            directly from it; otherwise reconstructed from the converged stress.
 
         Returns
         -------
@@ -189,8 +193,13 @@ class J2Isotropic3D(J2Isotropic):
         sigma_vm_trial = sigma_y + (3.0 * mu + self.H) * dlambda
         theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
 
-        # dev(σ_new) = θ · s_trial  →  s_trial = dev(σ_new) / θ
-        s_trial = self.dev(stress) / theta
+        if stress_trial is not None:
+            s_trial = self.dev(stress_trial)
+        else:
+            # Fallback: reconstruct via the J2 radial-return identity
+            # dev(σ_new) = θ · s_trial
+            s_trial = self.dev(stress) / theta
+
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + self.H) * sigma_vm_trial ** 3)
 
         I_vol = self.I_vol()
@@ -303,7 +312,8 @@ class J2Isotropic1D(J2Isotropic):
 
     def user_defined_tangent(
         self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
-        C: Stiffness, state_n: StateDict
+        C: Stiffness, state_n: StateDict,
+        *, stress_trial: "StressVec | None" = None, strain_inc: "FloatArray | None" = None,
     ) -> Stiffness:
         """1D consistent elastoplastic tangent for linear isotropic hardening.
 

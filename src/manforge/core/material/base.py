@@ -510,6 +510,9 @@ class MaterialModel(ABC):
         dlambda: Scalar,
         C: Stiffness,
         state_n: StateDict,
+        *,
+        stress_trial: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> "Stiffness | None":
         """User-supplied consistent tangent (optional).
 
@@ -530,6 +533,13 @@ class MaterialModel(ABC):
             Elastic stiffness tensor (already computed by the caller).
         state_n : dict
             Internal state at the beginning of the increment.
+        stress_trial : anp.ndarray, shape (ntens,), optional
+            Elastic trial stress σ_trial = σ_n + C Δε.  Forwarded from
+            ``stress_update``; use this instead of reconstructing σ_trial
+            from the converged stress to ensure autograd traceability.
+        strain_inc : anp.ndarray, shape (ntens,), optional
+            Strain increment Δε (engineering-shear convention, matching the
+            ABAQUS DSTRAN interface).  Forwarded from ``stress_update``.
 
         Returns
         -------

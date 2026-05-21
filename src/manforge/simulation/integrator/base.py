@@ -100,13 +100,16 @@ class _PythonIntegratorBase:
         return None
 
     def _try_user_tangent(
-        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict, C: Stiffness
+        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict, C: Stiffness,
+        stress_trial: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
     ) -> "Stiffness | None":
         """Attempt user_defined_tangent; return ddsdde array or None."""
         if self._method == "numerical_newton":
             return None
         ddsdde = self._model.user_defined_tangent(
-            rm.stress, rm.state, rm.dlambda, C, state_n
+            rm.stress, rm.state, rm.dlambda, C, state_n,
+            stress_trial=stress_trial, strain_inc=strain_inc,
         )
         if ddsdde is not None:
             return ddsdde
@@ -243,7 +246,7 @@ class _PythonIntegratorBase:
 
         rm = self.return_mapping(stress_trial, state_n, strain_inc)
 
-        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n)
+        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n, stress_trial, strain_inc)
         if ddsdde is None:
             ddsdde = self._consistent_tangent(rm, stress_n, state_n, strain_inc)
 
