@@ -35,10 +35,12 @@ def test_analytical_integrator_method():
 class _CapturingJ2(J2Isotropic3D):
     """J2Isotropic3D subclass that records kwargs passed to user_defined_tangent."""
 
-    captured: dict = {}
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.captured: dict = {}
 
     def user_defined_tangent(self, stress, state, dlambda, C, state_n, *, stress_trial=None, strain_inc=None):
-        _CapturingJ2.captured = {"stress_trial": stress_trial, "strain_inc": strain_inc}
+        self.captured = {"stress_trial": stress_trial, "strain_inc": strain_inc}
         return super().user_defined_tangent(
             stress, state, dlambda, C, state_n,
             stress_trial=stress_trial, strain_inc=strain_inc,
@@ -57,19 +59,19 @@ def test_user_defined_tangent_receives_stress_trial_and_strain_inc():
 
     integrator.stress_update(strain_inc, stress_n, state_n)
 
-    assert _CapturingJ2.captured.get("stress_trial") is not None, (
+    assert model.captured.get("stress_trial") is not None, (
         "stress_trial was not forwarded to user_defined_tangent"
     )
-    assert _CapturingJ2.captured.get("strain_inc") is not None, (
+    assert model.captured.get("strain_inc") is not None, (
         "strain_inc was not forwarded to user_defined_tangent"
     )
     np.testing.assert_allclose(
-        _CapturingJ2.captured["strain_inc"], strain_inc,
+        model.captured["strain_inc"], strain_inc,
         err_msg="strain_inc value forwarded incorrectly",
     )
     C_n = model.elastic_stiffness(state_n)
     expected_stress_trial = stress_n + C_n @ strain_inc
     np.testing.assert_allclose(
-        _CapturingJ2.captured["stress_trial"], expected_stress_trial,
+        model.captured["stress_trial"], expected_stress_trial,
         err_msg="stress_trial value forwarded incorrectly",
     )
