@@ -151,7 +151,7 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            g_flag = smooth_heaviside(g_stag)
+            g_flag = 1.0 if g_stag > 0.0 else 0.0
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0
@@ -220,8 +220,8 @@ class YUKinematic3D(YUKinematic):
 
     def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar = self.vonmises_norm(theta)
-        theta_flow = self.T @ theta / theta_bar * 1.5 
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        theta_flow = self.T @ theta / theta_bar * 1.5
+        C_k = self.C_1 if self.B - self.Y > theta_max else self.C_2
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
         if R != R_n:
