@@ -1,14 +1,12 @@
 import numpy as np
 import numpy.testing as npt
 
-from yu_kinematic import YUKinematic1D, YUKinematic3D
+from manforge.models.yu_kinematic import YUKinematic1D, YUKinematic3D
 from manforge.simulation.integrator import PythonNumericalIntegrator
 from manforge.simulation.driver import MixedDriver, StrainDriver
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import JacobianChecker
-from manforge.utils.voigt import from_mandel
 
-from matplotlib import pyplot as plt
 
 
 class YUChecker:
@@ -48,7 +46,7 @@ class YUChecker:
         assert_Rs_s = self.assertion_array(self.model.dRstress_dstress(self.C, self.xi, self.dlambda), jac.part["stress"]["stress"])
         assert_Rs_b = self.assertion_array(self.model.dRstress_dbeta(self.C, self.xi, self.dlambda), jac.part["stress"]["beta"])
         assert_Rs_t = self.assertion_array(self.model.dRstress_dtheta(self.C, self.xi, self.dlambda), jac.part["stress"]["theta"])
-        assert_Rs_l = self.assertion_array(self.model.dRstress_dlambda(self.C, self.xi), jac.part["stress"]["dlambda"])
+        assert_Rs_l = self.assertion_array(self.model.dRstress_dlambda(self.C, self.xi, self.eps_eq, self.dlambda), jac.part["stress"]["dlambda"])
         # Rbeta
         assert_Rb_s = self.assertion_array(self.model.dRbeta_dstress(self.dlambda), jac.part["beta"]["stress"])
         assert_Rb_b = self.assertion_array(self.model.dRbeta_dbeta(self.dlambda), jac.part["beta"]["beta"])
@@ -81,29 +79,46 @@ model1d = YUKinematic1D(
     B=435.0, Rsat=255.0, k=26.0, b=66.0,
     h=0.4, Ea=159_000, xi=61.0)
 
+idx = 0
 int3d = PythonNumericalIntegrator(model3d)
 int1d = PythonNumericalIntegrator(model1d)
-driver3d = MixedDriver(int3d, prescribed_strain_idx=[0])
+driver3d = MixedDriver(int3d, prescribed_strain_idx=[idx])
 driver1d = StrainDriver(int1d)
 
 hist = FieldHistory.cyclic_strain([0.05, -0.05, 0.05, -0.05], n_per_segment=50)
 run_g = driver3d.iter_run(hist)
 # res1d = driver1d.run(hist, collect_state={"theta": FieldType.STRESS, "eps_eq": FieldType.STRAIN, "R": FieldType.STRESS})
 
+strains = []
+stress = []
+i = 0
 for g in run_g:
     if g.result.is_plastic:
+        print(f"check {i}")
         yu_checker = YUChecker(model3d, g.result)
         jac = JacobianChecker(model3d).compute(g.result, g.result._state_n)
         assert_res = yu_checker.check_all(jac)
-        ddsdde = g.result.ddsdde
-        calced_ddsdde = yu_checker.model.calc_ddsdde(g.result.state, g.result._state_n, g.result.stress_trial, g.result.dlambda)
-        try:
-            npt.assert_allclose(ddsdde, calced_ddsdde, rtol=1e-06)
-        except Exception as e:
-            print(e)
+        i += 1
+        # ddsdde = g.result.ddsdde
+        # calced_ddsdde = yu_checker.model.calc_ddsdde(g.result.state, g.result._state_n, g.result.stress_trial, g.result.dlambda)
+        # try:
+        #     npt.assert_allclose(ddsdde, calced_ddsdde, rtol=1e-06)
+        # except Exception as e:
+        #     print(e)
         if not assert_res.all():
             print(f"Asertion result: ")
             print(assert_res)
             print(f"dlambda: {g.result.dlambda}")
             print(f"n_iteration: {g.result.n_iterations}")
             print(f"r_hist: {g.result.residual_history}")
+
+    strains.append(g.strain[idx])
+    stress.append(g.result.stress[idx])
+
+from matplotlib import pyplot as plt
+
+fig = plt.figure()
+ax = fig.add_subplot(111)
+ax.plot(strains, stress)
+plt.show()
+

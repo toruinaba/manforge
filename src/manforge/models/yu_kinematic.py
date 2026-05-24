@@ -39,12 +39,11 @@ class YUKinematic(MaterialModel):
         self.Ea = Ea
         self.xi = xi
 
-    def elastica_stiffness(self, state):
+    def elastic_stiffness(self, state):
         eps_eq = state["eps_eq"]
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        factor = 1.0 - (1.0 - self.Ea / self.E) * (1.0 - anp.exp(-self.xi * eps_eq))
-        return self.isotropic_C(lam, mu) # f
+        return self._calc_E_factor(eps_eq) * self.isotropic_C(lam, mu) # f
 
     def yield_function(self, state):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
@@ -87,6 +86,7 @@ class YUKinematic(MaterialModel):
         ]
 
     def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        C = self.elastic_stiffness(state_new)
         stress_new = state_new["stress"]
         theta_new = state_new["theta"]
         beta_new = state_new["beta"]
@@ -126,8 +126,6 @@ class YUKinematic3D(YUKinematic):
         d_vector = np.zeros(19)
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
-        C_inv = np.linalg.inv(C)
-        strain_inc = C_inv @ stress_trial
         dlambda = 0.0
         for iter in range(iter_rm):
             r_vector = self.calc_residual(state_new, state_n, stress_trial, dlambda)
@@ -194,14 +192,14 @@ class YUKinematic3D(YUKinematic):
         return xi_norm, flow
 
     def calc_residual(self, state_new, state_n, stress_trial, dlambda):
-        C = self.elastic_stiffness(state_n)
+        C = self.elastic_stiffness(state_new)
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(state_n["theta_max"] - (self.B - self.Y))
         a = self.B + state_new["R"] - self.Y
         dev_stress = self.dev(state_new["stress"])
         xi = dev_stress - state_new["theta"] - state_new["beta"]
-        xi_norm, flow = self.calc_norm_n_flow(xi)
+        _, flow = self.calc_norm_n_flow(xi)
         theta_norm, _ = self.calc_norm_n_flow(state_new["theta"])
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_stress = state_new["stress"] - stress_trial + dlambda * C @ flow
         R_theta = state_new["theta"] - state_n["theta"] - (C_k * a / self.Y * xi - C_k * smooth_sqrt(a / theta_norm) * state_new["theta"]) * dlambda 
         R_beta = state_new["beta"] - state_n["beta"] - (self.k * self.b / self.Y * xi - self.k * state_new["beta"]) * dlambda
         R_yield = self.yield_function(state_new)
@@ -244,9 +242,10 @@ class YUKinematic3D(YUKinematic):
         dn_dsig = self._prepare_Rstress(xi)
         return - dlambda * C @ dn_dsig
 
-    def dRstress_dlambda(self, C, xi):
+    def dRstress_dlambda(self, C, xi, eps_eq, dlambda):
         _, flow = self.calc_norm_n_flow(xi)
-        return C @ flow #self.model.xi * (updated_factor - self.model.Ea / self.model.E) / updated_factor * (stress - stress_trial) + C @ flow
+        factor = self.Ea / self.E + (1 - self.Ea / self.E) * anp.exp(-self.xi * eps_eq)
+        return C @ flow - self.xi * (1 - self.Ea / self.E) * anp.exp(-self.xi * eps_eq) / factor * dlambda * (C @ flow)
 
     def dRbeta_dstress(self, dlambda):
         return -self.k * self.b * dlambda / self.Y * self.I_dev()
@@ -312,7 +311,7 @@ class YUKinematic3D(YUKinematic):
         Rs_s = self.dRstress_dstress(C, xi, dlambda)
         Rs_b = self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = self.dRstress_dtheta(C, xi, dlambda)
-        Rs_l = self.dRstress_dlambda(C, xi)
+        Rs_l = self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
         Rs = np.hstack((Rs_s, np.matrix(Rs_l).transpose(), Rs_t, Rs_b))
         Rb_s = self.dRbeta_dstress(dlambda)
         Rb_b = self.dRbeta_dbeta(dlambda)
@@ -339,7 +338,7 @@ class YUKinematic3D(YUKinematic):
         Rs_s = C_inv @ self.dRstress_dstress(C, xi, dlambda)
         Rs_b = C_inv @ self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = C_inv @ self.dRstress_dtheta(C, xi, dlambda)
-        Rs_l = C_inv @ self.dRstress_dlambda(C, xi)
+        Rs_l = C_inv @ self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
         Rs = np.hstack((Rs_s, np.matrix(Rs_l).transpose(), Rs_t, Rs_b))
         Rb_s = self.dRbeta_dstress(dlambda)
         Rb_b = self.dRbeta_dbeta(dlambda)
