@@ -1,6 +1,5 @@
 from copy import deepcopy
 import numpy as np
-import numpy.testing as npt
 import autograd.numpy as anp
 from manforge.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
 from manforge.core.material import MaterialModel
@@ -122,7 +121,6 @@ class YUKinematic3D(YUKinematic):
         n_iteration = 0
         converged = False
         r_hist = []
-        d_vector = np.zeros(19)
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
         dlambda = 0.0
@@ -139,8 +137,6 @@ class YUKinematic3D(YUKinematic):
             state_new["theta"] -= dx[7:13]
             state_new["beta"] -= dx[13:]
             dlambda -= dx[6]
-            xi = state_new["stress"] - state_new["beta"] - state_new["theta"]
-            _, flow = self.calc_norm_n_flow(xi)
             theta_norm = self.vonmises_norm(state_new["theta"])
             s = 1 / (1 + self.k * dlambda)
             d_beta = state_new["beta"] - state_n["beta"]
@@ -373,64 +369,3 @@ class YUKinematic1D(YUKinematic):
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
-
-
-class YUChecker:
-    I = np.eye(6)
-    T = np.diag([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
-
-    def __init__(self, model, result):
-        self.model = model
-        self.state = result.state
-        self.state_n = result._state_n
-        self.dlambda = result.dlambda
-        self.stress_trial = result.stress_trial
-        self.C = model.elastic_stiffness(result.state)
-        self.C_inv = np.linalg.inv(self.C)
-        self.I_dev = model.I_dev()
-        self.stress = self.state["stress"]
-        self.theta = self.state["theta"]
-        self.beta = self.state["beta"]
-        self.eps_eq = self.state["eps_eq"]
-        self.R = self.state["R"]
-        self.R_n = self.state_n["R"]
-        self.dev_stress = model.dev(self.stress)
-        self.xi = self.dev_stress - self.theta - self.beta
-        self.theta_max = self.state_n["theta_max"]
-    
-    def assertion_array(self, actual, expected, atol=1e-10):
-        assertion = False
-        try:
-            npt.assert_allclose(actual, expected, atol=atol)
-            assertion = True
-        except Exception as e:
-            print(e)
-        return assertion
-
-    def check_all(self, jac):
-        # Rstress
-        assert_Rs_s = self.assertion_array(self.model.dRstress_dstress(self.C, self.xi, self.dlambda), jac.part["stress"]["stress"])
-        assert_Rs_b = self.assertion_array(self.model.dRstress_dbeta(self.C, self.xi, self.dlambda), jac.part["stress"]["beta"])
-        assert_Rs_t = self.assertion_array(self.model.dRstress_dtheta(self.C, self.xi, self.dlambda), jac.part["stress"]["theta"])
-        assert_Rs_l = self.assertion_array(self.model.dRstress_dlambda(self.C, self.xi), jac.part["stress"]["dlambda"])
-        # Rbeta
-        assert_Rb_s = self.assertion_array(self.model.dRbeta_dstress(self.dlambda), jac.part["beta"]["stress"])
-        assert_Rb_b = self.assertion_array(self.model.dRbeta_dbeta(self.dlambda), jac.part["beta"]["beta"])
-        assert_Rb_t = self.assertion_array(self.model.dRbeta_dtheta(self.dlambda), jac.part["beta"]["theta"])
-        assert_Rb_l = self.assertion_array(self.model.dRbeta_dlambda(self.xi, self.beta, self.dlambda), jac.part["beta"]["dlambda"])
-        # Rtheta
-        assert_Rt_s = self.assertion_array(self.model.dRtheta_dstress(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["stress"])
-        assert_Rt_b = self.assertion_array(self.model.dRtheta_dbeta(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["beta"])
-        assert_Rt_t = self.assertion_array(self.model.dRtheta_dtheta(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["theta"])
-        assert_Rt_l = self.assertion_array(self.model.dRtheta_dlambda(self.xi, self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["dlambda"])
-        # stress
-        assert_Rl_s = self.assertion_array(self.model.dRyield_dstress(self.xi), jac.part["dlambda"]["stress"])
-        assert_Rl_b = self.assertion_array(self.model.dRyield_dbeta(self.xi), jac.part["dlambda"]["beta"])
-        assert_Rl_t = self.assertion_array(self.model.dRyield_dtheta(self.xi), jac.part["dlambda"]["theta"])
-        assert_Rl_l = self.assertion_array(self.model.dRyield_dlambda(), jac.part["dlambda"]["dlambda"])
-        return np.array([
-            [assert_Rs_s, assert_Rs_b, assert_Rs_t, assert_Rs_l],
-            [assert_Rb_s, assert_Rb_b, assert_Rb_t, assert_Rb_l],
-            [assert_Rt_s, assert_Rt_b, assert_Rt_t, assert_Rt_l],
-            [assert_Rl_s, assert_Rl_b, assert_Rl_t, assert_Rl_l],
-        ])
