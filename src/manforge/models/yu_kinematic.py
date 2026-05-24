@@ -169,7 +169,7 @@ class YUKinematic3D(YUKinematic):
             delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
             state_new["R"] = state_n["R"] + delta_R * g_flag
             state_new["q"] = state_n["q"] + delta_q * g_flag
-            state_new["r"] = delta_r * g_flag
+            state_new["r"] = state_n["r"] + delta_r * g_flag
             state_new["eps_eq"] = state_n["eps_eq"] + dlambda
             n_iteration += 1
         else:
