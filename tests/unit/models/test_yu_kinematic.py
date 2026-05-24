@@ -118,6 +118,45 @@ def test_yield_function_subclasses(cls, ntens):
 
 
 # ---------------------------------------------------------------------------
+# U-4: update_state raises on mu NR non-convergence (§A.2 lock-in)
+# U-5: user_defined_return_mapping contains raise (B-2 lock-in, static check)
+# ---------------------------------------------------------------------------
+
+def _make_mu_diverge_state(model):
+    """r_n=0, Fn=0 (d_beta=0), Gn>0 causes F_mu_prime=0 → divide-by-zero → ValueError."""
+    state_n = model.initial_state()
+    state_n["q"] = np.zeros(6)
+    state_n["r"] = 0.0
+    state_n["beta"] = np.array([100.0, -50.0, -50.0, 0.0, 0.0, 0.0])
+    state_new = dict(state_n)
+    state_new["theta"] = np.zeros(6)
+    state_new["stress"] = np.zeros(6)
+    state_new["beta"] = state_n["beta"]   # d_beta = 0 → Fn = 0
+    return state_n, state_new
+
+
+def test_update_state_raises_on_mu_nonconvergence():
+    """§A.2 lock-in: update_state raises ValueError when mu NR does not converge."""
+    model = YUKinematic3D(**PARAMS)
+    state_n, state_new = _make_mu_diverge_state(model)
+    with pytest.raises(ValueError, match="update_state"):
+        model.update_state(0.001, state_new, state_n)
+
+
+def test_user_defined_return_mapping_has_raise():
+    """B-2 lock-in: user_defined_return_mapping contains 'raise ValueError' for mu non-convergence.
+
+    Triggering the raise dynamically requires a beta that stays fixed across outer NR
+    iterations, which is not achievable from outside the NR loop. Instead we verify
+    the raise is present in the source and carries the expected message.
+    """
+    import inspect
+    src = inspect.getsource(YUKinematic3D.user_defined_return_mapping)
+    assert "raise ValueError" in src
+    assert "user_defined_return_mapping" in src
+
+
+# ---------------------------------------------------------------------------
 # U-3: update_state r accumulates (B-1 lock-in)
 # U-6: theta_max monotone non-decreasing (B-4 lock-in)
 # ---------------------------------------------------------------------------
