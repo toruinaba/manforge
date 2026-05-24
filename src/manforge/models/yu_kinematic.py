@@ -1,6 +1,5 @@
 from copy import deepcopy
 import numpy as np
-import numpy.testing as npt
 import autograd.numpy as anp
 from manforge.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
 from manforge.core.material import MaterialModel
@@ -106,6 +105,14 @@ class YUKinematic(MaterialModel):
 
 
 class YUKinematic3D(YUKinematic):
+    """YUKinematic specialised for 3D solid elements (ntens=6).
+
+    Provides user_defined_return_mapping and user_defined_tangent via
+    an explicit analytical Jacobian. These analytical paths assume ntens=6
+    and are therefore only valid for SOLID_3D; YUKinematicPS and
+    YUKinematic1D rely on the autograd path inherited from YUKinematic.
+    """
+
     I = np.eye(6)
     T = np.diag([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
 
@@ -122,7 +129,6 @@ class YUKinematic3D(YUKinematic):
         n_iteration = 0
         converged = False
         r_hist = []
-        d_vector = np.zeros(19)
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
         dlambda = 0.0
@@ -139,8 +145,6 @@ class YUKinematic3D(YUKinematic):
             state_new["theta"] -= dx[7:13]
             state_new["beta"] -= dx[13:]
             dlambda -= dx[6]
-            xi = state_new["stress"] - state_new["beta"] - state_new["theta"]
-            _, flow = self.calc_norm_n_flow(xi)
             theta_norm = self.vonmises_norm(state_new["theta"])
             s = 1 / (1 + self.k * dlambda)
             d_beta = state_new["beta"] - state_n["beta"]
@@ -159,19 +163,19 @@ class YUKinematic3D(YUKinematic):
                 F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
                 mu -= F_mu / F_mu_prime
             else:
-                ValueError("Not converged mu")
+                raise ValueError("Not converged mu (user_defined_return_mapping)")
             delta_q = mu * g_xi / (1 + mu)
             delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
             delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
             state_new["R"] = state_n["R"] + delta_R * g_flag
             state_new["q"] = state_n["q"] + delta_q * g_flag
-            state_new["r"] = delta_r * g_flag
+            state_new["r"] = state_n["r"] + delta_r * g_flag
             state_new["eps_eq"] = state_n["eps_eq"] + dlambda
             n_iteration += 1
         else:
             converged = False
-        if theta_norm > state_new["theta_max"]:
-            state_new["theta_max"] = theta_norm
+        theta_norm_final = self.vonmises_norm(state_new["theta"])
+        state_new["theta_max"] = float(smooth_max(state_n["theta_max"], theta_norm_final))
         return ReturnMappingResult(
             stress=state_new["stress"],
             state=state_new,
@@ -216,7 +220,7 @@ class YUKinematic3D(YUKinematic):
 
     def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar = self.vonmises_norm(theta)
-        theta_flow = self.T @ theta / theta_bar * 1.5 
+        theta_flow = self.T @ theta / theta_bar * 1.5
         C_k = self.C_1 if self.B - self.Y > theta_max else self.C_2
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
@@ -268,19 +272,16 @@ class YUKinematic3D(YUKinematic):
 
     def dRtheta_dtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar == 0:
-            f0 = (1 + a * C_k * dlambda / self.Y) * self.I
-            return f0
-        f0 = (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
+        if theta_bar < 1e-14:
+            return (1 + a * C_k * dlambda / self.Y) * self.I
+        return (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
             np.sqrt(1.5) * C_k * dlambda * np.sqrt(a / theta_bar) / (2 * theta_bar)
         ) * np.outer(theta_flow / np.sqrt(1.5), theta)
-        return f0
     
     def dRtheta_dlambda(self, xi, theta, theta_max, R, R_n, dlambda):
         theta_bar, _, C_k, _, a, a_prime = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar == 0:
-            fr = (-a * C_k / self.Y - C_k * dlambda / self.Y * a_prime) * xi
-            return fr
+        if theta_bar < 1e-14:
+            return (-a * C_k / self.Y - C_k * dlambda / self.Y * a_prime) * xi
         fr = (
             - a * C_k / self.Y * xi
             - C_k * dlambda / self.Y * a_prime * xi
@@ -311,25 +312,24 @@ class YUKinematic3D(YUKinematic):
         Rs_b = self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = self.dRstress_dtheta(C, xi, dlambda)
         Rs_l = self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
-        Rs = np.hstack((Rs_s, np.matrix(Rs_l).transpose(), Rs_t, Rs_b))
+        Rs = np.hstack((Rs_s, Rs_l[:, np.newaxis], Rs_t, Rs_b))
         Rb_s = self.dRbeta_dstress(dlambda)
         Rb_b = self.dRbeta_dbeta(dlambda)
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
-        Rb = np.hstack((Rb_s, np.matrix(Rb_l).transpose(), Rb_t, Rb_b))
+        Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
         Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt = np.hstack((Rt_s, np.matrix(Rt_l).transpose(), Rt_t, Rt_b))
+        Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)
         Rl_t = self.dRyield_dtheta(xi)
         Rl_l = self.dRyield_dlambda()
         Rl = np.hstack((Rl_s, Rl_l, Rl_t, Rl_b))
-        jac = np.vstack((Rs, np.matrix(Rl), Rt, Rb))
-        return np.array(jac)
-    
+        return np.vstack((Rs, Rl.reshape(1, -1), Rt, Rb))
+
     def calc_ddsdde(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
         C_inv = anp.linalg.inv(C)
@@ -338,23 +338,23 @@ class YUKinematic3D(YUKinematic):
         Rs_b = C_inv @ self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = C_inv @ self.dRstress_dtheta(C, xi, dlambda)
         Rs_l = C_inv @ self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
-        Rs = np.hstack((Rs_s, np.matrix(Rs_l).transpose(), Rs_t, Rs_b))
+        Rs = np.hstack((Rs_s, Rs_l[:, np.newaxis], Rs_t, Rs_b))
         Rb_s = self.dRbeta_dstress(dlambda)
         Rb_b = self.dRbeta_dbeta(dlambda)
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
-        Rb = np.hstack((Rb_s, np.matrix(Rb_l).transpose(), Rb_t, Rb_b))
+        Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
         Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt = np.hstack((Rt_s, np.matrix(Rt_l).transpose(), Rt_t, Rt_b))
+        Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)
         Rl_t = self.dRyield_dtheta(xi)
         Rl_l = self.dRyield_dlambda()
         Rl = np.hstack((Rl_s, Rl_l, Rl_t, Rl_b))
-        jac = np.vstack((Rs, np.matrix(Rl), Rt, Rb))
+        jac = np.vstack((Rs, Rl.reshape(1, -1), Rt, Rb))
         jac_inv = anp.linalg.inv(jac)
         return np.array(jac_inv[:6, :6])
 
@@ -373,64 +373,3 @@ class YUKinematic1D(YUKinematic):
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
-
-
-class YUChecker:
-    I = np.eye(6)
-    T = np.diag([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
-
-    def __init__(self, model, result):
-        self.model = model
-        self.state = result.state
-        self.state_n = result._state_n
-        self.dlambda = result.dlambda
-        self.stress_trial = result.stress_trial
-        self.C = model.elastic_stiffness(result.state)
-        self.C_inv = np.linalg.inv(self.C)
-        self.I_dev = model.I_dev()
-        self.stress = self.state["stress"]
-        self.theta = self.state["theta"]
-        self.beta = self.state["beta"]
-        self.eps_eq = self.state["eps_eq"]
-        self.R = self.state["R"]
-        self.R_n = self.state_n["R"]
-        self.dev_stress = model.dev(self.stress)
-        self.xi = self.dev_stress - self.theta - self.beta
-        self.theta_max = self.state_n["theta_max"]
-    
-    def assertion_array(self, actual, expected, atol=1e-10):
-        assertion = False
-        try:
-            npt.assert_allclose(actual, expected, atol=atol)
-            assertion = True
-        except Exception as e:
-            print(e)
-        return assertion
-
-    def check_all(self, jac):
-        # Rstress
-        assert_Rs_s = self.assertion_array(self.model.dRstress_dstress(self.C, self.xi, self.dlambda), jac.part["stress"]["stress"])
-        assert_Rs_b = self.assertion_array(self.model.dRstress_dbeta(self.C, self.xi, self.dlambda), jac.part["stress"]["beta"])
-        assert_Rs_t = self.assertion_array(self.model.dRstress_dtheta(self.C, self.xi, self.dlambda), jac.part["stress"]["theta"])
-        assert_Rs_l = self.assertion_array(self.model.dRstress_dlambda(self.C, self.xi), jac.part["stress"]["dlambda"])
-        # Rbeta
-        assert_Rb_s = self.assertion_array(self.model.dRbeta_dstress(self.dlambda), jac.part["beta"]["stress"])
-        assert_Rb_b = self.assertion_array(self.model.dRbeta_dbeta(self.dlambda), jac.part["beta"]["beta"])
-        assert_Rb_t = self.assertion_array(self.model.dRbeta_dtheta(self.dlambda), jac.part["beta"]["theta"])
-        assert_Rb_l = self.assertion_array(self.model.dRbeta_dlambda(self.xi, self.beta, self.dlambda), jac.part["beta"]["dlambda"])
-        # Rtheta
-        assert_Rt_s = self.assertion_array(self.model.dRtheta_dstress(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["stress"])
-        assert_Rt_b = self.assertion_array(self.model.dRtheta_dbeta(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["beta"])
-        assert_Rt_t = self.assertion_array(self.model.dRtheta_dtheta(self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["theta"])
-        assert_Rt_l = self.assertion_array(self.model.dRtheta_dlambda(self.xi, self.theta, self.theta_max, self.R, self.R_n, self.dlambda), jac.part["theta"]["dlambda"])
-        # stress
-        assert_Rl_s = self.assertion_array(self.model.dRyield_dstress(self.xi), jac.part["dlambda"]["stress"])
-        assert_Rl_b = self.assertion_array(self.model.dRyield_dbeta(self.xi), jac.part["dlambda"]["beta"])
-        assert_Rl_t = self.assertion_array(self.model.dRyield_dtheta(self.xi), jac.part["dlambda"]["theta"])
-        assert_Rl_l = self.assertion_array(self.model.dRyield_dlambda(), jac.part["dlambda"]["dlambda"])
-        return np.array([
-            [assert_Rs_s, assert_Rs_b, assert_Rs_t, assert_Rs_l],
-            [assert_Rb_s, assert_Rb_b, assert_Rb_t, assert_Rb_l],
-            [assert_Rt_s, assert_Rt_b, assert_Rt_t, assert_Rt_l],
-            [assert_Rl_s, assert_Rl_b, assert_Rl_t, assert_Rl_l],
-        ])
