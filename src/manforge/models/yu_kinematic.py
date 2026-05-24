@@ -155,7 +155,7 @@ class YUKinematic3D(YUKinematic):
                 F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
                 mu -= F_mu / F_mu_prime
             else:
-                ValueError("Not converged mu")
+                raise ValueError("Not converged mu (user_defined_return_mapping)")
             delta_q = mu * g_xi / (1 + mu)
             delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
             delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
