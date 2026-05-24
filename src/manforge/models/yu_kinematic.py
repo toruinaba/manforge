@@ -224,10 +224,13 @@ class YUKinematic3D(YUKinematic):
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
-        a_prime = (
-            -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
-            + s * self.k * self.Rsat
-        )
+        if R != R_n:
+            a_prime = (
+                -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
+                + s * self.k * self.Rsat
+            )
+        else:
+            a_prime = 0.0
         return theta_bar, theta_flow, C_k, s, a, a_prime
 
     def dRstress_dstress(self, C, xi, dlambda):
