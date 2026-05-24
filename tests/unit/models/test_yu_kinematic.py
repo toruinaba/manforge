@@ -157,6 +157,60 @@ def test_user_defined_return_mapping_has_raise():
 
 
 # ---------------------------------------------------------------------------
+# U-8: state_residual structure sanity
+# ---------------------------------------------------------------------------
+
+def test_state_residual_returns_three_fields():
+    """state_residual must return exactly [stress, theta, beta]."""
+    model = YUKinematic3D(**PARAMS)
+    state_n = model.initial_state()
+    state_n["stress"] = np.array([400.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    state_new = dict(state_n)
+    C = model.elastic_stiffness(state_n)
+    stress_trial = state_n["stress"].copy()
+    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    names = {r.name for r in results}
+    assert names == {"stress", "theta", "beta"}
+
+
+def test_state_residual_stress_shape():
+    model = YUKinematic3D(**PARAMS)
+    state_n = model.initial_state()
+    state_new = dict(state_n)
+    stress_trial = np.zeros(6)
+    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    stress_res = next(r for r in results if r.name == "stress")
+    assert stress_res.value.shape == (6,)
+
+
+def test_state_residual_stress_is_zero_at_elastic_predictor():
+    """At zero dlambda with state_new == state_n, R_stress = state_new['stress'] - stress_trial = 0."""
+    model = YUKinematic3D(**PARAMS)
+    state_n = model.initial_state()
+    state_n["stress"] = np.array([200.0, -100.0, -100.0, 0.0, 0.0, 0.0])
+    state_new = dict(state_n)
+    # stress_trial equals state_new['stress'] → default_stress_residual = stress - trial + 0 = 0
+    stress_trial = state_n["stress"].copy()
+    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    stress_res = next(r for r in results if r.name == "stress")
+    npt.assert_allclose(stress_res.value, np.zeros(6), atol=1e-12)
+
+
+@pytest.mark.parametrize("cls,ntens", [
+    (YUKinematicPS, 3),
+    (YUKinematic1D, 1),
+])
+def test_state_residual_shape_subclasses(cls, ntens):
+    """state_residual works for PS and 1D subclasses."""
+    model = cls(**PARAMS)
+    state_n = model.initial_state()
+    state_new = dict(state_n)
+    stress_trial = np.zeros(ntens)
+    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    names = {r.name for r in results}
+    assert names == {"stress", "theta", "beta"}
+    for r in results:
+        assert r.value.shape == (ntens,)
 # U-3: update_state r accumulates (B-1 lock-in)
 # U-6: theta_max monotone non-decreasing (B-4 lock-in)
 # ---------------------------------------------------------------------------
