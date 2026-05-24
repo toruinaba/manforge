@@ -105,6 +105,14 @@ class YUKinematic(MaterialModel):
 
 
 class YUKinematic3D(YUKinematic):
+    """YUKinematic specialised for 3D solid elements (ntens=6).
+
+    Provides user_defined_return_mapping and user_defined_tangent via
+    an explicit analytical Jacobian. These analytical paths assume ntens=6
+    and are therefore only valid for SOLID_3D; YUKinematicPS and
+    YUKinematic1D rely on the autograd path inherited from YUKinematic.
+    """
+
     I = np.eye(6)
     T = np.diag([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
 
