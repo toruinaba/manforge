@@ -3,18 +3,13 @@
 import numpy as np
 import pytest
 import numpy.testing as npt
-from manforge.models.yu_kinematic import YUKinematic, YUKinematic3D, YUKinematicPS, YUKinematic1D
+from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,
     B=435.0, Rsat=255.0, k=26.0, b=66.0, h=0.4, Ea=159_000, xi=61.0,
 )
-
-
-@pytest.fixture
-def rng():
-    return np.random.default_rng(42)
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +161,6 @@ def test_state_residual_returns_three_fields():
     state_n = model.initial_state()
     state_n["stress"] = np.array([400.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_new = dict(state_n)
-    C = model.elastic_stiffness(state_n)
     stress_trial = state_n["stress"].copy()
     results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
     names = {r.name for r in results}
