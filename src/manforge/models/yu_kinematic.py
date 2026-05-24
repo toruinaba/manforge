@@ -166,8 +166,8 @@ class YUKinematic3D(YUKinematic):
             n_iteration += 1
         else:
             converged = False
-        if theta_norm > state_new["theta_max"]:
-            state_new["theta_max"] = theta_norm
+        theta_norm_final = self.vonmises_norm(state_new["theta"])
+        state_new["theta_max"] = float(smooth_max(state_n["theta_max"], theta_norm_final))
         return ReturnMappingResult(
             stress=state_new["stress"],
             state=state_new,
