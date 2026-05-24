@@ -115,3 +115,71 @@ def test_yield_function_subclasses(cls, ntens):
     sigma = np.zeros(ntens)
     state = _make_state(model, sigma)
     assert model.yield_function(state) == pytest.approx(-Y)
+
+
+# ---------------------------------------------------------------------------
+# U-3: update_state r accumulates (B-1 lock-in)
+# U-6: theta_max monotone non-decreasing (B-4 lock-in)
+# ---------------------------------------------------------------------------
+
+def _update_state_result_dict(model, dlambda, state_new, state_n):
+    results = model.update_state(dlambda, state_new, state_n)
+    return {r.name: r.value for r in results}
+
+
+def _make_plastic_state(model):
+    """State_n with pre-existing stagnation surface (r=5) and beta outside it."""
+    state_n = model.initial_state()
+    state_n["r"] = 5.0
+    state_n["q"] = np.zeros(6)
+    state_n["beta"] = np.array([20.0, -10.0, -10.0, 0.0, 0.0, 0.0])  # ||beta - q|| > r
+    state_n["R"] = 10.0
+    state_n["theta_max"] = 50.0
+    state_n["theta"] = np.array([50.0, -25.0, -25.0, 0.0, 0.0, 0.0])
+    state_new = dict(state_n)
+    state_new["beta"] = state_n["beta"] * 1.1   # moved — d_beta != 0
+    state_new["theta"] = np.array([55.0, -27.5, -27.5, 0.0, 0.0, 0.0])
+    state_new["stress"] = np.zeros(6)
+    return state_n, state_new
+
+
+def test_update_state_r_accumulates():
+    """B-1 regression: r must be state_n['r'] + delta_r * g_flag, not delta_r alone."""
+    model = YUKinematic3D(**PARAMS)
+    state_n, state_new = _make_plastic_state(model)
+    out = _update_state_result_dict(model, 0.001, state_new, state_n)
+    assert out["r"] > state_n["r"], "r must be strictly larger than state_n['r'] when stagnation surface is active"
+
+
+def test_update_state_returns_five_fields():
+    """update_state must return exactly 5 explicit fields."""
+    model = YUKinematic3D(**PARAMS)
+    state_n, state_new = _make_plastic_state(model)
+    results = model.update_state(0.001, state_new, state_n)
+    names = {r.name for r in results}
+    assert names == {"R", "q", "r", "eps_eq", "theta_max"}
+
+
+def test_update_state_eps_eq_accumulates():
+    """eps_eq must be state_n['eps_eq'] + dlambda."""
+    model = YUKinematic3D(**PARAMS)
+    state_n, state_new = _make_plastic_state(model)
+    dlambda = 0.002
+    out = _update_state_result_dict(model, dlambda, state_new, state_n)
+    assert out["eps_eq"] == pytest.approx(state_n["eps_eq"] + dlambda)
+
+
+def test_update_state_theta_max_monotone():
+    """B-4 regression: theta_max is non-decreasing."""
+    model = YUKinematic3D(**PARAMS)
+    state_n, state_new = _make_plastic_state(model)
+    # Case 1: theta_norm > current theta_max → increases
+    theta_norm_new = model.vonmises_norm(state_new["theta"])
+    state_n["theta_max"] = theta_norm_new * 0.5   # below new theta_norm
+    out = _update_state_result_dict(model, 0.001, state_new, state_n)
+    assert out["theta_max"] >= state_n["theta_max"]
+    # Case 2: theta_norm < current theta_max → does not decrease
+    state_n2 = dict(state_n)
+    state_n2["theta_max"] = theta_norm_new * 2.0   # above new theta_norm
+    out2 = _update_state_result_dict(model, 0.001, state_new, state_n2)
+    assert out2["theta_max"] >= state_n2["theta_max"] - 1e-12
