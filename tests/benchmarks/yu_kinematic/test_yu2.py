@@ -47,12 +47,19 @@ end = datetime.now()
 interval = end - start
 print(f"Total time: {interval}")
 
+hist_n = [r.n_iterations for r in res_n.step_results]
+hist_a = [r.n_iterations for r in res_a.step_results]
+hist_1dn = [r.n_iterations for r in res_1dn.step_results]
 
-fig = plt.figure()
-ax = fig.add_subplot(111)
-plt.plot(res_n.strain[:, idx], res_n.stress[:, idx], "-r")
-plt.plot(res_a.strain[:, idx], res_n.stress[:, idx], "--b")
-plt.plot(res_1dn.strain, res_1dn.stress, ":g")
+fig = plt.figure(figsize=(10, 8))
+ax1 = fig.add_subplot(121)
+ax2 = fig.add_subplot(122)
+ax1.plot(res_n.strain[:, idx], res_n.stress[:, idx], "-r", label="Numerical3d")
+ax1.plot(res_a.strain[:, idx], res_n.stress[:, idx], "--b", label="Analytical3d")
+ax1.plot(res_1dn.strain, res_1dn.stress, ":g", label="Numerical1d")
+ax2.plot(range(len(hist_n)), hist_n, "-r", label="Numerical3d")
+ax2.plot(range(len(hist_a)), hist_a, "--b", label="Analytical3d")
+ax2.plot(range(len(hist_1dn)), hist_1dn, ":g", label="Numerical1d")
+plt.legend()
 plt.show()
-
 
