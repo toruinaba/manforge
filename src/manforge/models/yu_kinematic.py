@@ -143,7 +143,7 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            g_flag = 1.0 if g_stag > 0.0 else 0.0
+            g_flag = smooth_heaviside(g_stag)
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0
@@ -213,16 +213,13 @@ class YUKinematic3D(YUKinematic):
     def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar = self.vonmises_norm(theta)
         theta_flow = self.T @ theta / theta_bar * 1.5 
-        C_k = self.C_1 if self.B - self.Y > theta_max else self.C_2
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
-        if R != R_n:
-            a_prime = (
-                -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
-                + s * self.k * self.Rsat
-            )
-        else:
-            a_prime = 0.0
+        a_prime = (
+            -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
+            + s * self.k * self.Rsat
+        )
         return theta_bar, theta_flow, C_k, s, a, a_prime
 
     def dRstress_dstress(self, C, xi, dlambda):
@@ -264,19 +261,16 @@ class YUKinematic3D(YUKinematic):
 
     def dRtheta_dtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar == 0:
-            f0 = (1 + a * C_k * dlambda / self.Y) * self.I
-            return f0
-        f0 = (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
+        if theta_bar < 1e-14:
+            return (1 + a * C_k * dlambda / self.Y) * self.I
+        return (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
             np.sqrt(1.5) * C_k * dlambda * np.sqrt(a / theta_bar) / (2 * theta_bar)
         ) * np.outer(theta_flow / np.sqrt(1.5), theta)
-        return f0
     
     def dRtheta_dlambda(self, xi, theta, theta_max, R, R_n, dlambda):
         theta_bar, _, C_k, _, a, a_prime = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar == 0:
-            fr = (-a * C_k / self.Y - C_k * dlambda / self.Y * a_prime) * xi
-            return fr
+        if theta_bar < 1e-14:
+            return (-a * C_k / self.Y - C_k * dlambda / self.Y * a_prime) * xi
         fr = (
             - a * C_k / self.Y * xi
             - C_k * dlambda / self.Y * a_prime * xi
