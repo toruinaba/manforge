@@ -1,29 +1,29 @@
 from copy import deepcopy
 import numpy as np
 import numpy.testing as npt
-import autograd
 import autograd.numpy as anp
 from manforge.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
 from manforge.core.material import MaterialModel
 from manforge.core.result import ReturnMappingResult
 from manforge.core.state import Explicit, Implicit, NTENS, SCALAR
-from manforge.core.dimension import SOLID_3D, UNIAXIAL_1D, StressDimension
-from manforge.simulation._residual import build_residual
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
 class YUKinematic(MaterialModel):
-    param_names = ["E", "nu", "Y", "C_1", "C_2", "Rsat", "k", "b", "h", "Ea", "xi"]
+    """Yoshida-Uemori two-surface + stagnation-surface kinematic hardening model."""
+
+    param_names = ["E", "nu", "Y", "B", "C_1", "C_2", "Rsat", "k", "b", "h", "Ea", "xi"]
     stress = Implicit(shape=NTENS, doc="cauchy stress")
     theta = Implicit(shape=NTENS, doc="relative backstress tensor of yield surface(deviatoric)")
     beta = Implicit(shape=NTENS, doc="relative backstress tensor of boundary surface(deviatoric)")
-    R = Explicit(shape=SCALAR, doc="Radius increment of boundary sourface")
+    R = Explicit(shape=SCALAR, doc="Radius increment of boundary surface")
     q = Explicit(shape=NTENS, doc="center of stagnation surface")
     r = Explicit(shape=SCALAR, doc="radius of stagnation surface")
     eps_eq = Explicit(shape=SCALAR, doc="equivalent plastic strain")
     theta_max = Explicit(shape=SCALAR, doc="Theta norm max in history")
 
-    def __init__(self, dimension: StressDimension, *,
+    def __init__(self, dimension: StressDimension = SOLID_3D, *,
                  E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float, 
+                 B: float, Rsat: float, k: float, b: float,
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=dimension)
         self.E = E
@@ -49,7 +49,7 @@ class YUKinematic(MaterialModel):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
         return self.vonmises_norm(s_xi) - self.Y
 
-    def update_state(self, dlambda, state_new, state_n, stress_trial=None, strain_inc=None):
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         R_n = state_n["R"]
         q_n = state_n["q"]
         r_n = state_n["r"]
@@ -73,7 +73,7 @@ class YUKinematic(MaterialModel):
             F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
             mu -= F_mu / F_mu_prime
         else:
-            ValueError("Not converged mu")
+            raise ValueError("Not converged mu (update_state)")
         delta_q = mu * g_xi / (1 + mu)
         delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
         delta_R = s * (R_n + self.k * self.Rsat * dlambda) - R_n
@@ -86,7 +86,6 @@ class YUKinematic(MaterialModel):
         ]
 
     def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        C = self.elastic_stiffness(state_new)
         stress_new = state_new["stress"]
         theta_new = state_new["theta"]
         beta_new = state_new["beta"]
@@ -360,9 +359,17 @@ class YUKinematic3D(YUKinematic):
         return np.array(jac_inv[:6, :6])
 
 
+class YUKinematicPS(YUKinematic):
+    def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
+                 B: float, Rsat: float, k: float, b: float,
+                 h: float, Ea: float, xi: float):
+        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
+                 B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+
+
 class YUKinematic1D(YUKinematic):
     def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float, 
+                 B: float, Rsat: float, k: float, b: float,
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
