@@ -114,18 +114,6 @@ Fortran に忠実移植した `yu_kinematic_3d` と比較する。構造的差�
 Path A の構造的差分 tolerance（stress < 1e-3, ddsdde < 1e-1）は **Path B には適用されない**。
 Path B の Fortran 移植元は解析経路であり、autograd 経路との差分は持たない。
 
-## 診断スクリプト
-
-`_diagnose.py`（アンダースコア prefix により pytest には collect されない）:
-
-```bash
-uv run python tests/benchmarks/yu_kinematic/_diagnose.py 2>&1 | tee /tmp/yu_diag.txt
-```
-
-各シナリオについて step ごとの `theta_max`、`dist_to_transition`、
-stress / state / ddsdde 誤差を記録し、`ddsdde_err` 降順で上位 10 step を表示する。
-tolerance 見直し時や B-Y パラメータ変更時の再評価に使用する。
-
 ## 実行方法
 
 ```bash

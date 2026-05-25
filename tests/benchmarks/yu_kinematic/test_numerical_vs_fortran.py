@@ -344,7 +344,7 @@ class TestResidualAndJacobian:
 
 
 # ---------------------------------------------------------------------------
-# FortranIntegrator fixture (shared by TestReturnMapping + TestCrosscheckTrajectory)
+# FortranIntegrator helper (shared by TestReturnMapping + TestCrosscheckTrajectory)
 # ---------------------------------------------------------------------------
 
 def _make_fc_int(fortran_mod, model):
@@ -368,7 +368,7 @@ class TestReturnMapping:
 
     def test_single_plastic_step_stress(self, plastic_state, fortran_mod):
         """Stress at a single plastic step matches between Python and Fortran."""
-        m, state_new, state_n, _ = plastic_state
+        m, _, _, _ = plastic_state
         # Re-run the step with the analytical integrator (user_defined_return_mapping)
         py_int = PythonAnalyticalIntegrator(m)
         stress_n_arr = np.zeros(6)
@@ -421,7 +421,7 @@ class TestReturnMapping:
         np.testing.assert_allclose(
             np.asarray(py_result.ddsdde),
             np.asarray(fc_result.ddsdde),
-            rtol=1e-4, atol=1e-4,
+            rtol=1e-5, atol=1e-5,
         )
 
 

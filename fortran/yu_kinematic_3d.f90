@@ -1405,7 +1405,8 @@ subroutine yu_kinematic_3d( &
     double precision :: Gn, Fn, mu, delta_q(6), delta_rstag, delta_Rbnd, s_fac
     double precision :: H_mu_fin, theta_new_norm, theta_max_cand
     integer :: iter, ii, jj, info_lu, info_mu
-    double precision, parameter :: TOL_NR = 1.0d-10
+    double precision, parameter :: TOL_NR   = 1.0d-10
+    double precision, parameter :: EPS_SQRT = 1.0d-30
 
     ! ==========================================================================
     ! Elastic predictor: stress_trial = stress_n + C(eps_eq_n) @ dstran
@@ -1427,7 +1428,7 @@ subroutine yu_kinematic_3d( &
     end do
     call yu_vonmises_norm(xi_trial, xi_trial_norm)
 
-    if (xi_trial_norm <= Y .or. xi_trial_norm < 1.0d-14) then
+    if (xi_trial_norm <= Y) then
         ! Elastic step: accept trial stress
         do ii = 1, 6
             stress_out(ii) = stress_trial(ii)
@@ -1553,7 +1554,7 @@ subroutine yu_kinematic_3d( &
         do ii = 1, 6
             delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
         end do
-        H_mu_fin   = sqrt(rstag_n*rstag_n + 6.0d0*h*Fn / (1.0d0 + mu) + 1.0d-60)
+        H_mu_fin   = sqrt(rstag_n*rstag_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
         delta_rstag = 0.5d0 * (rstag_n + H_mu_fin) - rstag_n
         s_fac       = 1.0d0 / (1.0d0 + k * dlambda)
         delta_Rbnd  = s_fac * (Rbnd_n + k * Rsat * dlambda) - Rbnd_n
