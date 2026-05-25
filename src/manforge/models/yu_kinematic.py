@@ -204,7 +204,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_calc_residual",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
     )
     def calc_residual(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
@@ -391,7 +391,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_calc_jacobian",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
     )
     def calc_jacobian(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)

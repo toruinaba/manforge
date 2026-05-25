@@ -75,9 +75,8 @@ def check_bindings(
                 f"Python returned size {py_arr.size}, Fortran returned size {f_arr.size}"
             )
 
+        ok = bool(np.allclose(py_arr, f_arr, rtol=rtol, atol=atol))
         abs_diff = np.abs(py_arr - f_arr)
-        # numpy allclose semantics: |a-b| <= atol + rtol*|b|
-        ok = bool(np.all(abs_diff <= atol + rtol * np.abs(f_arr)))
         max_rel_err = float(np.max(abs_diff / (np.abs(f_arr) + 1e-14)))
         results[method_name] = (ok, max_rel_err)
 
