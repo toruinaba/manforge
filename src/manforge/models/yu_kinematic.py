@@ -202,6 +202,10 @@ class YUKinematic3D(YUKinematic):
         flow = self.T @ xi / xi_norm * 1.5
         return xi_norm, flow
 
+    @verified_against_fortran(
+        "yu_calc_residual",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian",
+    )
     def calc_residual(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(state_n["theta_max"] - (self.B - self.Y))
@@ -385,6 +389,10 @@ class YUKinematic3D(YUKinematic):
     def dRyield_dlambda(self):
         return np.array([0.0])
 
+    @verified_against_fortran(
+        "yu_calc_jacobian",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian",
+    )
     def calc_jacobian(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
         xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]

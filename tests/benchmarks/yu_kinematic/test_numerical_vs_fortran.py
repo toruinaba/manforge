@@ -162,3 +162,76 @@ class TestJacobianBlocks:
 
         if n_plastic == 0:
             pytest.skip("No plastic steps in this scenario — Jacobian blocks not exercised")
+
+
+# ---------------------------------------------------------------------------
+# TestResidualAndJacobian: compare Python calc_residual/calc_jacobian vs Fortran
+# ---------------------------------------------------------------------------
+
+class TestResidualAndJacobian:
+    """Compare calc_residual and calc_jacobian Python vs Fortran over trajectories."""
+
+    def _run_and_check(self, m, history, fortran_mod):
+        integrator = PythonNumericalIntegrator(m)
+        stress_n = np.zeros(6)
+        state_n = m.initial_state()
+        n_plastic = 0
+
+        for strain_total_n, strain_total_np1 in zip(history[:-1], history[1:]):
+            strain_inc = strain_total_np1 - strain_total_n
+            result = integrator.stress_update(strain_inc, stress_n, state_n)
+
+            if result.is_plastic:
+                n_plastic += 1
+                state = result.state
+                dl = float(result.dlambda)
+
+                # Reconstruct stress_trial (σ_trial = σ_n + C·Δε, elastic)
+                C0 = m.elastic_stiffness(state_n)
+                stress_trial = stress_n + C0 @ strain_inc
+
+                props = (
+                    m.E, m.nu, m.Y, m.B, m.C_1, m.C_2,
+                    m.Rsat, m.k, m.b, m.h, m.Ea, m.xi,
+                )
+
+                # --- calc_residual ---
+                py_r = m.calc_residual(state, state_n, stress_trial, dl)
+                f_r = fortran_mod.call(
+                    "yu_calc_residual",
+                    *props,
+                    state["stress"], state["theta"], state["beta"],
+                    float(state["R"]), float(state["eps_eq"]),
+                    state_n["theta"], state_n["beta"], float(state_n["theta_max"]),
+                    stress_trial, dl,
+                )
+                np.testing.assert_allclose(
+                    np.asarray(py_r), np.asarray(f_r),
+                    rtol=1e-12, atol=1e-12,
+                    err_msg=f"calc_residual mismatch at plastic step {n_plastic}",
+                )
+
+                # --- calc_jacobian ---
+                py_j = m.calc_jacobian(state, state_n, stress_trial, dl)
+                f_j = fortran_mod.call(
+                    "yu_calc_jacobian",
+                    *props,
+                    state["stress"], state["theta"], state["beta"],
+                    float(state["R"]), float(state["eps_eq"]),
+                    float(state["theta_max"]), float(state_n["R"]), dl,
+                )
+                np.testing.assert_allclose(
+                    np.asarray(py_j), np.asarray(f_j),
+                    rtol=1e-10, atol=1e-12,
+                    err_msg=f"calc_jacobian mismatch at plastic step {n_plastic}",
+                )
+
+            stress_n = result.stress
+            state_n = result.state
+
+        if n_plastic == 0:
+            pytest.skip("No plastic steps in this scenario")
+
+    def test_residual_and_jacobian_match_fortran(self, yu_3d_scenario, fortran_mod):
+        m, history = yu_3d_scenario
+        self._run_and_check(m, history, fortran_mod)
