@@ -1645,6 +1645,18 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: ddsdde_local(6,6)
     integer :: i, j, n_iter, converged
 
+    ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
+    if (NTENS /= 6 .or. NDI /= 3 .or. NSHR /= 3 .or. &
+        NSTATV < 22 .or. NPROPS < 12) then
+        write(*,'(A)') 'YUKinematic3D UMAT: incompatible element/material definition.'
+        write(*,'(A,I0,A,I0,A,I0)') '  Expected NTENS=6 NDI=3 NSHR=3, got NTENS=', &
+            NTENS, ' NDI=', NDI, ' NSHR=', NSHR
+        write(*,'(A,I0,A,I0)') '  Expected NSTATV>=22 NPROPS>=12, got NSTATV=', &
+            NSTATV, ' NPROPS=', NPROPS
+        PNEWDT = 0.0d0
+        return
+    end if
+
     ! STATEV unpack
     do i = 1, 6
         theta_n(i) = STATEV(i)
@@ -1685,9 +1697,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     STATEV(21) = eps_eq_out
     STATEV(22) = theta_max_out
 
-    ! Non-convergence: request ABAQUS to halve the time increment
+    ! Non-convergence: request ABAQUS to reduce the time increment.
+    ! Use min() to avoid accidentally relaxing a smaller cutback already in PNEWDT.
     if (converged == 0) then
-        PNEWDT = 0.5d0
+        PNEWDT = min(PNEWDT, 0.5d0)
     end if
 
     ! Zero unused output fields
