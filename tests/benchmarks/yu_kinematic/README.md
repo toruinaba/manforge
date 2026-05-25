@@ -8,7 +8,7 @@ kinematic hardening model (`YUKinematic3D / YUKinematicPS / YUKinematic1D`).
 | パス | ファイル | 内容 |
 |---|---|---|
 | Path A | `test_analytical_vs_numerical.py` | 解析的 return mapping (`user_defined_return_mapping`) vs autograd NR の数値等価性検証 |
-| Path B | (未実装) | Python NR vs Fortran UMAT の数値等価性検証 (YU の Fortran 実装後に追加) |
+| Path B | `test_numerical_vs_fortran.py` | `PythonAnalyticalIntegrator` vs `FortranIntegrator` (`yu_kinematic_3d` UMAT) の数値等価性検証 |
 
 `user_defined_return_mapping` / `user_defined_tangent` は `YUKinematic3D`（ntens=6）のみに存在する。
 `YUKinematicPS` / `YUKinematic1D` は autograd 経路のみのため、Path A の strict 比較は 3D 専用とし、
@@ -99,10 +99,26 @@ uv run python tests/benchmarks/yu_kinematic/_diagnose.py 2>&1 | tee /tmp/yu_diag
 stress / state / ddsdde 誤差を記録し、`ddsdde_err` 降順で上位 10 step を表示する。
 tolerance 見直し時や B-Y パラメータ変更時の再評価に使用する。
 
+## Path B tolerance と根拠
+
+Path B は `PythonAnalyticalIntegrator`（`user_defined_return_mapping`）を主軸とし、
+**同一のアルゴリズム（NR 50 iter + 内側 mu Newton 10 iter + ハード g_flag 分岐）**を
+Fortran に忠実移植した `yu_kinematic_3d` と比較する。構造的差分がないため strict tolerance が適用される。
+
+| 量 | tolerance | 根拠 |
+|---|---|---|
+| stress max_rel_err | < 1e-6 | 同一 NR 反復・倍精度演算の丸め誤差のみ |
+| state max_rel_err | < 1e-6 | 同上 |
+| ddsdde max_rel_err | < 1e-5 | 19×19 LU 逆行列の積算丸め誤差を含む |
+
+Path A の構造的差分 tolerance（stress < 1e-3, ddsdde < 1e-1）は **Path B には適用されない**。
+Path B の Fortran 移植元は解析経路であり、autograd 経路との差分は持たない。
+
 ## 実行方法
 
 ```bash
 make test-benchmarks                 # slow 除外（fast CI 向け）
 uv run pytest tests/benchmarks/yu_kinematic/ -v          # slow 含む全テスト
 uv run pytest tests/benchmarks/yu_kinematic/ -m "not slow" -v  # 非 slow のみ
+uv run pytest tests/benchmarks/yu_kinematic/ -m "fortran" -v   # Fortran テストのみ（.so 必須）
 ```

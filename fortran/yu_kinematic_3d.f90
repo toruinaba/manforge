@@ -117,6 +117,7 @@ subroutine yu_vonmises_norm(xi, xi_norm)
     double precision, intent(out) :: xi_norm
 
     double precision :: sss
+    double precision, parameter :: EPS_SQRT = 1.0d-30
     integer :: ii
 
     sss = 0.0d0
@@ -126,7 +127,7 @@ subroutine yu_vonmises_norm(xi, xi_norm)
     do ii = 4, 6
         sss = sss + 2.0d0 * xi(ii)**2
     end do
-    xi_norm = sqrt(1.5d0 * sss)
+    xi_norm = sqrt(1.5d0 * sss + EPS_SQRT**2)
 
 end subroutine yu_vonmises_norm
 
@@ -1004,3 +1005,600 @@ subroutine yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi
     end do
 
 end subroutine yu_calc_jacobian
+
+
+! =============================================================================
+! solve19 -- in-place LU solver for a 19x19 system with NRHS right-hand sides
+!
+! Solves A*X = B using Gaussian elimination with partial pivoting.
+! B is overwritten with the solution X.
+! Returns info=0 on success, info=k if pivot k is essentially zero.
+!
+! Parameters
+! ----------
+! A(19,19)    [inout] : coefficient matrix (overwritten with LU)
+! B(19,NRHS) [inout] : right-hand sides (overwritten with solution)
+! NRHS        [in]   : number of right-hand sides
+! info        [out]  : 0 = success, k = singular at pivot k
+! =============================================================================
+subroutine solve19(A, B, NRHS, info)
+    implicit none
+    integer,          intent(in)    :: NRHS
+    double precision, intent(inout) :: A(19,19), B(19,NRHS)
+    integer,          intent(out)   :: info
+
+    integer          :: i, j, k, piv
+    double precision :: maxval_loc, tmp_d, factor
+    double precision, parameter :: EPS = 1.0d-14
+
+    info = 0
+
+    do k = 1, 19
+        ! -- find pivot row
+        maxval_loc = abs(A(k,k))
+        piv = k
+        do i = k+1, 19
+            if (abs(A(i,k)) > maxval_loc) then
+                maxval_loc = abs(A(i,k))
+                piv = i
+            end if
+        end do
+
+        ! -- check for singularity
+        if (maxval_loc < EPS) then
+            info = k
+            return
+        end if
+
+        ! -- swap rows k and piv in A
+        if (piv /= k) then
+            do j = 1, 19
+                tmp_d    = A(k,j)
+                A(k,j)   = A(piv,j)
+                A(piv,j) = tmp_d
+            end do
+            ! -- swap rows k and piv in B
+            do j = 1, NRHS
+                tmp_d    = B(k,j)
+                B(k,j)   = B(piv,j)
+                B(piv,j) = tmp_d
+            end do
+        end if
+
+        ! -- eliminate column k below diagonal
+        do i = k+1, 19
+            factor = A(i,k) / A(k,k)
+            do j = k, 19
+                A(i,j) = A(i,j) - factor * A(k,j)
+            end do
+            do j = 1, NRHS
+                B(i,j) = B(i,j) - factor * B(k,j)
+            end do
+        end do
+    end do
+
+    ! -- back substitution
+    do k = 19, 1, -1
+        do j = 1, NRHS
+            do i = k+1, 19
+                B(k,j) = B(k,j) - A(k,i) * B(i,j)
+            end do
+            B(k,j) = B(k,j) / A(k,k)
+        end do
+    end do
+
+end subroutine solve19
+
+
+! =============================================================================
+! yu_smooth_max (internal helper)
+!
+! Smooth maximum: b + 0.5 * (d + sqrt(d^2 + eps^2)), d = a - b.
+! Matches Python smooth_max(a, b, eps=1e-30).
+! =============================================================================
+subroutine yu_smooth_max(a, b, result)
+    implicit none
+    double precision, intent(in)  :: a, b
+    double precision, intent(out) :: result
+
+    double precision :: d
+    double precision, parameter :: EPS_SQRT = 1.0d-30
+
+    d = a - b
+    result = b + 0.5d0 * (d + sqrt(d*d + EPS_SQRT**2))
+
+end subroutine yu_smooth_max
+
+
+! =============================================================================
+! yu_inner_mu_newton
+!
+! Inner Newton loop to solve for mu (stagnation surface update).
+! Matches Python YUKinematic3D.user_defined_return_mapping lines 161-170.
+!
+! Newton iteration:
+!   H_mu = sqrt(r_n^2 + 6*h*Fn / (1+mu))
+!   F_mu = 3*Gn - r_n*(r_n + H_mu)*(1+mu)^2 - 3*h*Fn*(1+mu)
+!   stop when F_mu < 1e-16
+!   F_mu' = 3*h*Fn/H_mu*(r_n - H_mu) - 2*r_n*(1+mu)*(r_n + H_mu)
+!   mu = mu - F_mu / F_mu'
+!
+! Parameters
+! ----------
+! h       [in]  : stagnation surface parameter
+! r_n     [in]  : stagnation radius at step start
+! Gn      [in]  : deviatoric_inner_product(g_xi, g_xi)
+! Fn      [in]  : deviatoric_inner_product(g_xi, d_beta)
+! mu_out  [out] : converged mu
+! info    [out] : 0 = success, 1 = not converged (10 iter exceeded)
+! =============================================================================
+subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
+    implicit none
+    double precision, intent(in)  :: h, r_n, Gn, Fn
+    double precision, intent(out) :: mu_out
+    integer,          intent(out) :: info
+
+    integer :: i
+    double precision :: mu, H_mu, F_mu, F_mu_prime
+    double precision, parameter :: EPS_SQRT = 1.0d-30
+
+    mu = 0.0d0
+    info = 1
+
+    do i = 1, 10
+        H_mu = sqrt(r_n*r_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
+        F_mu = 3.0d0*Gn - r_n*(r_n + H_mu)*(1.0d0+mu)**2 &
+             - 3.0d0*h*Fn*(1.0d0 + mu)
+        if (F_mu < 1.0d-16) then
+            info = 0
+            exit
+        end if
+        F_mu_prime = 3.0d0*h*Fn/H_mu*(r_n - H_mu) &
+                   - 2.0d0*r_n*(1.0d0+mu)*(r_n + H_mu)
+        mu = mu - F_mu / F_mu_prime
+    end do
+
+    mu_out = mu
+
+end subroutine yu_inner_mu_newton
+
+
+! =============================================================================
+! yu_calc_ddsdde
+!
+! Computes the consistent algorithmic tangent (6x6) from the converged state.
+! Matches Python YUKinematic3D.calc_ddsdde (:421-447).
+!
+! Algorithm:
+!   1. Build the full 19x19 Jacobian via yu_calc_jacobian
+!   2. Reconstruct C and compute C_inv (via 6x6 LU solve with I_6 RHS)
+!   3. Pre-multiply stress-block rows (1..6) by C_inv
+!   4. Invert the modified 19x19 Jacobian (solve with I_19 RHS)
+!   5. Extract upper-left 6x6 block as ddsdde
+!
+! Parameters
+! ----------
+! (same 12 props + state at convergence as yu_calc_jacobian)
+! ddsdde(6,6) [out] : consistent tangent
+! =============================================================================
+subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                           stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                           theta_max_new, R_n, dlambda, &
+                           ddsdde)
+    implicit none
+    double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    double precision, intent(in)  :: stress_new(6), theta_new(6), beta_new(6)
+    double precision, intent(in)  :: R_new, eps_eq_new, theta_max_new, R_n, dlambda
+    double precision, intent(out) :: ddsdde(6,6)
+
+    double precision :: jac(19,19), C(6,6), C_inv(6,6), C_work(6,6)
+    double precision :: rhs19(19,19), jac_stress_block(6,19)
+    integer :: ii, jj, kk, info_lu
+    double precision, parameter :: ZERO = 0.0d0, ONE = 1.0d0
+
+    ! Step 1: Build full 19x19 Jacobian
+    call yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                          stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                          theta_max_new, R_n, dlambda, &
+                          jac)
+
+    ! Step 2: Reconstruct C and compute C_inv via 6x6 LU solve (C_work A, C_inv as I->X)
+    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
+    do ii = 1, 6
+        do jj = 1, 6
+            C_work(ii,jj) = C(ii,jj)
+            C_inv(ii,jj) = ZERO
+        end do
+        C_inv(ii,ii) = ONE
+    end do
+    call solve6_inplace(C_work, C_inv, info_lu)
+    if (info_lu /= 0) then
+        do ii = 1, 6
+            do jj = 1, 6
+                ddsdde(ii,jj) = C(ii,jj)
+            end do
+        end do
+        return
+    end if
+
+    ! Step 3: Pre-multiply stress-block rows (rows 1..6) by C_inv.
+    ! Copy rows first to avoid overwrite aliasing.
+    do ii = 1, 6
+        do jj = 1, 19
+            jac_stress_block(ii,jj) = jac(ii,jj)
+        end do
+    end do
+    do ii = 1, 6
+        do jj = 1, 19
+            jac(ii,jj) = ZERO
+            do kk = 1, 6
+                jac(ii,jj) = jac(ii,jj) + C_inv(ii,kk) * jac_stress_block(kk,jj)
+            end do
+        end do
+    end do
+
+    ! Step 4: Invert modified Jacobian by solving jac * X = I_19
+    do ii = 1, 19
+        do jj = 1, 19
+            rhs19(ii,jj) = ZERO
+        end do
+        rhs19(ii,ii) = ONE
+    end do
+    call solve19(jac, rhs19, 19, info_lu)
+    if (info_lu /= 0) then
+        do ii = 1, 6
+            do jj = 1, 6
+                ddsdde(ii,jj) = C(ii,jj)
+            end do
+        end do
+        return
+    end if
+
+    ! Step 5: Extract upper-left 6x6 block
+    do ii = 1, 6
+        do jj = 1, 6
+            ddsdde(ii,jj) = rhs19(ii,jj)
+        end do
+    end do
+
+end subroutine yu_calc_ddsdde
+
+
+! =============================================================================
+! solve6_inplace -- in-place LU solver for a 6x6 system with NRHS=6
+!
+! Internal helper for yu_calc_ddsdde (C_inv computation).
+! Solves A*X = B with Gaussian elimination + partial pivoting.
+! =============================================================================
+subroutine solve6_inplace(A, B, info)
+    implicit none
+    double precision, intent(inout) :: A(6,6), B(6,6)
+    integer,          intent(out)   :: info
+
+    integer          :: i, j, k, piv
+    double precision :: maxval_loc, tmp_d, factor
+    double precision, parameter :: EPS = 1.0d-14
+
+    info = 0
+
+    do k = 1, 6
+        maxval_loc = abs(A(k,k))
+        piv = k
+        do i = k+1, 6
+            if (abs(A(i,k)) > maxval_loc) then
+                maxval_loc = abs(A(i,k))
+                piv = i
+            end if
+        end do
+        if (maxval_loc < EPS) then
+            info = k
+            return
+        end if
+        if (piv /= k) then
+            do j = 1, 6
+                tmp_d    = A(k,j)
+                A(k,j)   = A(piv,j)
+                A(piv,j) = tmp_d
+                tmp_d    = B(k,j)
+                B(k,j)   = B(piv,j)
+                B(piv,j) = tmp_d
+            end do
+        end if
+        do i = k+1, 6
+            factor = A(i,k) / A(k,k)
+            do j = k, 6
+                A(i,j) = A(i,j) - factor * A(k,j)
+            end do
+            do j = 1, 6
+                B(i,j) = B(i,j) - factor * B(k,j)
+            end do
+        end do
+    end do
+
+    do k = 6, 1, -1
+        do j = 1, 6
+            do i = k+1, 6
+                B(k,j) = B(k,j) - A(k,i) * B(i,j)
+            end do
+            B(k,j) = B(k,j) / A(k,k)
+        end do
+    end do
+
+end subroutine solve6_inplace
+
+
+! =============================================================================
+! yu_kinematic_3d
+!
+! f2py-callable core subroutine for YUKinematic3D.
+! Implements the full return mapping (elastic predictor + NR plastic corrector)
+! and the consistent algorithmic tangent (DDSDDE).
+!
+! Matches Python YUKinematic3D.user_defined_return_mapping (:129-190)
+! and YUKinematic3D.user_defined_tangent / calc_ddsdde (:192-447).
+!
+! Argument order follows the FortranIntegrator.from_model convention:
+!   (*param_fn(), stress_n, *state_tup_in_declaration_order, strain_inc)
+!   -> (stress_out, *state_tup_out, ddsdde, n_iter, converged)
+!
+! State order (YUKinematic declaration, "stress" excluded):
+!   theta(6), beta(6), R(scalar), q(6), r(scalar), eps_eq(scalar), theta_max(scalar)
+!
+! Parameters
+! ----------
+! E..xi_param   [in]  : 12 material parameters (model.param_names order)
+! stress_n(6)   [in]  : stress at step start
+! theta_n(6)    [in]  : relative backstress at step start
+! beta_n(6)     [in]  : boundary backstress at step start
+! R_n           [in]  : boundary radius increment at step start
+! q_n(6)        [in]  : stagnation center at step start
+! r_n           [in]  : stagnation radius at step start
+! eps_eq_n      [in]  : equivalent plastic strain at step start
+! theta_max_n   [in]  : max ||theta|| history at step start
+! dstran(6)     [in]  : strain increment (engineering shear)
+! stress_out(6)                  [out] : updated stress
+! theta_out(6)                   [out] : updated theta
+! beta_out(6)                    [out] : updated beta
+! R_out                          [out] : updated R
+! q_out(6)                       [out] : updated q
+! r_out                          [out] : updated r
+! eps_eq_out                     [out] : updated eps_eq
+! theta_max_out                  [out] : updated theta_max
+! ddsdde(6,6)                    [out] : consistent algorithmic tangent
+! n_iter                         [out] : number of outer NR iterations performed
+! converged                      [out] : 1 = converged, 0 = not converged
+! =============================================================================
+subroutine yu_kinematic_3d( &
+        E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+        stress_n, &
+        theta_n, beta_n, Rbnd_n, q_n, rstag_n, eps_eq_n, theta_max_n, &
+        dstran, &
+        stress_out, &
+        theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
+        ddsdde, &
+        n_iter, converged)
+    implicit none
+    ! -- inputs: 12 props
+    double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    ! -- inputs: stress + state at step start
+    double precision, intent(in) :: stress_n(6)
+    double precision, intent(in) :: theta_n(6), beta_n(6), Rbnd_n, q_n(6), rstag_n, eps_eq_n, theta_max_n
+    ! -- input: strain increment
+    double precision, intent(in) :: dstran(6)
+    ! -- outputs: updated stress + state
+    double precision, intent(out) :: stress_out(6)
+    double precision, intent(out) :: theta_out(6), beta_out(6), Rbnd_out, q_out(6), rstag_out, eps_eq_out, theta_max_out
+    ! -- outputs: tangent + diagnostics
+    double precision, intent(out) :: ddsdde(6,6)
+    integer,          intent(out) :: n_iter
+    integer,          intent(out) :: converged
+
+    ! -- local variables
+    double precision :: C(6,6), stress_trial(6)
+    double precision :: stress_new(6), theta_new(6), beta_new(6)
+    double precision :: Rbnd_new, rstag_new, eps_eq_new
+    double precision :: q_new(6)
+    double precision :: dlambda
+    double precision :: r_vec(19), jac(19,19), dx(19,1)
+    double precision :: r_norm, xi_trial(6), dev_s(6), xi_trial_norm
+    double precision :: g_xi(6), d_beta(6), stag_norm, g_stag, g_flag
+    double precision :: Gn, Fn, mu, delta_q(6), delta_rstag, delta_Rbnd, s_fac
+    double precision :: H_mu_fin, theta_new_norm, theta_max_cand
+    integer :: iter, ii, jj, info_lu, info_mu
+    double precision, parameter :: TOL_NR   = 1.0d-10
+    double precision, parameter :: EPS_SQRT = 1.0d-30
+
+    ! ==========================================================================
+    ! Elastic predictor: stress_trial = stress_n + C(eps_eq_n) @ dstran
+    ! ==========================================================================
+    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C)
+    do ii = 1, 6
+        stress_trial(ii) = stress_n(ii)
+        do jj = 1, 6
+            stress_trial(ii) = stress_trial(ii) + C(ii,jj) * dstran(jj)
+        end do
+    end do
+
+    ! ==========================================================================
+    ! Yield check at trial state
+    ! ==========================================================================
+    call yu_deviatoric(stress_trial, dev_s)
+    do ii = 1, 6
+        xi_trial(ii) = dev_s(ii) - theta_n(ii) - beta_n(ii)
+    end do
+    call yu_vonmises_norm(xi_trial, xi_trial_norm)
+
+    if (xi_trial_norm <= Y) then
+        ! Elastic step: accept trial stress
+        do ii = 1, 6
+            stress_out(ii) = stress_trial(ii)
+            theta_out(ii)  = theta_n(ii)
+            beta_out(ii)   = beta_n(ii)
+            q_out(ii)      = q_n(ii)
+        end do
+        Rbnd_out      = Rbnd_n
+        rstag_out     = rstag_n
+        eps_eq_out    = eps_eq_n
+        theta_max_out = theta_max_n
+        do ii = 1, 6
+            do jj = 1, 6
+                ddsdde(ii,jj) = C(ii,jj)
+            end do
+        end do
+        n_iter    = 0
+        converged = 1
+        return
+    end if
+
+    ! ==========================================================================
+    ! Plastic step: outer NR loop (max 50 iter)
+    ! ==========================================================================
+    ! Initialize NR state
+    do ii = 1, 6
+        stress_new(ii) = stress_trial(ii)
+        theta_new(ii)  = theta_n(ii)
+        beta_new(ii)   = beta_n(ii)
+        q_new(ii)      = q_n(ii)
+    end do
+    Rbnd_new   = Rbnd_n
+    rstag_new  = rstag_n
+    eps_eq_new = eps_eq_n
+    dlambda    = 0.0d0
+    n_iter     = 0
+    converged  = 0
+
+    do iter = 1, 50
+        ! Residual (theta_max passed as state_n value -- not updated during NR)
+        call yu_calc_residual(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                              stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                              theta_n, beta_n, theta_max_n, &
+                              stress_trial, dlambda, &
+                              r_vec)
+
+        ! Convergence check: L2 norm (matches np.linalg.norm)
+        r_norm = 0.0d0
+        do ii = 1, 19
+            r_norm = r_norm + r_vec(ii)**2
+        end do
+        r_norm = sqrt(r_norm)
+
+        if (r_norm < TOL_NR) then
+            converged = 1
+            n_iter    = iter - 1
+            exit
+        end if
+
+        ! Jacobian and linear solve
+        call yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                              stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                              theta_max_n, Rbnd_n, dlambda, &
+                              jac)
+
+        do ii = 1, 19
+            dx(ii,1) = r_vec(ii)
+        end do
+        call solve19(jac, dx, 1, info_lu)
+        if (info_lu /= 0) then
+            converged = 0
+            n_iter    = iter
+            exit
+        end if
+
+        ! NR update: state_new -= dx
+        do ii = 1, 6
+            stress_new(ii) = stress_new(ii) - dx(ii, 1)
+            theta_new(ii)  = theta_new(ii)  - dx(7+ii, 1)
+            beta_new(ii)   = beta_new(ii)   - dx(13+ii, 1)
+        end do
+        dlambda = dlambda - dx(7, 1)
+
+        ! ----------------------------------------------------------------
+        ! Explicit state updates (stagnation surface)
+        ! g_flag: hard branch (matches user_defined_return_mapping:158)
+        ! ----------------------------------------------------------------
+        do ii = 1, 6
+            d_beta(ii) = beta_new(ii) - beta_n(ii)
+            g_xi(ii)   = beta_new(ii) - q_n(ii)
+        end do
+        call yu_vonmises_norm(g_xi, stag_norm)
+        g_stag = stag_norm - rstag_n
+        if (g_stag > 0.0d0) then
+            g_flag = 1.0d0
+        else
+            g_flag = 0.0d0
+        end if
+
+        ! deviatoric_inner_product for SOLID_3D:
+        !   Gn = sum(g_xi(1:3)^2) + 2*sum(g_xi(4:6)^2)   (Mandel)
+        !   Fn = sum(g_xi(1:3)*d_beta(1:3)) + 2*sum(g_xi(4:6)*d_beta(4:6))
+        Gn = 0.0d0
+        Fn = 0.0d0
+        do ii = 1, 3
+            Gn = Gn + g_xi(ii)**2
+            Fn = Fn + g_xi(ii) * d_beta(ii)
+        end do
+        do ii = 4, 6
+            Gn = Gn + 2.0d0 * g_xi(ii)**2
+            Fn = Fn + 2.0d0 * g_xi(ii) * d_beta(ii)
+        end do
+
+        ! Inner mu Newton
+        call yu_inner_mu_newton(h, rstag_n, Gn, Fn, mu, info_mu)
+        if (info_mu /= 0) then
+            converged = 0
+            n_iter    = iter
+            exit
+        end if
+
+        ! delta_q, delta_rstag, delta_Rbnd
+        do ii = 1, 6
+            delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
+        end do
+        H_mu_fin   = sqrt(rstag_n*rstag_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
+        delta_rstag = 0.5d0 * (rstag_n + H_mu_fin) - rstag_n
+        s_fac       = 1.0d0 / (1.0d0 + k * dlambda)
+        delta_Rbnd  = s_fac * (Rbnd_n + k * Rsat * dlambda) - Rbnd_n
+
+        Rbnd_new = Rbnd_n + g_flag * delta_Rbnd
+        do ii = 1, 6
+            q_new(ii) = q_n(ii) + g_flag * delta_q(ii)
+        end do
+        rstag_new  = rstag_n + g_flag * delta_rstag
+        eps_eq_new = eps_eq_n + dlambda
+
+    end do
+
+    ! If we exhausted the loop without converging, n_iter not set yet
+    if (converged == 0 .and. n_iter == 0) n_iter = 50
+
+    ! ==========================================================================
+    ! theta_max update (after outer NR, matches :181-182)
+    ! ==========================================================================
+    call yu_vonmises_norm(theta_new, theta_new_norm)
+    call yu_smooth_max(theta_max_n, theta_new_norm, theta_max_cand)
+    theta_max_out = theta_max_cand
+
+    ! ==========================================================================
+    ! Consistent tangent (DDSDDE)
+    ! Use theta_max_out (= smooth_max after NR) matching Python calc_ddsdde
+    ! which receives state_new["theta_max"] (already updated after NR loop).
+    ! ==========================================================================
+    call yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                        stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                        theta_max_out, Rbnd_n, dlambda, &
+                        ddsdde)
+
+    ! ==========================================================================
+    ! Copy converged state to outputs
+    ! ==========================================================================
+    do ii = 1, 6
+        stress_out(ii) = stress_new(ii)
+        theta_out(ii)  = theta_new(ii)
+        beta_out(ii)   = beta_new(ii)
+        q_out(ii)      = q_new(ii)
+    end do
+    Rbnd_out   = Rbnd_new
+    rstag_out  = rstag_new
+    eps_eq_out = eps_eq_new
+
+end subroutine yu_kinematic_3d
