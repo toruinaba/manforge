@@ -6,10 +6,10 @@ or:
     uv run manforge build fortran/abaqus_stubs.f90 fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d
 
 Test classes:
-    TestHelpers              -- helper subroutines: elastic_stiffness, calc_norm_n_flow,
-                                _prepare_Rstress, _prepare_Rtheta  (single plastic step)
-    TestJacobianBlocks       -- 16 dRxx_dyy blocks over full trajectories
-    TestResidualAndJacobian  -- integrated calc_residual + calc_jacobian over full trajectories
+    TestHelpers              -- elastic_stiffness, calc_norm_n_flow,
+                                _prepare_Rstress, _prepare_Rtheta
+    TestJacobianBlocks       -- one test per dRxx_dyy block (16 total)
+    TestResidualAndJacobian  -- calc_residual + calc_jacobian over trajectories
 """
 
 import numpy as np
@@ -27,7 +27,6 @@ pytestmark = pytest.mark.fortran
 
 from manforge.simulation.integrator import FortranModule, PythonNumericalIntegrator
 from manforge.models import YUKinematic3D
-from manforge.verification import check_bindings
 
 from .conftest import PARAMS
 
@@ -48,7 +47,7 @@ def model():
 
 @pytest.fixture
 def plastic_state(model):
-    """Run one plastic step and return (model, state, state_n, dlambda)."""
+    """Run one plastic step; return (model, state, state_n, dlambda)."""
     integrator = PythonNumericalIntegrator(model)
     stress_n = np.zeros(6)
     state_n = model.initial_state()
@@ -59,94 +58,7 @@ def plastic_state(model):
 
 
 # ---------------------------------------------------------------------------
-# Helper: build check_bindings cases for all 16 dRxx_dyy blocks
-# ---------------------------------------------------------------------------
-
-def _build_jacobian_cases(m, state, state_n, dlambda):
-    C = m.elastic_stiffness(state)
-    xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
-    theta = state["theta"]
-    beta = state["beta"]
-    eps_eq = float(state["eps_eq"])
-    R = float(state["R"])
-    R_n = float(state_n["R"])
-    theta_max = float(state["theta_max"])
-    dl = float(dlambda)
-
-    return {
-        "dRstress_dstress": (
-            (C, xi, dl),
-            (C, xi, dl),
-        ),
-        "dRstress_dbeta": (
-            (C, xi, dl),
-            (C, xi, dl),
-        ),
-        "dRstress_dtheta": (
-            (C, xi, dl),
-            (C, xi, dl),
-        ),
-        "dRstress_dlambda": (
-            (C, xi, eps_eq, dl),
-            (m.E, m.Ea, m.xi, C, xi, eps_eq, dl),
-        ),
-        "dRbeta_dstress": (
-            (dl,),
-            (m.k, m.b, m.Y, dl),
-        ),
-        "dRbeta_dbeta": (
-            (dl,),
-            (m.k, m.b, m.Y, dl),
-        ),
-        "dRbeta_dtheta": (
-            (dl,),
-            (m.k, m.b, m.Y, dl),
-        ),
-        "dRbeta_dlambda": (
-            (xi, beta, dl),
-            (m.k, m.b, m.Y, xi, beta, dl),
-        ),
-        "dRtheta_dstress": (
-            (theta, theta_max, R, R_n, dl),
-            (m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
-             theta, theta_max, R, R_n, dl),
-        ),
-        "dRtheta_dbeta": (
-            (theta, theta_max, R, R_n, dl),
-            (m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
-             theta, theta_max, R, R_n, dl),
-        ),
-        "dRtheta_dtheta": (
-            (theta, theta_max, R, R_n, dl),
-            (m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
-             theta, theta_max, R, R_n, dl),
-        ),
-        "dRtheta_dlambda": (
-            (xi, theta, theta_max, R, R_n, dl),
-            (m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
-             xi, theta, theta_max, R, R_n, dl),
-        ),
-        "dRyield_dstress": (
-            (xi,),
-            (xi,),
-        ),
-        "dRyield_dbeta": (
-            (xi,),
-            (xi,),
-        ),
-        "dRyield_dtheta": (
-            (xi,),
-            (xi,),
-        ),
-        "dRyield_dlambda": (
-            (),
-            (),
-        ),
-    }
-
-
-# ---------------------------------------------------------------------------
-# TestHelpers: helper subroutines compared at a single plastic step
+# TestHelpers: helper subroutines at a single plastic step
 # ---------------------------------------------------------------------------
 
 class TestHelpers:
@@ -199,40 +111,166 @@ class TestHelpers:
 
 
 # ---------------------------------------------------------------------------
-# TestJacobianBlocks: per-step comparison over full trajectories
+# TestJacobianBlocks: one test per dRxx_dyy block (16 total)
 # ---------------------------------------------------------------------------
 
 class TestJacobianBlocks:
-    """Compare all 16 Jacobian blocks Python vs Fortran over trajectory steps."""
+    """Compare each Jacobian block Python vs Fortran at a single plastic step."""
 
-    def test_jacobian_blocks_match_fortran(self, yu_3d_scenario, fortran_mod):
-        m, history = yu_3d_scenario
-        integrator = PythonNumericalIntegrator(m)
+    # --- R_stress blocks ---
 
-        stress_n = np.zeros(6)
-        state_n = m.initial_state()
-        n_plastic = 0
+    def test_dRstress_dstress(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        C = m.elastic_stiffness(state)
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRstress_dstress(C, xi, dlambda)
+        f = fortran_mod.call("yu_drs_dstress", C, xi, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
-        for strain_total_n, strain_total_np1 in zip(history[:-1], history[1:]):
-            strain_inc = strain_total_np1 - strain_total_n
-            result = integrator.stress_update(strain_inc, stress_n, state_n)
+    def test_dRstress_dbeta(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        C = m.elastic_stiffness(state)
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRstress_dbeta(C, xi, dlambda)
+        f = fortran_mod.call("yu_drs_dbeta", C, xi, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
-            if result.is_plastic:
-                n_plastic += 1
-                cases = _build_jacobian_cases(m, result.state, state_n, result.dlambda)
-                res = check_bindings(m, fortran_mod, cases, rtol=1e-10, atol=1e-12)
-                for name, (ok, err) in res.items():
-                    assert ok, f"step {n_plastic}: {name}: max_rel_err={err:.3e}"
+    def test_dRstress_dtheta(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        C = m.elastic_stiffness(state)
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRstress_dtheta(C, xi, dlambda)
+        f = fortran_mod.call("yu_drs_dtheta", C, xi, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
-            stress_n = result.stress
-            state_n = result.state
+    def test_dRstress_dlambda(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        C = m.elastic_stiffness(state)
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        eps_eq = float(state["eps_eq"])
+        py = m.dRstress_dlambda(C, xi, eps_eq, dlambda)
+        f = fortran_mod.call("yu_drs_dlambda", m.E, m.Ea, m.xi, C, xi, eps_eq, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
-        if n_plastic == 0:
-            pytest.skip("No plastic steps in this scenario — Jacobian blocks not exercised")
+    # --- R_beta blocks ---
+
+    def test_dRbeta_dstress(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        py = m.dRbeta_dstress(dlambda)
+        f = fortran_mod.call("yu_drb_dstress", m.k, m.b, m.Y, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRbeta_dbeta(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        py = m.dRbeta_dbeta(dlambda)
+        f = fortran_mod.call("yu_drb_dbeta", m.k, m.b, m.Y, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRbeta_dtheta(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        py = m.dRbeta_dtheta(dlambda)
+        f = fortran_mod.call("yu_drb_dtheta", m.k, m.b, m.Y, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRbeta_dlambda(self, plastic_state, fortran_mod):
+        m, state, _, dlambda = plastic_state
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        beta = state["beta"]
+        py = m.dRbeta_dlambda(xi, beta, dlambda)
+        f = fortran_mod.call("yu_drb_dlambda", m.k, m.b, m.Y, xi, beta, dlambda)
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    # --- R_theta blocks ---
+
+    def test_dRtheta_dstress(self, plastic_state, fortran_mod):
+        m, state, state_n, dlambda = plastic_state
+        theta = state["theta"]
+        theta_max = float(state["theta_max"])
+        R = float(state["R"])
+        R_n = float(state_n["R"])
+        py = m.dRtheta_dstress(theta, theta_max, R, R_n, dlambda)
+        f = fortran_mod.call(
+            "yu_drt_dstress",
+            m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
+            theta, theta_max, R, R_n, dlambda,
+        )
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRtheta_dbeta(self, plastic_state, fortran_mod):
+        m, state, state_n, dlambda = plastic_state
+        theta = state["theta"]
+        theta_max = float(state["theta_max"])
+        R = float(state["R"])
+        R_n = float(state_n["R"])
+        py = m.dRtheta_dbeta(theta, theta_max, R, R_n, dlambda)
+        f = fortran_mod.call(
+            "yu_drt_dbeta",
+            m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
+            theta, theta_max, R, R_n, dlambda,
+        )
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRtheta_dtheta(self, plastic_state, fortran_mod):
+        m, state, state_n, dlambda = plastic_state
+        theta = state["theta"]
+        theta_max = float(state["theta_max"])
+        R = float(state["R"])
+        R_n = float(state_n["R"])
+        py = m.dRtheta_dtheta(theta, theta_max, R, R_n, dlambda)
+        f = fortran_mod.call(
+            "yu_drt_dtheta",
+            m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
+            theta, theta_max, R, R_n, dlambda,
+        )
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    def test_dRtheta_dlambda(self, plastic_state, fortran_mod):
+        m, state, state_n, dlambda = plastic_state
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        theta = state["theta"]
+        theta_max = float(state["theta_max"])
+        R = float(state["R"])
+        R_n = float(state_n["R"])
+        py = m.dRtheta_dlambda(xi, theta, theta_max, R, R_n, dlambda)
+        f = fortran_mod.call(
+            "yu_drt_dlambda",
+            m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
+            xi, theta, theta_max, R, R_n, dlambda,
+        )
+        np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
+
+    # --- R_yield blocks ---
+
+    def test_dRyield_dstress(self, plastic_state, fortran_mod):
+        m, state, _, _ = plastic_state
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRyield_dstress(xi)
+        f = fortran_mod.call("yu_drl_dstress", xi)
+        np.testing.assert_allclose(py, f, rtol=1e-12)
+
+    def test_dRyield_dbeta(self, plastic_state, fortran_mod):
+        m, state, _, _ = plastic_state
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRyield_dbeta(xi)
+        f = fortran_mod.call("yu_drl_dbeta", xi)
+        np.testing.assert_allclose(py, f, rtol=1e-12)
+
+    def test_dRyield_dtheta(self, plastic_state, fortran_mod):
+        m, state, _, _ = plastic_state
+        xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
+        py = m.dRyield_dtheta(xi)
+        f = fortran_mod.call("yu_drl_dtheta", xi)
+        np.testing.assert_allclose(py, f, rtol=1e-12)
+
+    def test_dRyield_dlambda(self, plastic_state, fortran_mod):
+        m, _, _, _ = plastic_state
+        py = m.dRyield_dlambda()
+        f = fortran_mod.call("yu_drl_dlambda")
+        np.testing.assert_allclose(py, f, rtol=1e-12)
 
 
 # ---------------------------------------------------------------------------
-# TestResidualAndJacobian: integrated residual + Jacobian over full trajectories
+# TestResidualAndJacobian: integrated residual + Jacobian over trajectories
 # ---------------------------------------------------------------------------
 
 class TestResidualAndJacobian:
