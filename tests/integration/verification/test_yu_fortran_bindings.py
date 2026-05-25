@@ -29,10 +29,12 @@ def test_all_bindings_registered():
         "dRtheta_dbeta":        "yu_drt_dbeta",
         "dRtheta_dtheta":       "yu_drt_dtheta",
         "dRtheta_dlambda":      "yu_drt_dlambda",
-        "dRyield_dstress":      "yu_drl_dstress",
-        "dRyield_dbeta":        "yu_drl_dbeta",
-        "dRyield_dtheta":       "yu_drl_dtheta",
-        "dRyield_dlambda":      "yu_drl_dlambda",
+        "dRyield_dstress":          "yu_drl_dstress",
+        "dRyield_dbeta":            "yu_drl_dbeta",
+        "dRyield_dtheta":           "yu_drl_dtheta",
+        "dRyield_dlambda":          "yu_drl_dlambda",
+        "user_defined_return_mapping": "yu_kinematic_3d",
+        "calc_ddsdde":              "yu_calc_ddsdde",
     }
     for method, subroutine in expected.items():
         assert method in bindings, f"{method} not in _fortran_bindings"

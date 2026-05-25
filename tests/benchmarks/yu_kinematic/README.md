@@ -122,3 +122,32 @@ uv run pytest tests/benchmarks/yu_kinematic/ -v          # slow 含む全テス�
 uv run pytest tests/benchmarks/yu_kinematic/ -m "not slow" -v  # 非 slow のみ
 uv run pytest tests/benchmarks/yu_kinematic/ -m "fortran" -v   # Fortran テストのみ（.so 必須）
 ```
+
+## ABAQUS 入力デック例
+
+Fortran UMAT (`subroutine umat` in `fortran/yu_kinematic_3d.f90`) を ABAQUS で使用する場合の
+入力デック例。`CONSTANTS=12` は `model.param_names` の 12 パラメータに対応。
+
+```
+*MATERIAL, NAME=YU_KINEMATIC
+*USER MATERIAL, CONSTANTS=12
+** E,       nu,    Y,    B,     C_1,    C_2,   Rsat,   k,    b,     h,     Ea,    xi
+  210000., 0.3, 250., 520., 35000., 14000., 180., 8.5, 14., 0.4, 2000., 250.
+*DEPVAR
+22
+```
+
+`*DEPVAR` に指定する 22 は STATEV スロット数（以下）:
+
+| スロット | 変数 | 説明 |
+|---|---|---|
+| 1–6   | theta(1–6)  | 降伏面相対バックストレステンソル (physical shear) |
+| 7–12  | beta(1–6)   | 境界面相対バックストレステンソル (physical shear) |
+| 13    | R           | 境界面半径増分 |
+| 14–19 | q(1–6)      | 停滞面中心 (physical shear) |
+| 20    | r           | 停滞面半径 |
+| 21    | eps_eq      | 相当塑性ひずみ |
+| 22    | theta_max   | theta ノルムの履歴最大値 |
+
+初期状態（弾性状態）はすべてのスロットにゼロを与えればよい。
+非収束時は `PNEWDT = 0.5` が返り、ABAQUS に時間刻みの半減を要求する。
