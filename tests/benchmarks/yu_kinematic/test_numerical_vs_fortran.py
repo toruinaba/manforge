@@ -10,6 +10,8 @@ Test classes:
                                 _prepare_Rstress, _prepare_Rtheta
     TestJacobianBlocks       -- one test per dRxx_dyy block (16 total)
     TestResidualAndJacobian  -- calc_residual + calc_jacobian over trajectories
+    TestReturnMapping        -- yu_kinematic_3d core (return mapping + ddsdde)
+    TestCrosscheckTrajectory -- PythonAnalyticalIntegrator vs FortranIntegrator
 """
 
 import numpy as np
@@ -25,7 +27,9 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.simulation.integrator import FortranModule, PythonNumericalIntegrator
+from manforge.simulation.integrator import FortranModule, PythonNumericalIntegrator, PythonAnalyticalIntegrator, FortranIntegrator
+from manforge.simulation.types import FieldHistory, FieldType
+from manforge.verification.crosscheck_driver import CrosscheckStrainDriver
 from manforge.models import YUKinematic3D
 
 from .conftest import PARAMS
@@ -337,3 +341,111 @@ class TestResidualAndJacobian:
     def test_residual_and_jacobian_match_fortran(self, yu_3d_scenario, fortran_mod):
         m, history = yu_3d_scenario
         self._run_and_check(m, history, fortran_mod)
+
+
+# ---------------------------------------------------------------------------
+# FortranIntegrator fixture (shared by TestReturnMapping + TestCrosscheckTrajectory)
+# ---------------------------------------------------------------------------
+
+def _make_fc_int(fortran_mod, model):
+    """Build FortranIntegrator for yu_kinematic_3d.
+
+    state_names order (from YUKinematic declaration, "stress" excluded):
+        theta(6), beta(6), R(scalar), q(6), r(scalar), eps_eq(scalar), theta_max(scalar)
+    Fortran argument order matches this order exactly.
+    Trailing outputs n_iter/converged are ignored by the default ddsdde parser
+    (it scans for the first 2-D array, which is ddsdde at position 8).
+    """
+    return FortranIntegrator.from_model(fortran_mod, "yu_kinematic_3d", model)
+
+
+# ---------------------------------------------------------------------------
+# TestReturnMapping: single-step comparison at a plastic step
+# ---------------------------------------------------------------------------
+
+class TestReturnMapping:
+    """Compare yu_kinematic_3d (full return mapping) vs PythonAnalyticalIntegrator."""
+
+    def test_single_plastic_step_stress(self, plastic_state, fortran_mod):
+        """Stress at a single plastic step matches between Python and Fortran."""
+        m, state_new, state_n, _ = plastic_state
+        # Re-run the step with the analytical integrator (user_defined_return_mapping)
+        py_int = PythonAnalyticalIntegrator(m)
+        stress_n_arr = np.zeros(6)
+        state_n_fresh = m.initial_state()
+        strain_inc = np.array([2e-3, -6e-4, -6e-4, 0.0, 0.0, 0.0])
+        py_result = py_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        fc_int = _make_fc_int(fortran_mod, m)
+        fc_result = fc_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        np.testing.assert_allclose(
+            np.asarray(py_result.stress),
+            np.asarray(fc_result.stress),
+            rtol=1e-6, atol=1e-8,
+        )
+
+    def test_single_plastic_step_state(self, plastic_state, fortran_mod):
+        """State variables at a single plastic step match between Python and Fortran."""
+        m, _, _, _ = plastic_state
+        py_int = PythonAnalyticalIntegrator(m)
+        stress_n_arr = np.zeros(6)
+        state_n_fresh = m.initial_state()
+        strain_inc = np.array([2e-3, -6e-4, -6e-4, 0.0, 0.0, 0.0])
+        py_result = py_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        fc_int = _make_fc_int(fortran_mod, m)
+        fc_result = fc_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        for key in ["theta", "beta", "q"]:
+            np.testing.assert_allclose(
+                np.asarray(py_result.state[key]),
+                np.asarray(fc_result.state[key]),
+                rtol=1e-6, atol=1e-8,
+                err_msg=f"state[{key!r}] mismatch",
+            )
+        for key in ["R", "r", "eps_eq", "theta_max"]:
+            np.testing.assert_allclose(
+                float(py_result.state[key]),
+                float(fc_result.state[key]),
+                rtol=1e-6, atol=1e-8,
+                err_msg=f"state[{key!r}] mismatch",
+            )
+
+    def test_single_plastic_step_ddsdde(self, plastic_state, fortran_mod):
+        """DDSDDE at a single plastic step matches (relaxed tolerance: 1e-4)."""
+        m, _, _, _ = plastic_state
+        py_int = PythonAnalyticalIntegrator(m)
+        stress_n_arr = np.zeros(6)
+        state_n_fresh = m.initial_state()
+        strain_inc = np.array([2e-3, -6e-4, -6e-4, 0.0, 0.0, 0.0])
+        py_result = py_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        fc_int = _make_fc_int(fortran_mod, m)
+        fc_result = fc_int.stress_update(strain_inc, stress_n_arr, state_n_fresh)
+        np.testing.assert_allclose(
+            np.asarray(py_result.ddsdde),
+            np.asarray(fc_result.ddsdde),
+            rtol=1e-4, atol=1e-4,
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestCrosscheckTrajectory: multi-step trajectory crosscheck
+# ---------------------------------------------------------------------------
+
+class TestCrosscheckTrajectory:
+    """PythonAnalyticalIntegrator vs FortranIntegrator over full strain trajectories."""
+
+    def test_analytical_vs_fortran(self, yu_3d_scenario, fortran_mod):
+        """Strict crosscheck: analytical Python == Fortran (stress<1e-6, state<1e-6, tangent<1e-5)."""
+        model, strain_history = yu_3d_scenario
+        fc_int = _make_fc_int(fortran_mod, model)
+        py_int = PythonAnalyticalIntegrator(model)
+        load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
+
+        cc = CrosscheckStrainDriver(py_int, fc_int, stress_tol=1e-6, tangent_tol=1e-5, state_tol=1e-6)
+        result = cc.run(load)
+
+        assert result.passed, (
+            f"CrosscheckStrainDriver failed: "
+            f"max_stress_rel_err={result.max_stress_rel_err:.2e}, "
+            f"n_passed={result.n_passed}/{result.n_cases}"
+        )
+        assert result.max_stress_rel_err < 1e-6
+

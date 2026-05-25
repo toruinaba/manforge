@@ -126,6 +126,10 @@ class YUKinematic3D(YUKinematic):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
 
+    @verified_against_fortran(
+        "yu_kinematic_3d",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestCrosscheckTrajectory::test_analytical_vs_fortran",
+    )
     def user_defined_return_mapping(
             self, stress_trial: anp.ndarray, C: anp.ndarray, state_n: dict
         ):
@@ -418,6 +422,10 @@ class YUKinematic3D(YUKinematic):
         Rl = np.hstack((Rl_s, Rl_l, Rl_t, Rl_b))
         return np.vstack((Rs, Rl.reshape(1, -1), Rt, Rb))
 
+    @verified_against_fortran(
+        "yu_calc_ddsdde",
+        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestReturnMapping::test_single_plastic_step_ddsdde",
+    )
     def calc_ddsdde(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
         C_inv = anp.linalg.inv(C)
