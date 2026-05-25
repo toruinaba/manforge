@@ -131,8 +131,8 @@ Fortran UMAT (`subroutine umat` in `fortran/yu_kinematic_3d.f90`) を ABAQUS で
 ```
 *MATERIAL, NAME=YU_KINEMATIC
 *USER MATERIAL, CONSTANTS=12
-** E,       nu,    Y,    B,     C_1,    C_2,   Rsat,   k,    b,     h,     Ea,    xi
-  210000., 0.3, 250., 520., 35000., 14000., 180., 8.5, 14., 0.4, 2000., 250.
+** E,        nu,    Y,    B,    C_1,   C_2,  Rsat,   k,   b,   h,      Ea,   xi
+  206000., 0.3, 360., 435., 2000., 200., 255., 26., 66., 0.4, 159000., 61.
 *DEPVAR
 22
 ```
