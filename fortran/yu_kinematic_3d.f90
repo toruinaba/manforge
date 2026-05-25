@@ -1602,3 +1602,112 @@ subroutine yu_kinematic_3d( &
     eps_eq_out = eps_eq_new
 
 end subroutine yu_kinematic_3d
+
+
+! =============================================================================
+! umat -- ABAQUS UMAT interface for YUKinematic3D
+!
+! Thin shim that unpacks PROPS(12) and STATEV(22) into named arguments
+! and calls yu_kinematic_3d.  Non-convergence is signalled to ABAQUS
+! via PNEWDT = 0.5 (request to halve the time increment).
+!
+! PROPS layout: see file header (PROPS(1)=E .. PROPS(12)=xi_param)
+! STATEV layout: see file header (STATEV(1..6)=theta .. STATEV(22)=theta_max)
+! =============================================================================
+subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
+                RPL, DDSDDT, DRPLDE, DRPLDT, &
+                STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP, &
+                PREDEF, DPRED, CMNAME, NDI, NSHR, NTENS, &
+                NSTATV, PROPS, NPROPS, COORDS, DROT, PNEWDT, &
+                CELENT, DFGRD0, DFGRD1, NOEL, NPT, LAYER, &
+                KSPT, KSTEP, KINC)
+    implicit none
+    character(len=80),    intent(in)    :: CMNAME
+    integer,              intent(in)    :: NDI, NSHR, NTENS, NSTATV, NPROPS
+    integer,              intent(in)    :: NOEL, NPT, LAYER, KSPT, KSTEP, KINC
+    double precision,     intent(inout) :: STRESS(NTENS)
+    double precision,     intent(inout) :: STATEV(NSTATV)
+    double precision,     intent(out)   :: DDSDDE(NTENS, NTENS)
+    double precision,     intent(out)   :: SSE, SPD, SCD, RPL, DRPLDT
+    double precision,     intent(out)   :: DDSDDT(NTENS), DRPLDE(NTENS)
+    double precision,     intent(in)    :: STRAN(NTENS), DSTRAN(NTENS)
+    double precision,     intent(in)    :: TIME(2), DTIME, TEMP, DTEMP
+    double precision,     intent(in)    :: PREDEF(1), DPRED(1)
+    double precision,     intent(in)    :: PROPS(NPROPS), COORDS(3)
+    double precision,     intent(in)    :: DROT(3,3), DFGRD0(3,3), DFGRD1(3,3)
+    double precision,     intent(inout) :: PNEWDT
+    double precision,     intent(in)    :: CELENT
+
+    double precision :: theta_n(6), beta_n(6), Rbnd_n, q_n(6), rstag_n
+    double precision :: eps_eq_n, theta_max_n
+    double precision :: stress_out(6), theta_out(6), beta_out(6), Rbnd_out
+    double precision :: q_out(6), rstag_out, eps_eq_out, theta_max_out
+    double precision :: ddsdde_local(6,6)
+    integer :: i, j, n_iter, converged
+
+    ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
+    if (NTENS /= 6 .or. NDI /= 3 .or. NSHR /= 3 .or. &
+        NSTATV < 22 .or. NPROPS < 12) then
+        write(*,'(A)') 'YUKinematic3D UMAT: incompatible element/material definition.'
+        write(*,'(A,I0,A,I0,A,I0)') '  Expected NTENS=6 NDI=3 NSHR=3, got NTENS=', &
+            NTENS, ' NDI=', NDI, ' NSHR=', NSHR
+        write(*,'(A,I0,A,I0)') '  Expected NSTATV>=22 NPROPS>=12, got NSTATV=', &
+            NSTATV, ' NPROPS=', NPROPS
+        PNEWDT = 0.0d0
+        return
+    end if
+
+    ! STATEV unpack
+    do i = 1, 6
+        theta_n(i) = STATEV(i)
+        beta_n(i)  = STATEV(6 + i)
+        q_n(i)     = STATEV(13 + i)
+    end do
+    Rbnd_n      = STATEV(13)
+    rstag_n     = STATEV(20)
+    eps_eq_n    = STATEV(21)
+    theta_max_n = STATEV(22)
+
+    call yu_kinematic_3d( &
+        PROPS(1), PROPS(2), PROPS(3), PROPS(4), PROPS(5), PROPS(6), &
+        PROPS(7), PROPS(8), PROPS(9), PROPS(10), PROPS(11), PROPS(12), &
+        STRESS, &
+        theta_n, beta_n, Rbnd_n, q_n, rstag_n, eps_eq_n, theta_max_n, &
+        DSTRAN, &
+        stress_out, &
+        theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
+        ddsdde_local, n_iter, converged)
+
+    ! Write-back stress and tangent
+    do i = 1, NTENS
+        STRESS(i) = stress_out(i)
+        do j = 1, NTENS
+            DDSDDE(i, j) = ddsdde_local(i, j)
+        end do
+    end do
+
+    ! STATEV repack
+    do i = 1, 6
+        STATEV(i)      = theta_out(i)
+        STATEV(6 + i)  = beta_out(i)
+        STATEV(13 + i) = q_out(i)
+    end do
+    STATEV(13) = Rbnd_out
+    STATEV(20) = rstag_out
+    STATEV(21) = eps_eq_out
+    STATEV(22) = theta_max_out
+
+    ! Non-convergence: request ABAQUS to reduce the time increment.
+    ! Use min() to avoid accidentally relaxing a smaller cutback already in PNEWDT.
+    if (converged == 0) then
+        PNEWDT = min(PNEWDT, 0.5d0)
+    end if
+
+    ! Zero unused output fields
+    SSE = 0.0d0; SPD = 0.0d0; SCD = 0.0d0; RPL = 0.0d0; DRPLDT = 0.0d0
+    do i = 1, NTENS
+        DDSDDT(i) = 0.0d0
+        DRPLDE(i) = 0.0d0
+    end do
+
+end subroutine umat
