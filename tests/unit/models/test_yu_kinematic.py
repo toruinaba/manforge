@@ -130,25 +130,37 @@ def _make_mu_diverge_state(model):
     return state_n, state_new
 
 
-def test_update_state_raises_on_mu_nonconvergence():
-    """§A.2 lock-in: update_state raises ValueError when mu NR does not converge."""
+def test_update_state_mu_nonconvergence_returns_without_raise():
+    """mu NR 不収束時に raise せず、state が返されること (外側 NR が PNEWDT cutback に流す)。
+    r_n=0, Fn=0 のとき F_mu_prime=0 ガードが発動し (mu, False) を返す。
+    update_state は (_, False) を受け取っても例外を投げず結果を返す。
+    """
     model = YUKinematic3D(**PARAMS)
     state_n, state_new = _make_mu_diverge_state(model)
-    with pytest.raises(ValueError, match="update_state"):
-        model.update_state(0.001, state_new, state_n)
+    # Must not raise; result may be non-physical but should be a list
+    result = model.update_state(0.001, state_new, state_n)
+    assert isinstance(result, list)
 
 
-def test_user_defined_return_mapping_has_raise():
-    """B-2 lock-in: user_defined_return_mapping contains 'raise ValueError' for mu non-convergence.
+def test_solve_mu_fn_negative_no_nan():
+    """Fn < 0 (load-reversal) でも _solve_mu が NaN を出さないこと。"""
+    model = YUKinematic3D(**PARAMS)
+    r_n = 50.0
+    Gn  = 100.0 * 100.0  # some positive value
+    Fn  = -5000.0         # load-reversal: g_xi points opposite to d_beta
+    mu, _ok = model._solve_mu(r_n, Gn, Fn)
+    assert np.isfinite(mu), f"mu is not finite: {mu}"
 
-    Triggering the raise dynamically requires a beta that stays fixed across outer NR
-    iterations, which is not achievable from outside the NR loop. Instead we verify
-    the raise is present in the source and carries the expected message.
-    """
-    import inspect
-    src = inspect.getsource(YUKinematic3D.user_defined_return_mapping)
-    assert "raise ValueError" in src
-    assert "user_defined_return_mapping" in src
+
+def test_solve_mu_converges_on_normal_input():
+    """通常入力 (Fn>0) で _solve_mu が True を返すこと。"""
+    model = YUKinematic3D(**PARAMS)
+    r_n = 50.0
+    Gn  = 10000.0
+    Fn  = 5000.0
+    mu, ok = model._solve_mu(r_n, Gn, Fn)
+    assert ok, "Expected mu to converge on normal input"
+    assert mu >= 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -229,17 +229,21 @@ class TestJacobianBlocks:
         np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
     def test_dRtheta_dlambda(self, plastic_state, fortran_mod):
+        from manforge.utils.smooth import smooth_heaviside
         m, state, state_n, dlambda = plastic_state
         xi = m.dev(state["stress"]) - state["theta"] - state["beta"]
         theta = state["theta"]
         theta_max = float(state["theta_max"])
         R = float(state["R"])
         R_n = float(state_n["R"])
-        py = m.dRtheta_dlambda(xi, theta, theta_max, R, R_n, dlambda)
+        g_xi   = np.asarray(state["beta"]) - np.asarray(state_n["q"])
+        g_stag = float(m.vonmises_norm(g_xi)) - float(state_n["r"])
+        g_flag = float(smooth_heaviside(g_stag))
+        py = m.dRtheta_dlambda(xi, theta, theta_max, R, R_n, dlambda, g_flag)
         f = fortran_mod.call(
             "yu_drt_dlambda",
             m.B, m.Y, m.k, m.Rsat, m.C_1, m.C_2,
-            xi, theta, theta_max, R, R_n, dlambda,
+            xi, theta, theta_max, R, R_n, dlambda, g_flag,
         )
         np.testing.assert_allclose(py, f, rtol=1e-10, atol=1e-12)
 
@@ -324,7 +328,8 @@ class TestResidualAndJacobian:
                     *props,
                     state["stress"], state["theta"], state["beta"],
                     float(state["R"]), float(state["eps_eq"]),
-                    float(state["theta_max"]), float(state_n["R"]), dl,
+                    float(state_n["theta_max"]), float(state_n["R"]),
+                    state_n["q"], float(state_n["r"]), dl,  # q_n, rstag_n, dlambda
                 )
                 np.testing.assert_allclose(
                     np.asarray(py_j), np.asarray(f_j),

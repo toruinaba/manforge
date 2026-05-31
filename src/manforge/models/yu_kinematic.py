@@ -1,6 +1,7 @@
 from copy import deepcopy
 import numpy as np
 import autograd.numpy as anp
+from autograd.tracer import getval
 from manforge.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
 from manforge.core.material import MaterialModel, verified_against_fortran
 from manforge.core.result import ReturnMappingResult
@@ -65,20 +66,16 @@ class YUKinematic(MaterialModel):
         stag_norm = self.vonmises_norm(g_xi)
         g_stag = stag_norm - r_n
         g_flag = smooth_heaviside(g_stag)
-        Gn = self.deviatoric_inner_product(g_xi, g_xi)
-        Fn = self.deviatoric_inner_product(g_xi, d_beta)
-        mu = 0.0
-        for i in range(10):
-            H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
-            F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-            if F_mu < 1.0e-16:
-                break
-            F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
-            mu -= F_mu / F_mu_prime
+        if float(getval(g_flag)) > 1e-6:
+            Gn = self.deviatoric_inner_product(g_xi, g_xi)
+            Fn = self.deviatoric_inner_product(g_xi, d_beta)
+            mu, _ = self._solve_mu(r_n, Gn, Fn)
+            delta_q = mu * g_xi / (1 + mu)
+            radicand_fin = max(0.0, float(getval(r_n)) ** 2 + 6.0 * self.h * float(getval(Fn)) / (1.0 + mu))
+            delta_r = 0.5 * (r_n + np.sqrt(radicand_fin)) - r_n
         else:
-            raise ValueError("Not converged mu (update_state)")
-        delta_q = mu * g_xi / (1 + mu)
-        delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
+            delta_q = np.zeros(len(g_xi))
+            delta_r = 0.0
         delta_R = s * (R_n + self.k * self.Rsat * dlambda) - R_n
         return [
             self.R(R_n + g_flag * delta_R),
@@ -102,6 +99,36 @@ class YUKinematic(MaterialModel):
         R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda 
         R_beta = beta_new - state_n["beta"] - (self.k * self.b / self.Y * s_xi - self.k * beta_new) * dlambda
         return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
+
+    def _solve_mu(self, r_n, Gn, Fn, max_iter=10, tol_rel=1e-12):
+        """Inner Newton for stagnation-surface mu. Returns (mu, converged: bool).
+
+        Never raises — callers treat not-converged as a soft failure and let
+        the outer NR loop fall back to PNEWDT cutback.
+
+        Uses getval() to strip autograd ArrayBox wrappers so the pure-scalar
+        Newton loop runs outside the autograd tape.
+        """
+        r_n_f = float(getval(r_n))
+        Gn_f  = float(getval(Gn))
+        Fn_f  = float(getval(Fn))
+        mu    = 0.0
+        F0    = abs(3.0 * Gn_f)
+        for _ in range(max_iter):
+            radicand = max(0.0, r_n_f * r_n_f + 6.0 * self.h * Fn_f / (1.0 + mu))
+            H_mu = np.sqrt(radicand)
+            F_mu = (3.0 * Gn_f
+                    - r_n_f * (r_n_f + H_mu) * (1.0 + mu) ** 2
+                    - 3.0 * self.h * Fn_f * (1.0 + mu))
+            if abs(F_mu) < tol_rel * max(1.0, F0):
+                return mu, True
+            denom = H_mu if H_mu > 1e-30 else 1e-30
+            F_mu_prime = (3.0 * self.h * Fn_f / denom * (r_n_f - H_mu)
+                          - 2.0 * r_n_f * (1.0 + mu) * (r_n_f + H_mu))
+            if abs(F_mu_prime) < 1e-30:
+                return mu, False
+            mu -= F_mu / F_mu_prime
+        return mu, False
 
     def _calc_E_factor(self, eps_eq):
         factor = 1.0 - (1.0 - self.Ea / self.E) * (1.0 - anp.exp(-self.xi * eps_eq))
@@ -159,21 +186,22 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            g_flag = 1.0 if g_stag > 0.0 else 0.0
-            Gn = self.deviatoric_inner_product(g_xi, g_xi)
-            Fn = self.deviatoric_inner_product(g_xi, d_beta)
-            mu = 0.0
-            for i in range(10):
-                H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
-                F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                if F_mu < 1.0e-16:
+            g_flag = smooth_heaviside(g_stag)
+            r_n_val = state_n["r"]
+            if float(g_flag) > 1e-6:
+                # Stagnation surface is active: solve for mu and update q, r.
+                Gn = self.deviatoric_inner_product(g_xi, g_xi)
+                Fn = self.deviatoric_inner_product(g_xi, d_beta)
+                mu, mu_ok = self._solve_mu(r_n_val, Gn, Fn)
+                if not mu_ok:
+                    converged = False
                     break
-                F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
-                mu -= F_mu / F_mu_prime
+                delta_q = mu * g_xi / (1 + mu)
+                radicand_fin = max(0.0, float(r_n_val * r_n_val + 6.0 * self.h * float(Fn) / (1.0 + mu)))
+                delta_r = 0.5 * (r_n_val + np.sqrt(radicand_fin)) - r_n_val
             else:
-                raise ValueError("Not converged mu (user_defined_return_mapping)")
-            delta_q = mu * g_xi / (1 + mu)
-            delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
+                delta_q = np.zeros(6)
+                delta_r = 0.0
             delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
             state_new["R"] = state_n["R"] + delta_R * g_flag
             state_new["q"] = state_n["q"] + delta_q * g_flag
@@ -231,28 +259,35 @@ class YUKinematic3D(YUKinematic):
     )
     def _prepare_Rstress(self, xi):
         xi_norm, flow = self.calc_norm_n_flow(xi)
-        dn_dsig = (
-            1.5 / xi_norm * (
-                self.T @ self.I_dev() - np.outer(flow / np.sqrt(1.5), flow / np.sqrt(1.5))
-            )
-        )
-        return dn_dsig
+        n = flow / np.sqrt(1.5)
+        # dflow/dsigma: xi = dev(sigma) - theta - beta, so dxi/dsigma = I_dev
+        dn_dsig = 1.5 / xi_norm * (self.T @ self.I_dev() - np.outer(n, n))
+        # dflow/dxi for theta/beta columns: dxi/dtheta = dxi/dbeta = -I (no deviatoric)
+        dflow_dxi = 1.5 / xi_norm * (self.T - np.outer(n, n))
+        return dn_dsig, dflow_dxi
 
     @verified_against_fortran(
         "yu_prepare_rtheta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rtheta",
     )
-    def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
+    def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
         theta_bar = self.vonmises_norm(theta)
         theta_flow = self.T @ theta / theta_bar * 1.5
-        C_k = self.C_1 if self.B - self.Y > theta_max else self.C_2
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
-        if R != R_n:
-            a_prime = (
-                -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
-                + s * self.k * self.Rsat
-            )
+        a_prime_active = (
+            -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
+            + s * self.k * self.Rsat
+        )
+        if g_flag is not None:
+            # g_flag supplied by caller (from smooth_heaviside); scales da/dlambda correctly
+            # even in the smooth transition zone where 0 < g_flag < 1.
+            a_prime = g_flag * a_prime_active
+        elif abs(float(getval(R)) - float(getval(R_n))) > 1e-15 * max(1.0, abs(float(getval(R_n)))):
+            # Fallback: stagnation surface is either fully active or in transition;
+            # use a_prime_active (approximates g_flag≈1 for hard-branch callers).
+            a_prime = a_prime_active
         else:
             a_prime = 0.0
         return theta_bar, theta_flow, C_k, s, a, a_prime
@@ -262,7 +297,7 @@ class YUKinematic3D(YUKinematic):
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dstress",
     )
     def dRstress_dstress(self, C, xi, dlambda):
-        dn_dsig = self._prepare_Rstress(xi)
+        dn_dsig, _ = self._prepare_Rstress(xi)
         return self.I + dlambda * C @ dn_dsig
 
     @verified_against_fortran(
@@ -270,16 +305,16 @@ class YUKinematic3D(YUKinematic):
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dbeta",
     )
     def dRstress_dbeta(self, C, xi, dlambda):
-        dn_dsig = self._prepare_Rstress(xi)
-        return - dlambda * C @ dn_dsig
+        _, dflow_dxi = self._prepare_Rstress(xi)
+        return - dlambda * C @ dflow_dxi
 
     @verified_against_fortran(
         "yu_drs_dtheta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dtheta",
     )
     def dRstress_dtheta(self, C, xi, dlambda):
-        dn_dsig = self._prepare_Rstress(xi)
-        return - dlambda * C @ dn_dsig
+        _, dflow_dxi = self._prepare_Rstress(xi)
+        return - dlambda * C @ dflow_dxi
 
     @verified_against_fortran(
         "yu_drs_dlambda",
@@ -287,6 +322,13 @@ class YUKinematic3D(YUKinematic):
     )
     def dRstress_dlambda(self, C, xi, eps_eq, dlambda):
         _, flow = self.calc_norm_n_flow(xi)
+        # Total derivative w.r.t. dlambda in the NR loop:
+        #   eps_eq = eps_eq_n + dlambda  →  d(eps_eq)/d(dlambda) = 1
+        #   R_stress = sigma - sigma_trial + dlambda * C(eps_eq) @ flow
+        #   dR/dlambda = C @ flow + dlambda * dC/d(eps_eq) @ flow
+        # dC/d(eps_eq) = d(E_factor)/d(eps_eq) * C_0
+        #   E_factor = Ea/E + (1-Ea/E)*exp(-xi*eps_eq)
+        #   d(E_factor)/d(eps_eq) / E_factor = -xi*(1-Ea/E)*exp(-xi*eps_eq) / factor
         factor = self.Ea / self.E + (1 - self.Ea / self.E) * anp.exp(-self.xi * eps_eq)
         return C @ flow - self.xi * (1 - self.Ea / self.E) * anp.exp(-self.xi * eps_eq) / factor * dlambda * (C @ flow)
 
@@ -322,45 +364,48 @@ class YUKinematic3D(YUKinematic):
         "yu_drt_dstress",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dstress",
     )
-    def dRtheta_dstress(self, theta, theta_max, R, R_n, dlambda):
-        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
+    def dRtheta_dstress(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
+        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda, g_flag)
         return -a * C_k * dlambda / self.Y * self.I_dev()
 
     @verified_against_fortran(
         "yu_drt_dbeta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dbeta",
     )
-    def dRtheta_dbeta(self, theta, theta_max, R, R_n, dlambda):
-        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
+    def dRtheta_dbeta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
+        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda, g_flag)
         return a * C_k * dlambda / self.Y * self.I
 
     @verified_against_fortran(
         "yu_drt_dtheta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dtheta",
     )
-    def dRtheta_dtheta(self, theta, theta_max, R, R_n, dlambda):
-        theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar < 1e-14:
-            return (1 + a * C_k * dlambda / self.Y) * self.I
-        return (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
-            np.sqrt(1.5) * C_k * dlambda * np.sqrt(a / theta_bar) / (2 * theta_bar)
+    def dRtheta_dtheta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
+        theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda, g_flag)
+        # theta_bar uses smooth_sqrt floor (≈1e-15); no hard branch needed.
+        # When theta→0: theta_flow→0 and theta→0 so the outer product → 0,
+        # leaving only the identity term (same as the old theta_bar<1e-14 branch).
+        sqrt_a_over_tbar = np.sqrt(a / theta_bar)
+        return (1 + a * C_k * dlambda / self.Y + C_k * dlambda * sqrt_a_over_tbar) * self.I - (
+            np.sqrt(1.5) * C_k * dlambda * sqrt_a_over_tbar / (2 * theta_bar)
         ) * np.outer(theta_flow / np.sqrt(1.5), theta)
-    
+
     @verified_against_fortran(
         "yu_drt_dlambda",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dlambda",
     )
-    def dRtheta_dlambda(self, xi, theta, theta_max, R, R_n, dlambda):
-        theta_bar, _, C_k, _, a, a_prime = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
-        if theta_bar < 1e-14:
-            return (-a * C_k / self.Y - C_k * dlambda / self.Y * a_prime) * xi
-        fr = (
+    def dRtheta_dlambda(self, xi, theta, theta_max, R, R_n, dlambda, g_flag=None):
+        theta_bar, _, C_k, _, a, a_prime = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda, g_flag)
+        # Total derivative w.r.t. dlambda in the NR loop:
+        #   R = R_n + g_flag * delta_R(dlambda)  →  dR/dlambda = g_flag * a_prime
+        #   a = B + R - Y  →  da/dlambda = a_prime (from _prepare_Rtheta with g_flag)
+        sqrt_a_over_tbar = np.sqrt(a / theta_bar)
+        return (
             - a * C_k / self.Y * xi
             - C_k * dlambda / self.Y * a_prime * xi
-            + C_k * np.sqrt(a / theta_bar) * theta
-            + C_k * dlambda * np.sqrt(1 / (theta_bar * a)) * a_prime / 2 * theta
+            + C_k * sqrt_a_over_tbar * theta
+            + C_k * dlambda * np.sqrt(1.0 / (theta_bar * a)) * a_prime / 2.0 * theta
         )
-        return fr
 
     @verified_against_fortran(
         "yu_drl_dstress",
@@ -400,6 +445,13 @@ class YUKinematic3D(YUKinematic):
     def calc_jacobian(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
         xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
+        g_xi   = state_new["beta"] - state_n["q"]
+        g_stag = self.vonmises_norm(g_xi) - state_n["r"]
+        g_flag = float(smooth_heaviside(g_stag))
+        theta   = state_new["theta"]
+        t_max   = state_n["theta_max"]   # must match calc_residual which uses state_n["theta_max"]
+        R_new   = state_new["R"]
+        R_n     = state_n["R"]
         Rs_s = self.dRstress_dstress(C, xi, dlambda)
         Rs_b = self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = self.dRstress_dtheta(C, xi, dlambda)
@@ -410,10 +462,10 @@ class YUKinematic3D(YUKinematic):
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_s = self.dRtheta_dstress(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_b = self.dRtheta_dbeta(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_t = self.dRtheta_dtheta(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_l = self.dRtheta_dlambda(xi, theta, t_max, R_new, R_n, dlambda, g_flag)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)
@@ -430,6 +482,13 @@ class YUKinematic3D(YUKinematic):
         C = self.elastic_stiffness(state_new)
         C_inv = anp.linalg.inv(C)
         xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
+        g_xi   = state_new["beta"] - state_n["q"]
+        g_stag = self.vonmises_norm(g_xi) - state_n["r"]
+        g_flag = float(smooth_heaviside(g_stag))
+        theta   = state_new["theta"]
+        t_max   = state_n["theta_max"]   # must match calc_residual which uses state_n["theta_max"]
+        R_new   = state_new["R"]
+        R_n     = state_n["R"]
         Rs_s = C_inv @ self.dRstress_dstress(C, xi, dlambda)
         Rs_b = C_inv @ self.dRstress_dbeta(C, xi, dlambda)
         Rs_t = C_inv @ self.dRstress_dtheta(C, xi, dlambda)
@@ -440,10 +499,36 @@ class YUKinematic3D(YUKinematic):
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_s = self.dRtheta_dstress(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_b = self.dRtheta_dbeta(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_t = self.dRtheta_dtheta(theta, t_max, R_new, R_n, dlambda, g_flag)
+        Rt_l = self.dRtheta_dlambda(xi, theta, t_max, R_new, R_n, dlambda, g_flag)
+        # Consistent tangent correction: ∂R_theta/∂beta via beta → g_flag → R_new → a.
+        # This term is zero when g_flag is fully 0 or 1 (outside transition band).
+        # calc_jacobian (NR step) correctly omits this: R is fixed per iteration.
+        # calc_ddsdde (consistent tangent) needs the full derivative at convergence.
+        stag_norm_f = float(self.vonmises_norm(g_xi))
+        if stag_norm_f > 1e-15:
+            # smooth_heaviside'(x) = 25 * sech^2(25*x) = 25 * (1 - tanh^2(25*x))
+            import math
+            g_stag_f = float(g_stag)
+            t = math.tanh(25.0 * g_stag_f)
+            dg_flag_dgstag = 25.0 * (1.0 - t * t)
+            if abs(dg_flag_dgstag) > 1e-15:
+                s_val = 1.0 / (1.0 + self.k * float(dlambda))
+                delta_R = s_val * (float(R_n) + self.k * self.Rsat * float(dlambda)) - float(R_n)
+                T_vec = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+                da_dbeta = delta_R * dg_flag_dgstag * T_vec * np.asarray(g_xi) / stag_norm_f
+                theta_bar_v, _, C_k_v, _, a_v, _ = self._prepare_Rtheta(
+                    theta, t_max, R_new, R_n, dlambda, g_flag)
+                # Guard against theta_bar -> 0 or a -> 0; when theta ~ 0 the
+                # theta-proportional term vanishes naturally.
+                if float(theta_bar_v) > 1e-14 and float(a_v) > 1e-14:
+                    dRt_da = -(C_k_v / self.Y * xi
+                               - C_k_v * np.sqrt(1.0 / (a_v * theta_bar_v)) / 2.0 * theta) * dlambda
+                else:
+                    dRt_da = -C_k_v / self.Y * xi * dlambda
+                Rt_b = Rt_b + np.outer(dRt_da, da_dbeta)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)

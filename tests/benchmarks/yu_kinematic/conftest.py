@@ -42,6 +42,38 @@ def _3d_uniaxial_cyclic():
     ).data
 
 
+def _3d_pure_shear():
+    """Pure shear (gamma12 only): 0 -> +0.005 -> -0.005 -> +0.005."""
+    data = FieldHistory.cyclic_strain(
+        [5e-3, -5e-3, 5e-3], n_per_segment=30, ntens=6,
+    ).data
+    # Reroute all strain into shear component 3 (index 3 = gamma12), not axial
+    shear = data[:, 0].copy()
+    data[:] = 0.0
+    data[:, 3] = shear
+    return data
+
+
+def _3d_load_reversal_fast():
+    """Uniaxial load-reversal: +0.01 -> -0.01 (fast, 1 cycle)."""
+    return FieldHistory.cyclic_strain(
+        [0.01, -0.01], n_per_segment=30, ntens=6,
+    ).data
+
+
+def _3d_stagnation_crossing():
+    """Large then small amplitude to force stagnation-surface crossing."""
+    large = FieldHistory.cyclic_strain(
+        [0.04, -0.04], n_per_segment=30, ntens=6,
+    ).data
+    small = FieldHistory.cyclic_strain(
+        [0.005, -0.005, 0.005], n_per_segment=15, ntens=6,
+    ).data
+    # Continue from endpoint of large cycle
+    small = small + large[-1]
+    return np.vstack([large, small])
+
+
 # ---------------------------------------------------------------------------
 # 1D scenario builders
 # ---------------------------------------------------------------------------
@@ -64,9 +96,12 @@ def _1d_uniaxial_cyclic():
 # ---------------------------------------------------------------------------
 
 _3D_SCENARIOS = {
-    "uniaxial_monotonic":     (_3d_uniaxial_monotonic, False),
+    "uniaxial_monotonic":     (_3d_uniaxial_monotonic,     False),
     "small_amplitude_cyclic": (_3d_small_amplitude_cyclic, False),
-    "uniaxial_cyclic":        (_3d_uniaxial_cyclic, True),
+    "uniaxial_cyclic":        (_3d_uniaxial_cyclic,        True),
+    "pure_shear":             (_3d_pure_shear,             False),
+    "load_reversal_fast":     (_3d_load_reversal_fast,     False),
+    "stagnation_crossing":    (_3d_stagnation_crossing,    True),
 }
 
 _1D_SCENARIOS = {

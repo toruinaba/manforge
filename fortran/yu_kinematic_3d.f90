@@ -201,16 +201,19 @@ end subroutine yu_calc_norm_n_flow
 !
 ! Parameters
 ! ----------
-! xi       [in]  : 6-component deviatoric driving stress
-! dn_dsig  [out] : (6,6) partial derivative matrix
+! xi          [in]  : 6-component deviatoric driving stress
+! dn_dsig     [out] : (6,6) dflow/dsigma = 1.5/xi_norm*(T@I_dev - n_hat*n_hat^T)
+! dflow_dxi   [out] : (6,6) dflow/dxi   = 1.5/xi_norm*(T       - n_hat*n_hat^T)
+!                           (for theta/beta columns: dxi/dtheta = dxi/dbeta = -I,
+!                            no deviatoric projection)
 ! =============================================================================
-subroutine yu_prepare_rstress(xi, dn_dsig)
+subroutine yu_prepare_rstress(xi, dn_dsig, dflow_dxi)
     implicit none
     double precision, intent(in)  :: xi(6)
-    double precision, intent(out) :: dn_dsig(6,6)
+    double precision, intent(out) :: dn_dsig(6,6), dflow_dxi(6,6)
 
     double precision :: xi_norm, flow(6)
-    double precision :: n_hat(6), T_I_dev(6,6), P_ij
+    double precision :: n_hat(6), T_I_dev(6,6), T_mat(6,6), P_ij
     double precision, parameter :: SQRT15 = 1.2247448713915890d0  ! sqrt(1.5)
     integer :: ii, jj
 
@@ -221,9 +224,8 @@ subroutine yu_prepare_rstress(xi, dn_dsig)
         n_hat(ii) = flow(ii) / SQRT15
     end do
 
-    ! T_I_dev = T @ I_dev
-    ! T = diag(1,1,1,2,2,2)
-    ! I_dev_ij = delta_ij - 1/3 * [i<=3 and j<=3]
+    ! T_I_dev = T @ I_dev  and  T_mat = T = diag(1,1,1,2,2,2)
+    ! T = diag(1,1,1,2,2,2), I_dev_ij = delta_ij - 1/3 * [i<=3 and j<=3]
     do ii = 1, 6
         do jj = 1, 6
             P_ij = 0.0d0
@@ -231,15 +233,19 @@ subroutine yu_prepare_rstress(xi, dn_dsig)
             if (ii <= 3 .and. jj <= 3) P_ij = P_ij - 1.0d0/3.0d0
             if (ii > 3) then
                 T_I_dev(ii,jj) = 2.0d0 * P_ij
+                T_mat(ii,jj)   = 0.0d0
             else
                 T_I_dev(ii,jj) = P_ij
+                T_mat(ii,jj)   = 0.0d0
             end if
         end do
+        T_mat(ii,ii) = merge(2.0d0, 1.0d0, ii > 3)
     end do
 
     do ii = 1, 6
         do jj = 1, 6
-            dn_dsig(ii,jj) = 1.5d0 / xi_norm * (T_I_dev(ii,jj) - n_hat(ii) * n_hat(jj))
+            dn_dsig(ii,jj)   = 1.5d0 / xi_norm * (T_I_dev(ii,jj) - n_hat(ii) * n_hat(jj))
+            dflow_dxi(ii,jj) = 1.5d0 / xi_norm * (T_mat(ii,jj)   - n_hat(ii) * n_hat(jj))
         end do
     end do
 
@@ -281,6 +287,7 @@ subroutine yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
     double precision, intent(out) :: theta_bar, theta_flow(6), C_k, s, a, a_prime
 
     integer :: ii
+    double precision :: g_ck, h_ck
 
     call yu_vonmises_norm(theta, theta_bar)
 
@@ -291,18 +298,17 @@ subroutine yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
         theta_flow(ii) = 3.0d0 * theta(ii) / theta_bar
     end do
 
-    ! Hard step (Jacobian side): matches Python _prepare_Rtheta line 224
-    if (B_bnd - Y > theta_max) then
-        C_k = C_1
-    else
-        C_k = C_2
-    end if
+    ! Smooth heaviside (matches residual side and Python _prepare_Rtheta)
+    ! C_k = C_1 - (C_1-C_2) * smooth_heaviside(theta_max - (B-Y))
+    g_ck = theta_max - (B_bnd - Y)
+    call yu_smooth_heaviside(g_ck, h_ck)
+    C_k = C_1 - (C_1 - C_2) * h_ck
 
     s = 1.0d0 / (1.0d0 + k * dlambda)
     a = B_bnd + R - Y
 
-    ! Floating-point equality: matches Python _prepare_Rtheta line 227
-    if (R /= R_n) then
+    ! Relative-tolerance comparison (avoids floating-point equality trap)
+    if (abs(R - R_n) > 1.0d-15 * max(1.0d0, abs(R_n))) then
         a_prime = -k * s * s * (R_n + k * Rsat * dlambda) + s * k * Rsat
     else
         a_prime = 0.0d0
@@ -328,10 +334,10 @@ subroutine yu_dRs_dstress(C, xi, dlambda, jmat)
     double precision, intent(in)  :: C(6,6), xi(6), dlambda
     double precision, intent(out) :: jmat(6,6)
 
-    double precision :: dn_dsig(6,6)
+    double precision :: dn_dsig(6,6), dflow_dxi(6,6)
     integer :: ii, jj, kk
 
-    call yu_prepare_rstress(xi, dn_dsig)
+    call yu_prepare_rstress(xi, dn_dsig, dflow_dxi)
 
     do ii = 1, 6
         do jj = 1, 6
@@ -356,16 +362,16 @@ subroutine yu_dRs_dbeta(C, xi, dlambda, jmat)
     double precision, intent(in)  :: C(6,6), xi(6), dlambda
     double precision, intent(out) :: jmat(6,6)
 
-    double precision :: dn_dsig(6,6)
+    double precision :: dn_dsig(6,6), dflow_dxi(6,6)
     integer :: ii, jj, kk
 
-    call yu_prepare_rstress(xi, dn_dsig)
+    call yu_prepare_rstress(xi, dn_dsig, dflow_dxi)
 
     do ii = 1, 6
         do jj = 1, 6
             jmat(ii,jj) = 0.0d0
             do kk = 1, 6
-                jmat(ii,jj) = jmat(ii,jj) - dlambda * C(ii,kk) * dn_dsig(kk,jj)
+                jmat(ii,jj) = jmat(ii,jj) - dlambda * C(ii,kk) * dflow_dxi(kk,jj)
             end do
         end do
     end do
@@ -422,8 +428,12 @@ subroutine yu_dRs_dlambda(E, Ea, xi_param, C, xi, eps_eq, dlambda, jvec)
         end do
     end do
 
+    ! Total derivative w.r.t. dlambda in the NR loop:
+    !   eps_eq = eps_eq_n + dlambda  ->  d(eps_eq)/d(dlambda) = 1
+    !   dR/dlambda = C@flow + dlambda * dC/d(eps_eq) @ flow
+    !   d(E_factor)/d(eps_eq) / E_factor = -xi*(1-Ea/E)*exp(-xi*eps_eq) / factor
     exp_term = exp(-xi_param * eps_eq)
-    factor = Ea / E + (1.0d0 - Ea / E) * exp_term
+    factor   = Ea / E + (1.0d0 - Ea / E) * exp_term
 
     do ii = 1, 6
         jvec(ii) = Cn(ii) - xi_param * (1.0d0 - Ea / E) * exp_term / factor * dlambda * Cn(ii)
@@ -629,24 +639,17 @@ subroutine yu_dRt_dtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
         end do
     end do
 
-    if (theta_bar < 1.0d-14) then
-        ! Degenerate case: only diagonal term (Python line 276)
-        diag_coeff = 1.0d0 + a * C_k * dlambda / Y
-        do ii = 1, 6
-            jmat(ii,ii) = diag_coeff
+    ! theta_bar uses smooth_sqrt floor (~1e-15); no hard branch needed.
+    ! When theta->0: theta_flow->0 and theta->0 so outer product -> 0 automatically.
+    diag_coeff  = 1.0d0 + a * C_k * dlambda / Y &
+                  + C_k * dlambda * sqrt(a / theta_bar)
+    outer_coeff = SQRT15 * C_k * dlambda * sqrt(a / theta_bar) / (2.0d0 * theta_bar)
+    do ii = 1, 6
+        do jj = 1, 6
+            jmat(ii,jj) = -outer_coeff * (theta_flow(ii) / SQRT15) * theta(jj)
         end do
-    else
-        diag_coeff  = 1.0d0 + a * C_k * dlambda / Y &
-                      + C_k * dlambda * sqrt(a / theta_bar)
-        outer_coeff = SQRT15 * C_k * dlambda * sqrt(a / theta_bar) / (2.0d0 * theta_bar)
-        do ii = 1, 6
-            do jj = 1, 6
-                ! outer product: (theta_flow/sqrt(1.5))_i * theta_j
-                jmat(ii,jj) = -outer_coeff * (theta_flow(ii) / SQRT15) * theta(jj)
-            end do
-            jmat(ii,ii) = jmat(ii,ii) + diag_coeff
-        end do
-    end if
+        jmat(ii,ii) = jmat(ii,ii) + diag_coeff
+    end do
 
 end subroutine yu_dRt_dtheta
 
@@ -658,32 +661,29 @@ end subroutine yu_dRt_dtheta
 ! Has a theta_bar < 1e-14 guard (Python line 283).
 ! =============================================================================
 subroutine yu_dRt_dlambda(B_bnd, Y, k, Rsat, C_1, C_2, &
-                           xi, theta, theta_max, R, R_n, dlambda, jvec)
+                           xi, theta, theta_max, R, R_n, dlambda, g_flag, jvec)
     implicit none
     double precision, intent(in)  :: B_bnd, Y, k, Rsat, C_1, C_2
-    double precision, intent(in)  :: xi(6), theta(6), theta_max, R, R_n, dlambda
+    double precision, intent(in)  :: xi(6), theta(6), theta_max, R, R_n, dlambda, g_flag
     double precision, intent(out) :: jvec(6)
 
-    double precision :: theta_bar, theta_flow(6), C_k, s, a, a_prime
+    double precision :: theta_bar, theta_flow(6), C_k, s, a, a_prime, a_prime_eff
     integer :: ii
 
     call yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
                            theta, theta_max, R, R_n, dlambda, &
                            theta_bar, theta_flow, C_k, s, a, a_prime)
 
-    if (theta_bar < 1.0d-14) then
-        ! Degenerate case (Python line 284)
-        do ii = 1, 6
-            jvec(ii) = (-a * C_k / Y - C_k * dlambda / Y * a_prime) * xi(ii)
-        end do
-    else
-        do ii = 1, 6
-            jvec(ii) = - a * C_k / Y * xi(ii) &
-                       - C_k * dlambda / Y * a_prime * xi(ii) &
-                       + C_k * sqrt(a / theta_bar) * theta(ii) &
-                       + C_k * dlambda * sqrt(1.0d0 / (theta_bar * a)) * a_prime / 2.0d0 * theta(ii)
-        end do
-    end if
+    ! yu_prepare_rtheta returns a_prime without g_flag scaling.
+    ! Apply g_flag here: da/dlambda = g_flag * a_prime_active (total derivative).
+    a_prime_eff = g_flag * a_prime
+
+    do ii = 1, 6
+        jvec(ii) = - a * C_k / Y * xi(ii) &
+                   - C_k * dlambda / Y * a_prime_eff * xi(ii) &
+                   + C_k * sqrt(a / theta_bar) * theta(ii) &
+                   + C_k * dlambda * sqrt(1.0d0 / (theta_bar * a)) * a_prime_eff / 2.0d0 * theta(ii)
+    end do
 
 end subroutine yu_dRt_dlambda
 
@@ -909,12 +909,13 @@ end subroutine yu_calc_residual
 ! =============================================================================
 subroutine yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                              stress_new, theta_new, beta_new, R_new, eps_eq_new, &
-                             theta_max_new, R_n, dlambda, &
+                             theta_max_new, R_n, q_n, rstag_n, dlambda, &
                              jac)
     implicit none
     double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
     double precision, intent(in)  :: stress_new(6), theta_new(6), beta_new(6)
     double precision, intent(in)  :: R_new, eps_eq_new, theta_max_new, R_n, dlambda
+    double precision, intent(in)  :: q_n(6), rstag_n
     double precision, intent(out) :: jac(19,19)
 
     double precision :: C(6,6), dev_stress(6), xi(6)
@@ -922,6 +923,7 @@ subroutine yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi
     double precision :: Rb_s(6,6), Rb_b(6,6), Rb_t(6,6), Rb_l(6)
     double precision :: Rt_s(6,6), Rt_b(6,6), Rt_t(6,6), Rt_l(6)
     double precision :: Rl_s(6), Rl_b(6), Rl_t(6), Rl_l
+    double precision :: g_xi(6), stag_norm, g_stag, g_flag
     integer :: ii, jj
 
     call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
@@ -930,6 +932,14 @@ subroutine yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi
     do ii = 1, 6
         xi(ii) = dev_stress(ii) - theta_new(ii) - beta_new(ii)
     end do
+
+    ! g_flag for total derivative (da/dlambda = g_flag * a_prime_active)
+    do ii = 1, 6
+        g_xi(ii) = beta_new(ii) - q_n(ii)
+    end do
+    call yu_vonmises_norm(g_xi, stag_norm)
+    g_stag = stag_norm - rstag_n
+    call yu_smooth_heaviside(g_stag, g_flag)
 
     ! Rstress blocks
     call yu_dRs_dstress(C, xi, dlambda, Rs_s)
@@ -951,7 +961,7 @@ subroutine yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi
     call yu_dRt_dtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
                        theta_new, theta_max_new, R_new, R_n, dlambda, Rt_t)
     call yu_dRt_dlambda(B_bnd, Y, k, Rsat, C_1, C_2, &
-                        xi, theta_new, theta_max_new, R_new, R_n, dlambda, Rt_l)
+                        xi, theta_new, theta_max_new, R_new, R_n, dlambda, g_flag, Rt_l)
 
     ! Ryield blocks
     call yu_dRl_dstress(xi, Rl_s)
@@ -1146,15 +1156,21 @@ subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
     info = 1
 
     do i = 1, 10
-        H_mu = sqrt(r_n*r_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
+        H_mu = sqrt(max(0.0d0, r_n*r_n + 6.0d0*h*Fn / (1.0d0 + mu)) + EPS_SQRT**2)
         F_mu = 3.0d0*Gn - r_n*(r_n + H_mu)*(1.0d0+mu)**2 &
              - 3.0d0*h*Fn*(1.0d0 + mu)
-        if (F_mu < 1.0d-16) then
+        if (abs(F_mu) < 1.0d-12 * max(1.0d0, abs(3.0d0*Gn))) then
             info = 0
+            exit
+        end if
+        if (H_mu < 1.0d-30) then
             exit
         end if
         F_mu_prime = 3.0d0*h*Fn/H_mu*(r_n - H_mu) &
                    - 2.0d0*r_n*(1.0d0+mu)*(r_n + H_mu)
+        if (abs(F_mu_prime) < 1.0d-30) then
+            exit
+        end if
         mu = mu - F_mu / F_mu_prime
     end do
 
@@ -1183,24 +1199,87 @@ end subroutine yu_inner_mu_newton
 ! =============================================================================
 subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                            stress_new, theta_new, beta_new, R_new, eps_eq_new, &
-                           theta_max_new, R_n, dlambda, &
+                           theta_max_new, R_n, q_n, rstag_n, dlambda, &
                            ddsdde)
     implicit none
     double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
     double precision, intent(in)  :: stress_new(6), theta_new(6), beta_new(6)
     double precision, intent(in)  :: R_new, eps_eq_new, theta_max_new, R_n, dlambda
+    double precision, intent(in)  :: q_n(6), rstag_n
     double precision, intent(out) :: ddsdde(6,6)
 
     double precision :: jac(19,19), C(6,6), C_inv(6,6), C_work(6,6)
     double precision :: rhs19(19,19), jac_stress_block(6,19)
     integer :: ii, jj, kk, info_lu
     double precision, parameter :: ZERO = 0.0d0, ONE = 1.0d0
+    ! Chain rule correction variables
+    double precision :: g_xi(6), stag_norm, g_stag, g_flag_val
+    double precision :: dg_flag_dgstag, delta_R, s_fac
+    double precision :: da_dbeta(6), dRt_da(6), theta_bar, theta_flow(6)
+    double precision :: C_k, s_tmp, a_val, a_prime_tmp
+    double precision :: dev_stress(6), xi_vec(6)
+    double precision :: tanh_val
 
     ! Step 1: Build full 19x19 Jacobian
     call yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                           stress_new, theta_new, beta_new, R_new, eps_eq_new, &
-                          theta_max_new, R_n, dlambda, &
+                          theta_max_new, R_n, q_n, rstag_n, dlambda, &
                           jac)
+
+    ! Step 1b: Consistent tangent correction to Rt_b block (rows 7-12, cols 14-19).
+    ! Adds d(R_theta)/d(beta) via beta -> g_flag -> R_new -> a chain rule.
+    ! This term is nonzero only in the smooth-heaviside transition band (|g_stag| < ~0.1).
+    ! calc_jacobian (NR step) correctly omits this: R is fixed per NR iteration.
+    do ii = 1, 6
+        g_xi(ii) = beta_new(ii) - q_n(ii)
+    end do
+    call yu_vonmises_norm(g_xi, stag_norm)
+    if (stag_norm > 1.0d-15) then
+        g_stag = stag_norm - rstag_n
+        ! smooth_heaviside'(x) = 25 * sech^2(25*x) = 25 * (1 - tanh^2(25*x))
+        tanh_val = tanh(25.0d0 * g_stag)
+        dg_flag_dgstag = 25.0d0 * (1.0d0 - tanh_val * tanh_val)
+        if (abs(dg_flag_dgstag) > 1.0d-15) then
+            s_fac   = 1.0d0 / (1.0d0 + k * dlambda)
+            delta_R = s_fac * (R_n + k * Rsat * dlambda) - R_n
+            ! da/dbeta_j = delta_R * dg_flag/dgstag * T_j * g_xi_j / stag_norm
+            do ii = 1, 3
+                da_dbeta(ii) = delta_R * dg_flag_dgstag * g_xi(ii) / stag_norm
+            end do
+            do ii = 4, 6
+                da_dbeta(ii) = delta_R * dg_flag_dgstag * 2.0d0 * g_xi(ii) / stag_norm
+            end do
+            ! dRt_da = -(C_k/Y * xi - C_k * sqrt(1/(a*theta_bar))/2 * theta) * dlambda
+            call yu_smooth_heaviside(g_stag, g_flag_val)
+            call yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
+                                   theta_new, theta_max_new, R_new, R_n, dlambda, &
+                                   theta_bar, theta_flow, C_k, s_tmp, a_val, a_prime_tmp)
+            call yu_deviatoric(stress_new, dev_stress)
+            do ii = 1, 6
+                xi_vec(ii) = dev_stress(ii) - theta_new(ii) - beta_new(ii)
+            end do
+            ! Guard against theta_bar -> 0 (theta near zero: dRt_da -> 0 naturally)
+            if (theta_bar > 1.0d-14 .and. a_val > 1.0d-14) then
+                do ii = 1, 6
+                    dRt_da(ii) = -(C_k / Y * xi_vec(ii) &
+                                   - C_k * sqrt(1.0d0 / (a_val * theta_bar)) / 2.0d0 * theta_new(ii)) &
+                                 * dlambda
+                end do
+            else
+                do ii = 1, 6
+                    dRt_da(ii) = -C_k / Y * xi_vec(ii) * dlambda
+                end do
+            end if
+            ! Add outer(dRt_da, da_dbeta) to jac rows 8-13 (Rt block), cols 14-19 (beta)
+            ! Layout: row 1-6=Rs, row 7=Rl, rows 8-13=Rt, rows 14-19=Rb
+            !         col 1-6=s,  col 7=l,  cols 8-13=t,  cols 14-19=b
+            do ii = 1, 6
+                do jj = 1, 6
+                    jac(7 + ii, 13 + jj) = jac(7 + ii, 13 + jj) + dRt_da(ii) * da_dbeta(jj)
+                end do
+            end do
+        end if
+    end if
 
     ! Step 2: Reconstruct C and compute C_inv via 6x6 LU solve (C_work A, C_inv as I->X)
     call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
@@ -1491,7 +1570,7 @@ subroutine yu_kinematic_3d( &
         ! Jacobian and linear solve
         call yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                               stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
-                              theta_max_n, Rbnd_n, dlambda, &
+                              theta_max_n, Rbnd_n, q_n, rstag_n, dlambda, &
                               jac)
 
         do ii = 1, 19
@@ -1522,40 +1601,43 @@ subroutine yu_kinematic_3d( &
         end do
         call yu_vonmises_norm(g_xi, stag_norm)
         g_stag = stag_norm - rstag_n
-        if (g_stag > 0.0d0) then
-            g_flag = 1.0d0
+        call yu_smooth_heaviside(g_stag, g_flag)
+
+        ! delta_q, delta_rstag: only needed when stagnation surface is active.
+        ! When g_flag == 0, these are multiplied out so mu need not be solved.
+        if (g_flag > 1.0d-6) then
+            ! deviatoric_inner_product for SOLID_3D:
+            !   Gn = sum(g_xi(1:3)^2) + 2*sum(g_xi(4:6)^2)   (Mandel)
+            !   Fn = sum(g_xi(1:3)*d_beta(1:3)) + 2*sum(g_xi(4:6)*d_beta(4:6))
+            Gn = 0.0d0
+            Fn = 0.0d0
+            do ii = 1, 3
+                Gn = Gn + g_xi(ii)**2
+                Fn = Fn + g_xi(ii) * d_beta(ii)
+            end do
+            do ii = 4, 6
+                Gn = Gn + 2.0d0 * g_xi(ii)**2
+                Fn = Fn + 2.0d0 * g_xi(ii) * d_beta(ii)
+            end do
+
+            call yu_inner_mu_newton(h, rstag_n, Gn, Fn, mu, info_mu)
+            if (info_mu /= 0) then
+                converged = 0
+                n_iter    = iter
+                exit
+            end if
+
+            do ii = 1, 6
+                delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
+            end do
+            H_mu_fin    = sqrt(max(0.0d0, rstag_n*rstag_n + 6.0d0*h*Fn / (1.0d0 + mu)) + EPS_SQRT**2)
+            delta_rstag = 0.5d0 * (rstag_n + H_mu_fin) - rstag_n
         else
-            g_flag = 0.0d0
+            do ii = 1, 6
+                delta_q(ii) = 0.0d0
+            end do
+            delta_rstag = 0.0d0
         end if
-
-        ! deviatoric_inner_product for SOLID_3D:
-        !   Gn = sum(g_xi(1:3)^2) + 2*sum(g_xi(4:6)^2)   (Mandel)
-        !   Fn = sum(g_xi(1:3)*d_beta(1:3)) + 2*sum(g_xi(4:6)*d_beta(4:6))
-        Gn = 0.0d0
-        Fn = 0.0d0
-        do ii = 1, 3
-            Gn = Gn + g_xi(ii)**2
-            Fn = Fn + g_xi(ii) * d_beta(ii)
-        end do
-        do ii = 4, 6
-            Gn = Gn + 2.0d0 * g_xi(ii)**2
-            Fn = Fn + 2.0d0 * g_xi(ii) * d_beta(ii)
-        end do
-
-        ! Inner mu Newton
-        call yu_inner_mu_newton(h, rstag_n, Gn, Fn, mu, info_mu)
-        if (info_mu /= 0) then
-            converged = 0
-            n_iter    = iter
-            exit
-        end if
-
-        ! delta_q, delta_rstag, delta_Rbnd
-        do ii = 1, 6
-            delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
-        end do
-        H_mu_fin   = sqrt(rstag_n*rstag_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
-        delta_rstag = 0.5d0 * (rstag_n + H_mu_fin) - rstag_n
         s_fac       = 1.0d0 / (1.0d0 + k * dlambda)
         delta_Rbnd  = s_fac * (Rbnd_n + k * Rsat * dlambda) - Rbnd_n
 
@@ -1580,12 +1662,14 @@ subroutine yu_kinematic_3d( &
 
     ! ==========================================================================
     ! Consistent tangent (DDSDDE)
-    ! Use theta_max_out (= smooth_max after NR) matching Python calc_ddsdde
-    ! which receives state_new["theta_max"] (already updated after NR loop).
+    ! Use theta_max_n (step-start value) to match calc_residual which uses
+    ! state_n["theta_max"] for C_k computation -- consistent with Python.
+    ! Pass q_n and r_n so calc_ddsdde/calc_jacobian can compute g_flag for
+    ! the total derivative (da/dlambda = g_flag * a_prime_active).
     ! ==========================================================================
     call yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                         stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
-                        theta_max_out, Rbnd_n, dlambda, &
+                        theta_max_n, Rbnd_n, q_n, rstag_n, dlambda, &
                         ddsdde)
 
     ! ==========================================================================
@@ -1643,6 +1727,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: stress_out(6), theta_out(6), beta_out(6), Rbnd_out
     double precision :: q_out(6), rstag_out, eps_eq_out, theta_max_out
     double precision :: ddsdde_local(6,6)
+    double precision :: tmp6(6)
     integer :: i, j, n_iter, converged
 
     ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
@@ -1668,6 +1753,23 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     eps_eq_n    = STATEV(21)
     theta_max_n = STATEV(22)
 
+    ! Rotate backstress tensors to co-rotational frame (NLGEOM=YES).
+    ! STRESS is already rotated by ABAQUS before calling UMAT.
+    ! STATEV tensors (theta, beta, q) must be rotated explicitly.
+    ! LSTR=1: stress-like (physical shear, not engineering shear).
+    call ROTSIG(theta_n, DROT, tmp6, 1, NDI, NSHR)
+    do i = 1, 6
+        theta_n(i) = tmp6(i)
+    end do
+    call ROTSIG(beta_n, DROT, tmp6, 1, NDI, NSHR)
+    do i = 1, 6
+        beta_n(i) = tmp6(i)
+    end do
+    call ROTSIG(q_n, DROT, tmp6, 1, NDI, NSHR)
+    do i = 1, 6
+        q_n(i) = tmp6(i)
+    end do
+
     call yu_kinematic_3d( &
         PROPS(1), PROPS(2), PROPS(3), PROPS(4), PROPS(5), PROPS(6), &
         PROPS(7), PROPS(8), PROPS(9), PROPS(10), PROPS(11), PROPS(12), &
@@ -1678,28 +1780,34 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde_local, n_iter, converged)
 
-    ! Write-back stress and tangent
-    do i = 1, NTENS
-        STRESS(i) = stress_out(i)
-        do j = 1, NTENS
-            DDSDDE(i, j) = ddsdde_local(i, j)
+    ! Write-back stress, tangent, and STATEV only on convergence.
+    ! On non-convergence, leave STRESS/STATEV unchanged so that ABAQUS
+    ! receives the original (pre-increment) state when it retries with a
+    ! smaller time increment (PNEWDT < 1).
+    if (converged == 1) then
+        do i = 1, NTENS
+            STRESS(i) = stress_out(i)
+            do j = 1, NTENS
+                DDSDDE(i, j) = ddsdde_local(i, j)
+            end do
         end do
-    end do
-
-    ! STATEV repack
-    do i = 1, 6
-        STATEV(i)      = theta_out(i)
-        STATEV(6 + i)  = beta_out(i)
-        STATEV(13 + i) = q_out(i)
-    end do
-    STATEV(13) = Rbnd_out
-    STATEV(20) = rstag_out
-    STATEV(21) = eps_eq_out
-    STATEV(22) = theta_max_out
-
-    ! Non-convergence: request ABAQUS to reduce the time increment.
-    ! Use min() to avoid accidentally relaxing a smaller cutback already in PNEWDT.
-    if (converged == 0) then
+        do i = 1, 6
+            STATEV(i)      = theta_out(i)
+            STATEV(6 + i)  = beta_out(i)
+            STATEV(13 + i) = q_out(i)
+        end do
+        STATEV(13) = Rbnd_out
+        STATEV(20) = rstag_out
+        STATEV(21) = eps_eq_out
+        STATEV(22) = theta_max_out
+    else
+        ! Non-convergence: return elastic tangent so the global solver has a
+        ! reasonable stiffness for the cutback step.
+        do i = 1, NTENS
+            do j = 1, NTENS
+                DDSDDE(i, j) = ddsdde_local(i, j)
+            end do
+        end do
         PNEWDT = min(PNEWDT, 0.5d0)
     end if
 
