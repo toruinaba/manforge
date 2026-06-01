@@ -509,16 +509,16 @@ class YUKinematic3D(YUKinematic):
         # calc_ddsdde (consistent tangent) needs the full derivative at convergence.
         stag_norm_f = float(self.vonmises_norm(g_xi))
         if stag_norm_f > 1e-15:
-            # smooth_heaviside'(x) = 25 * sech^2(25*x) = 25 * (1 - tanh^2(25*x))
+            # smooth_heaviside'(x) = 12.5 * sech^2(25*x) = 12.5 * (1 - tanh^2(25*x))
             import math
             g_stag_f = float(g_stag)
             t = math.tanh(25.0 * g_stag_f)
-            dg_flag_dgstag = 25.0 * (1.0 - t * t)
+            dg_flag_dgstag = 12.5 * (1.0 - t * t)
             if abs(dg_flag_dgstag) > 1e-15:
                 s_val = 1.0 / (1.0 + self.k * float(dlambda))
                 delta_R = s_val * (float(R_n) + self.k * self.Rsat * float(dlambda)) - float(R_n)
                 T_vec = np.array([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
-                da_dbeta = delta_R * dg_flag_dgstag * T_vec * np.asarray(g_xi) / stag_norm_f
+                da_dbeta = delta_R * dg_flag_dgstag * 1.5 * T_vec * np.asarray(g_xi) / stag_norm_f
                 theta_bar_v, _, C_k_v, _, a_v, _ = self._prepare_Rtheta(
                     theta, t_max, R_new, R_n, dlambda, g_flag)
                 # Guard against theta_bar -> 0 or a -> 0; when theta ~ 0 the
