@@ -118,7 +118,6 @@ def _calc_ddsdde_variant(model, state_new, state_n, stress_trial, dlambda, varia
             # A1: coefficient for smooth_heaviside'
             # HEAD uses 25.0;  fixed uses 12.5  (correct: 0.5*tanh*25 → deriv = 12.5*sech²)
             coeff = 12.5 if variant == "fixed" else 25.0
-            t_val = math.tanh(coeff / 12.5 * 12.5 * g_stag_f)  # tanh(25*x) either way
             t_val = math.tanh(25.0 * g_stag_f)
             dg_flag_dgstag = coeff * (1.0 - t_val * t_val)
             if abs(dg_flag_dgstag) > 1e-15:

@@ -37,7 +37,6 @@ from tests.fixtures.yu_fd import (
     fd_jacobian,
     fd_ddsdde,
     run_steps,
-    get_converged_state,
     pick_largest_dlambda,
     pick_min_gstag,
     uniaxial_plastic_step,

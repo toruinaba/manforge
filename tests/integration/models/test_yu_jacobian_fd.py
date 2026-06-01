@@ -11,9 +11,7 @@ obtain a converged state, then evaluate the Jacobian at that state.
 import numpy as np
 import pytest
 
-from manforge.models import YUKinematic3D
 from tests.fixtures.yu_fd import (
-    PARAMS,
     FD_RTOL_JAC as FD_RTOL,
     FD_ATOL_JAC as FD_ATOL,
     fd_jacobian,
