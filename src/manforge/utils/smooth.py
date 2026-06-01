@@ -11,7 +11,7 @@ Functions and their parameters:
   smooth_norm(v, eps=1e-30)        √(v·v + ε²)                ε: denominator stabiliser
   smooth_macaulay(x, eps=1e-30)    (x + smooth_abs(x)) / 2    ε: denominator stabiliser
   smooth_direction(v, eps=1e-30)   v / smooth_norm(v)          ε: denominator stabiliser
-  smooth_heaviside(x, beta=50.0)   0.5·(1 + tanh(β·x/2))      β: transition sharpness
+  smooth_heaviside(x, beta=500.0)  0.5·(1 + tanh(β·x/2))      β: transition sharpness
   smooth_min(a, b, eps=1e-30)      b + (d - smooth_abs(d)) / 2  ε: denominator stabiliser
   smooth_max(a, b, eps=1e-30)      b + (d + smooth_abs(d)) / 2  ε: denominator stabiliser
 
@@ -64,13 +64,15 @@ def smooth_direction(v: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
     return v / smooth_norm(v, eps)
 
 
-def smooth_heaviside(x: anp.ndarray, beta: float = 50.0) -> anp.ndarray:
+def smooth_heaviside(x: anp.ndarray, beta: float = 500.0) -> anp.ndarray:
     """Smooth Heaviside step: 0.5·(1 + tanh(β·x/2)).
 
     Uses :func:`_stable_tanh` so the autograd VJP follows ``1 − tanh²``
     instead of ``1 / cosh²``, avoiding overflow at ``|β·x/2| ≳ 354``
-    (i.e. ``|x| ≳ 709/β``; with default β=50, ``|x| ≳ 14.2``).
+    (i.e. ``|x| ≳ 709/β``; with default β=500, ``|x| ≳ 1.42``).
     At x=0 returns exactly 0.5; larger β gives a sharper transition.
+    With β=500 the transition zone (1%→99%) is ±0.0092 in x-units,
+    approximating a hard step while remaining fully differentiable.
     """
     return 0.5 * (1.0 + _stable_tanh(0.5 * beta * x))
 

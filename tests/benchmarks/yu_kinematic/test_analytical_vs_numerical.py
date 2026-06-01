@@ -7,29 +7,31 @@ YUKinematic3D across a variety of strain histories.
 YUKinematic1D has no analytical path (user_defined_return_mapping is 3D-only),
 so 1D coverage is smoke-only (autograd convergence + state monotonicity).
 
-Tolerance policy (evidence from _diagnose_jacobian.py, 2026-06-01):
+Tolerance policy (evidence from _diagnose_gflag_beta.py, 2026-06-01):
 
-  stress  : atol=5e-3
-    Remaining structural difference between the two paths: the analytical
-    outer loop uses a hard g_flag=1/0 branch for the stagnation-surface
-    state update (user_defined_return_mapping), while the autograd path
-    uses smooth_heaviside throughout (update_state). For multiaxial loading
-    this produces ~2.7e-3 divergence in accumulated stress.
+  smooth_heaviside beta raised from 50 → 500 to close the hard/smooth g_flag
+  gap. With beta=500, transition zone is ±0.0092 MPa — effectively hard step
+  while remaining fully differentiable.
+
+  stress  : atol=1e-4
+    multiaxial worst case: 1.5e-5 (was 2.7e-3 with beta=50).
+    Residual gap: hard g_flag in user_defined_return_mapping vs beta=500
+    smooth_heaviside in update_state.
 
   state   : per-key relative error (|Δ| / (|v| + 1))
-    R, q, r : atol=1e-2  — hard g_flag vs smooth_heaviside in stagnation
-              update; structural O(1e-2).
-    others  : atol=1e-4  — eps_eq, theta, beta, theta_max stay tight.
+    R, q, r : atol=1e-3  — beta=500 reduces stagnation-state divergence;
+              multiaxial worst case R=3e-4.
+    theta   : atol=1e-6  — beta=500 closes hard/smooth gap to ~8e-7.
+    others  : atol=1e-4  — eps_eq, beta, theta_max stay tight.
 
   tangent : max_rel_err < 2e-2
-    After fixing calc_jacobian (2026-06-01 bugs A+B), the structural
-    mismatch is now O(1e-3)–O(1e-2). Observed worst case: 1.4e-2 for
-    multiaxial loading. Tolerance 2e-2 provides a 1.5× margin.
+    Structural mismatch remains at ~1.4e-2 for multiaxial (hard vs smooth
+    g_flag paths reach slightly different convergence points).
+    Tolerance 2e-2 provides a 1.5× margin.
 
   NR iterations: diff <= 5
-    For most scenarios the counts match exactly (diff=0). Multiaxial
-    loading can differ by up to 4 due to the hard/smooth g_flag difference
-    leading to slightly different convergence paths.
+    Multiaxial can differ by up to 4 — hard/smooth g_flag leads to slightly
+    different NR paths even with beta=500.
 """
 
 import numpy as np
@@ -156,31 +158,30 @@ def test_smoke_convergence_and_monotonicity(yu_smoke_scenario):
 def test_analytical_matches_numerical(yu_3d_scenario):
     """Analytical and autograd integrators agree over the full strain history.
 
-    Tolerances are set from _diagnose_jacobian.py empirical data (2026-06-01).
+    Tolerances are set from _diagnose_gflag_beta.py empirical data (2026-06-01).
+    smooth_heaviside beta=500 (raised from 50) closes the hard/smooth g_flag gap.
 
-    B-A1: max stress error < 5e-3
-          (multiaxial reaches 2.7e-3; hard g_flag vs smooth_heaviside in the
-          outer stagnation-surface state update drives a structural divergence)
+    B-A1: max stress error < 1e-4 (multiaxial 1.5e-5 with beta=500)
     B-A2: per-state-key relative error
-          R/q/r < 1e-2, theta < 5e-4, others < 1e-4
-    B-A4: ddsdde max_rel_err < 2e-2 (improved after Jacobian bug fix)
-    B-A5: NR iteration count difference <= 5 (multiaxial can differ)
+          R/q/r < 1e-3 (multiaxial R=3e-4 with beta=500)
+          theta < 1e-6, others < 1e-4
+    B-A4: ddsdde max_rel_err < 2e-2
+    B-A5: NR iteration count difference <= 5 (multiaxial can differ by 4)
     """
     model, history = yu_3d_scenario
     errs = _run_and_compare(model, history)
 
     # B-A1: stress trajectory
-    assert errs["stress"] < 5e-3, f"stress err = {errs['stress']:.3e}"
+    assert errs["stress"] < 1e-4, f"stress err = {errs['stress']:.3e}"
 
     # B-A2: state variables (relative error)
     stagnation_keys = {"R", "q", "r"}
-    # theta can reach ~1.2e-4 for multiaxial after the Jacobian fix (hard/smooth g_flag)
-    loose_keys = {"theta"}
+    tight_keys = {"theta"}
     for k, v in errs["state"].items():
         if k in stagnation_keys:
-            atol = 1e-2
-        elif k in loose_keys:
-            atol = 5e-4
+            atol = 1e-3
+        elif k in tight_keys:
+            atol = 1e-6
         else:
             atol = 1e-4
         assert v < atol, f"state[{k!r}] rel_err = {v:.3e} (atol={atol:.0e})"
