@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
 
 # ---------------------------------------------------------------------------
 # Fortran build (host)
@@ -14,6 +14,10 @@ fortran-build:
 ## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
 	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
+
+## Compile YU Kinematic UMAT (abaqus_stubs + yu_kinematic_3d) into a Python extension via f2py
+fortran-build-yu:
+	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d.f90 -m yu_kinematic_3d
 
 # ---------------------------------------------------------------------------
 # Test targets
