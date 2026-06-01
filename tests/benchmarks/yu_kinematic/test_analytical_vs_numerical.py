@@ -167,8 +167,8 @@ def test_analytical_matches_numerical(yu_3d_scenario):
     B-A2: per-state-key relative error — R/q/r < 1e-2 (stagnation state
           updated via hard g_flag=1/0 in analytical vs smooth_heaviside in
           autograd; structural O(1e-2) across all plastic steps), others < 1e-4
-    B-A4: ddsdde max_rel_err < 1e-1 (structural analytical Jacobian
-          approximation; not transition-zone dependent, see _diagnose.py)
+    B-A4: ddsdde max_rel_err < 3e-2 (measured worst: ~1.1e-2 at stagnation_crossing;
+          structural analytical Jacobian approximation, not transition-zone dependent)
     B-A5: NR iteration count difference == 0 (exact match observed)
     """
     model, history = yu_3d_scenario
@@ -185,9 +185,9 @@ def test_analytical_matches_numerical(yu_3d_scenario):
 
     # B-A4: ddsdde — analytical (calc_ddsdde) vs autograd (_consistent_tangent).
     # calc_ddsdde includes the g_flag(beta)->R->a chain rule correction for the
-    # stagnation-surface transition band. Residual ~1-5% comes from other minor
+    # stagnation-surface transition band. Residual ~1% comes from other minor
     # autograd/analytical differences (update_state path vs residual formulation).
-    assert errs["tangent"] < 1e-1, f"ddsdde rel err = {errs['tangent']:.3e}"
+    assert errs["tangent"] < 3e-2, f"ddsdde rel err = {errs['tangent']:.3e}"
 
     # B-A5: iteration count — small diff allowed since analytical Jacobian omits
     # g_flag(beta) chain rule that autograd tracks via update_state.

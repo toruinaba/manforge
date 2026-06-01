@@ -1236,18 +1236,18 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
     call yu_vonmises_norm(g_xi, stag_norm)
     if (stag_norm > 1.0d-15) then
         g_stag = stag_norm - rstag_n
-        ! smooth_heaviside'(x) = 25 * sech^2(25*x) = 25 * (1 - tanh^2(25*x))
+        ! smooth_heaviside'(x) = 12.5 * sech^2(25*x) = 12.5 * (1 - tanh^2(25*x))
         tanh_val = tanh(25.0d0 * g_stag)
-        dg_flag_dgstag = 25.0d0 * (1.0d0 - tanh_val * tanh_val)
+        dg_flag_dgstag = 12.5d0 * (1.0d0 - tanh_val * tanh_val)
         if (abs(dg_flag_dgstag) > 1.0d-15) then
             s_fac   = 1.0d0 / (1.0d0 + k * dlambda)
             delta_R = s_fac * (R_n + k * Rsat * dlambda) - R_n
-            ! da/dbeta_j = delta_R * dg_flag/dgstag * T_j * g_xi_j / stag_norm
+            ! da/dbeta_j = delta_R * dg_flag/dgstag * 1.5 * T_j * g_xi_j / stag_norm
             do ii = 1, 3
-                da_dbeta(ii) = delta_R * dg_flag_dgstag * g_xi(ii) / stag_norm
+                da_dbeta(ii) = delta_R * dg_flag_dgstag * 1.5d0 * g_xi(ii) / stag_norm
             end do
             do ii = 4, 6
-                da_dbeta(ii) = delta_R * dg_flag_dgstag * 2.0d0 * g_xi(ii) / stag_norm
+                da_dbeta(ii) = delta_R * dg_flag_dgstag * 1.5d0 * 2.0d0 * g_xi(ii) / stag_norm
             end do
             ! dRt_da = -(C_k/Y * xi - C_k * sqrt(1/(a*theta_bar))/2 * theta) * dlambda
             call yu_smooth_heaviside(g_stag, g_flag_val)
