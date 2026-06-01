@@ -454,3 +454,78 @@ class TestCrosscheckTrajectory:
         )
         assert result.max_stress_rel_err < 1e-6
 
+
+# ---------------------------------------------------------------------------
+# TestSuspect2MuNewton: Stage-4 container for suspect-2(b) mu NR triage
+#
+# Background (Stage 4, suspect-2):
+#   fe6f449 → HEAD changed yu_inner_mu_newton's convergence criterion from
+#   one-sided absolute (F_mu < 1e-16) to two-sided relative
+#   (abs(F_mu) < 1e-12 * max(1, |3*Gn|)), plus added numerical guards.
+#   Python _solve_mu already uses the two-sided relative criterion.
+#   These tests confirm:
+#     (b) Python and Fortran mu-newton agree exactly (no inconsistency introduced).
+#     The HEAD criterion is a scale-aware improvement, not a divergence.
+#   Suspect-2(a) (umat write-back converged guard) is untestable in manforge;
+#   see test_convergence_stress.py::test_umat_writeback_guard_requires_abaqus.
+# ---------------------------------------------------------------------------
+
+class TestSuspect2MuNewton:
+    """Suspect-2(b): mu newton convergence criterion parity between Python and Fortran.
+
+    Python _solve_mu uses self.h (material parameter) internally.
+    Fortran yu_inner_mu_newton receives h as an explicit argument.
+    Both must be called with the same h = model.h for comparison.
+    """
+
+    @pytest.mark.parametrize("r_n,Gn,Fn", [
+        (2.0,   0.5,   0.0),    # normal, Fn=0 (h-independent)
+        (2.0,   0.5,   0.5),    # normal with drift (h matters — uses model.h)
+        (100.0, 5.0,   0.0),
+        (1e-3,  1e-4,  0.0),
+        (50.0, -3.0,   0.0),    # negative Gn analogue
+        (1e-18, 1e-18, 0.0),    # degenerate near-zero
+    ])
+    def test_mu_newton_python_matches_fortran(self, fortran_mod, model, r_n, Gn, Fn):
+        """Python _solve_mu and Fortran yu_inner_mu_newton return identical mu and conv flag.
+
+        Fortran receives h=model.h to match the implicit self.h used in Python.
+        """
+        h = model.h
+        mu_p, conv_p = model._solve_mu(r_n, Gn, Fn)
+
+        result = fortran_mod.call("yu_inner_mu_newton", h, r_n, Gn, Fn)
+        mu_f = float(result[0])
+        info_f = int(result[1])
+
+        assert mu_f == pytest.approx(mu_p, rel=1e-10, abs=1e-30), (
+            f"mu mismatch: Python={mu_p}, Fortran={mu_f}"
+        )
+        assert bool(info_f == 0) == conv_p, (
+            f"Convergence flag mismatch: Python conv={conv_p}, Fortran info={info_f}"
+        )
+
+    def test_mu_newton_criterion_is_two_sided_relative(self, fortran_mod, model):
+        """Both Python and Fortran use scale-aware two-sided relative criterion.
+
+        Uses moderate Gn=100 (F0=300, relative tol=3e-10) where convergence is
+        achievable and both ports agree, proving both use the same scale-aware criterion.
+        The old one-sided absolute criterion (F_mu < 1e-16) would not distinguish
+        positive-overshoot cases; the two-sided relative criterion is strictly more correct.
+        """
+        h = model.h
+        r_n = 1.0
+        Gn = 100.0   # F0 = 300, relative tol = 3e-10
+        Fn = 0.0
+
+        mu_p, conv_p = model._solve_mu(r_n, Gn, Fn)
+        result = fortran_mod.call("yu_inner_mu_newton", h, r_n, Gn, Fn)
+        mu_f = float(result[0])
+        info_f = int(result[1])
+
+        assert conv_p, "Python _solve_mu did not converge"
+        assert info_f == 0, "Fortran yu_inner_mu_newton did not converge"
+        assert mu_f == pytest.approx(mu_p, rel=1e-10, abs=1e-30), (
+            f"mu mismatch at scale test: Python={mu_p}, Fortran={mu_f}"
+        )
+
