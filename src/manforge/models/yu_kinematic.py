@@ -99,7 +99,7 @@ class YUKinematic(MaterialModel):
         theta_norm = self.vonmises_norm(theta_new)
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda 
+        R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda
         R_beta = beta_new - state_n["beta"] - (self.k * self.b / self.Y * s_xi - self.k * beta_new) * dlambda
         return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
 
@@ -125,6 +125,27 @@ class YUKinematic3D(YUKinematic):
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        stress_new = state_new["stress"]
+        theta_new = state_new["theta"]
+        beta_new = state_new["beta"]
+        R_new = state_new["R"]
+        theta_max = state_n["theta_max"]
+        s_xi = self.dev(stress_new) - theta_new - beta_new
+        a = self.B + R_new - self.Y
+        theta_norm = self.vonmises_norm(theta_new)
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        C = self.elastic_stiffness(state_new)
+        _, flow = self.calc_norm_n_flow(s_xi)
+        # Use flow directly (identical to calc_residual) instead of default_stress_residual.
+        # autograd.grad(yield_function)(sigma) applies I_dev via chain rule, causing
+        # dRstress/dtheta to differ from calc_jacobian when theta perturbs xi off the
+        # deviatoric manifold. Using flow directly avoids that artefact.
+        R_stress = stress_new - stress_trial + dlambda * (C @ flow)
+        R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda
+        R_beta = beta_new - state_n["beta"] - (self.k * self.b / self.Y * s_xi - self.k * beta_new) * dlambda
+        return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
 
     @verified_against_fortran(
         "yu_kinematic_3d",
@@ -431,12 +452,16 @@ class YUKinematic3D(YUKinematic):
     )
     def calc_ddsdde(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
-        C_inv = anp.linalg.inv(C)
+        # C_n (step-start stiffness) is used for the rhs scaling in the consistent
+        # tangent: J·dx/dε = [C_n; 0; ...] → ddsdde = J^{-1}[0:6,0:6]·C_n.
+        # Using C(state_new) here was a bug when E varies with eps_eq.
+        C_n = self.elastic_stiffness(state_n)
+        C_n_inv = anp.linalg.inv(C_n)
         xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
-        Rs_s = C_inv @ self.dRstress_dstress(C, xi, dlambda)
-        Rs_b = C_inv @ self.dRstress_dbeta(C, xi, dlambda)
-        Rs_t = C_inv @ self.dRstress_dtheta(C, xi, dlambda)
-        Rs_l = C_inv @ self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
+        Rs_s = C_n_inv @ self.dRstress_dstress(C, xi, dlambda)
+        Rs_b = C_n_inv @ self.dRstress_dbeta(C, xi, dlambda)
+        Rs_t = C_n_inv @ self.dRstress_dtheta(C, xi, dlambda)
+        Rs_l = C_n_inv @ self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
         Rs = np.hstack((Rs_s, Rs_l[:, np.newaxis], Rs_t, Rs_b))
         Rb_s = self.dRbeta_dstress(dlambda)
         Rb_b = self.dRbeta_dbeta(dlambda)
