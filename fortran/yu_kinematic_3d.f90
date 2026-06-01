@@ -1643,6 +1643,8 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: stress_out(6), theta_out(6), beta_out(6), Rbnd_out
     double precision :: q_out(6), rstag_out, eps_eq_out, theta_max_out
     double precision :: ddsdde_local(6,6)
+    double precision :: theta_rot(6), beta_rot(6), q_rot(6)
+    double precision :: theta_out_rot(6), beta_out_rot(6), q_out_rot(6)
     integer :: i, j, n_iter, converged
 
     ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
@@ -1657,7 +1659,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         return
     end if
 
-    ! STATEV unpack
+    ! STATEV unpack + co-rotate tensor state variables
+    ! STRESS is already co-rotated by ABAQUS before UMAT entry (no ROTSIG needed).
+    ! theta, beta, q are deviatoric stress-like tensors stored in STATEV and must
+    ! be co-rotated here so the return-mapping operates in the rotated frame.
     do i = 1, 6
         theta_n(i) = STATEV(i)
         beta_n(i)  = STATEV(6 + i)
@@ -1668,11 +1673,15 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     eps_eq_n    = STATEV(21)
     theta_max_n = STATEV(22)
 
+    call ROTSIG(theta_n, DROT, theta_rot, 1, NDI, NSHR)
+    call ROTSIG(beta_n,  DROT, beta_rot,  1, NDI, NSHR)
+    call ROTSIG(q_n,     DROT, q_rot,     1, NDI, NSHR)
+
     call yu_kinematic_3d( &
         PROPS(1), PROPS(2), PROPS(3), PROPS(4), PROPS(5), PROPS(6), &
         PROPS(7), PROPS(8), PROPS(9), PROPS(10), PROPS(11), PROPS(12), &
         STRESS, &
-        theta_n, beta_n, Rbnd_n, q_n, rstag_n, eps_eq_n, theta_max_n, &
+        theta_rot, beta_rot, Rbnd_n, q_rot, rstag_n, eps_eq_n, theta_max_n, &
         DSTRAN, &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
@@ -1687,6 +1696,8 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     end do
 
     ! STATEV repack
+    ! theta_out, beta_out, q_out are already in the rotated frame (return mapping
+    ! was performed there); no further rotation needed before storing.
     do i = 1, 6
         STATEV(i)      = theta_out(i)
         STATEV(6 + i)  = beta_out(i)
