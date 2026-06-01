@@ -225,18 +225,21 @@ class YUKinematic3D(YUKinematic):
         r_vector = anp.hstack((R_stress, R_yield, R_theta, R_beta))
         return r_vector
 
+    def _dflow_dxi(self, xi):
+        """∂flow/∂ξ  (no I_dev projection; use for dRstress/dtheta and dRstress/dbeta).
+
+        flow = 1.5·T@ξ / |ξ|_VM,  dflow/dξ = 1.5/|ξ| · (T − outer(n̂, n̂))
+        where n̂ = flow/√1.5  (unit-norm direction).
+        """
+        xi_norm, flow = self.calc_norm_n_flow(xi)
+        return 1.5 / xi_norm * (self.T - np.outer(flow / np.sqrt(1.5), flow / np.sqrt(1.5)))
+
     @verified_against_fortran(
         "yu_prepare_rstress",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rstress",
     )
     def _prepare_Rstress(self, xi):
-        xi_norm, flow = self.calc_norm_n_flow(xi)
-        dn_dsig = (
-            1.5 / xi_norm * (
-                self.T @ self.I_dev() - np.outer(flow / np.sqrt(1.5), flow / np.sqrt(1.5))
-            )
-        )
-        return dn_dsig
+        return self._dflow_dxi(xi) @ self.I_dev()
 
     @verified_against_fortran(
         "yu_prepare_rtheta",
@@ -245,7 +248,7 @@ class YUKinematic3D(YUKinematic):
     def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar = self.vonmises_norm(theta)
         theta_flow = self.T @ theta / theta_bar * 1.5
-        C_k = self.C_1 if self.B - self.Y > theta_max else self.C_2
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
         if R != R_n:
@@ -270,16 +273,16 @@ class YUKinematic3D(YUKinematic):
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dbeta",
     )
     def dRstress_dbeta(self, C, xi, dlambda):
-        dn_dsig = self._prepare_Rstress(xi)
-        return - dlambda * C @ dn_dsig
+        # ∂ξ/∂β = -I (no dev projection), so use _dflow_dxi without I_dev
+        return -dlambda * C @ self._dflow_dxi(xi)
 
     @verified_against_fortran(
         "yu_drs_dtheta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dtheta",
     )
     def dRstress_dtheta(self, C, xi, dlambda):
-        dn_dsig = self._prepare_Rstress(xi)
-        return - dlambda * C @ dn_dsig
+        # ∂ξ/∂θ = -I (no dev projection), so use _dflow_dxi without I_dev
+        return -dlambda * C @ self._dflow_dxi(xi)
 
     @verified_against_fortran(
         "yu_drs_dlambda",
@@ -410,10 +413,10 @@ class YUKinematic3D(YUKinematic):
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_s = self.dRtheta_dstress(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)
@@ -440,10 +443,10 @@ class YUKinematic3D(YUKinematic):
         Rb_t = self.dRbeta_dtheta(dlambda)
         Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.dRtheta_dstress(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
-        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_new["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_s = self.dRtheta_dstress(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Rl_s = self.dRyield_dstress(xi)
         Rl_b = self.dRyield_dbeta(xi)
