@@ -12,8 +12,11 @@ Test classes:
     TestResidualAndJacobian  -- calc_residual + calc_jacobian over trajectories
     TestReturnMapping        -- yu_kinematic_3d core (return mapping + ddsdde)
     TestCrosscheckTrajectory -- PythonAnalyticalIntegrator vs FortranIntegrator
+    TestUmatShim             -- ABAQUS umat entry point (PROPS/STATEV packing, PNEWDT)
+    TestParamOrder           -- param_names order matches yu_kinematic_3d dummy args
 """
 
+import re
 import numpy as np
 import pytest
 
@@ -448,4 +451,200 @@ class TestCrosscheckTrajectory:
             f"n_passed={result.n_passed}/{result.n_cases}"
         )
         assert result.max_stress_rel_err < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Helpers for umat calls
+# ---------------------------------------------------------------------------
+
+def _pack_statev(state):
+    """Pack a state dict into STATEV(22) following the Fortran layout.
+
+    Layout (1-indexed):
+        1..6  = theta(6)
+        7..12 = beta(6)
+        13    = R
+        14..19= q(6)
+        20    = r
+        21    = eps_eq
+        22    = theta_max
+    """
+    sv = np.zeros(22)
+    sv[0:6]   = np.asarray(state["theta"])
+    sv[6:12]  = np.asarray(state["beta"])
+    sv[12]    = float(state["R"])
+    sv[13:19] = np.asarray(state["q"])
+    sv[19]    = float(state["r"])
+    sv[20]    = float(state["eps_eq"])
+    sv[21]    = float(state["theta_max"])
+    return sv
+
+
+def _unpack_statev(sv):
+    """Unpack STATEV(22) back to a dict."""
+    return {
+        "theta":     sv[0:6].copy(),
+        "beta":      sv[6:12].copy(),
+        "R":         sv[12],
+        "q":         sv[13:19].copy(),
+        "r":         sv[19],
+        "eps_eq":    sv[20],
+        "theta_max": sv[21],
+    }
+
+
+def _call_umat(fortran_mod, model, stress_n, state_n, strain_inc, pnewdt_in=1.0):
+    """Call the ABAQUS umat entry point and return (stress_out, state_out, ddsdde, pnewdt_out)."""
+    import yu_kinematic_3d as fm
+    NTENS = 6
+    STRESS = np.asarray(stress_n, dtype=np.float64).copy()
+    STATEV = _pack_statev(state_n)
+    PROPS  = np.array([model.E, model.nu, model.Y, model.B,
+                       model.C_1, model.C_2, model.Rsat, model.k,
+                       model.b, model.h, model.Ea, model.xi], dtype=np.float64)
+    DSTRAN = np.asarray(strain_inc, dtype=np.float64)
+    STRAN  = np.zeros(NTENS)
+    TIME   = np.zeros(2); DTIME = 1.0; TEMP = 0.0; DTEMP = 0.0
+    PREDEF = np.zeros(1); DPRED = np.zeros(1)
+    CMNAME = b'YU      '
+    COORDS = np.zeros(3); DROT = np.eye(3)
+    CELENT = 1.0; DFGRD0 = np.eye(3); DFGRD1 = np.eye(3)
+    pnewdt = np.array(pnewdt_in, dtype=np.float64)
+
+    # umat returns: ddsdde, sse, spd, scd, rpl, ddsddt, drplde, drpldt
+    # STRESS and STATEV are modified in-place (intent(inout))
+    ret = fm.umat(STRESS, STATEV, STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP,
+                  PREDEF, DPRED, CMNAME, 3, 3,
+                  PROPS, COORDS, DROT, pnewdt, CELENT,
+                  DFGRD0, DFGRD1, 1, 1, 1, 1, 1, 1)
+    ddsdde = ret[0]
+    return STRESS.copy(), _unpack_statev(STATEV), ddsdde, float(pnewdt)
+
+
+# ---------------------------------------------------------------------------
+# TestUmatShim: ABAQUS umat entry point
+# ---------------------------------------------------------------------------
+
+class TestUmatShim:
+    """Verify the ABAQUS umat shim: PROPS/STATEV packing and PNEWDT logic."""
+
+    def test_umat_matches_core(self, plastic_state, fortran_mod):
+        """umat output (STRESS, STATEV, DDSDDE) matches yu_kinematic_3d core."""
+        m, _, _, _ = plastic_state
+        stress_n = np.zeros(6)
+        state_n = m.initial_state()
+        strain_inc = np.array([2e-3, -6e-4, -6e-4, 0.0, 0.0, 0.0])
+
+        # umat path
+        stress_u, state_u, ddsdde_u, _ = _call_umat(fortran_mod, m, stress_n, state_n, strain_inc)
+
+        # core path
+        ret_c = fortran_mod.call(
+            "yu_kinematic_3d",
+            m.E, m.nu, m.Y, m.B, m.C_1, m.C_2, m.Rsat, m.k, m.b, m.h, m.Ea, m.xi,
+            stress_n,
+            np.asarray(state_n["theta"]), np.asarray(state_n["beta"]),
+            float(state_n["R"]), np.asarray(state_n["q"]),
+            float(state_n["r"]), float(state_n["eps_eq"]), float(state_n["theta_max"]),
+            strain_inc,
+        )
+        # ret_c: (stress_out, theta_out, beta_out, R_out, q_out, r_out, eps_eq_out, theta_max_out, ddsdde, n_iter, converged)
+        stress_c = np.asarray(ret_c[0])
+        state_c = {
+            "theta": np.asarray(ret_c[1]), "beta": np.asarray(ret_c[2]),
+            "R": float(ret_c[3]), "q": np.asarray(ret_c[4]),
+            "r": float(ret_c[5]), "eps_eq": float(ret_c[6]), "theta_max": float(ret_c[7]),
+        }
+        ddsdde_c = np.asarray(ret_c[8])
+
+        np.testing.assert_allclose(stress_u, stress_c, rtol=1e-12, atol=1e-12,
+                                   err_msg="umat STRESS != core stress_out")
+        np.testing.assert_allclose(ddsdde_u, ddsdde_c, rtol=1e-12, atol=1e-12,
+                                   err_msg="umat DDSDDE != core ddsdde")
+        for key in ["theta", "beta", "q"]:
+            np.testing.assert_allclose(state_u[key], state_c[key], rtol=1e-12, atol=1e-12,
+                                       err_msg=f"umat STATEV {key} != core")
+        for key in ["R", "r", "eps_eq", "theta_max"]:
+            np.testing.assert_allclose(state_u[key], state_c[key], rtol=1e-12, atol=1e-12,
+                                       err_msg=f"umat STATEV {key} != core")
+
+    def test_umat_statev_roundtrip(self, plastic_state, fortran_mod):
+        """PROPS/STATEV packing roundtrip: umat matches PythonAnalyticalIntegrator."""
+        m, _, _, _ = plastic_state
+        stress_n = np.zeros(6)
+        state_n = m.initial_state()
+        strain_inc = np.array([2e-3, -6e-4, -6e-4, 0.0, 0.0, 0.0])
+
+        py_int = PythonAnalyticalIntegrator(m)
+        py_result = py_int.stress_update(strain_inc, stress_n, state_n)
+
+        stress_u, state_u, _, _ = _call_umat(fortran_mod, m, stress_n, state_n, strain_inc)
+
+        np.testing.assert_allclose(stress_u, np.asarray(py_result.stress),
+                                   rtol=1e-6, atol=1e-8,
+                                   err_msg="umat STRESS != Python stress")
+        for key in ["theta", "beta", "q"]:
+            np.testing.assert_allclose(state_u[key], np.asarray(py_result.state[key]),
+                                       rtol=1e-6, atol=1e-8,
+                                       err_msg=f"umat STATEV {key} != Python state")
+        for key in ["R", "r", "eps_eq", "theta_max"]:
+            np.testing.assert_allclose(state_u[key], float(py_result.state[key]),
+                                       rtol=1e-6, atol=1e-8,
+                                       err_msg=f"umat STATEV {key} != Python state")
+
+    def test_umat_pnewdt_elastic(self, model, fortran_mod):
+        """Elastic step: PNEWDT stays at 1.0 (no cutback requested)."""
+        strain_inc = np.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        _, _, _, pnewdt = _call_umat(fortran_mod, model, np.zeros(6), model.initial_state(), strain_inc)
+        assert pnewdt == 1.0
+
+    def test_umat_pnewdt_nonconvergence(self, model, fortran_mod):
+        """Non-converging input (extremely large strain): PNEWDT reduced to 0.5."""
+        strain_inc = np.array([10.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        _, _, _, pnewdt = _call_umat(fortran_mod, model, np.zeros(6), model.initial_state(), strain_inc)
+        assert pnewdt == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# TestParamOrder: param_names order matches yu_kinematic_3d dummy args
+# ---------------------------------------------------------------------------
+
+def _extract_yu_dummy_args(fortran_mod):
+    """Parse first 12 arg names from yu_kinematic_3d f2py __doc__."""
+    import yu_kinematic_3d as fm
+    doc = fm.yu_kinematic_3d.__doc__ or ""
+    first_line = doc.split("\n")[0]
+    m = re.search(r"\(([^)]+)\)", first_line)
+    if not m:
+        return []
+    return [a.strip().lower() for a in m.group(1).split(",")]
+
+
+class TestParamOrder:
+    """param_names order matches the first 12 dummy args of yu_kinematic_3d.
+
+    Fortran renames two params to avoid keyword collisions:
+        B (Python)  → b_bnd  (Fortran)
+        xi (Python) → xi_param (Fortran)
+    The test maps these before comparison.
+    """
+
+    # Python param_names → Fortran dummy arg name (only entries that differ)
+    _FORTRAN_NAME = {"B": "b_bnd", "b": "b_kin", "xi": "xi_param"}
+
+    def test_param_names_match_fortran_arg_order(self, fortran_mod):
+        from manforge.models import YUKinematic3D
+        model = YUKinematic3D(**PARAMS)
+        dummy_args = _extract_yu_dummy_args(fortran_mod)
+        n = len(model.param_names)
+        assert len(dummy_args) >= n, (
+            f"yu_kinematic_3d: expected at least {n} dummy args, got {len(dummy_args)}: {dummy_args}"
+        )
+        expected = [self._FORTRAN_NAME.get(p, p).lower() for p in model.param_names]
+        actual = dummy_args[:n]
+        assert actual == expected, (
+            f"param_names order mismatch:\n"
+            f"  expected (with Fortran renames): {expected}\n"
+            f"  actual   (from __doc__):         {actual}"
+        )
 

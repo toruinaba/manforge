@@ -42,6 +42,29 @@ def _3d_uniaxial_cyclic():
     ).data
 
 
+def _3d_shear_monotonic():
+    n = 60
+    data = np.zeros((n, 6))
+    data[:, 3] = np.linspace(0.0, 1.5e-2, n)
+    return data
+
+
+def _3d_multiaxial():
+    n = 60
+    t = np.linspace(0.0, 1.0, n)
+    data = np.zeros((n, 6))
+    data[:, 0] = 5e-3 * t
+    data[:, 3] = 8e-3 * np.sin(np.pi * t)
+    return data
+
+
+def _3d_branch_C2():
+    # 2% reversed cyclic: theta_max reaches ~181 > B-Y=75 → activates C_k=C_2 branch
+    return FieldHistory.cyclic_strain(
+        [0.02, -0.02, 0.02, -0.02], n_per_segment=30, ntens=6,
+    ).data
+
+
 # ---------------------------------------------------------------------------
 # 1D scenario builders
 # ---------------------------------------------------------------------------
@@ -67,6 +90,9 @@ _3D_SCENARIOS = {
     "uniaxial_monotonic":     (_3d_uniaxial_monotonic, False),
     "small_amplitude_cyclic": (_3d_small_amplitude_cyclic, False),
     "uniaxial_cyclic":        (_3d_uniaxial_cyclic, True),
+    "shear_monotonic":        (_3d_shear_monotonic, False),
+    "multiaxial":             (_3d_multiaxial, False),
+    "branch_C2":              (_3d_branch_C2, True),
 }
 
 _1D_SCENARIOS = {
