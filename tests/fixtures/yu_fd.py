@@ -27,11 +27,11 @@ PARAMS = dict(
 
 FD_EPS        = 1e-5   # step for Jacobian FD (residual-based)
 FD_H          = 1e-5   # step for DDSDDE FD (stress_update-based)
-FD_RTOL       = 2e-2   # relative tolerance (large-increment scenarios; Stage 5 will tighten)
+FD_RTOL       = 2e-2   # FD-truth-limited at ~1.2e-2 (stag_active); analytical Jacobian approx floor
 FD_ATOL       = 1e-1   # absolute tolerance (scaled to stiffness ~1e5)
 FD_RTOL_JAC   = 1e-4   # relative tolerance for Jacobian tests
 FD_ATOL_JAC   = 1e-3   # absolute tolerance for Jacobian tests
-FD_RTOL_BAND  = 5e-3   # tighter tolerance for stagnation transition band
+FD_RTOL_BAND  = 2e-3   # stagnation transition band; measured floor ~5.8e-4
 
 # ---------------------------------------------------------------------------
 # Scenario builders (cumulative total-strain histories, shape (N, 6))

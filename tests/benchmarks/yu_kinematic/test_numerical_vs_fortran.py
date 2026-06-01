@@ -414,7 +414,7 @@ class TestReturnMapping:
             )
 
     def test_single_plastic_step_ddsdde(self, plastic_state, fortran_mod):
-        """DDSDDE at a single plastic step matches (relaxed tolerance: 1e-4)."""
+        """DDSDDE at a single plastic step matches (rtol=1e-7, atol=1e-8)."""
         m, _, _, _ = plastic_state
         py_int = PythonAnalyticalIntegrator(m)
         stress_n_arr = np.zeros(6)
@@ -426,7 +426,7 @@ class TestReturnMapping:
         np.testing.assert_allclose(
             np.asarray(py_result.ddsdde),
             np.asarray(fc_result.ddsdde),
-            rtol=1e-5, atol=1e-5,
+            rtol=1e-7, atol=1e-8,
         )
 
 
@@ -438,13 +438,13 @@ class TestCrosscheckTrajectory:
     """PythonAnalyticalIntegrator vs FortranIntegrator over full strain trajectories."""
 
     def test_analytical_vs_fortran(self, yu_3d_scenario, fortran_mod):
-        """Strict crosscheck: analytical Python == Fortran (stress<1e-6, state<1e-6, tangent<1e-5)."""
+        """Strict crosscheck: analytical Python == Fortran (stress<1e-6, state<1e-6, tangent<1e-7)."""
         model, strain_history = yu_3d_scenario
         fc_int = _make_fc_int(fortran_mod, model)
         py_int = PythonAnalyticalIntegrator(model)
         load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 
-        cc = CrosscheckStrainDriver(py_int, fc_int, stress_tol=1e-6, tangent_tol=1e-5, state_tol=1e-6)
+        cc = CrosscheckStrainDriver(py_int, fc_int, stress_tol=1e-6, tangent_tol=1e-7, state_tol=1e-6)
         result = cc.run(load)
 
         assert result.passed, (
