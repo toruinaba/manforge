@@ -98,7 +98,7 @@ class TestHelpers:
     def test_prepare_rtheta(self, plastic_state, fortran_mod):
         m, state, state_n, dlambda = plastic_state
         theta = state["theta"]
-        theta_max = float(state["theta_max"])
+        theta_max = float(state_n["theta_max"])  # state_n: consistent with residual C_k
         R = float(state["R"])
         R_n = float(state_n["R"])
         py = m._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
@@ -327,7 +327,7 @@ class TestResidualAndJacobian:
                     *props,
                     state["stress"], state["theta"], state["beta"],
                     float(state["R"]), float(state["eps_eq"]),
-                    float(state["theta_max"]), float(state_n["R"]), dl,
+                    float(state_n["theta_max"]), float(state_n["R"]), dl,
                 )
                 np.testing.assert_allclose(
                     np.asarray(py_j), np.asarray(f_j),

@@ -280,6 +280,7 @@ subroutine yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
     double precision, intent(in)  :: theta(6), theta_max, R, R_n, dlambda
     double precision, intent(out) :: theta_bar, theta_flow(6), C_k, s, a, a_prime
 
+    double precision :: hv
     integer :: ii
 
     call yu_vonmises_norm(theta, theta_bar)
@@ -291,17 +292,14 @@ subroutine yu_prepare_rtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
         theta_flow(ii) = 3.0d0 * theta(ii) / theta_bar
     end do
 
-    ! Hard step (Jacobian side): matches Python _prepare_Rtheta line 224
-    if (B_bnd - Y > theta_max) then
-        C_k = C_1
-    else
-        C_k = C_2
-    end if
+    ! smooth_heaviside (consistent with residual): matches Python _prepare_Rtheta
+    call yu_smooth_heaviside(theta_max - (B_bnd - Y), hv)
+    C_k = C_1 - (C_1 - C_2) * hv
 
     s = 1.0d0 / (1.0d0 + k * dlambda)
     a = B_bnd + R - Y
 
-    ! Floating-point equality: matches Python _prepare_Rtheta line 227
+    ! Floating-point equality: matches Python _prepare_Rtheta line 251
     if (R /= R_n) then
         a_prime = -k * s * s * (R_n + k * Rsat * dlambda) + s * k * Rsat
     else
@@ -347,25 +345,75 @@ end subroutine yu_dRs_dstress
 
 
 ! =============================================================================
+! yu_dflow_dxi
+!
+! d(flow)/d(xi)  (without I_dev projection; use for dRs/dtheta and dRs/dbeta).
+!
+! flow = 1.5*T@xi / |xi|_VM,  d(flow)/d(xi) = 1.5/|xi| * (T - outer(n_hat, n_hat))
+! where n_hat = flow/sqrt(1.5)  (unit-norm direction).
+!
+! Unlike yu_prepare_rstress (which computes d(flow)/d(xi) @ I_dev for dRs/dstress),
+! this returns the un-projected derivative, needed because
+!   d(xi)/d(theta) = d(xi)/d(beta) = -I  (no deviatoric projection).
+!
+! Parameters
+! ----------
+! xi(6)    [in]  : deviatoric driving stress
+! dflow(6,6) [out] : result matrix
+! =============================================================================
+subroutine yu_dflow_dxi(xi, dflow)
+    implicit none
+    double precision, intent(in)  :: xi(6)
+    double precision, intent(out) :: dflow(6,6)
+
+    double precision :: xi_norm, flow(6), n_hat(6)
+    double precision, parameter :: SQRT15 = 1.2247448713915890d0
+    integer :: ii, jj
+
+    call yu_calc_norm_n_flow(xi, xi_norm, flow)
+
+    do ii = 1, 6
+        n_hat(ii) = flow(ii) / SQRT15
+    end do
+
+    ! off-diagonal: -1.5/|xi| * n_hat(i) * n_hat(j)
+    ! diagonal adds T(i,i)/|xi| * 1.5: 1.5/|xi| for i<=3, 3.0/|xi| for i>3
+    do ii = 1, 6
+        do jj = 1, 6
+            dflow(ii,jj) = 1.5d0 / xi_norm * (-n_hat(ii) * n_hat(jj))
+        end do
+        if (ii <= 3) then
+            dflow(ii,ii) = dflow(ii,ii) + 1.5d0 / xi_norm
+        else
+            dflow(ii,ii) = dflow(ii,ii) + 3.0d0 / xi_norm
+        end if
+    end do
+
+end subroutine yu_dflow_dxi
+
+
+! =============================================================================
 ! yu_dRs_dbeta
 !
-! dR_stress / d_beta = -dlambda * C @ dn_dsig
+! dR_stress / d_beta = -dlambda * C @ dflow_dxi
+!
+! d(xi)/d(beta) = -I (no deviatoric projection), so use yu_dflow_dxi without I_dev.
 ! =============================================================================
 subroutine yu_dRs_dbeta(C, xi, dlambda, jmat)
     implicit none
     double precision, intent(in)  :: C(6,6), xi(6), dlambda
     double precision, intent(out) :: jmat(6,6)
 
-    double precision :: dn_dsig(6,6)
+    double precision :: dflow(6,6)
     integer :: ii, jj, kk
 
-    call yu_prepare_rstress(xi, dn_dsig)
+    call yu_dflow_dxi(xi, dflow)
 
     do ii = 1, 6
         do jj = 1, 6
             jmat(ii,jj) = 0.0d0
             do kk = 1, 6
-                jmat(ii,jj) = jmat(ii,jj) - dlambda * C(ii,kk) * dn_dsig(kk,jj)
+                jmat(ii,jj) = jmat(ii,jj) - dlambda * C(ii,kk) * dflow(kk,jj)
             end do
         end do
     end do
@@ -376,7 +424,9 @@ end subroutine yu_dRs_dbeta
 ! =============================================================================
 ! yu_dRs_dtheta
 !
-! dR_stress / d_theta = -dlambda * C @ dn_dsig  (identical to dRs_dbeta)
+! dR_stress / d_theta = -dlambda * C @ dflow_dxi  (identical to dRs_dbeta)
+!
+! d(xi)/d(theta) = -I (no deviatoric projection), so use yu_dflow_dxi without I_dev.
 ! =============================================================================
 subroutine yu_dRs_dtheta(C, xi, dlambda, jmat)
     implicit none
@@ -1580,12 +1630,11 @@ subroutine yu_kinematic_3d( &
 
     ! ==========================================================================
     ! Consistent tangent (DDSDDE)
-    ! Use theta_max_out (= smooth_max after NR) matching Python calc_ddsdde
-    ! which receives state_new["theta_max"] (already updated after NR loop).
+    ! Use theta_max_n (step-start value, consistent with residual C_k).
     ! ==========================================================================
     call yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                         stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
-                        theta_max_out, Rbnd_n, dlambda, &
+                        theta_max_n, Rbnd_n, dlambda, &
                         ddsdde)
 
     ! ==========================================================================
