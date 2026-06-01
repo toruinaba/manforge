@@ -68,15 +68,16 @@ class YUKinematic(MaterialModel):
         Gn = self.deviatoric_inner_product(g_xi, g_xi)
         Fn = self.deviatoric_inner_product(g_xi, d_beta)
         mu = 0.0
-        for i in range(10):
-            H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
-            F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-            if F_mu < 1.0e-16:
-                break
-            F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
-            mu -= F_mu / F_mu_prime
-        else:
-            raise ValueError("Not converged mu (update_state)")
+        if r_n >= 1e-14:
+            for i in range(10):
+                H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
+                F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
+                if F_mu < 1.0e-16:
+                    break
+                F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
+                mu -= F_mu / F_mu_prime
+            else:
+                raise ValueError("Not converged mu (update_state)")
         delta_q = mu * g_xi / (1 + mu)
         delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
         delta_R = s * (R_n + self.k * self.Rsat * dlambda) - R_n
@@ -184,15 +185,16 @@ class YUKinematic3D(YUKinematic):
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0
-            for i in range(10):
-                H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
-                F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                if F_mu < 1.0e-16:
-                    break
-                F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
-                mu -= F_mu / F_mu_prime
-            else:
-                raise ValueError("Not converged mu (user_defined_return_mapping)")
+            if state_n["r"] >= 1e-14:
+                for i in range(10):
+                    H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
+                    F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
+                    if F_mu < 1.0e-16:
+                        break
+                    F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
+                    mu -= F_mu / F_mu_prime
+                else:
+                    raise ValueError("Not converged mu (user_defined_return_mapping)")
             delta_q = mu * g_xi / (1 + mu)
             delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
             delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]

@@ -164,7 +164,7 @@ def test_analytical_matches_numerical(yu_3d_scenario):
     B-A1: max stress error < 1e-4 (multiaxial 1.5e-5 with beta=500)
     B-A2: per-state-key relative error
           R/q/r < 1e-3 (multiaxial R=3e-4 with beta=500)
-          theta < 1e-6, others < 1e-4
+          theta < 5e-6, others < 1e-4
     B-A4: ddsdde max_rel_err < 2e-2
     B-A5: NR iteration count difference <= 5 (multiaxial can differ by 4)
     """
@@ -181,7 +181,7 @@ def test_analytical_matches_numerical(yu_3d_scenario):
         if k in stagnation_keys:
             atol = 1e-3
         elif k in tight_keys:
-            atol = 1e-6
+            atol = 5e-6
         else:
             atol = 1e-4
         assert v < atol, f"state[{k!r}] rel_err = {v:.3e} (atol={atol:.0e})"

@@ -1193,6 +1193,16 @@ subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
     double precision, parameter :: EPS_SQRT = 1.0d-30
 
     mu = 0.0d0
+    info = 0  ! default: converged (mu=0 is returned if r_n is degenerate)
+
+    ! Guard: when r_n=0 the mu equation has no physical solution (mu>=0).
+    ! H_mu arg = 6*h*Fn which is negative when Fn<0, causing sqrt(negative).
+    ! Correct answer is mu=0 (no stagnation update).
+    if (r_n < 1.0d-14) then
+        mu_out = 0.0d0
+        return
+    end if
+
     info = 1
 
     do i = 1, 10

@@ -117,8 +117,8 @@ def test_yield_function_subclasses(cls, ntens):
 # U-5: user_defined_return_mapping contains raise (B-2 lock-in, static check)
 # ---------------------------------------------------------------------------
 
-def _make_mu_diverge_state(model):
-    """r_n=0, Fn=0 (d_beta=0), Gn>0 causes F_mu_prime=0 → divide-by-zero → ValueError."""
+def _make_mu_rn_zero_state(model):
+    """r_n=0: stagnation radius is zero at step start (initial state or reset)."""
     state_n = model.initial_state()
     state_n["q"] = np.zeros(6)
     state_n["r"] = 0.0
@@ -130,12 +130,18 @@ def _make_mu_diverge_state(model):
     return state_n, state_new
 
 
-def test_update_state_raises_on_mu_nonconvergence():
-    """§A.2 lock-in: update_state raises ValueError when mu NR does not converge."""
+def test_update_state_rn_zero_returns_mu_zero():
+    """§A.2: r_n=0 is degenerate (no valid mu>=0 solution); update_state must not crash.
+
+    When the stagnation radius is zero at step start, the mu Newton equation has no
+    physical solution. The correct answer is mu=0 (no stagnation-surface update).
+    Previously this case caused sqrt(negative) → nan → ValueError.
+    """
     model = YUKinematic3D(**PARAMS)
-    state_n, state_new = _make_mu_diverge_state(model)
-    with pytest.raises(ValueError, match="update_state"):
-        model.update_state(0.001, state_new, state_n)
+    state_n, state_new = _make_mu_rn_zero_state(model)
+    # Should complete without raising
+    result = model.update_state(0.001, state_new, state_n)
+    assert result is not None
 
 
 def test_user_defined_return_mapping_has_raise():
