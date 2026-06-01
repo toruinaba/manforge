@@ -1234,29 +1234,33 @@ end subroutine yu_inner_mu_newton
 subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                            stress_new, theta_new, beta_new, R_new, eps_eq_new, &
                            theta_max_new, R_n, dlambda, &
-                           ddsdde)
+                           ddsdde, eps_eq_n)
     implicit none
     double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
     double precision, intent(in)  :: stress_new(6), theta_new(6), beta_new(6)
     double precision, intent(in)  :: R_new, eps_eq_new, theta_max_new, R_n, dlambda
     double precision, intent(out) :: ddsdde(6,6)
+    double precision, intent(in)  :: eps_eq_n  ! step-start eps_eq for C_n (rhs scaling)
 
-    double precision :: jac(19,19), C(6,6), C_inv(6,6), C_work(6,6)
+    double precision :: jac(19,19), C(6,6), C_n(6,6), C_inv(6,6), C_work(6,6)
     double precision :: rhs19(19,19), jac_stress_block(6,19)
     integer :: ii, jj, kk, info_lu
     double precision, parameter :: ZERO = 0.0d0, ONE = 1.0d0
 
-    ! Step 1: Build full 19x19 Jacobian
+    ! Step 1: Build full 19x19 Jacobian (uses eps_eq_new for C in dRs/dlambda)
     call yu_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                           stress_new, theta_new, beta_new, R_new, eps_eq_new, &
                           theta_max_new, R_n, dlambda, &
                           jac)
 
-    ! Step 2: Reconstruct C and compute C_inv via 6x6 LU solve (C_work A, C_inv as I->X)
+    ! Step 2: Reconstruct C for Jacobian (eps_eq_new) and C_n for rhs scaling (eps_eq_n).
+    ! C_n (step-start stiffness) is the correct rhs scaling: J*dx/de = [C_n; 0; ...]
+    ! -> ddsdde = J^{-1}[0:6,0:6]*C_n. Using C(state_new) was a bug when E varies.
     call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
+    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n,   Ea, xi_param, C_n)
     do ii = 1, 6
         do jj = 1, 6
-            C_work(ii,jj) = C(ii,jj)
+            C_work(ii,jj) = C_n(ii,jj)
             C_inv(ii,jj) = ZERO
         end do
         C_inv(ii,ii) = ONE
@@ -1265,7 +1269,7 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
     if (info_lu /= 0) then
         do ii = 1, 6
             do jj = 1, 6
-                ddsdde(ii,jj) = C(ii,jj)
+                ddsdde(ii,jj) = C_n(ii,jj)
             end do
         end do
         return
@@ -1631,11 +1635,12 @@ subroutine yu_kinematic_3d( &
     ! ==========================================================================
     ! Consistent tangent (DDSDDE)
     ! Use theta_max_n (step-start value, consistent with residual C_k).
+    ! Pass eps_eq_n so yu_calc_ddsdde uses C(state_n) for rhs scaling.
     ! ==========================================================================
     call yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
                         stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
                         theta_max_n, Rbnd_n, dlambda, &
-                        ddsdde)
+                        ddsdde, eps_eq_n)
 
     ! ==========================================================================
     ! Copy converged state to outputs
