@@ -1811,6 +1811,12 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
                 KSTEP, KINC, NOEL, NPT, DTIME
             write(7,'(A,6ES10.3)') 'YU-DS ', (DSTRAN(i), i=1,6)
             write(7,'(A,6ES10.3)') 'YU-SS ', (STRESS(i), i=1,6)
+            ! State variables at step start (before return mapping)
+            ! YU-TH: theta(1..6), YU-BT: beta(1..6)
+            ! YU-RQ: Rbnd  rstag  eps_eq
+            write(7,'(A,6ES10.3)') 'YU-TH ', (STATEV(i), i=1,6)
+            write(7,'(A,6ES10.3)') 'YU-BT ', (STATEV(6+i), i=1,6)
+            write(7,'(A,3ES11.3)') 'YU-RQ ', STATEV(13), STATEV(20), STATEV(21)
         end if
 
         yu_nfail = yu_nfail + 1
