@@ -1797,10 +1797,14 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             write(7,'(A,6ES10.3)') 'YU-SS ', (STRESS(i), i=1,6)
             ! State variables at step start (before return mapping, unchanged)
             ! YU-TH: theta(1..6), YU-BT: beta(1..6)
-            ! YU-RQ: Rbnd  rstag  eps_eq
+            ! YU-RQ: Rbnd  rstag  eps_eq  theta_max  vm(q)
             write(7,'(A,6ES10.3)') 'YU-TH ', (STATEV(i), i=1,6)
             write(7,'(A,6ES10.3)') 'YU-BT ', (STATEV(6+i), i=1,6)
-            write(7,'(A,3ES11.3)') 'YU-RQ ', STATEV(13), STATEV(20), STATEV(21)
+            write(7,'(A,5ES11.3)') 'YU-RQ ', STATEV(13), STATEV(20), STATEV(21), &
+                STATEV(22), &
+                sqrt(STATEV(14)**2+STATEV(15)**2+STATEV(16)**2 &
+                   + 2.0d0*(STATEV(17)**2+STATEV(18)**2+STATEV(19)**2))
+            ! cols: Rbnd  rstag  eps_eq  theta_max  vm(q) [Mandel norm]
             ! YU-XT: xi_trial_norm as computed inside yu_kinematic_3d
             ! compare with external calculation to find discrepancy
             write(7,'(A,ES11.3,A,F8.2)') 'YU-XT ', xi_trial_norm_val, ' Y=', PROPS(3)
@@ -1818,6 +1822,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         end if
 
         PNEWDT = min(PNEWDT, 0.5d0)
+        ! Provide elastic DDSDDE so ABAQUS global NR gets a valid stiffness matrix.
+        ! Without this, DDSDDE is uninitialised, which may corrupt the global NR.
+        call yu_kinematic_3d_elastic_stiffness( &
+            PROPS(1), PROPS(2), eps_eq_n, PROPS(11), PROPS(12), DDSDDE)
         return   ! leave STRESS and STATEV unchanged for the retry
     end if
 
