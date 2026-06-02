@@ -1803,6 +1803,14 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             yu_nfail = 0
             yu_nnr   = 0
             yu_nmu   = 0
+            ! Detail line for the first failure of this increment:
+            !   YU-DT kstep kinc elem pt dtime
+            !   YU-DS dstran(1..6)  -- strain increment magnitude
+            !   YU-SS stress(1..6)  -- stress at step start
+            write(7,'(A,4I6,ES11.3)') 'YU-DT ', &
+                KSTEP, KINC, NOEL, NPT, DTIME
+            write(7,'(A,6ES10.3)') 'YU-DS ', (DSTRAN(i), i=1,6)
+            write(7,'(A,6ES10.3)') 'YU-SS ', (STRESS(i), i=1,6)
         end if
 
         yu_nfail = yu_nfail + 1
