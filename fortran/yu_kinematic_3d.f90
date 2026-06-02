@@ -1072,70 +1072,16 @@ end subroutine yu_calc_jacobian
 ! info        [out]  : 0 = success, k = singular at pivot k
 ! =============================================================================
 subroutine solve19(A, B, NRHS, info)
+    ! Thin wrapper around LAPACK dgesv for numerical stability.
+    ! Replaces the hand-rolled Gaussian elimination to ensure consistent
+    ! floating-point behaviour across compilers (gfortran vs Intel Fortran).
     implicit none
     integer,          intent(in)    :: NRHS
     double precision, intent(inout) :: A(19,19), B(19,NRHS)
     integer,          intent(out)   :: info
 
-    integer          :: i, j, k, piv
-    double precision :: maxval_loc, tmp_d, factor
-    double precision, parameter :: EPS = 1.0d-14
-
-    info = 0
-
-    do k = 1, 19
-        ! -- find pivot row
-        maxval_loc = abs(A(k,k))
-        piv = k
-        do i = k+1, 19
-            if (abs(A(i,k)) > maxval_loc) then
-                maxval_loc = abs(A(i,k))
-                piv = i
-            end if
-        end do
-
-        ! -- check for singularity
-        if (maxval_loc < EPS) then
-            info = k
-            return
-        end if
-
-        ! -- swap rows k and piv in A
-        if (piv /= k) then
-            do j = 1, 19
-                tmp_d    = A(k,j)
-                A(k,j)   = A(piv,j)
-                A(piv,j) = tmp_d
-            end do
-            ! -- swap rows k and piv in B
-            do j = 1, NRHS
-                tmp_d    = B(k,j)
-                B(k,j)   = B(piv,j)
-                B(piv,j) = tmp_d
-            end do
-        end if
-
-        ! -- eliminate column k below diagonal
-        do i = k+1, 19
-            factor = A(i,k) / A(k,k)
-            do j = k, 19
-                A(i,j) = A(i,j) - factor * A(k,j)
-            end do
-            do j = 1, NRHS
-                B(i,j) = B(i,j) - factor * B(k,j)
-            end do
-        end do
-    end do
-
-    ! -- back substitution
-    do k = 19, 1, -1
-        do j = 1, NRHS
-            do i = k+1, 19
-                B(k,j) = B(k,j) - A(k,i) * B(i,j)
-            end do
-            B(k,j) = B(k,j) / A(k,k)
-        end do
-    end do
+    integer :: ipiv(19)
+    call dgesv(19, NRHS, A, 19, ipiv, B, 19, info)
 
 end subroutine solve19
 
@@ -1335,58 +1281,13 @@ end subroutine yu_calc_ddsdde
 ! Solves A*X = B with Gaussian elimination + partial pivoting.
 ! =============================================================================
 subroutine solve6_inplace(A, B, info)
+    ! Thin wrapper around LAPACK dgesv for numerical stability.
     implicit none
     double precision, intent(inout) :: A(6,6), B(6,6)
     integer,          intent(out)   :: info
 
-    integer          :: i, j, k, piv
-    double precision :: maxval_loc, tmp_d, factor
-    double precision, parameter :: EPS = 1.0d-14
-
-    info = 0
-
-    do k = 1, 6
-        maxval_loc = abs(A(k,k))
-        piv = k
-        do i = k+1, 6
-            if (abs(A(i,k)) > maxval_loc) then
-                maxval_loc = abs(A(i,k))
-                piv = i
-            end if
-        end do
-        if (maxval_loc < EPS) then
-            info = k
-            return
-        end if
-        if (piv /= k) then
-            do j = 1, 6
-                tmp_d    = A(k,j)
-                A(k,j)   = A(piv,j)
-                A(piv,j) = tmp_d
-                tmp_d    = B(k,j)
-                B(k,j)   = B(piv,j)
-                B(piv,j) = tmp_d
-            end do
-        end if
-        do i = k+1, 6
-            factor = A(i,k) / A(k,k)
-            do j = k, 6
-                A(i,j) = A(i,j) - factor * A(k,j)
-            end do
-            do j = 1, 6
-                B(i,j) = B(i,j) - factor * B(k,j)
-            end do
-        end do
-    end do
-
-    do k = 6, 1, -1
-        do j = 1, 6
-            do i = k+1, 6
-                B(k,j) = B(k,j) - A(k,i) * B(i,j)
-            end do
-            B(k,j) = B(k,j) / A(k,k)
-        end do
-    end do
+    integer :: ipiv(6)
+    call dgesv(6, 6, A, 6, ipiv, B, 6, info)
 
 end subroutine solve6_inplace
 
