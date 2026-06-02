@@ -6,16 +6,18 @@ non-smooth counterparts.
 
 Functions and their parameters:
 
-  smooth_sqrt(x, eps=1e-30)        √(x + ε²)                  ε: denominator stabiliser
-  smooth_abs(x, eps=1e-30)         √(x² + ε²)                 ε: denominator stabiliser
-  smooth_norm(v, eps=1e-30)        √(v·v + ε²)                ε: denominator stabiliser
-  smooth_macaulay(x, eps=1e-30)    (x + smooth_abs(x)) / 2    ε: denominator stabiliser
-  smooth_direction(v, eps=1e-30)   v / smooth_norm(v)          ε: denominator stabiliser
+  smooth_sqrt(x, eps=1e-12)        √(x + ε²)                  ε: denominator stabiliser
+  smooth_abs(x, eps=1e-12)         √(x² + ε²)                 ε: denominator stabiliser
+  smooth_norm(v, eps=1e-12)        √(v·v + ε²)                ε: denominator stabiliser
+  smooth_macaulay(x, eps=1e-12)    (x + smooth_abs(x)) / 2    ε: denominator stabiliser
+  smooth_direction(v, eps=1e-12)   v / smooth_norm(v)          ε: denominator stabiliser
   smooth_heaviside(x, beta=500.0)  0.5·(1 + tanh(β·x/2))      β: transition sharpness
-  smooth_min(a, b, eps=1e-30)      b + (d - smooth_abs(d)) / 2  ε: denominator stabiliser
-  smooth_max(a, b, eps=1e-30)      b + (d + smooth_abs(d)) / 2  ε: denominator stabiliser
+  smooth_min(a, b, eps=1e-12)      b + (d - smooth_abs(d)) / 2  ε: denominator stabiliser
+  smooth_max(a, b, eps=1e-12)      b + (d + smooth_abs(d)) / 2  ε: denominator stabiliser
 
-``eps`` regularises denominators at zero; with float64, ``sqrt(1e-30) ≈ 1e-15``.
+``eps`` regularises denominators at zero; eps=1e-12 gives eps²=1e-24 which is
+safely above float64 machine epsilon (2.2e-16) while remaining physically
+negligible for stress-scale quantities (MPa).
 ``beta`` controls the steepness of the Heaviside step: larger β → sharper transition.
 """
 
@@ -23,7 +25,7 @@ import numpy as np
 import autograd.numpy as anp
 from autograd.extend import defvjp, primitive
 
-_DEFAULT_EPS: float = 1e-30
+_DEFAULT_EPS: float = 1e-12
 
 
 @primitive

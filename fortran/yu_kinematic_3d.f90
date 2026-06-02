@@ -117,7 +117,7 @@ subroutine yu_vonmises_norm(xi, xi_norm)
     double precision, intent(out) :: xi_norm
 
     double precision :: sss
-    double precision, parameter :: EPS_SQRT = 1.0d-30
+    double precision, parameter :: EPS_SQRT = 1.0d-12
     integer :: ii
 
     sss = 0.0d0
@@ -836,7 +836,7 @@ subroutine yu_smooth_sqrt(x, result)
     double precision, intent(in)  :: x
     double precision, intent(out) :: result
 
-    double precision, parameter :: EPS_SQRT = 1.0d-30
+    double precision, parameter :: EPS_SQRT = 1.0d-12
 
     result = sqrt(x + EPS_SQRT**2)
 
@@ -1098,7 +1098,7 @@ subroutine yu_smooth_max(a, b, result)
     double precision, intent(out) :: result
 
     double precision :: d
-    double precision, parameter :: EPS_SQRT = 1.0d-30
+    double precision, parameter :: EPS_SQRT = 1.0d-12
 
     d = a - b
     result = b + 0.5d0 * (d + sqrt(d*d + EPS_SQRT**2))
@@ -1136,7 +1136,7 @@ subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
 
     integer :: i
     double precision :: mu, H_mu, F_mu, F_mu_prime
-    double precision, parameter :: EPS_SQRT = 1.0d-30
+    double precision, parameter :: EPS_SQRT = 1.0d-12
 
     mu = 0.0d0
     info = 0  ! default: converged (mu=0 is returned if r_n is degenerate)
@@ -1373,7 +1373,7 @@ subroutine yu_kinematic_3d( &
     double precision :: H_mu_fin, theta_new_norm, theta_max_cand
     integer :: iter, ii, jj, info_lu, info_mu
     double precision, parameter :: TOL_NR   = 1.0d-10
-    double precision, parameter :: EPS_SQRT = 1.0d-30
+    double precision, parameter :: EPS_SQRT = 1.0d-12
 
     ! ==========================================================================
     ! Elastic predictor: stress_trial = stress_n + C(eps_eq_n) @ dstran
