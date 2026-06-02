@@ -1759,29 +1759,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde_local, n_iter, converged)
 
-    ! Write-back stress and tangent
-    do i = 1, NTENS
-        STRESS(i) = stress_out(i)
-        do j = 1, NTENS
-            DDSDDE(i, j) = ddsdde_local(i, j)
-        end do
-    end do
-
-    ! STATEV repack
-    ! theta_out, beta_out, q_out are already in the rotated frame (return mapping
-    ! was performed there); no further rotation needed before storing.
-    do i = 1, 6
-        STATEV(i)      = theta_out(i)
-        STATEV(6 + i)  = beta_out(i)
-        STATEV(13 + i) = q_out(i)
-    end do
-    STATEV(13) = Rbnd_out
-    STATEV(20) = rstag_out
-    STATEV(21) = eps_eq_out
-    STATEV(22) = theta_max_out
-
-    ! Non-convergence: request ABAQUS to reduce the time increment.
-    ! Use min() to avoid accidentally relaxing a smaller cutback already in PNEWDT.
+    ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV.
+    ! ABAQUS will retry the increment with the original (unchanged) values.
+    ! Previously STRESS/STATEV were overwritten before PNEWDT was set, causing
+    ! the retry to start from a corrupted state (partially-converged values).
     !
     ! Diagnostic: accumulate per-increment failure counts and flush one summary
     ! line to the msg file when the increment changes.  Format (grep "YU-NC"):
@@ -1806,12 +1787,12 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             ! Detail line for the first failure of this increment:
             !   YU-DT kstep kinc elem pt dtime
             !   YU-DS dstran(1..6)  -- strain increment magnitude
-            !   YU-SS stress(1..6)  -- stress at step start
+            !   YU-SS stress(1..6)  -- stress at step start (unchanged, correct)
             write(7,'(A,4I6,ES11.3)') 'YU-DT ', &
                 KSTEP, KINC, NOEL, NPT, DTIME
             write(7,'(A,6ES10.3)') 'YU-DS ', (DSTRAN(i), i=1,6)
             write(7,'(A,6ES10.3)') 'YU-SS ', (STRESS(i), i=1,6)
-            ! State variables at step start (before return mapping)
+            ! State variables at step start (before return mapping, unchanged)
             ! YU-TH: theta(1..6), YU-BT: beta(1..6)
             ! YU-RQ: Rbnd  rstag  eps_eq
             write(7,'(A,6ES10.3)') 'YU-TH ', (STATEV(i), i=1,6)
@@ -1827,7 +1808,29 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         end if
 
         PNEWDT = min(PNEWDT, 0.5d0)
+        return   ! leave STRESS and STATEV unchanged for the retry
     end if
+
+    ! Write-back stress and tangent (converged == 1 only)
+    do i = 1, NTENS
+        STRESS(i) = stress_out(i)
+        do j = 1, NTENS
+            DDSDDE(i, j) = ddsdde_local(i, j)
+        end do
+    end do
+
+    ! STATEV repack (converged == 1 only)
+    ! theta_out, beta_out, q_out are already in the rotated frame (return mapping
+    ! was performed there); no further rotation needed before storing.
+    do i = 1, 6
+        STATEV(i)      = theta_out(i)
+        STATEV(6 + i)  = beta_out(i)
+        STATEV(13 + i) = q_out(i)
+    end do
+    STATEV(13) = Rbnd_out
+    STATEV(20) = rstag_out
+    STATEV(21) = eps_eq_out
+    STATEV(22) = theta_max_out
 
     ! Zero unused output fields
     SSE = 0.0d0; SPD = 0.0d0; SCD = 0.0d0; RPL = 0.0d0; DRPLDT = 0.0d0
