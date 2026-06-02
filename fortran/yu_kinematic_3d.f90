@@ -1440,7 +1440,7 @@ subroutine yu_kinematic_3d( &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde, &
-        n_iter, converged, xi_trial_norm_out)
+        n_iter, converged, xi_trial_norm_out, r_hist)
     implicit none
     ! -- inputs: 12 props
     double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
@@ -1457,6 +1457,7 @@ subroutine yu_kinematic_3d( &
     integer,          intent(out) :: n_iter
     integer,          intent(out) :: converged
     double precision, intent(out) :: xi_trial_norm_out  ! von Mises norm of xi_trial (for diagnostics)
+    double precision, intent(out) :: r_hist(50)         ! residual norm at each NR iteration
 
     ! -- local variables
     double precision :: C(6,6), stress_trial(6)
@@ -1513,6 +1514,9 @@ subroutine yu_kinematic_3d( &
         end do
         n_iter    = 0
         converged = 1
+        do ii = 1, 50
+            r_hist(ii) = 0.0d0
+        end do
         return
     end if
 
@@ -1547,6 +1551,7 @@ subroutine yu_kinematic_3d( &
             r_norm = r_norm + r_vec(ii)**2
         end do
         r_norm = sqrt(r_norm)
+        r_hist(iter) = r_norm
 
         if (r_norm < TOL_NR) then
             converged = 1
@@ -1713,6 +1718,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: theta_out_rot(6), beta_out_rot(6), q_out_rot(6)
     integer :: i, j, n_iter, converged
     double precision :: xi_trial_norm_val
+    double precision :: r_hist_val(50)
     ! Diagnostic: per-increment failure counters (retained across calls via save)
     integer,          save :: yu_kstep = -1
     integer,          save :: yu_kinc  = -1
@@ -1760,7 +1766,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         DSTRAN, &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
-        ddsdde_local, n_iter, converged, xi_trial_norm_val)
+        ddsdde_local, n_iter, converged, xi_trial_norm_val, r_hist_val)
 
     ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV.
     ! ABAQUS will retry the increment with the original (unchanged) values.
@@ -1812,6 +1818,8 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             ! If YU-TR == YU-TH, no rotation occurred; driver test reproduces exact UMAT input
             write(7,'(A,6ES10.3)') 'YU-TR ', (theta_rot(i), i=1,6)
             write(7,'(A,6ES10.3)') 'YU-BR ', (beta_rot(i), i=1,6)
+            ! YU-RH: residual norm history (first 10 NR iterations)
+            write(7,'(A,10ES10.3)') 'YU-RH ', (r_hist_val(i), i=1,10)
         end if
 
         yu_nfail = yu_nfail + 1
