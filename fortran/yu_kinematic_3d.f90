@@ -1804,6 +1804,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             ! YU-XT: xi_trial_norm as computed inside yu_kinematic_3d
             ! compare with external calculation to find discrepancy
             write(7,'(A,ES11.3,A,F8.2)') 'YU-XT ', xi_trial_norm_val, ' Y=', PROPS(3)
+            ! YU-TR/YU-BR: theta/beta after ROTSIG (actual values passed to yu_kinematic_3d)
+            ! If YU-TR == YU-TH, no rotation occurred; driver test reproduces exact UMAT input
+            write(7,'(A,6ES10.3)') 'YU-TR ', (theta_rot(i), i=1,6)
+            write(7,'(A,6ES10.3)') 'YU-BR ', (beta_rot(i), i=1,6)
         end if
 
         yu_nfail = yu_nfail + 1
