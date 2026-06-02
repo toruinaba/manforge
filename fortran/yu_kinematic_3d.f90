@@ -1440,7 +1440,7 @@ subroutine yu_kinematic_3d( &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde, &
-        n_iter, converged)
+        n_iter, converged, xi_trial_norm_out)
     implicit none
     ! -- inputs: 12 props
     double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
@@ -1456,6 +1456,7 @@ subroutine yu_kinematic_3d( &
     double precision, intent(out) :: ddsdde(6,6)
     integer,          intent(out) :: n_iter
     integer,          intent(out) :: converged
+    double precision, intent(out) :: xi_trial_norm_out  ! von Mises norm of xi_trial (for diagnostics)
 
     ! -- local variables
     double precision :: C(6,6), stress_trial(6)
@@ -1491,6 +1492,7 @@ subroutine yu_kinematic_3d( &
         xi_trial(ii) = dev_s(ii) - theta_n(ii) - beta_n(ii)
     end do
     call yu_vonmises_norm(xi_trial, xi_trial_norm)
+    xi_trial_norm_out = xi_trial_norm  ! expose for UMAT diagnostics
 
     if (xi_trial_norm <= Y) then
         ! Elastic step: accept trial stress
@@ -1710,6 +1712,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: theta_rot(6), beta_rot(6), q_rot(6)
     double precision :: theta_out_rot(6), beta_out_rot(6), q_out_rot(6)
     integer :: i, j, n_iter, converged
+    double precision :: xi_trial_norm_val
     ! Diagnostic: per-increment failure counters (retained across calls via save)
     integer,          save :: yu_kstep = -1
     integer,          save :: yu_kinc  = -1
@@ -1757,7 +1760,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         DSTRAN, &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
-        ddsdde_local, n_iter, converged)
+        ddsdde_local, n_iter, converged, xi_trial_norm_val)
 
     ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV.
     ! ABAQUS will retry the increment with the original (unchanged) values.
@@ -1798,6 +1801,9 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             write(7,'(A,6ES10.3)') 'YU-TH ', (STATEV(i), i=1,6)
             write(7,'(A,6ES10.3)') 'YU-BT ', (STATEV(6+i), i=1,6)
             write(7,'(A,3ES11.3)') 'YU-RQ ', STATEV(13), STATEV(20), STATEV(21)
+            ! YU-XT: xi_trial_norm as computed inside yu_kinematic_3d
+            ! compare with external calculation to find discrepancy
+            write(7,'(A,ES11.3,A,F8.2)') 'YU-XT ', xi_trial_norm_val, ' Y=', PROPS(3)
         end if
 
         yu_nfail = yu_nfail + 1
