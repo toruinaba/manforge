@@ -1722,10 +1722,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
     if (NTENS /= 6 .or. NDI /= 3 .or. NSHR /= 3 .or. &
         NSTATV < 22 .or. NPROPS < 12) then
-        write(*,'(A)') 'YUKinematic3D UMAT: incompatible element/material definition.'
-        write(*,'(A,I0,A,I0,A,I0)') '  Expected NTENS=6 NDI=3 NSHR=3, got NTENS=', &
+        write(7,'(A)') 'YUKinematic3D UMAT: incompatible element/material definition.'
+        write(7,'(A,I0,A,I0,A,I0)') '  Expected NTENS=6 NDI=3 NSHR=3, got NTENS=', &
             NTENS, ' NDI=', NDI, ' NSHR=', NSHR
-        write(*,'(A,I0,A,I0)') '  Expected NSTATV>=22 NPROPS>=12, got NSTATV=', &
+        write(7,'(A,I0,A,I0)') '  Expected NSTATV>=22 NPROPS>=12, got NSTATV=', &
             NSTATV, ' NPROPS=', NPROPS
         PNEWDT = 0.0d0
         return
@@ -1792,7 +1792,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         ! Flush previous increment summary when increment changes
         if (KSTEP /= yu_kstep .or. KINC /= yu_kinc) then
             if (yu_kinc /= -1) then
-                write(*,'(A,2I6,2ES11.3,3I8)') 'YU-NC ', &
+                write(7,'(A,2I6,2ES11.3,3I8)') 'YU-NC ', &
                     yu_kstep, yu_kinc, yu_time, yu_dtime, &
                     yu_nfail, yu_nnr, yu_nmu
             end if
