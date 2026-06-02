@@ -1710,6 +1710,14 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: theta_rot(6), beta_rot(6), q_rot(6)
     double precision :: theta_out_rot(6), beta_out_rot(6), q_out_rot(6)
     integer :: i, j, n_iter, converged
+    ! Diagnostic: per-increment failure counters (retained across calls via save)
+    integer,          save :: yu_kstep = -1
+    integer,          save :: yu_kinc  = -1
+    integer,          save :: yu_nfail = 0
+    integer,          save :: yu_nnr   = 0
+    integer,          save :: yu_nmu   = 0
+    double precision, save :: yu_time  = 0.0d0
+    double precision, save :: yu_dtime = 0.0d0
 
     ! Guard: this UMAT is for 3-D solid elements only (NTENS=6, NDI=3, NSHR=3)
     if (NTENS /= 6 .or. NDI /= 3 .or. NSHR /= 3 .or. &
@@ -1774,7 +1782,36 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
 
     ! Non-convergence: request ABAQUS to reduce the time increment.
     ! Use min() to avoid accidentally relaxing a smaller cutback already in PNEWDT.
+    !
+    ! Diagnostic: accumulate per-increment failure counts and flush one summary
+    ! line to the msg file when the increment changes.  Format (grep "YU-NC"):
+    !   YU-NC  kstep  kinc     time      dtime   n_fail  n_nr  n_mu
+    ! n_nr: return-mapping NR non-convergence (n_iter==50, all 50 iters consumed)
+    ! n_mu: internal failure (mu Newton or solve19, n_iter<50)
     if (converged == 0) then
+        ! Flush previous increment summary when increment changes
+        if (KSTEP /= yu_kstep .or. KINC /= yu_kinc) then
+            if (yu_kinc /= -1) then
+                write(*,'(A,2I6,2ES11.3,3I8)') 'YU-NC ', &
+                    yu_kstep, yu_kinc, yu_time, yu_dtime, &
+                    yu_nfail, yu_nnr, yu_nmu
+            end if
+            yu_kstep = KSTEP
+            yu_kinc  = KINC
+            yu_time  = TIME(1)
+            yu_dtime = DTIME
+            yu_nfail = 0
+            yu_nnr   = 0
+            yu_nmu   = 0
+        end if
+
+        yu_nfail = yu_nfail + 1
+        if (n_iter >= 50) then
+            yu_nnr = yu_nnr + 1   ! all 50 NR iters consumed -> return mapping
+        else
+            yu_nmu = yu_nmu + 1   ! early exit: mu Newton or solve19 failure
+        end if
+
         PNEWDT = min(PNEWDT, 0.5d0)
     end if
 
