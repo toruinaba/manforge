@@ -1520,7 +1520,7 @@
       end do
       call yu_vonmises_norm(g_xi, stag_norm)
       g_stag = stag_norm - rstag_n
-      if (g_stag > 0.0d0) g_latched = .true.  ! latch: never reset to fa
+      if (g_stag > -1.0d-10) g_latched = .true.  ! dead band + latch: ab
       if (g_latched) then
       g_flag = 1.0d0
       else

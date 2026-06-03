@@ -182,7 +182,7 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            if g_stag > 0.0:
+            if g_stag > -1.0e-10:  # dead band: absorb convergence noise at boundary
                 g_latched = True
             g_flag = 1.0 if g_latched else 0.0
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
