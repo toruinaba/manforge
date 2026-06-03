@@ -64,7 +64,7 @@ class YUKinematic(MaterialModel):
         g_xi = beta_new - q_n
         stag_norm = self.vonmises_norm(g_xi)
         g_stag = stag_norm - r_n
-        g_flag = smooth_heaviside(g_stag)
+        g_flag = smooth_heaviside(g_stag + 1.0e-10)  # dead band: shift by +1e-10 so boundary noise activates
         Gn = self.deviatoric_inner_product(g_xi, g_xi)
         Fn = self.deviatoric_inner_product(g_xi, d_beta)
         mu = 0.0
@@ -271,19 +271,15 @@ class YUKinematic3D(YUKinematic):
         "yu_prepare_rtheta",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rtheta",
     )
-    def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda):
+    def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
         theta_bar = self.vonmises_norm(theta)
         theta_flow = self.T @ theta / theta_bar * 1.5
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
         s = 1 / (1 + self.k * dlambda)
         a = self.B + R - self.Y
-        if R != R_n:
-            a_prime = (
-                -self.k * s * s * (R_n + self.k * self.Rsat * dlambda)
-                + s * self.k * self.Rsat
-            )
-        else:
-            a_prime = 0.0
+        active = (g_flag if g_flag is not None else
+                  float(abs(R - R_n) > 1.0e-15 * max(abs(R_n), 1.0)))
+        a_prime = (-self.k * s * s * (R_n + self.k * self.Rsat * dlambda) + s * self.k * self.Rsat) * active
         return theta_bar, theta_flow, C_k, s, a, a_prime
 
     @verified_against_fortran(

@@ -304,8 +304,8 @@
       s = 1.0d0 / (1.0d0 + k * dlambda)
       a = B_bnd + R - Y
 
-! Floating-point equality: matches Python _prepare_Rtheta line 251
-      if (R /= R_n) then
+! Use relative epsilon to avoid false equality from FP rounding when g_f
+      if (abs(R - R_n) > 1.0d-15 * max(abs(R_n), 1.0d0)) then
       a_prime = -k * s * s * (R_n + k * Rsat * dlambda) + s * k * Rsat
       else
       a_prime = 0.0d0
@@ -830,7 +830,7 @@
       real*8, intent(in)  :: x
       real*8, intent(out) :: hv
 
-      real*8, parameter :: BETA_H = 50.0d0
+      real*8, parameter :: BETA_H = 500.0d0
 
       hv = 0.5d0 * (1.0d0 + tanh(0.5d0 * BETA_H * x))
 
