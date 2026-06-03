@@ -1371,6 +1371,7 @@ subroutine yu_kinematic_3d( &
     double precision :: r_vec(19), jac(19,19), dx(19,1)
     double precision :: r_norm, xi_trial(6), dev_s(6), xi_trial_norm
     double precision :: g_xi(6), d_beta(6), stag_norm, g_stag, g_flag
+    logical :: g_latched
     double precision :: Gn, Fn, mu, delta_q(6), delta_rstag, delta_Rbnd, s_fac
     double precision :: H_mu_fin, theta_new_norm, theta_max_cand
     integer :: iter, ii, jj, info_lu, info_mu
@@ -1439,6 +1440,7 @@ subroutine yu_kinematic_3d( &
     dlambda    = 0.0d0
     n_iter     = 0
     converged  = 0
+    g_latched  = .false.  ! latch: once stagnation surface activates, stays active this increment
 
     do iter = 1, 50
         ! Residual (theta_max passed as state_n value -- not updated during NR)
@@ -1496,7 +1498,8 @@ subroutine yu_kinematic_3d( &
         end do
         call yu_vonmises_norm(g_xi, stag_norm)
         g_stag = stag_norm - rstag_n
-        if (g_stag > 0.0d0) then
+        if (g_stag > 0.0d0) g_latched = .true.  ! latch: never reset to false within increment
+        if (g_latched) then
             g_flag = 1.0d0
         else
             g_flag = 0.0d0

@@ -162,6 +162,7 @@ class YUKinematic3D(YUKinematic):
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
         dlambda = 0.0
+        g_latched = False  # latch: once stagnation surface activates, stays active this increment
         for iter in range(iter_rm):
             r_vector = self.calc_residual(state_new, state_n, stress_trial, dlambda)
             r_norm = np.linalg.norm(r_vector)
@@ -181,7 +182,9 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            g_flag = 1.0 if g_stag > 0.0 else 0.0
+            if g_stag > 0.0:
+                g_latched = True
+            g_flag = 1.0 if g_latched else 0.0
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0
