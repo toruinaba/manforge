@@ -1734,30 +1734,30 @@
 !   YU-DS dstran(1..6)  -- strain increment magnitude
 !   YU-SS stress(1..6)  -- stress at step start (unchanged, correct)
       write(7,'(A,4I6,ES11.3)') 'YU-DT ', KSTEP, KINC, NOEL, NPT, DTIME
-      write(7,'(A,6ES10.3)') 'YU-DS ', (DSTRAN(i), i=1,6)
-      write(7,'(A,6ES10.3)') 'YU-SS ', (STRESS(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-DS ', (DSTRAN(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-SS ', (STRESS(i), i=1,6)
 ! State variables at step start (before return mapping, unchanged)
 ! YU-TH: theta(1..6), YU-BT: beta(1..6)
 ! YU-RQ: Rbnd  rstag  eps_eq  theta_max  vm(q)
-      write(7,'(A,6ES10.3)') 'YU-TH ', (STATEV(i), i=1,6)
-      write(7,'(A,6ES10.3)') 'YU-BT ', (STATEV(6+i), i=1,6)
-      write(7,'(A,5ES11.3)') 'YU-RQ ', STATEV(13), STATEV(20),
+      write(7,'(A,6ES22.14)') 'YU-TH ', (STATEV(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-BT ', (STATEV(6+i), i=1,6)
+      write(7,'(A,5ES22.14)') 'YU-RQ ', STATEV(13), STATEV(20),
      &STATEV(21), STATEV(22),
      &sqrt(STATEV(14)**2+STATEV(15)**2+STATEV(16)**2 +
      &2.0d0*(STATEV(17)**2+STATEV(18)**2+STATEV(19)**2))
 ! cols: Rbnd  rstag  eps_eq  theta_max  vm(q) [Mandel norm]
 ! YU-XT: xi_trial_norm as computed inside yu_kinematic_3d
 ! compare with external calculation to find discrepancy
-      write(7,'(A,ES11.3,A,F8.2)') 'YU-XT ', xi_trial_norm_val, ' Y=',
+      write(7,'(A,ES22.14,A,F10.4)') 'YU-XT ', xi_trial_norm_val, ' Y=',
      &PROPS(3)
 ! YU-TR/YU-BR: theta/beta after ROTSIG (actual values passed to yu_kinem
 ! If YU-TR == YU-TH, no rotation occurred; driver test reproduces exact 
-      write(7,'(A,6ES10.3)') 'YU-TR ', (theta_rot(i), i=1,6)
-      write(7,'(A,6ES10.3)') 'YU-BR ', (beta_rot(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-TR ', (theta_rot(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-BR ', (beta_rot(i), i=1,6)
 ! YU-RH: residual norm history (first 10 NR iterations)
       write(7,'(A,10ES10.3)') 'YU-RH ', (r_hist_val(i), i=1,10)
 ! YU-IV: stagnation state at iter=3: Fn Gn g_stag Rbnd_new eps_eq_new dl
-      write(7,'(A,6ES12.4)') 'YU-IV ', (stag_vals_v(i), i=1,6)
+      write(7,'(A,6ES22.14)') 'YU-IV ', (stag_vals_v(i), i=1,6)
       end if
 
       yu_nfail = yu_nfail + 1
