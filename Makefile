@@ -19,6 +19,10 @@ fortran-build-umat:
 fortran-build-yu:
 	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
 
+## Compile YU Kinematic UMAT fixed-form version (for ABAQUS compatibility verification)
+fortran-build-yu-fixed:
+	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
+
 # ---------------------------------------------------------------------------
 # Test targets
 # ---------------------------------------------------------------------------
