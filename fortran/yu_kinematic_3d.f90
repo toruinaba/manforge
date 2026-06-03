@@ -1341,7 +1341,7 @@ subroutine yu_kinematic_3d( &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde, &
-        n_iter, converged, xi_trial_norm_out, r_hist)
+        n_iter, converged, xi_trial_norm_out, r_hist, stag_vals)
     implicit none
     ! -- inputs: 12 props
     double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
@@ -1359,6 +1359,7 @@ subroutine yu_kinematic_3d( &
     integer,          intent(out) :: converged
     double precision, intent(out) :: xi_trial_norm_out  ! von Mises norm of xi_trial (for diagnostics)
     double precision, intent(out) :: r_hist(50)         ! residual norm at each NR iteration
+    double precision, intent(out) :: stag_vals(6)        ! stagnation state at iter=3: [Fn,Gn,g_stag,Rbnd_new,eps_eq_new,dlambda]
 
     ! -- local variables
     double precision :: C(6,6), stress_trial(6)
@@ -1538,6 +1539,16 @@ subroutine yu_kinematic_3d( &
         rstag_new  = rstag_n + g_flag * delta_rstag
         eps_eq_new = eps_eq_n + dlambda
 
+        ! Capture stagnation state at iter=3 for diagnostics (YU-IV output in UMAT)
+        if (iter == 3) then
+            stag_vals(1) = Fn
+            stag_vals(2) = Gn
+            stag_vals(3) = g_stag
+            stag_vals(4) = Rbnd_new
+            stag_vals(5) = eps_eq_new
+            stag_vals(6) = dlambda
+        end if
+
     end do
 
     ! If we exhausted the loop without converging, n_iter not set yet
@@ -1619,6 +1630,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: theta_out_rot(6), beta_out_rot(6), q_out_rot(6)
     integer :: i, j, n_iter, converged
     double precision :: xi_trial_norm_val
+    double precision :: stag_vals_v(6)
     double precision :: r_hist_val(50)
     ! Diagnostic: per-increment failure counters (retained across calls via save)
     integer,          save :: yu_kstep = -1
@@ -1667,7 +1679,8 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         DSTRAN, &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
-        ddsdde_local, n_iter, converged, xi_trial_norm_val, r_hist_val)
+        ddsdde_local, n_iter, converged, xi_trial_norm_val, r_hist_val, &
+        stag_vals_v)
 
     ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV.
     ! ABAQUS will retry the increment with the original (unchanged) values.
@@ -1721,6 +1734,8 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             write(7,'(A,6ES10.3)') 'YU-BR ', (beta_rot(i), i=1,6)
             ! YU-RH: residual norm history (first 10 NR iterations)
             write(7,'(A,10ES10.3)') 'YU-RH ', (r_hist_val(i), i=1,10)
+            ! YU-IV: stagnation state at iter=3: Fn Gn g_stag Rbnd_new eps_eq_new dlambda
+            write(7,'(A,6ES12.4)') 'YU-IV ', (stag_vals_v(i), i=1,6)
         end if
 
         yu_nfail = yu_nfail + 1
