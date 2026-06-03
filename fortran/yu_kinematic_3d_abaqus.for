@@ -1359,7 +1359,8 @@
      &b_kin, h, Ea, xi_param, stress_n, theta_n, beta_n, Rbnd_n, q_n,
      &rstag_n, eps_eq_n, theta_max_n, dstran, stress_out, theta_out,
      &beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out,
-     &ddsdde, n_iter, converged, xi_trial_norm_out, r_hist, stag_vals)
+     &ddsdde, n_iter, converged, xi_trial_norm_out, r_hist, stag_vals,
+     &iter_dump)
       implicit none
 ! -- inputs: 12 props
       real*8, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat,
@@ -1381,6 +1382,7 @@
       real*8, intent(out) :: xi_trial_norm_out  ! von Mises no
       real*8, intent(out) :: r_hist(50)  ! residual norm at ea
       real*8, intent(out) :: stag_vals(6)  ! stagnation state 
+      real*8, intent(out) :: iter_dump(50,22)  ! per-iter: str
 
 ! -- local variables
       real*8 :: C(6,6), stress_trial(6)
@@ -1561,6 +1563,17 @@
       rstag_new  = rstag_n + g_flag * delta_rstag
       eps_eq_new = eps_eq_n + dlambda
 
+! Record all intermediate values for this iteration
+      do ii = 1, 6
+      iter_dump(iter, ii)    = stress_new(ii)
+      iter_dump(iter, 6+ii)  = theta_new(ii)
+      iter_dump(iter, 12+ii) = beta_new(ii)
+      end do
+      iter_dump(iter, 19) = dlambda
+      iter_dump(iter, 20) = Rbnd_new
+      iter_dump(iter, 21) = Fn
+      iter_dump(iter, 22) = Gn
+
 ! Capture stagnation state at iter=3 for diagnostics (YU-IV output in UM
       if (iter == 3) then
       stag_vals(1) = Fn
@@ -1620,8 +1633,7 @@
 ! ======================================================================
 
 C =============================================================================
-C UMAT -- ABAQUS entry point (official interface with ABA_PARAM.INC)
-C Thin wrapper: unpacks JSTEP and delegates to UMAT_IMPL.
+C UMAT -- ABAQUS official interface (ABA_PARAM.INC, JSTEP(4))
 C =============================================================================
       SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
      1 RPL,DDSDDT,DRPLDE,DRPLDT,
@@ -1637,8 +1649,6 @@ C
      2 STRAN(NTENS),DSTRAN(NTENS),TIME(2),PREDEF(1),DPRED(1),
      3 PROPS(NPROPS),COORDS(3),DROT(3,3),DFGRD0(3,3),DFGRD1(3,3),
      4 JSTEP(4)
-C
-C     Delegate all processing to UMAT_IMPL which uses IMPLICIT NONE + REAL*8
       CALL UMAT_IMPL(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
      1 RPL,DDSDDT,DRPLDE,DRPLDT,
      2 STRAN,DSTRAN,TIME,DTIME,TEMP,DTEMP,PREDEF,DPRED,CMNAME,
@@ -1648,7 +1658,7 @@ C     Delegate all processing to UMAT_IMPL which uses IMPLICIT NONE + REAL*8
       END
 C
 C =============================================================================
-C UMAT_IMPL -- implementation with IMPLICIT NONE + REAL*8
+C UMAT_IMPL -- implementation (IMPLICIT NONE + REAL*8)
 C =============================================================================
       subroutine umat_impl(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, RPL,
      &DDSDDT, DRPLDE, DRPLDT, STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP,
@@ -1689,6 +1699,7 @@ C =============================================================================
       real*8 :: xi_trial_norm_val
       real*8 :: stag_vals_v(6)
       real*8 :: r_hist_val(50)
+      real*8 :: iter_dump_v(50,22)
 ! Diagnostic: per-increment failure counters (retained across calls via 
       integer,          save :: yu_kstep = -1
       integer,          save :: yu_kinc  = -1
@@ -1735,7 +1746,7 @@ C =============================================================================
      &rstag_n, eps_eq_n, theta_max_n, DSTRAN, stress_out, theta_out,
      &beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out,
      &ddsdde_local, n_iter, converged, xi_trial_norm_val, r_hist_val,
-     &stag_vals_v)
+     &stag_vals_v, iter_dump_v)
 
 ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV.
 ! ABAQUS will retry the increment with the original (unchanged) values.
@@ -1790,6 +1801,11 @@ C =============================================================================
       write(7,'(A,10ES10.3)') 'YU-RH ', (r_hist_val(i), i=1,10)
 ! YU-IV: stagnation state at iter=3: Fn Gn g_stag Rbnd_new eps_eq_new dl
       write(7,'(A,6ES22.14)') 'YU-IV ', (stag_vals_v(i), i=1,6)
+! YU-Ni: per-iteration dump (stress,theta,beta,dlambda,Rbnd,Fn,Gn) for i
+      do i = 1, min(n_iter+1, 10)
+      write(7,'(A,I2,A,22ES22.14)') 'YU-N', i, ' ', (iter_dump_v(i,j),
+     &j=1,22)
+      end do
       end if
 
       yu_nfail = yu_nfail + 1
