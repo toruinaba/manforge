@@ -485,11 +485,286 @@ class YUKinematic3D(YUKinematic):
 
 
 class YUKinematicPS(YUKinematic):
+    I = np.eye(3)
+    T = np.diag([1.0, 1.0, 2.0])
+    P = 1 / 3 * np.array([[2, -1, 0], [-1, 2, 0], [0, 0, 6]])
+
     def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
                  B: float, Rsat: float, k: float, b: float,
                  h: float, Ea: float, xi: float):
         super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+ 
+    def calc_g(self, stress):
+        dstress = self.P @ stress  
+        return np.dot(stress, dstress)
+
+    def yield_function(self, state):
+        s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
+        xi_g = self.vonmises_norm(s_xi)**2 * 2 / 3
+        return 1 / 2 * xi_g - 1 / 3 * self.Y * self.Y
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        R_n = state_n["R"]
+        q_n = state_n["q"]
+        r_n = state_n["r"]
+        s_xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
+        xi_g = self.vonmises_norm(s_xi)**2 * 2 / 3 
+        delta_eps_eq = dlambda * smooth_sqrt(2 / 3 *  xi_g)
+        s = 1 / (1 + 2 / 3 * self.Y * self.k * dlambda)
+        beta_new = state_new["beta"]
+        d_beta = beta_new - state_n["beta"]
+        theta_new = state_new["theta"]
+        theta_norm = self.vonmises_norm(theta_new)
+        g_xi = beta_new - q_n
+        stag_norm = self.vonmises_norm(g_xi)
+        g_stag = stag_norm - r_n
+        g_flag = smooth_heaviside(g_stag + 1.0e-10)  # dead band: shift by +1e-10 so boundary noise activates
+        Gn = self.deviatoric_inner_product(g_xi, g_xi)
+        Fn = self.deviatoric_inner_product(g_xi, d_beta)
+        mu = 0.0
+        if r_n >= 1e-14:
+            for i in range(10):
+                H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
+                F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
+                if F_mu < 1.0e-16:
+                    break
+                F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
+                mu -= F_mu / F_mu_prime
+            else:
+                raise ValueError("Not converged mu (update_state)")
+        delta_q = mu * g_xi / (1 + mu)
+        delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
+        delta_R = s * (R_n + 2 / 3 * self.Y * self.k * self.Rsat * dlambda) - R_n
+        return [
+            self.R(R_n + g_flag * delta_R),
+            self.q(q_n + g_flag * delta_q),
+            self.r(r_n + g_flag * delta_r),
+            self.eps_eq(state_n["eps_eq"] + delta_eps_eq),
+            self.theta_max(smooth_max(state_n["theta_max"], theta_norm))
+        ]
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        stress_new = state_new["stress"]
+        theta_new = state_new["theta"]
+        beta_new = state_new["beta"]
+        R_new = state_new["R"]
+        theta_max = state_n["theta_max"]
+        C = self.elastic_stiffness(state_new)
+        s_xi = self.dev(stress_new) - theta_new - beta_new
+        a = self.B + R_new - self.Y
+        theta_norm = self.vonmises_norm(theta_new)
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        flow = s_xi
+        # R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_stress = stress_new - stress_trial + dlambda * C @ flow
+        R_theta = theta_new - state_n["theta"] - 2 / 3 * (C_k * a * s_xi - C_k * self.Y * smooth_sqrt(a / theta_norm) * theta_new) * dlambda
+        R_beta = beta_new - state_n["beta"] - 2 / 3 * (self.k * self.b * s_xi - self.k * self.Y * beta_new) * dlambda
+        return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
+
+    def calc_norm_n_flow(self, xi):
+        xi_norm = self.vonmises_norm(xi)
+        flow = self.P @ xi
+        return xi_norm, flow
+
+    def user_defined_return_mapping(
+            self, stress_trial: anp.ndarray, C: anp.ndarray, state_n: dict
+        ):
+        iter_rm = 50
+        n_iteration = 0
+        converged = False
+        r_hist = []
+        state_new = deepcopy(state_n)
+        state_new["stress"] = deepcopy(stress_trial)
+        dlambda = 0.0
+        g_latched = False  # latch: once stagnation surface activates, stays active this increment
+        for iter in range(iter_rm):
+            r_vector = self.calc_residual(state_new, state_n, stress_trial, dlambda)
+            r_norm = np.linalg.norm(r_vector)
+            r_hist.append(r_norm)
+            if anp.abs(r_norm) < 1.0e-10:
+                converged = True
+                break
+            jacobian = self.calc_jacobian(state_new, state_n, stress_trial, dlambda)
+            dx = np.linalg.solve(jacobian, r_vector)
+            state_new["stress"] -= dx[0:6]
+            state_new["theta"] -= dx[7:13]
+            state_new["beta"] -= dx[13:]
+            dlambda -= dx[6]
+            s = 1 / (1 + self.k * dlambda)
+            d_beta = state_new["beta"] - state_n["beta"]
+            g_xi = state_new["beta"] - state_n["q"]
+            stag_norm = self.vonmises_norm(g_xi)
+            g_stag = stag_norm - state_n["r"]
+            if g_stag > -1.0e-10:  # dead band: absorb convergence noise at boundary
+                g_latched = True
+            g_flag = 1.0 if g_latched else 0.0
+            Gn = self.deviatoric_inner_product(g_xi, g_xi)
+            Fn = self.deviatoric_inner_product(g_xi, d_beta)
+            mu = 0.0
+            if state_n["r"] >= 1e-14:
+                for i in range(10):
+                    H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
+                    F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
+                    if F_mu < 1.0e-16:
+                        break
+                    F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
+                    mu -= F_mu / F_mu_prime
+                else:
+                    raise ValueError("Not converged mu (user_defined_return_mapping)")
+            delta_q = mu * g_xi / (1 + mu)
+            delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
+            delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
+            state_new["R"] = state_n["R"] + delta_R * g_flag
+            state_new["q"] = state_n["q"] + delta_q * g_flag
+            state_new["r"] = state_n["r"] + delta_r * g_flag
+            state_new["eps_eq"] = state_n["eps_eq"] + dlambda
+            n_iteration += 1
+        else:
+            converged = False
+        theta_norm_final = self.vonmises_norm(state_new["theta"])
+        state_new["theta_max"] = float(smooth_max(state_n["theta_max"], theta_norm_final))
+        return ReturnMappingResult(
+            stress=state_new["stress"],
+            state=state_new,
+            dlambda=dlambda,
+            n_iterations=n_iteration,
+            residual_history=r_hist,
+            converged=converged,
+        )
+
+    def calc_residual(self, state_new, state_n, stress_trial, dlambda):
+        C = self.elastic_stiffness(state_new)
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(state_n["theta_max"] - (self.B - self.Y))
+        a = self.B + state_new["R"] - self.Y
+        xi = state_new["stress"] - state_new["theta"] - state_new["beta"]
+        _, flow = self.calc_norm_n_flow(xi)
+        theta_norm, _ = self.calc_norm_n_flow(state_new["theta"])
+        R_stress = state_new["stress"] - stress_trial + dlambda * C @ flow
+        R_theta = state_new["theta"] - state_n["theta"] - 2 / 3 * (C_k * a * xi - C_k * self.Y * smooth_sqrt(a / theta_norm) * state_new["theta"]) * dlambda
+        R_beta = state_new["beta"] - state_n["beta"] - 2 / 3 * (self.k * self.b * xi - self.k * self.Y * state_new["beta"]) * dlambda
+        R_yield = self.yield_function(state_new)
+        r_vector = anp.hstack((R_stress, R_yield, R_theta, R_beta))
+        return r_vector
+
+    def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
+        theta_bar = self.vonmises_norm(theta)
+        theta_flow = self.P @ theta
+        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        s = 1 / (1 + 2 / 3 * self.k * self.Y * dlambda)
+        a = self.B + R - self.Y
+        active = (g_flag if g_flag is not None else
+                  float(abs(R - R_n) > 1.0e-15 * max(abs(R_n), 1.0)))
+        s_prime = - 2 / 3 * self.k * self.Y * s * s
+        a_prime = (
+            s_prime * (R + 2 / 3 * self.k * self.Y * self.Rsat * dlambda)
+            + 2 / 3 * s * self.k * self.Y * self.Rsat
+        ) * active
+        return theta_bar, theta_flow, C_k, s, a, a_prime
+
+    def dRstress_dstress(self, C, xi, dlambda):
+        return self.I + dlambda * C @ self.P
+
+    def dRstress_dbeta(self, C, xi, dlambda):
+        return - dlambda * C @ self.P
+
+    def dRstress_dtheta(self, C, xi, dlambda):
+        return - dlambda * C @ self.P
+
+    def dRstress_dlambda(self, C, xi, eps_eq, dlambda):
+        g = self.calc_g(xi)
+        d_eps_eq = dlambda * smooth_sqrt(2 / 3 * g)
+        factor = self._calc_E_factor(eps_eq + d_eps_eq)
+        flow = self.P @ xi
+        return C @ flow - smooth_sqrt(2 / 3 * g) * self.xi * (1 - self.Ea / self.E) * anp.exp(-self.xi * eps_eq) / factor * dlambda * C @ flow
+
+    def dRbeta_dstress(self, dlambda):
+        return -2 / 3 * self.k * self.b * dlambda * self.I
+
+    def dRbeta_dbeta(self, dlambda):
+        return 2 / 3 * self.k * self.b * dlambda * self.I
+
+    def dRbeta_dtheta(self, dlambda):
+        return (
+            1 +
+            2 / 3 * self.k * self.b * dlambda +
+            2 / 3 * self.k * self.Y * dlambda
+        ) * self.I
+
+    def dRbeta_dlambda(self, xi, beta_new, dlambda):
+        return 2 / 3 * (self.k * self.Y * beta_new - self.k * self.b * xi)
+    
+    def dRtheta_dstress(self, theta_new, theta_max, R_new, R_n, dlambda):
+        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta_new, theta_max, R_new, R_n, dlambda)
+        return -2 / 3 * C_k * a * dlambda * self.I
+
+    def dRtheta_dbeta(self, theta_new, theta_max, R_new, R_n, dlambda):
+        _, _, C_k, _, a, _ = self._prepare_Rtheta(theta_new, theta_max, R_new, R_n, dlambda)
+        return 2 / 3 * C_k * a * dlambda * self.I
+
+    def dRtheta_dtheta(self, theta_new, theta_max, R_new, R_n, dlambda):
+        theta_bar, theta_flow, C_k, _, a, a_prime = self._prepare_Rtheta(theta_new, theta_max, R_new, R_n, dlambda)
+        if theta_bar == 0.0:
+            return (1 + 2 / 3 * C_k * a * dlambda) * self.I
+        else:
+            tb_theta = np.sqrt(3) * theta_flow / (2 * smooth_sqrt(2 * self.calc_g(theta_new)))
+            f = (
+                1 + 2 / 3 * C_k * a * dlambda
+                + 2 / 3 * C_k * self.Y * dlambda * smooth_sqrt(a / theta_bar)
+            ) * self.I - 2 * C_k * self.Y * dlambda / (3 * theta_bar) * smooth_sqrt(a / theta_bar) * np.outer(tb_theta, theta_new)
+            return f
+
+    def dRtheta_dlambda(self, xi, theta_new, theta_max, R_new, R_n, dlambda):
+        theta_bar, theta_flow, C_k, s, a, a_prime = self._prepare_Rtheta(theta_new, theta_max, R_new, R_n, dlambda)
+        if theta_bar == 0.0:
+            return - 2 / 3 * C_k * dlambda * a_prime * xi - 2 / 3 * C_k * a * xi
+        else:
+            return - 2 / 3 * C_k * (
+                xi * (a_prime * dlambda * a)
+                - self.Y * theta_new * (
+                    smooth_sqrt(a / theta_bar) + dlambda / (2 * smooth_sqrt(a * theta_bar))
+                )
+            )
+
+    def dRyield_dstress(self, xi):
+        _, flow = self.calc_norm_n_flow(xi)
+        return flow
+
+    def dRyield_dbeta(self, xi):
+        _, flow = self.calc_norm_n_flow(xi)
+        return -flow
+
+    def dRyield_dtheta(self, xi):
+        _, flow = self.calc_norm_n_flow(xi)
+        return -flow
+
+    def dRyield_dlambda(self):
+        return np.array([0.0])
+
+    def calc_jacobian(self, state_new, state_n, stress_trial, dlambda):
+        C = self.elastic_stiffness(state_new)
+        xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
+        Rs_s = self.dRstress_dstress(C, xi, dlambda)
+        Rs_b = self.dRstress_dbeta(C, xi, dlambda)
+        Rs_t = self.dRstress_dtheta(C, xi, dlambda)
+        Rs_l = self.dRstress_dlambda(C, xi, state_new["eps_eq"], dlambda)
+        Rs = np.hstack((Rs_s, Rs_l[:, np.newaxis], Rs_t, Rs_b))
+        Rb_s = self.dRbeta_dstress(dlambda)
+        Rb_b = self.dRbeta_dbeta(dlambda)
+        Rb_t = self.dRbeta_dtheta(dlambda)
+        Rb_l = self.dRbeta_dlambda(xi, state_new["beta"], dlambda)
+        Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
+        Rt_s = self.dRtheta_dstress(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_b = self.dRtheta_dbeta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_t = self.dRtheta_dtheta(state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt_l = self.dRtheta_dlambda(xi, state_new["theta"], state_n["theta_max"], state_new["R"], state_n["R"], dlambda)
+        Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
+        Rl_s = self.dRyield_dstress(xi)
+        Rl_b = self.dRyield_dbeta(xi)
+        Rl_t = self.dRyield_dtheta(xi)
+        Rl_l = self.dRyield_dlambda()
+        Rl = np.hstack((Rl_s, Rl_l, Rl_t, Rl_b))
+        return np.vstack((Rs, Rl.reshape(1, -1), Rt, Rb))
 
 
 class YUKinematic1D(YUKinematic):
