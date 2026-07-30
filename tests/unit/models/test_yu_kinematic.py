@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import numpy.testing as npt
 from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,
@@ -35,7 +35,7 @@ def test_state_names():
 
 @pytest.mark.parametrize("cls,dim", [
     (YUKinematic3D,  SOLID_3D),
-    (YUKinematicPS,  PLANE_STRESS),
+    (YUKinematicPS,  PLANE_STRESS_P),
     (YUKinematic1D,  UNIAXIAL_1D),
 ])
 def test_subclass_dimension(cls, dim):
@@ -100,16 +100,19 @@ def test_yield_function_outside_is_positive():
     assert model.yield_function(state) > 0
 
 
-@pytest.mark.parametrize("cls,ntens", [
-    (YUKinematicPS, 3),
-    (YUKinematic1D, 1),
-])
-def test_yield_function_subclasses(cls, ntens):
-    model = cls(**PARAMS)
+def test_yield_function_1d_at_origin():
+    model = YUKinematic1D(**PARAMS)
     Y = PARAMS["Y"]
-    sigma = np.zeros(ntens)
-    state = _make_state(model, sigma)
+    state = _make_state(model, np.zeros(1))
     assert model.yield_function(state) == pytest.approx(-Y)
+
+
+def test_yield_function_ps_at_origin():
+    """YUKinematicPS uses the quadratic form f = ½ξᵀPξ − ⅓Y², not f = q − Y."""
+    model = YUKinematicPS(**PARAMS)
+    Y = PARAMS["Y"]
+    state = _make_state(model, np.zeros(3))
+    assert model.yield_function(state) == pytest.approx(-Y * Y / 3.0)
 
 
 # ---------------------------------------------------------------------------

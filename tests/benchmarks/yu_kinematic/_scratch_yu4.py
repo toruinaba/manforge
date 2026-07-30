@@ -27,7 +27,7 @@ class YUChecker:
         self.R = self.state["R"]
         self.R_n = self.state_n["R"]
         self.dev_stress = model.dev(self.stress)
-        self.xi = self.dev_stress - self.theta - self.beta
+        self.xi = self.stress - self.theta - self.beta
         self.theta_max = self.state_n["theta_max"]
     
     def assertion_array(self, actual, expected, atol=1e-10):
@@ -88,8 +88,18 @@ for g in run_g:
         print(f"check {i}")
         yu_checker = YUChecker(modelps, g.result)
         jac = JacobianChecker(modelps).compute(g.result, g.result._state_n)
-        assert_res = yu_checker.check_all(jac)
+        #assert_res = yu_checker.check_all(jac)
         i += 1
+        stress = yu_checker.stress
+        beta = yu_checker.beta 
+        theta = yu_checker.theta
+        print(stress)
+        xi1 = modelps.dev(stress) - beta - theta
+        xi2 = stress - beta - theta
+        mises1 = modelps.vonmises_norm(xi1)
+        mises2 = np.sqrt(modelps.calc_g(xi2) * 3 / 2)
+        print(f"mises1: {mises1}\nmises2: {mises2}")
+        quit()
         # ddsdde = g.result.ddsdde
         # calced_ddsdde = yu_checker.model.calc_ddsdde(g.result.state, g.result._state_n, g.result.stress_trial, g.result.dlambda)
         # try:
@@ -102,7 +112,7 @@ for g in run_g:
             print(f"dlambda: {g.result.dlambda}")
             print(f"n_iteration: {g.result.n_iterations}")
             print(f"r_hist: {g.result.residual_history}")
-        if i == 10:
+        if i == 1:
             quit()
 
     strains.append(g.strain[idx])

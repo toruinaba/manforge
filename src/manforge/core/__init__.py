@@ -4,6 +4,7 @@ from manforge.core.dimension import (
     SOLID_3D,
     PLANE_STRAIN,
     PLANE_STRESS,
+    PLANE_STRESS_P,
     UNIAXIAL_1D,
 )
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
@@ -21,6 +22,7 @@ __all__ = [
     "SOLID_3D",
     "PLANE_STRAIN",
     "PLANE_STRESS",
+    "PLANE_STRESS_P",
     "UNIAXIAL_1D",
     "ReturnMappingResult",
     "StressUpdateResult",

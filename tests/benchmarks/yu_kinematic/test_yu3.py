@@ -29,7 +29,7 @@ int_1dn = PythonNumericalIntegrator(model1d)
 d_1dn = StrainDriver(int_1dn)
 int_psn = PythonNumericalIntegrator(modelps)
 int_psa = PythonIntegrator(modelps)
-d_psn = MixedDriver(int_psn, prescribed_strain_idx=[idx])
+d_psn = MixedDriver(int_psa, prescribed_strain_idx=[idx])
 
 hist = FieldHistory.cyclic_strain([0.05, -0.05, 0.05, -0.05], n_per_segment=50)
 print(80*"=")
