@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
@@ -16,6 +17,34 @@ from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.core.material.fortran_binding import collect_bindings as _collect_bindings
 from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
 from manforge.core.result import ReturnMappingResult
+
+
+def _wrap_flow_return_check(cls) -> None:
+    """Wrap a subclass's own ``flow`` so an unwrapped return fails at the source.
+
+    Without this, a bare ndarray leaking out of an overridden ``flow`` surfaces
+    as ``AttributeError: 'ndarray' object has no attribute 'stress_like'`` at
+    whichever use site happens to run first, rather than naming the offending
+    method.
+    """
+    own_flow = cls.__dict__.get("flow")
+    if own_flow is None or getattr(own_flow, "_flow_checked", False):
+        return
+
+    @functools.wraps(own_flow)
+    def checked(self, state, *args, **kwargs):
+        n = own_flow(self, state, *args, **kwargs)
+        if not isinstance(n, FlowVector):
+            raise TypeError(
+                f"{type(self).__name__}.flow() must return a FlowVector — wrap the "
+                "result in self.strain_flow(...) (engineering shear, Δε_p conjugate) "
+                "or self.stress_flow(...) (physical shear, textbook (3/2)s/‖s‖ form), "
+                f"got {type(n).__name__}."
+            )
+        return n
+
+    checked._flow_checked = True  # type: ignore[attr-defined]
+    cls.flow = checked
 
 
 class MaterialModel(ABC):
@@ -172,6 +201,7 @@ class MaterialModel(ABC):
                 f"{cls.__name__}: implicit states {sorted(implicit)} require "
                 "state_residual() to be implemented"
             )
+        _wrap_flow_return_check(cls)
         cls._fortran_bindings = _collect_bindings(cls)
 
     @property
@@ -419,18 +449,6 @@ class MaterialModel(ABC):
         )(state["stress"])
         return self.strain_flow(n)
 
-    def _flow_checked(self, state: "State | StateDict") -> FlowVector:
-        """Call :meth:`flow` and enforce the FlowVector return contract."""
-        n = self.flow(state)
-        if not isinstance(n, FlowVector):
-            raise TypeError(
-                f"{type(self).__name__}.flow() must return a FlowVector — wrap the "
-                "result in self.strain_flow(...) (engineering shear, Δε_p conjugate) "
-                "or self.stress_flow(...) (physical shear, textbook (3/2)s/‖s‖ form), "
-                f"got {type(n).__name__}."
-            )
-        return n
-
     def default_stress_residual(
         self,
         state_new: "State | StateDict",
@@ -468,7 +486,7 @@ class MaterialModel(ABC):
             raise ValueError("default_stress_residual: stress_trial is required")
         stress = state_new["stress"]
         C = self.elastic_stiffness(state_new)
-        n = self._flow_checked(state_new)
+        n = self.flow(state_new)
         return stress - stress_trial + dlambda * (C @ n.strain_like)
 
     def vonmises(self, stress: StressVec) -> Scalar:

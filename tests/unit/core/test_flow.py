@@ -38,24 +38,30 @@ def _af(**kw):
 # FlowVector mechanics
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("op", [
-    lambda n: n * 2.0,
-    lambda n: 2.0 * n,
-    lambda n: n / 2.0,
-    lambda n: n + 1.0,
-    lambda n: n - 1.0,
-    lambda n: -n,
-    lambda n: np.eye(6) @ n,
-    lambda n: n[0],
-    lambda n: len(n),
-    lambda n: list(n),
-    lambda n: np.asarray(n),
+@pytest.mark.parametrize("op,expected", [
+    (lambda n: n * 2.0, "multiplication"),
+    (lambda n: 2.0 * n, "multiplication"),
+    (lambda n: n / 2.0, "division"),
+    (lambda n: 2.0 / n, "division"),
+    (lambda n: n + 1.0, "addition"),
+    (lambda n: 1.0 + n, "addition"),
+    (lambda n: n - 1.0, "subtraction"),
+    (lambda n: 1.0 - n, "subtraction"),
+    (lambda n: -n, "negation"),
+    (lambda n: n @ np.eye(6), "matrix multiplication"),
+    # numpy tries __array__ before __rmatmul__, so C @ n trips the ndarray guard.
+    (lambda n: np.eye(6) @ n, "conversion to ndarray"),
+    (lambda n: n[0], "indexing"),
+    (lambda n: len(n), "len()"),
+    (lambda n: list(n), "iteration"),
+    (lambda n: np.asarray(n), "conversion to ndarray"),
 ])
-def test_flow_vector_rejects_raw_arithmetic(op):
-    """Every ambiguous use must fail loudly rather than silently pick a convention."""
+def test_flow_vector_rejects_raw_arithmetic(op, expected):
+    """Ambiguous uses must fail loudly, naming the operation the caller wrote."""
     n = FlowVector(SIG_3D, SOLID_3D.eng_to_phys_strain_factors_np)
-    with pytest.raises(TypeError, match="shear convention"):
+    with pytest.raises(TypeError, match="shear convention") as excinfo:
         op(n)
+    assert expected in str(excinfo.value)
 
 
 def test_flow_vector_shear_factor_is_two():
@@ -188,5 +194,40 @@ def test_unwrapped_flow_return_raises():
 
     m = _BadFlowModel(sigma_y0=250.0)
     state = m.make_state(stress=SIG_3D, ep=0.0)
+
+    # The check lives on the override itself, so it fires wherever flow is
+    # reached — not only via default_stress_residual.
+    with pytest.raises(TypeError, match="must return a FlowVector"):
+        m.flow(state)
     with pytest.raises(TypeError, match="must return a FlowVector"):
         m.default_stress_residual(state, anp.array(0.0), SIG_3D)
+
+
+def test_unwrapped_flow_in_update_state_raises():
+    """A bare ndarray must not surface as AttributeError at a .stress_like use site."""
+
+    class _BadFlowAF(AFKinematic3D):
+        def flow(self, state):
+            s_xi = self.dev(state["stress"]) - state["alpha"]
+            return 1.5 * s_xi / self.vonmises_norm(s_xi)  # missing the wrapper
+
+    m = _BadFlowAF(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=20000.0, gamma=100.0)
+    state_n = m.make_state(stress=np.zeros(6), alpha=np.zeros(6), ep=0.0)
+    state_new = m.make_state(stress=SIG_3D, alpha=np.zeros(6), ep=0.0)
+    with pytest.raises(TypeError, match="must return a FlowVector"):
+        m.update_state(anp.array(1e-3), state_new, state_n)
+
+
+def test_valid_override_is_not_double_wrapped():
+    """Re-deriving from a class with a checked flow must not stack wrappers."""
+
+    class _Child(AFKinematic3D):
+        pass
+
+    class _GrandChild(_Child):
+        def flow(self, state):
+            return self.stress_flow(np.ones(6))
+
+    m = _GrandChild(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=20000.0, gamma=100.0)
+    state = m.make_state(stress=SIG_3D, alpha=ALPHA_3D, ep=0.0)
+    np.testing.assert_allclose(m.flow(state).stress_like, np.ones(6))

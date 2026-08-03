@@ -341,15 +341,21 @@ class FlowVector:
         self._reject("multiplication")
 
     __rmul__ = __mul__
-    __truediv__ = __mul__
-    __rtruediv__ = __mul__
+
+    def __truediv__(self, other):
+        self._reject("division")
+
+    __rtruediv__ = __truediv__
 
     def __add__(self, other):
         self._reject("addition")
 
     __radd__ = __add__
-    __sub__ = __add__
-    __rsub__ = __add__
+
+    def __sub__(self, other):
+        self._reject("subtraction")
+
+    __rsub__ = __sub__
 
     def __matmul__(self, other):
         self._reject("matrix multiplication")
