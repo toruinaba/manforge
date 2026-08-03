@@ -127,26 +127,17 @@ class YUKinematic3D(YUKinematic):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
                  B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        stress_new = state_new["stress"]
-        theta_new = state_new["theta"]
-        beta_new = state_new["beta"]
-        R_new = state_new["R"]
-        theta_max = state_n["theta_max"]
-        s_xi = self.dev(stress_new) - theta_new - beta_new
-        a = self.B + R_new - self.Y
-        theta_norm = self.vonmises_norm(theta_new)
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
-        C = self.elastic_stiffness(state_new)
-        _, flow = self.calc_norm_n_flow(s_xi)
-        # Use flow directly (identical to calc_residual) instead of default_stress_residual.
-        # autograd.grad(yield_function)(sigma) applies I_dev via chain rule, causing
-        # dRstress/dtheta to differ from calc_jacobian when theta perturbs xi off the
-        # deviatoric manifold. Using flow directly avoids that artefact.
-        R_stress = stress_new - stress_trial + dlambda * (C @ flow)
-        R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda
-        R_beta = beta_new - state_n["beta"] - (self.k * self.b / self.Y * s_xi - self.k * beta_new) * dlambda
-        return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
+    def flow(self, state):
+        """Hand-derived flow direction, matching :meth:`calc_jacobian`.
+
+        ``calc_norm_n_flow`` returns ``1.5·T@ξ/‖ξ‖`` — already engineering shear.
+
+        This differs from the autograd default: ``grad(yield_function)(σ)``
+        applies ``I_dev`` via the chain rule, so ``dRstress/dtheta`` would not
+        match ``calc_jacobian`` when θ perturbs ξ off the deviatoric manifold.
+        """
+        xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
+        return self.strain_flow(self.calc_norm_n_flow(xi)[1])
 
     @verified_against_fortran(
         "yu_kinematic_3d",
