@@ -8,7 +8,7 @@ from typing import ClassVar
 import autograd.numpy as anp
 
 from manforge.core.state import (
-    StateField, State, DlambdaField, DlambdaResidual,
+    StateField, State, DlambdaField, DlambdaResidual, FlowVector,
     StateResidual, StateUpdate,
     collect_state_fields, _make, NTENS, DLAMBDA_FIELD,
 )
@@ -377,26 +377,78 @@ class MaterialModel(ABC):
         data = _make(required, f"{type(self).__name__}.make_state", kwargs)
         return State(data, tuple(self.state_names))
 
+    def strain_flow(self, value: FloatArray) -> FlowVector:
+        """Tag ``value`` as an engineering-shear (Δε_p conjugate) flow direction."""
+        return FlowVector(value, self.dimension.eng_to_phys_strain_factors_np)
+
+    def stress_flow(self, value: FloatArray) -> FlowVector:
+        """Tag ``value`` as a physical-shear (textbook ``(3/2) s/‖s‖``) flow direction."""
+        return FlowVector(
+            self.dimension.to_strain_like(value),
+            self.dimension.eng_to_phys_strain_factors_np,
+        )
+
+    def flow(self, state: "State | StateDict") -> FlowVector:
+        """Plastic flow direction at ``state``.
+
+        The default is associative: ``∂f/∂σ`` via autodiff.  Because σ is stored
+        with physical shear, the raw gradient comes out in the engineering-shear
+        convention, so it is tagged with :meth:`strain_flow`.
+
+        Override to implement non-associative flow (plastic potential g ≠ f), or
+        to supply a hand-derived expression.  The return value **must** be wrapped
+        by :meth:`strain_flow` or :meth:`stress_flow` so the shear convention is
+        explicit::
+
+            def flow(self, state):
+                s_xi = self.dev(state["stress"]) - state["alpha"]
+                return self.stress_flow(1.5 * s_xi / self.vonmises_norm(s_xi))
+
+        Consumers pick a convention at the use site: ``.strain_like`` for
+        ``C @ n``, ``Δε_p = Δλ·n``, and strain-dimension residuals;
+        ``.stress_like`` for backstress evolution laws.
+
+        Returns
+        -------
+        FlowVector
+        """
+        import autograd
+        from manforge.core.state import _state_with_stress
+        n = autograd.grad(  # type: ignore[call-arg]
+            lambda s: self.yield_function(_state_with_stress(state, s))
+        )(state["stress"])
+        return self.strain_flow(n)
+
+    def _flow_checked(self, state: "State | StateDict") -> FlowVector:
+        """Call :meth:`flow` and enforce the FlowVector return contract."""
+        n = self.flow(state)
+        if not isinstance(n, FlowVector):
+            raise TypeError(
+                f"{type(self).__name__}.flow() must return a FlowVector — wrap the "
+                "result in self.strain_flow(...) (engineering shear, Δε_p conjugate) "
+                "or self.stress_flow(...) (physical shear, textbook (3/2)s/‖s‖ form), "
+                f"got {type(n).__name__}."
+            )
+        return n
+
     def default_stress_residual(
         self,
         state_new: "State | StateDict",
         dlambda: Scalar,
         stress_trial: "StressVec | None",
     ) -> StressVec:
-        """Associative default R_stress = σ − σ_trial + Δλ·C·∂f/∂σ.
+        """Default R_stress = σ − σ_trial + Δλ·C·n, with n from :meth:`flow`.
 
-        Call this from :meth:`state_residual` when the model uses associative
-        flow (flow direction = ∂f/∂σ)::
+        Call this from :meth:`state_residual`::
 
-            def state_residual(self, state_new, dlambda, state_n, state_trial,
-                               *, stress_trial):
+            def state_residual(self, state_new, dlambda, state_n, *, stress_trial):
                 R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
                 R_alpha = ...
                 return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
-        For non-associative flow (plastic potential g ≠ f), compute R_stress
-        from your g-based flow direction and return ``self.stress(R_stress)``
-        directly.
+        For non-associative flow (plastic potential g ≠ f), override
+        :meth:`flow` rather than reimplementing this residual — the algebra here
+        is unchanged and only the flow direction differs.
 
         Parameters
         ----------
@@ -412,16 +464,12 @@ class MaterialModel(ABC):
         -------
         anp.ndarray, shape (ntens,)
         """
-        import autograd
-        from manforge.core.state import _state_with_stress
         if stress_trial is None:
             raise ValueError("default_stress_residual: stress_trial is required")
         stress = state_new["stress"]
         C = self.elastic_stiffness(state_new)
-        n = autograd.grad(  # type: ignore[call-arg]
-            lambda s: self.yield_function(_state_with_stress(state_new, s))
-        )(stress)
-        return stress - stress_trial + dlambda * (C @ n)
+        n = self._flow_checked(state_new)
+        return stress - stress_trial + dlambda * (C @ n.strain_like)
 
     def vonmises(self, stress: StressVec) -> Scalar:
         """Von Mises equivalent stress; delegates to :meth:`StressDimension.vonmises`."""
