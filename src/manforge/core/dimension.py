@@ -62,6 +62,14 @@ class StressDimension:
         """
         return np.array([1.0] * self.ndi + [2.0] * self.nshr)
 
+    def to_stress_like(self, v):
+        """Convert an engineering-shear (strain-like) Voigt vector to physical shear."""
+        return v / self.eng_to_phys_strain_factors_np
+
+    def to_strain_like(self, v):
+        """Convert a physical-shear (stress-like) Voigt vector to engineering shear."""
+        return v * self.eng_to_phys_strain_factors_np
+
     # backward-compat alias
     @property
     def mandel_factors_jnp(self) -> np.ndarray:

@@ -283,6 +283,99 @@ class StateUpdate:
 
 
 # ---------------------------------------------------------------------------
+# FlowVector — shear-convention-tagged plastic flow direction
+# ---------------------------------------------------------------------------
+
+class FlowVector:
+    """Plastic flow direction carrying its shear convention explicitly.
+
+    The same flow direction has two numerically different Voigt
+    representations, differing by a factor of 2 on the shear components:
+
+    - ``strain_like`` — conjugate to the plastic strain increment
+      (engineering shear).  Use for ``Δε_p = Δλ·n``, ``C @ n``, and any
+      residual written in the strain dimension (``C⁻¹`` applied).
+    - ``stress_like`` — the textbook ``(3/2) s/‖s‖`` form (physical shear).
+      Use in evolution laws for stress-like internal variables (backstress).
+
+    Neither representation is more fundamental; picking the wrong one produces
+    a silent 2× error on shear components only, which vanishes under uniaxial
+    and biaxial loading.  This wrapper therefore refuses raw array arithmetic —
+    every use site must name the convention it wants.
+
+    Build with :meth:`MaterialModel.strain_flow` or
+    :meth:`MaterialModel.stress_flow` rather than calling the constructor.
+    """
+
+    __slots__ = ("_strain_like", "_factors")
+
+    def __init__(self, strain_like: FloatArray, factors: FloatArray):
+        self._strain_like = strain_like
+        self._factors = factors
+
+    @property
+    def strain_like(self) -> FloatArray:
+        """Engineering-shear form (conjugate to Δε_p; use with ``C @``)."""
+        return self._strain_like
+
+    @property
+    def stress_like(self) -> FloatArray:
+        """Physical-shear form (textbook ``(3/2) s/‖s‖``; use for backstress)."""
+        return self._strain_like / self._factors
+
+    def __repr__(self) -> str:
+        return f"FlowVector(strain_like={self._strain_like!r})"
+
+    def _reject(self, op: str):
+        raise TypeError(
+            f"FlowVector does not support {op}: the shear convention is ambiguous. "
+            "Use .strain_like (Δε_p conjugate, engineering shear — for C @ n and "
+            "plastic strain) or .stress_like (physical shear — for backstress "
+            "evolution laws)."
+        )
+
+    def __array__(self, *args, **kwargs):
+        self._reject("conversion to ndarray")
+
+    def __mul__(self, other):
+        self._reject("multiplication")
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, other):
+        self._reject("division")
+
+    __rtruediv__ = __truediv__
+
+    def __add__(self, other):
+        self._reject("addition")
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        self._reject("subtraction")
+
+    __rsub__ = __sub__
+
+    def __matmul__(self, other):
+        self._reject("matrix multiplication")
+
+    __rmatmul__ = __matmul__
+
+    def __neg__(self):
+        self._reject("negation")
+
+    def __iter__(self):
+        self._reject("iteration")
+
+    def __len__(self):
+        self._reject("len()")
+
+    def __getitem__(self, key):
+        self._reject("indexing")
+
+
+# ---------------------------------------------------------------------------
 # DlambdaResidual / DlambdaField — optional Δλ row override
 # ---------------------------------------------------------------------------
 

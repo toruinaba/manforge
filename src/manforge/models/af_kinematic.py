@@ -90,8 +90,8 @@ class AFKinematic(MaterialModel):
 
     def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
         alpha_n = state_n["alpha"]
-        s_xi = self.dev(state_new["stress"]) - alpha_n
-        n_hat = 1.5 * s_xi / self.vonmises_norm(s_xi)
+        # α is stress-like, so the evolution law takes the physical-shear flow.
+        n_hat = self.flow(state_new).stress_like
         alpha_new = (alpha_n + (2.0 / 3.0) * self.C_k * dlambda * n_hat) \
                   / (1.0 + self.gamma * dlambda)
         return [self.alpha(alpha_new), self.ep(state_n["ep"] + dlambda)]

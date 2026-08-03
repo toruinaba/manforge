@@ -136,6 +136,29 @@ Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, a
 - `deviatoric_inner_product(s, t)` — Double contraction for **physical-shear deviatoric** tensors (caller guarantees tr s = tr t = 0); reconstructs missing direct components from `tr=0` and includes them. Generalises `vonmises_norm`. Used for s:s, α:dα, etc.
 - `strain_norm(strain)` — Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to `vonmises`. Accepts **engineering-shear** strain (driver/UMAT convention, γ12 = 2ε12); converts internally. Assumes isochoric plastic strain with missing-component correction automatic for PS/1D.
 
+### Plastic flow direction (`flow`)
+
+`flow(state)` → `FlowVector` is the single access point for the plastic flow direction. The default is associative (`∂f/∂σ` via autodiff); override it for non-associative flow (plastic potential g ≠ f) or to supply a hand-derived expression. **Override `flow`, not `default_stress_residual`** — the residual algebra is unchanged.
+
+The same direction has two Voigt representations differing by ×2 on shear, and picking the wrong one is a silent error that vanishes under uniaxial/biaxial loading. `FlowVector` therefore refuses raw array arithmetic (`n * 2`, `C @ n`, `n[0]`, `np.asarray(n)` all raise `TypeError`); every use site must name a convention:
+
+- `.strain_like` — engineering shear, conjugate to Δε_p. Use for `C @ n`, `Δε_p = Δλ·n`, and residuals written in the strain dimension (`C⁻¹` applied — the form that lets DDSDDE be read off `J⁻¹` directly). `strain_norm(.strain_like) == 1` for J2-type yield functions.
+- `.stress_like` — physical shear, the textbook `(3/2)·s/‖s‖`. Use in evolution laws for stress-like internal variables (backstress α, θ, β). `vonmises_norm(.stress_like) == 1.5`.
+
+Overrides must tag their return value, declaring which convention they computed in — no conversion arithmetic in the model:
+
+```python
+def flow(self, state):                      # textbook form, as published
+    s_xi = self.dev(state["stress"]) - state["alpha"]
+    return self.stress_flow(1.5 * s_xi / self.vonmises_norm(s_xi))
+
+def flow(self, state):                      # already engineering shear (YUKinematic3D)
+    xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
+    return self.strain_flow(self.calc_norm_n_flow(xi)[1])
+```
+
+Returning a bare ndarray raises `TypeError` at the framework boundary. `StressDimension.to_stress_like` / `to_strain_like` provide the raw ÷2 / ×2 conversions for non-flow quantities. Note the normalisation invariants above hold only for J2-type yield functions, so the framework does not assert them.
+
 Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n, *, stress_trial=None, strain_inc=None)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR). `stress_trial` and `strain_inc` are forwarded keyword-only from `stress_update` so implementations can use them directly (e.g. for autograd traceability) without reconstructing σ_trial from the converged stress.
 
 The reference implementations live in `src/manforge/models/`. Each model family has a parent class that holds the shared physics (`J2Isotropic`, `AFKinematic`, `OWKinematic`) and three thin dimension-specialized subclasses that set the default `dimension=` value and, where applicable, provide closed-form solver hooks (`J2Isotropic3D` / `J2Isotropic1D`). All nine concrete classes (`J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D`) and the three parent classes are exported from `manforge.models`.
