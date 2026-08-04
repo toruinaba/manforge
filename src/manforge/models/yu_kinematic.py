@@ -751,22 +751,28 @@ class YUKinematicPS(YUKinematic):
         dC_dl = fb / f * deq_dl * C
         return C @ self.P @ eta + dlambda * dC_dl @ self.P @ eta
 
-    def calc_ft_fs(self, state, dlambda):
-        R = state["R"]
-        theta_max = state["theta_max"]
-        a = self.B + R - self.Y
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+    def _C_k(self, state_n):
+        """Kinematic hardening rate.
+
+        ``theta_max`` comes from ``state_n``: the residual holds C_k fixed at
+        its step-start value, so its Jacobian must too.  Reading the updated
+        ``theta_max`` here makes the tangent jump by C_1/C_2 (×10) on steps
+        whose theta_max crosses B − Y.
+        """
+        return self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(
+            state_n["theta_max"] - (self.B - self.Y)
+        )
+
+    def calc_ft_fs(self, state, dlambda, state_n):
+        a = self.B + state["R"] - self.Y
+        C_k = self._C_k(state_n)
         return - 2 / 3 * C_k * a * dlambda * np.eye(3)
 
-    def calc_ft_ft(self, state, dlambda):
-        stress = state["stress"]
-        beta = state["beta"]
+    def calc_ft_ft(self, state, dlambda, state_n):
         theta = state["theta"]
         theta_bar = self.vonmises_norm(theta)
-        R = state["R"]
-        theta_max = state["theta_max"]
-        a = self.B + R - self.Y
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        a = self.B + state["R"] - self.Y
+        C_k = self._C_k(state_n)
         f1 = (
             1 + 
             2 / 3 * C_k * a * dlambda +
@@ -776,11 +782,9 @@ class YUKinematicPS(YUKinematic):
         dthb_dth = np.sqrt(1.5) * self.P @ theta / smooth_sqrt(self.deviatoric_inner_product(theta, theta))
         return f1 * np.eye(3) + f2 * np.outer(theta, dthb_dth)
 
-    def calc_ft_fb(self, state, dlambda):
-        R = state["R"]
-        theta_max = state["theta_max"]
-        a = self.B + R - self.Y
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+    def calc_ft_fb(self, state, dlambda, state_n):
+        a = self.B + state["R"] - self.Y
+        C_k = self._C_k(state_n)
         return 2 / 3 * C_k * a * dlambda * np.eye(3)
 
     def calc_ft_fl(self, state, dlambda, state_n):
@@ -791,14 +795,17 @@ class YUKinematicPS(YUKinematic):
         theta_bar = self.vonmises_norm(theta)
         R = state["R"]
         R_n = state_n["R"]
-        theta_max = state["theta_max"]
         a = self.B + R - self.Y
-        C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+        C_k = self._C_k(state_n)
         s =  1 / (1 + 2 / 3 * self.k * self.Y * dlambda)
         ds_dl = - 2 / 3 * self.k * self.Y * s * s
-        da_dl = ds_dl * (
+        # R only evolves while the stagnation surface is active (the g_flag gate in
+        # update_state), so da/dΔλ vanishes when it is not.  Same test as
+        # YUKinematic3D._prepare_Rtheta.
+        active = float(abs(R - R_n) > 1.0e-15 * max(abs(R_n), 1.0))
+        da_dl = active * (ds_dl * (
             R_n + 2 / 3 * self.k * self.Y * self.Rsat * dlambda
-        ) + 2 / 3 * s * self.k * self.Y * self.Rsat
+        ) + 2 / 3 * s * self.k * self.Y * self.Rsat)
         f1 = - 2 / 3 * C_k * dlambda * da_dl
         f2 = - 2 / 3 * C_k * a
         f3 = 2 / 3 * C_k * self.Y * (
@@ -834,9 +841,9 @@ class YUKinematicPS(YUKinematic):
         Rb_t = self.calc_fb_ft(state_new, dlambda)
         Rb_l = self.calc_fb_fl(state_new, dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.calc_ft_fs(state_new, dlambda)
-        Rt_b = self.calc_ft_fb(state_new, dlambda)
-        Rt_t = self.calc_ft_ft(state_new, dlambda)
+        Rt_s = self.calc_ft_fs(state_new, dlambda, state_n)
+        Rt_b = self.calc_ft_fb(state_new, dlambda, state_n)
+        Rt_t = self.calc_ft_ft(state_new, dlambda, state_n)
         Rt_l = self.calc_ft_fl(state_new, dlambda, state_n)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Ry_s = self.calc_fy_fs(state_new)
@@ -847,8 +854,10 @@ class YUKinematicPS(YUKinematic):
         return np.vstack((Rs, Ry.reshape(1, -1), Rt, Rb))
 
     def calc_ddsdde(self, state_new, state_n, stress_trial, dlambda):
-        C = self.elastic_stiffness(state_new)
-        Cinv = np.linalg.inv(C)
+        # C_n (step-start stiffness) is used for the rhs scaling in the consistent
+        # tangent: J·dx/dε = [C_n; 0; ...] → ddsdde = J^{-1}[0:3,0:3]·C_n.
+        # Using C(state_new) here was a bug when E varies with eps_eq.
+        Cinv = np.linalg.inv(self.elastic_stiffness(state_n))
         Rs_s = Cinv @ self.calc_fe_fs(state_new, dlambda, state_n)
         Rs_b = Cinv @ self.calc_fe_fb(state_new, dlambda, state_n)
         Rs_t = Cinv @ self.calc_fe_ft(state_new, dlambda, state_n)
@@ -859,9 +868,9 @@ class YUKinematicPS(YUKinematic):
         Rb_t = self.calc_fb_ft(state_new, dlambda)
         Rb_l = self.calc_fb_fl(state_new, dlambda)
         Rb = np.hstack((Rb_s, Rb_l[:, np.newaxis], Rb_t, Rb_b))
-        Rt_s = self.calc_ft_fs(state_new, dlambda)
-        Rt_b = self.calc_ft_fb(state_new, dlambda)
-        Rt_t = self.calc_ft_ft(state_new, dlambda)
+        Rt_s = self.calc_ft_fs(state_new, dlambda, state_n)
+        Rt_b = self.calc_ft_fb(state_new, dlambda, state_n)
+        Rt_t = self.calc_ft_ft(state_new, dlambda, state_n)
         Rt_l = self.calc_ft_fl(state_new, dlambda, state_n)
         Rt = np.hstack((Rt_s, Rt_l[:, np.newaxis], Rt_t, Rt_b))
         Ry_s = self.calc_fy_fs(state_new)
