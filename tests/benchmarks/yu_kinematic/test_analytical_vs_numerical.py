@@ -7,31 +7,31 @@ YUKinematic3D across a variety of strain histories.
 YUKinematic1D has no analytical path (user_defined_return_mapping is 3D-only),
 so 1D coverage is smoke-only (autograd convergence + state monotonicity).
 
-Tolerance policy (evidence from _diagnose_gflag_beta.py, 2026-06-01):
+Both routes now share one stagnation gate — smooth_heaviside(g_stag + 1e-10),
+re-evaluated every NR iteration — so state and stress agree to machine
+precision.  There is no hard-branch/smooth divergence left to budget for.
 
-  smooth_heaviside beta raised from 50 → 500 to close the hard/smooth g_flag
-  gap. With beta=500, transition zone is ±0.0092 MPa — effectively hard step
-  while remaining fully differentiable.
+Tolerance policy (measured 2026-08-04, worst case over all six scenarios):
 
-  stress  : atol=1e-4
-    multiaxial worst case: 1.5e-5 (was 2.7e-3 with beta=50).
-    Residual gap: hard g_flag in user_defined_return_mapping vs beta=500
-    smooth_heaviside in update_state.
-
+  stress  : atol=1e-4    measured 2.4e-11
   state   : per-key relative error (|Δ| / (|v| + 1))
-    R, q, r : atol=1e-3  — beta=500 reduces stagnation-state divergence;
-              multiaxial worst case R=3e-4.
-    theta   : atol=1e-6  — beta=500 closes hard/smooth gap to ~8e-7.
-    others  : atol=1e-4  — eps_eq, beta, theta_max stay tight.
+    theta   : atol=5e-6  measured 2.0e-13
+    R, q, r : atol=1e-3  measured 5.5e-14
+    others  : atol=1e-4  measured 6.4e-14   (eps_eq, beta, theta_max)
+  tangent : max_rel_err < 2e-2   measured 1.1e-3
+  NR iterations: diff <= 5       measured 2
 
-  tangent : max_rel_err < 2e-2
-    Structural mismatch remains at ~1.4e-2 for multiaxial (hard vs smooth
-    g_flag paths reach slightly different convergence points).
-    Tolerance 2e-2 provides a 1.5× margin.
+The limits sit well above the measured values on purpose: they are a
+regression fence, not a fit.  Two bugs previously hid beneath them —
 
-  NR iterations: diff <= 5
-    Multiaxial can differ by up to 4 — hard/smooth g_flag leads to slightly
-    different NR paths even with beta=500.
+  - the g_flag latch in user_defined_return_mapping kept R evolving on steps
+    whose converged g_stag is negative, and R feeds R_theta through
+    a = B + R − Y, so the two routes solved different systems (stress 3.0e-1);
+  - a transposed outer product in dRtheta_dtheta, visible only when direct and
+    shear components are simultaneously nonzero (tangent 1.2e-2).
+
+Both are now pinned: the first by the machine-precision agreement above, the
+second by test_jacobian_fd_multiaxial.
 """
 
 import numpy as np
@@ -158,15 +158,13 @@ def test_smoke_convergence_and_monotonicity(yu_smoke_scenario):
 def test_analytical_matches_numerical(yu_3d_scenario):
     """Analytical and autograd integrators agree over the full strain history.
 
-    Tolerances are set from _diagnose_gflag_beta.py empirical data (2026-06-01).
-    smooth_heaviside beta=500 (raised from 50) closes the hard/smooth g_flag gap.
+    See the module docstring for the measured error budget behind each limit.
 
-    B-A1: max stress error < 1e-4 (multiaxial 1.5e-5 with beta=500)
-    B-A2: per-state-key relative error
-          R/q/r < 1e-3 (multiaxial R=3e-4 with beta=500)
-          theta < 5e-6, others < 1e-4
+    B-A1: max stress error < 1e-4
+    B-A2: per-state-key relative error — theta < 5e-6, R/q/r < 1e-3,
+          others < 1e-4
     B-A4: ddsdde max_rel_err < 2e-2
-    B-A5: NR iteration count difference <= 5 (multiaxial can differ by 4)
+    B-A5: NR iteration count difference <= 5
     """
     model, history = yu_3d_scenario
     errs = _run_and_compare(model, history)
@@ -186,8 +184,8 @@ def test_analytical_matches_numerical(yu_3d_scenario):
             atol = 1e-4
         assert v < atol, f"state[{k!r}] rel_err = {v:.3e} (atol={atol:.0e})"
 
-    # B-A4: ddsdde — structural difference from hard/smooth g_flag after Jacobian fix
+    # B-A4: ddsdde
     assert errs["tangent"] < 2e-2, f"ddsdde rel err = {errs['tangent']:.3e}"
 
-    # B-A5: iteration count — exact match for most scenarios; multiaxial can differ
+    # B-A5: iteration count
     assert errs["iter_diff"] <= 5, f"NR iter count diff = {errs['iter_diff']}"

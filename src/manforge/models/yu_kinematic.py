@@ -155,7 +155,6 @@ class YUKinematic3D(YUKinematic):
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
         dlambda = 0.0
-        g_latched = False  # latch: once stagnation surface activates, stays active this increment
         for iter in range(iter_rm):
             r_vector = self.calc_residual(state_new, state_n, stress_trial, dlambda)
             r_norm = np.linalg.norm(r_vector)
@@ -175,9 +174,13 @@ class YUKinematic3D(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            if g_stag > -1.0e-10:  # dead band: absorb convergence noise at boundary
-                g_latched = True
-            g_flag = 1.0 if g_latched else 0.0
+            # Same smooth gate as update_state, re-evaluated every iteration.
+            # A hard branch here would be discontinuous across iterations, and
+            # the one-way latch that used to guard it kept R evolving on steps
+            # whose converged g_stag is negative — 0.30 MPa of stress error via
+            # a = B + R − Y in R_theta, so the two routes solved different
+            # systems.  smooth_heaviside cannot chatter, so no latch is needed.
+            g_flag = smooth_heaviside(g_stag + 1.0e-10)
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0
@@ -360,9 +363,13 @@ class YUKinematic3D(YUKinematic):
         theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
         if theta_bar < 1e-14:
             return (1 + a * C_k * dlambda / self.Y) * self.I
+        # θ ⊗ ∂θ̄/∂θ — the gradient goes in the second slot.  Transposing this
+        # is invisible under uniaxial or pure-shear loading, because T's shear
+        # weighting only makes outer(Tθ, θ) ≠ outer(θ, Tθ) when direct and
+        # shear components are simultaneously nonzero.
         return (1 + a * C_k * dlambda / self.Y + C_k * dlambda * np.sqrt(a / theta_bar)) * self.I - (
             np.sqrt(1.5) * C_k * dlambda * np.sqrt(a / theta_bar) / (2 * theta_bar)
-        ) * np.outer(theta_flow / np.sqrt(1.5), theta)
+        ) * np.outer(theta, theta_flow / np.sqrt(1.5))
     
     @verified_against_fortran(
         "yu_drt_dlambda",
@@ -579,7 +586,6 @@ class YUKinematicPS(YUKinematic):
         state_new = deepcopy(state_n)
         state_new["stress"] = deepcopy(stress_trial)
         dlambda = 0.0
-        g_latched = False
         for iter in range(iter_rm):
             r_vector = self.calc_residual(state_new, state_n, stress_trial, dlambda)
             r_norm = np.linalg.norm(r_vector)
@@ -602,9 +608,9 @@ class YUKinematicPS(YUKinematic):
             g_xi = state_new["beta"] - state_n["q"]
             stag_norm = self.vonmises_norm(g_xi)
             g_stag = stag_norm - state_n["r"]
-            if g_stag > -1.0e-10:
-                g_latched = True
-            g_flag = 1.0 if g_latched else 0.0
+            # Same smooth gate as update_state; see YUKinematic3D for why the
+            # hard-branch latch was removed.
+            g_flag = smooth_heaviside(g_stag + 1.0e-10)
             Gn = self.deviatoric_inner_product(g_xi, g_xi)
             Fn = self.deviatoric_inner_product(g_xi, d_beta)
             mu = 0.0

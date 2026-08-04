@@ -454,9 +454,8 @@ def test_user_defined_trajectory_matches_autograd():
     """The hand-derived return mapping must track the autograd one step for step.
 
     Covers the residual and the mu/stagnation update, which the block checks
-    above do not reach.  The two paths gate g_flag differently — a per-iteration
-    latch vs a smooth_heaviside — so this is what establishes the difference
-    does not accumulate.
+    above do not reach.  Both routes gate on the same smooth_heaviside, so this
+    is what establishes that nothing else drifts across steps.
     """
     model = YUKinematicPS(**PARAMS)
     history = FieldHistory.cyclic_strain([0.05, -0.05, 0.05], n_per_segment=25, ntens=1)

@@ -695,8 +695,14 @@ subroutine yu_dRt_dtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
         outer_coeff = SQRT15 * C_k * dlambda * sqrt(a / theta_bar) / (2.0d0 * theta_bar)
         do ii = 1, 6
             do jj = 1, 6
-                ! outer product: (theta_flow/sqrt(1.5))_i * theta_j
-                jmat(ii,jj) = -outer_coeff * (theta_flow(ii) / SQRT15) * theta(jj)
+                ! outer product theta (x) d(theta_bar)/d(theta):
+                !   theta_i * (theta_flow/sqrt(1.5))_j
+                ! The gradient belongs in the second slot.  Transposing this is
+                ! invisible under uniaxial or pure-shear loading, because T's
+                ! shear weighting only makes outer(T.theta, theta) differ from
+                ! outer(theta, T.theta) when direct and shear components are
+                ! simultaneously nonzero.
+                jmat(ii,jj) = -outer_coeff * theta(ii) * (theta_flow(jj) / SQRT15)
             end do
             jmat(ii,ii) = jmat(ii,ii) + diag_coeff
         end do
@@ -1375,7 +1381,6 @@ subroutine yu_kinematic_3d( &
     double precision :: r_vec(19), jac(19,19), dx(19,1)
     double precision :: r_norm, xi_trial(6), dev_s(6), xi_trial_norm
     double precision :: g_xi(6), d_beta(6), stag_norm, g_stag, g_flag
-    logical :: g_latched
     double precision :: Gn, Fn, mu, delta_q(6), delta_rstag, delta_Rbnd, s_fac
     double precision :: H_mu_fin, theta_new_norm, theta_max_cand
     integer :: iter, ii, jj, info_lu, info_mu
@@ -1444,7 +1449,6 @@ subroutine yu_kinematic_3d( &
     dlambda    = 0.0d0
     n_iter     = 0
     converged  = 0
-    g_latched  = .false.  ! latch: once stagnation surface activates, stays active this increment
 
     do iter = 1, 50
         ! Residual (theta_max passed as state_n value -- not updated during NR)
@@ -1494,7 +1498,14 @@ subroutine yu_kinematic_3d( &
 
         ! ----------------------------------------------------------------
         ! Explicit state updates (stagnation surface)
-        ! g_flag: hard branch (matches user_defined_return_mapping:158)
+        ! g_flag: smooth gate, re-evaluated every iteration (matches
+        ! user_defined_return_mapping and update_state).
+        ! A hard branch here is discontinuous across iterations, and the
+        ! one-way latch that used to guard it kept R evolving on steps whose
+        ! converged g_stag is negative -- 0.30 MPa of stress error, because R
+        ! enters R_theta through a = B_bnd + R - Y, so the analytical and
+        ! autograd routes were solving different systems.  smooth_heaviside
+        ! cannot chatter, so no latch is needed.
         ! ----------------------------------------------------------------
         do ii = 1, 6
             d_beta(ii) = beta_new(ii) - beta_n(ii)
@@ -1502,12 +1513,7 @@ subroutine yu_kinematic_3d( &
         end do
         call yu_vonmises_norm(g_xi, stag_norm)
         g_stag = stag_norm - rstag_n
-        if (g_stag > -1.0d-10) g_latched = .true.  ! dead band + latch: absorb convergence noise at boundary
-        if (g_latched) then
-            g_flag = 1.0d0
-        else
-            g_flag = 0.0d0
-        end if
+        call yu_smooth_heaviside(g_stag + 1.0d-10, g_flag)
 
         ! deviatoric_inner_product for SOLID_3D:
         !   Gn = sum(g_xi(1:3)^2) + 2*sum(g_xi(4:6)^2)   (Mandel)

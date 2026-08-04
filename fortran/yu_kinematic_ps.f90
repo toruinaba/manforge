@@ -1103,11 +1103,9 @@ end subroutine yu_ps_inner_mu_newton
 ! -> return mapping -> consistent tangent).  Equivalent to one UMAT call.
 ! Mirrors YUKinematicPS.user_defined_return_mapping + user_defined_tangent.
 !
-! The stagnation flag is LATCHED across NR iterations, matching
-! user_defined_return_mapping (and yu_kinematic_3d.f90).  The autograd path in
-! update_state instead re-evaluates a smooth_heaviside every iteration; the two
-! converge to the same trajectory but the latch is what the analytical route
-! defines.
+! The stagnation flag uses smooth_heaviside, re-evaluated every NR iteration --
+! the same gate as update_state and the Python analytical route.  See
+! yu_kinematic_3d.f90 for why the earlier hard-branch latch was removed.
 !
 ! Parameters
 ! ----------
@@ -1161,7 +1159,6 @@ subroutine yu_kinematic_ps( &
     ! bound-surface radius would be the same symbol.
     double precision :: Gn, Fn, mu, delta_q(3), delta_rstag, delta_Rbnd, H_val
     double precision :: theta_norm_final
-    logical :: g_latched
     integer :: ii, jj, iter, info_lu, info_mu
     double precision, parameter :: TOL_NR = 1.0d-10
 
@@ -1217,7 +1214,6 @@ subroutine yu_kinematic_ps( &
     dlambda    = 0.0d0
     n_iter     = 0
     converged  = 0
-    g_latched  = .false.
 
     do iter = 1, 50
         call yu_ps_calc_residual(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
@@ -1272,14 +1268,11 @@ subroutine yu_kinematic_ps( &
 
         s_fac = 1.0d0 / (1.0d0 + 2.0d0 / 3.0d0 * k * Y * dlambda)
 
+        ! Smooth gate, re-evaluated every iteration -- see yu_kinematic_3d.f90
+        ! for why the hard-branch latch was removed.
         call yu_ps_vonmises_norm(g_xi, stag_norm)
         g_stag = stag_norm - rstag_n
-        if (g_stag > -1.0d-10) g_latched = .true.   ! dead band + latch
-        if (g_latched) then
-            g_flag = 1.0d0
-        else
-            g_flag = 0.0d0
-        end if
+        call yu_ps_smooth_heaviside(g_stag + 1.0d-10, g_flag)
 
         call yu_ps_dev_inner(g_xi, g_xi, Gn)
         call yu_ps_dev_inner(g_xi, d_beta, Fn)

@@ -345,7 +345,7 @@ class TestCrosscheckTrajectory:
     """March both implementations forward together and compare every step.
 
     Errors that are invisible in one step -- a slightly wrong tangent, a
-    stagnation flag that latches one iteration late -- accumulate here.
+    stagnation flag that turns on one iteration late -- accumulate here.
     """
 
     @pytest.mark.parametrize("strain_inc", [
