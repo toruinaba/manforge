@@ -11,11 +11,7 @@ Test classes:
     TestResidualAndJacobian  -- calc_residual + calc_jacobian over a trajectory
     TestReturnMapping        -- yu_kinematic_ps core (return mapping + ddsdde)
     TestCrosscheckTrajectory -- PythonAnalyticalIntegrator vs FortranIntegrator
-
-Scope note: the ABAQUS umat shim is deliberately not ported yet.  Plane-stress
-elements enter with NTENS=3/NDI=2/NSHR=1 and ROTSIG co-rotation of 3-component
-tensors is unverified; keeping it out separates numerical correctness from the
-ABAQUS packing contract.
+    TestUmatShim             -- ABAQUS umat entry point (STATEV packing, PNEWDT)
 """
 
 import numpy as np
@@ -396,3 +392,109 @@ class TestCrosscheckTrajectory:
                     err_msg=f"state[{key!r}] diverged at step {step}")
 
         assert n_plastic > 0, "trajectory never yielded"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for umat calls
+# ---------------------------------------------------------------------------
+
+def _pack_statev(state):
+    """Pack a state dict into STATEV(13) following the Fortran layout."""
+    sv = np.zeros(13)
+    sv[0:3]  = np.asarray(state["theta"])
+    sv[3:6]  = np.asarray(state["beta"])
+    sv[6]    = float(state["R"])
+    sv[7:10] = np.asarray(state["q"])
+    sv[10]   = float(state["r"])
+    sv[11]   = float(state["eps_eq"])
+    sv[12]   = float(state["theta_max"])
+    return sv
+
+
+def _unpack_statev(sv):
+    return {
+        "theta":     sv[0:3].copy(),
+        "beta":      sv[3:6].copy(),
+        "R":         sv[6],
+        "q":         sv[7:10].copy(),
+        "r":         sv[10],
+        "eps_eq":    sv[11],
+        "theta_max": sv[12],
+    }
+
+
+def _call_umat(model, stress_n, state_n, strain_inc, pnewdt_in=1.0):
+    """Call the ABAQUS umat entry point; returns (stress, state, ddsdde, pnewdt)."""
+    import yu_kinematic_ps as fm
+    NTENS = 3
+    STRESS = np.asarray(stress_n, dtype=np.float64).copy()
+    STATEV = _pack_statev(state_n)
+    PROPS = np.array(_props(model), dtype=np.float64)
+    DSTRAN = np.asarray(strain_inc, dtype=np.float64)
+    STRAN = np.zeros(NTENS)
+    TIME = np.zeros(2)
+    PREDEF = np.zeros(1)
+    DPRED = np.zeros(1)
+    pnewdt = np.array(pnewdt_in, dtype=np.float64)
+
+    # STRESS and STATEV are intent(inout): modified in place.
+    # NDI=2, NSHR=1 -- the plane-stress / conventional-shell signature.
+    ret = fm.umat(STRESS, STATEV, STRAN, DSTRAN, TIME, 1.0, 0.0, 0.0,
+                  PREDEF, DPRED, b'YU      ', 2, 1,
+                  PROPS, np.zeros(3), np.eye(3), pnewdt, 1.0,
+                  np.eye(3), np.eye(3), 1, 1, 1, 1, 1, 1)
+    return STRESS.copy(), _unpack_statev(STATEV), ret[0], float(pnewdt)
+
+
+# ---------------------------------------------------------------------------
+# TestUmatShim
+# ---------------------------------------------------------------------------
+
+class TestUmatShim:
+    """Verify the ABAQUS umat shim: STATEV packing and the PNEWDT contract.
+
+    The core is already pinned against Python above; what is new here is the
+    13-slot STATEV layout (R at 7 and r at 11, unlike the 3-D file's 13 and 20)
+    and the ROTSIG calls, which are the only places the shim can silently
+    scramble state.
+    """
+
+    def test_umat_statev_roundtrip(self, model):
+        """umat STRESS/STATEV match PythonAnalyticalIntegrator through the pack."""
+        state_n = _initial_state(model)
+        strain_inc = np.array([3.0e-3, -1.0e-3, 0.0])
+        py = PythonAnalyticalIntegrator(model).stress_update(
+            strain_inc, np.zeros(3), state_n)
+        assert py.is_plastic
+
+        stress_u, state_u, _, pnewdt = _call_umat(
+            model, np.zeros(3), state_n, strain_inc)
+
+        assert pnewdt == 1.0, "converged step must not request a cutback"
+        np.testing.assert_allclose(stress_u, np.asarray(py.stress),
+                                   rtol=1e-9, atol=1e-9,
+                                   err_msg="umat STRESS != Python stress")
+        for key in ("theta", "beta", "R", "q", "r", "eps_eq", "theta_max"):
+            np.testing.assert_allclose(
+                np.asarray(state_u[key]), np.asarray(py.state[key]),
+                rtol=1e-9, atol=1e-9, err_msg=f"umat STATEV {key} != Python state")
+
+    def test_umat_pnewdt_nonconvergence(self, model):
+        """A strain increment too large to converge must halve PNEWDT and
+        leave STRESS/STATEV untouched so the retry restarts from step start."""
+        state_n = _initial_state(model)
+        strain_inc = np.array([5.0, -2.0, 1.0])
+        stress_u, state_u, ddsdde, pnewdt = _call_umat(
+            model, np.zeros(3), state_n, strain_inc)
+
+        assert pnewdt <= 0.5, "non-convergence must request a time-increment cut"
+        np.testing.assert_allclose(stress_u, np.zeros(3), atol=0.0,
+                                   err_msg="STRESS must be left unchanged")
+        for key in ("theta", "beta", "q"):
+            np.testing.assert_allclose(np.asarray(state_u[key]), np.zeros(3),
+                                       atol=0.0,
+                                       err_msg=f"STATEV {key} must be unchanged")
+        # Secant stiffness at eps_eq_n, so the global NR still gets a valid matrix
+        np.testing.assert_allclose(
+            np.asarray(ddsdde), np.asarray(model.elastic_stiffness(state_n)),
+            rtol=1e-11, atol=1e-11)

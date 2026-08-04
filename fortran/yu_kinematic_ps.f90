@@ -45,14 +45,23 @@
 !   PROPS(11) = Ea       asymptotic modulus (nonlinear elasticity)
 !   PROPS(12) = xi_param nonlinear elasticity decay parameter (Python: self.xi)
 !
-! State variables (13 slots, model.state_names without "stress"):
-!   theta(1..3)   relative backstress of yield surface
-!   beta(1..3)    relative backstress of boundary surface
-!   R             radius increment of boundary surface
-!   q(1..3)       center of stagnation surface
-!   r             radius of stagnation surface
-!   eps_eq        equivalent plastic strain
-!   theta_max     max ||theta|| in history
+! State variables (STATEV, 13 slots, model.state_names without "stress"):
+!   STATEV(1..3)   theta      relative backstress of yield surface
+!   STATEV(4..6)   beta       relative backstress of boundary surface
+!   STATEV(7)      R          radius increment of boundary surface
+!   STATEV(8..10)  q          center of stagnation surface
+!   STATEV(11)     r          radius of stagnation surface
+!   STATEV(12)     eps_eq     equivalent plastic strain
+!   STATEV(13)     theta_max  max ||theta|| in history
+!
+! Target elements: S4, S3, S4R, S3R (and CPS4-family plane stress), all of
+! which enter with NDI=2, NSHR=1, NTENS=3.  Transverse shear is expected to be
+! supplied via *TRANSVERSE SHEAR STIFFNESS on the section, not by this UMAT;
+! the NTENS=5 shell path is rejected by the guard in umat.
+!
+! One `umat` per source file: ABAQUS links a single umat symbol per job, so
+! this file and yu_kinematic_3d.f90 are alternatives, not companions.  A job
+! mixing 3-D solids and shells with this material is not supported.
 !
 ! Voigt convention (ntens=3): [s11, s22, s12]
 !   Stress components: physical shear   (sigma_12 = tensor shear)
@@ -1327,3 +1336,179 @@ subroutine yu_kinematic_ps( &
                            theta_max_n, Rbnd_n, dlambda, eps_eq_n, ddsdde)
 
 end subroutine yu_kinematic_ps
+
+
+! =============================================================================
+! umat -- ABAQUS UMAT interface for YUKinematicPS
+!
+! Thin shim that unpacks PROPS(12) and STATEV(13) into named arguments and
+! calls yu_kinematic_ps.  Non-convergence is signalled to ABAQUS via
+! PNEWDT = 0.5 (request to halve the time increment).
+!
+! PROPS / STATEV layouts: see file header.
+! =============================================================================
+subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
+                RPL, DDSDDT, DRPLDE, DRPLDT, &
+                STRAN, DSTRAN, TIME, DTIME, TEMP, DTEMP, &
+                PREDEF, DPRED, CMNAME, NDI, NSHR, NTENS, &
+                NSTATV, PROPS, NPROPS, COORDS, DROT, PNEWDT, &
+                CELENT, DFGRD0, DFGRD1, NOEL, NPT, LAYER, &
+                KSPT, KSTEP, KINC)
+    implicit none
+    character(len=80),    intent(in)    :: CMNAME
+    integer,              intent(in)    :: NDI, NSHR, NTENS, NSTATV, NPROPS
+    integer,              intent(in)    :: NOEL, NPT, LAYER, KSPT, KSTEP, KINC
+    double precision,     intent(inout) :: STRESS(NTENS)
+    double precision,     intent(inout) :: STATEV(NSTATV)
+    double precision,     intent(out)   :: DDSDDE(NTENS, NTENS)
+    double precision,     intent(out)   :: SSE, SPD, SCD, RPL, DRPLDT
+    double precision,     intent(out)   :: DDSDDT(NTENS), DRPLDE(NTENS)
+    double precision,     intent(in)    :: STRAN(NTENS), DSTRAN(NTENS)
+    double precision,     intent(in)    :: TIME(2), DTIME, TEMP, DTEMP
+    double precision,     intent(in)    :: PREDEF(1), DPRED(1)
+    double precision,     intent(in)    :: PROPS(NPROPS), COORDS(3)
+    double precision,     intent(in)    :: DROT(3,3), DFGRD0(3,3), DFGRD1(3,3)
+    double precision,     intent(inout) :: PNEWDT
+    double precision,     intent(in)    :: CELENT
+
+    double precision :: theta_n(3), beta_n(3), Rbnd_n, q_n(3), rstag_n
+    double precision :: eps_eq_n, theta_max_n
+    double precision :: stress_out(3), theta_out(3), beta_out(3), Rbnd_out
+    double precision :: q_out(3), rstag_out, eps_eq_out, theta_max_out
+    double precision :: ddsdde_local(3,3)
+    double precision :: theta_rot(3), beta_rot(3), q_rot(3)
+    double precision :: r_hist_val(50)
+    integer :: i, j, n_iter, converged
+    ! Debug output control: change to .true. to enable YU-* diagnostic writes
+    logical, parameter :: YU_DEBUG = .false.
+
+    ! Diagnostic: per-increment failure counters (retained across calls via save)
+    integer,          save :: yu_kstep = -1
+    integer,          save :: yu_kinc  = -1
+    integer,          save :: yu_nfail = 0
+    integer,          save :: yu_nnr   = 0
+    integer,          save :: yu_nmu   = 0
+    double precision, save :: yu_time  = 0.0d0
+    double precision, save :: yu_dtime = 0.0d0
+
+    ! Guard: plane stress / conventional shell only (S4, S3, S4R, S3R, CPS4...).
+    ! The NTENS=5 shell path (transverse shear carried by the material) is
+    ! rejected: use *TRANSVERSE SHEAR STIFFNESS on the section instead.
+    if (NTENS /= 3 .or. NDI /= 2 .or. NSHR /= 1 .or. &
+        NSTATV < 13 .or. NPROPS < 12) then
+        write(7,'(A)') 'YUKinematicPS UMAT: incompatible element/material definition.'
+        write(7,'(A,I0,A,I0,A,I0)') '  Expected NTENS=3 NDI=2 NSHR=1, got NTENS=', &
+            NTENS, ' NDI=', NDI, ' NSHR=', NSHR
+        write(7,'(A,I0,A,I0)') '  Expected NSTATV>=13 NPROPS>=12, got NSTATV=', &
+            NSTATV, ' NPROPS=', NPROPS
+        PNEWDT = 0.0d0
+        return
+    end if
+
+    ! STATEV unpack + co-rotate tensor state variables.
+    ! STRESS is already co-rotated by ABAQUS before UMAT entry (no ROTSIG needed).
+    ! theta, beta, q are stress-like tensors stored in STATEV and must be
+    ! co-rotated here so the return mapping operates in the rotated frame.
+    ! LSTR=1 (stress): PLANE_STRESS_P stores the raw tensor shear, so no
+    ! engineering-shear halving applies.
+    do i = 1, 3
+        theta_n(i) = STATEV(i)
+        beta_n(i)  = STATEV(3 + i)
+        q_n(i)     = STATEV(7 + i)
+    end do
+    Rbnd_n      = STATEV(7)
+    rstag_n     = STATEV(11)
+    eps_eq_n    = STATEV(12)
+    theta_max_n = STATEV(13)
+
+    call ROTSIG(theta_n, DROT, theta_rot, 1, NDI, NSHR)
+    call ROTSIG(beta_n,  DROT, beta_rot,  1, NDI, NSHR)
+    call ROTSIG(q_n,     DROT, q_rot,     1, NDI, NSHR)
+
+    call yu_kinematic_ps( &
+        PROPS(1), PROPS(2), PROPS(3), PROPS(4), PROPS(5), PROPS(6), &
+        PROPS(7), PROPS(8), PROPS(9), PROPS(10), PROPS(11), PROPS(12), &
+        STRESS, &
+        theta_rot, beta_rot, Rbnd_n, q_rot, rstag_n, eps_eq_n, theta_max_n, &
+        DSTRAN, &
+        stress_out, &
+        theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
+        ddsdde_local, n_iter, converged, r_hist_val)
+
+    ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV, so
+    ! the retry starts from the original state rather than a partially-converged
+    ! one.  DDSDDE still gets the secant stiffness at eps_eq_n -- the state the
+    ! retry will start from -- because the ABAQUS global NR needs a valid matrix.
+    if (converged == 0) then
+        PNEWDT = min(PNEWDT, 0.5d0)
+        call yu_ps_elastic_stiffness( &
+            PROPS(1), PROPS(2), eps_eq_n, PROPS(11), PROPS(12), DDSDDE)
+
+        if (YU_DEBUG) then
+            ! One summary line per increment (grep "YU-NC"):
+            !   YU-NC  kstep  kinc  time  dtime  n_fail  n_nr  n_mu
+            ! n_nr: outer NR ran out of iterations (n_iter>=50)
+            ! n_mu: internal failure -- mu Newton or the linear solve (n_iter<50)
+            if (KSTEP /= yu_kstep .or. KINC /= yu_kinc) then
+                if (yu_kinc /= -1) then
+                    write(7,'(A,2I6,2ES11.3,3I8)') 'YU-NC ', &
+                        yu_kstep, yu_kinc, yu_time, yu_dtime, &
+                        yu_nfail, yu_nnr, yu_nmu
+                end if
+                yu_kstep = KSTEP
+                yu_kinc  = KINC
+                yu_time  = TIME(1)
+                yu_dtime = DTIME
+                yu_nfail = 0
+                yu_nnr   = 0
+                yu_nmu   = 0
+                write(7,'(A,4I6,ES11.3)') 'YU-DT ', KSTEP, KINC, NOEL, NPT, DTIME
+                write(7,'(A,3ES22.14)') 'YU-DS ', (DSTRAN(i), i=1,3)
+                write(7,'(A,3ES22.14)') 'YU-SS ', (STRESS(i), i=1,3)
+                write(7,'(A,3ES22.14)') 'YU-TH ', (STATEV(i), i=1,3)
+                write(7,'(A,3ES22.14)') 'YU-BT ', (STATEV(3+i), i=1,3)
+                write(7,'(A,4ES22.14)') 'YU-RQ ', STATEV(7), STATEV(11), &
+                    STATEV(12), STATEV(13)
+                write(7,'(A,10ES10.3)') 'YU-RH ', (r_hist_val(i), i=1,10)
+            end if
+
+            yu_nfail = yu_nfail + 1
+            if (n_iter >= 50) then
+                yu_nnr = yu_nnr + 1
+            else
+                yu_nmu = yu_nmu + 1
+            end if
+        end if
+
+        return   ! leave STRESS and STATEV unchanged for the retry
+    end if
+
+    ! Write-back stress and tangent (converged == 1 only)
+    do i = 1, NTENS
+        STRESS(i) = stress_out(i)
+        do j = 1, NTENS
+            DDSDDE(i, j) = ddsdde_local(i, j)
+        end do
+    end do
+
+    ! STATEV repack (converged == 1 only).
+    ! theta_out, beta_out, q_out are already in the rotated frame (the return
+    ! mapping ran there); no further rotation before storing.
+    do i = 1, 3
+        STATEV(i)     = theta_out(i)
+        STATEV(3 + i) = beta_out(i)
+        STATEV(7 + i) = q_out(i)
+    end do
+    STATEV(7)  = Rbnd_out
+    STATEV(11) = rstag_out
+    STATEV(12) = eps_eq_out
+    STATEV(13) = theta_max_out
+
+    ! Zero unused output fields
+    SSE = 0.0d0; SPD = 0.0d0; SCD = 0.0d0; RPL = 0.0d0; DRPLDT = 0.0d0
+    do i = 1, NTENS
+        DDSDDT(i) = 0.0d0
+        DRPLDE(i) = 0.0d0
+    end do
+
+end subroutine umat
