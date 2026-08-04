@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -9,17 +9,26 @@
 # Fortran build (host)
 # ---------------------------------------------------------------------------
 
+# PY selects the interpreter that drives f2py.  Inside the Docker image the venv
+# is read-only and lives outside the bind-mounted tree, so `uv run` would try to
+# re-sync it and fail; override with `make PY=python fortran-build-yu` there.
+PY ?= uv run python
+
 ## Compile fortran/test_basic.f90 into a Python extension via f2py
 fortran-build:
-	cd fortran && uv run python -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
+	cd fortran && $(PY) -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
 
 ## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
-	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
 
 ## Compile YU Kinematic UMAT (abaqus_stubs + yu_kinematic_3d) into a Python extension via f2py
 fortran-build-yu:
-	cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
+
+## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
+fortran-build-yu-ps:
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -71,10 +80,26 @@ test-all:
 docker-build:
 	docker build -t manforge-fortran .
 
+# Runs as the invoking user so build artifacts in the bind mount stay writable
+# on the host; PY=python bypasses `uv run` because /opt/venv is not writable.
+DOCKER_RUN = docker run --rm --user $$(id -u):$$(id -g) \
+	-v $$(pwd):/workspace -w /workspace -e HOME=/tmp \
+	-e PYTHONPATH=/workspace/src:/workspace/fortran manforge-fortran
+
 ## Run Fortran build and Fortran benchmark tests inside Docker container
 docker-test:
-	docker run --rm -v $$(pwd):/workspace -w /workspace manforge-fortran \
-		bash -c "make fortran-build-umat && make test-benchmarks-fortran"
+	$(DOCKER_RUN) bash -c "make PY=python fortran-build-umat && \
+		python -m pytest tests/benchmarks -m fortran -v"
+
+## Build both YU Fortran modules and run the YU Fortran benchmarks in Docker
+# Names the two Fortran test files explicitly: the sibling test_yu*.py scratch
+# scripts import matplotlib, which the container image does not carry.
+docker-test-yu:
+	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
+		make PY=python fortran-build-yu-ps && \
+		python -m pytest \
+			tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py \
+			tests/benchmarks/yu_kinematic/test_ps_vs_fortran.py -m fortran -v"
 
 # ---------------------------------------------------------------------------
 # Cleanup
