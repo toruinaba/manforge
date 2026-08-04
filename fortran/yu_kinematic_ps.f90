@@ -1277,6 +1277,16 @@ subroutine yu_kinematic_ps( &
         call yu_ps_dev_inner(g_xi, g_xi, Gn)
         call yu_ps_dev_inner(g_xi, d_beta, Fn)
         call yu_ps_inner_mu_newton(h, rstag_n, Gn, Fn, mu, info_mu)
+        ! An unconverged mu leaves delta_q / delta_rstag meaningless, yet the
+        ! outer NR can still reach its tolerance and report success -- the
+        ! caller would then store a corrupt stagnation surface.  Python raises
+        ! here (update_state / user_defined_return_mapping); the Fortran
+        ! equivalent is to fail the step so the UMAT can request a cutback.
+        if (info_mu /= 0) then
+            converged = 0
+            n_iter    = iter
+            exit
+        end if
 
         do ii = 1, 3
             delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
@@ -1291,9 +1301,12 @@ subroutine yu_kinematic_ps( &
             q_new(ii) = q_n(ii) + g_flag * delta_q(ii)
         end do
         eps_eq_new = eps_eq_n + delta_eps_eq
-
-        n_iter = iter
     end do
+
+    ! Exhausting the loop leaves n_iter at its initial 0; 50 distinguishes
+    ! "outer NR ran out of iterations" from the early exits above, which the
+    ! UMAT diagnostics use to separate NR from internal (mu / solve) failures.
+    if (converged == 0 .and. n_iter == 0) n_iter = 50
 
     ! theta_max is updated once, after convergence
     call yu_ps_vonmises_norm(theta_new, theta_norm_final)
