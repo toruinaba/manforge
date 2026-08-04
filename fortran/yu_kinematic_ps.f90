@@ -1,0 +1,1323 @@
+! =============================================================================
+! manforge -- YUKinematicPS UMAT (Yoshida-Uemori 2-surface + stagnation surface)
+!
+! Fortran port of YUKinematicPS (src/manforge/models/yu_kinematic.py).
+! Plane stress under the P-metric convention (PLANE_STRESS_P), ntens = 3.
+! Algorithm: fully-implicit Newton-Raphson on [stress(3), dlambda(1),
+!            theta(3), beta(3)] = 10 unknowns.
+!
+! NOTE this is NOT a dimension-reduction of yu_kinematic_3d.f90.  The yield
+! function there is the norm form ||xi|| - Y; here it is the quadratic form
+!   f = 0.5 * xi^T P xi - Y^2/3
+! so dlambda is (2/3)Y times smaller and every residual carries 2/3 and Y
+! factors that have no counterpart in the 3-D file.  The two ports are
+! deliberately separate.
+!
+! P metric (P = T * Pi_dev with T = diag(1,1,2)):
+!         [  2/3  -1/3   0  ]
+!   P  =  [ -1/3   2/3   0  ]
+!         [   0     0    2  ]
+! It absorbs both the deviatoric projection and the Mandel shear weighting, so
+!   dev(s)                        is the IDENTITY  (P already projects)
+!   dev(s):dev(t)                 = s^T P t
+!   ||s||_vm                      = sqrt(1.5 * s^T P s)
+!   P @ xi                        comes out in engineering shear
+! Projecting before applying P would double-project.
+!
+! NOTE on naming:
+!   - Fortran is case-insensitive, so the Python parameters B (bound surface
+!     size) and b (backstress rate) would collide.  B is named "B_bnd" and
+!     b is named "b_kin" throughout, matching yu_kinematic_3d.f90.
+!   - Output matrix/vector arguments are named jmat / jvec / jval to avoid
+!     collision with the loop variable j.
+!
+! Material properties (PROPS, 12 parameters, matches model.param_names):
+!   PROPS(1)  = E        Young's modulus
+!   PROPS(2)  = nu       Poisson's ratio
+!   PROPS(3)  = Y        initial yield stress
+!   PROPS(4)  = B_bnd    bound surface size  (Python: self.B)
+!   PROPS(5)  = C_1      kinematic hardening rate (theta, pre-reversal)
+!   PROPS(6)  = C_2      kinematic hardening rate (theta, post-reversal)
+!   PROPS(7)  = Rsat     saturation value of R
+!   PROPS(8)  = k        boundary surface hardening rate
+!   PROPS(9)  = b_kin    backstress (beta) hardening rate  (Python: self.b)
+!   PROPS(10) = h        stagnation surface parameter
+!   PROPS(11) = Ea       asymptotic modulus (nonlinear elasticity)
+!   PROPS(12) = xi_param nonlinear elasticity decay parameter (Python: self.xi)
+!
+! State variables (13 slots, model.state_names without "stress"):
+!   theta(1..3)   relative backstress of yield surface
+!   beta(1..3)    relative backstress of boundary surface
+!   R             radius increment of boundary surface
+!   q(1..3)       center of stagnation surface
+!   r             radius of stagnation surface
+!   eps_eq        equivalent plastic strain
+!   theta_max     max ||theta|| in history
+!
+! Voigt convention (ntens=3): [s11, s22, s12]
+!   Stress components: physical shear   (sigma_12 = tensor shear)
+!   Strain components: engineering shear (gamma_12 = 2 * tensor shear)
+!   Stress-like quantities store the raw in-plane tensor with the 33 component
+!   identically zero -- NOT a 3-D deviator with s33 = -(s11+s22).
+!
+! NR unknown vector layout (10 components):
+!   x = [stress(1..3), dlambda(4), theta(5..7), beta(8..10)]
+! Residual vector layout (matching x):
+!   r = [R_stress(1..3), R_yield(4), R_theta(5..7), R_beta(8..10)]
+!
+! Build (from fortran/ directory):
+!   uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_ps.f90 -m yu_kinematic_ps
+! =============================================================================
+
+
+! =============================================================================
+! yu_ps_pmat  (internal helper, not f2py-callable)
+!
+! Returns the plane-stress deviatoric metric P.
+! =============================================================================
+subroutine yu_ps_pmat(P)
+    implicit none
+    double precision, intent(out) :: P(3,3)
+
+    P(1,1) =  2.0d0 / 3.0d0
+    P(1,2) = -1.0d0 / 3.0d0
+    P(1,3) =  0.0d0
+    P(2,1) = -1.0d0 / 3.0d0
+    P(2,2) =  2.0d0 / 3.0d0
+    P(2,3) =  0.0d0
+    P(3,1) =  0.0d0
+    P(3,2) =  0.0d0
+    P(3,3) =  2.0d0
+
+end subroutine yu_ps_pmat
+
+
+! =============================================================================
+! yu_ps_pmul  (internal helper, not f2py-callable)
+!
+! Computes y = P @ x for the plane-stress metric.
+! =============================================================================
+subroutine yu_ps_pmul(x, y)
+    implicit none
+    double precision, intent(in)  :: x(3)
+    double precision, intent(out) :: y(3)
+
+    y(1) = (2.0d0 * x(1) - x(2)) / 3.0d0
+    y(2) = (2.0d0 * x(2) - x(1)) / 3.0d0
+    y(3) = 2.0d0 * x(3)
+
+end subroutine yu_ps_pmul
+
+
+! =============================================================================
+! yu_ps_dev_inner  (internal helper, not f2py-callable)
+!
+! Deviatoric double contraction via the P metric: dev(s):dev(t) = s^T P t.
+! =============================================================================
+subroutine yu_ps_dev_inner(s, t, val)
+    implicit none
+    double precision, intent(in)  :: s(3), t(3)
+    double precision, intent(out) :: val
+
+    double precision :: Pt(3)
+
+    call yu_ps_pmul(t, Pt)
+    val = s(1) * Pt(1) + s(2) * Pt(2) + s(3) * Pt(3)
+
+end subroutine yu_ps_dev_inner
+
+
+! =============================================================================
+! yu_ps_vonmises_norm  (internal helper, not f2py-callable)
+!
+! Von Mises equivalent norm under the P metric:
+!   ||s||_vm = sqrt(1.5 * s^T P s)
+! =============================================================================
+subroutine yu_ps_vonmises_norm(s, s_norm)
+    implicit none
+    double precision, intent(in)  :: s(3)
+    double precision, intent(out) :: s_norm
+
+    double precision :: sPs
+    double precision, parameter :: EPS_SQRT = 1.0d-12
+
+    call yu_ps_dev_inner(s, s, sPs)
+    s_norm = sqrt(1.5d0 * sPs + EPS_SQRT**2)
+
+end subroutine yu_ps_vonmises_norm
+
+
+! =============================================================================
+! yu_ps_smooth_heaviside  (internal helper, not f2py-callable)
+!
+! Smooth Heaviside step 0.5*(1 + tanh(beta*x/2)) with beta = 500, matching
+! manforge.utils.smooth.smooth_heaviside.
+! =============================================================================
+subroutine yu_ps_smooth_heaviside(x, hv)
+    implicit none
+    double precision, intent(in)  :: x
+    double precision, intent(out) :: hv
+
+    double precision, parameter :: BETA_HV = 500.0d0
+    double precision :: arg
+
+    arg = BETA_HV * x / 2.0d0
+    if (arg > 350.0d0) then
+        hv = 1.0d0
+    else if (arg < -350.0d0) then
+        hv = 0.0d0
+    else
+        hv = 0.5d0 * (1.0d0 + tanh(arg))
+    end if
+
+end subroutine yu_ps_smooth_heaviside
+
+
+! =============================================================================
+! yu_ps_smooth_sqrt  (internal helper, not f2py-callable)
+!
+! sqrt(x + eps^2), matching manforge.utils.smooth.smooth_sqrt.
+! =============================================================================
+subroutine yu_ps_smooth_sqrt(x, res)
+    implicit none
+    double precision, intent(in)  :: x
+    double precision, intent(out) :: res
+
+    double precision, parameter :: EPS_SQRT = 1.0d-12
+
+    res = sqrt(x + EPS_SQRT**2)
+
+end subroutine yu_ps_smooth_sqrt
+
+
+! =============================================================================
+! yu_ps_elastic_stiffness
+!
+! Plane-stress secant elastic stiffness C_e = f(eps_eq) * C_iso, where
+!   f = 1 - (1 - Ea/E) * (1 - exp(-xi_param * eps_eq))
+!
+! C_iso is the Schur condensation of the 3-D isotropic stiffness onto the
+! in-plane components (sigma_33 = 0), matching
+! _PlaneStressPDimension.isotropic_C:
+!   C_rr - outer(C_rc, C_rc) / C_cc   with retain = (11, 22, 12), condensed = 33
+!
+! Parameters
+! ----------
+! E         [in]  : Young's modulus
+! nu        [in]  : Poisson's ratio
+! eps_eq    [in]  : equivalent plastic strain (from state)
+! Ea        [in]  : asymptotic modulus
+! xi_param  [in]  : decay parameter (self.xi in Python)
+! C         [out] : 3x3 Voigt stiffness
+! =============================================================================
+subroutine yu_ps_elastic_stiffness(E, nu, eps_eq, Ea, xi_param, C)
+    implicit none
+    double precision, intent(in)  :: E, nu, eps_eq, Ea, xi_param
+    double precision, intent(out) :: C(3,3)
+
+    double precision :: mu, lam, factor, denom
+    integer :: ii, jj
+
+    mu  = E / (2.0d0 * (1.0d0 + nu))
+    lam = E * nu / ((1.0d0 + nu) * (1.0d0 - 2.0d0 * nu))
+
+    do jj = 1, 3
+        do ii = 1, 3
+            C(ii,jj) = 0.0d0
+        end do
+    end do
+
+    ! Condense out the 33 component: C_cc = lam + 2*mu, C_rc = (lam, lam, 0)
+    denom = lam + 2.0d0 * mu
+    C(1,1) = lam + 2.0d0 * mu - lam * lam / denom
+    C(2,2) = C(1,1)
+    C(1,2) = lam - lam * lam / denom
+    C(2,1) = C(1,2)
+    C(3,3) = mu
+
+    factor = 1.0d0 - (1.0d0 - Ea / E) * (1.0d0 - exp(-xi_param * eps_eq))
+    do jj = 1, 3
+        do ii = 1, 3
+            C(ii,jj) = factor * C(ii,jj)
+        end do
+    end do
+
+end subroutine yu_ps_elastic_stiffness
+
+
+! =============================================================================
+! yu_ps_ck  (internal helper, not f2py-callable)
+!
+! Kinematic hardening rate with the post-reversal branch:
+!   C_k = C_1 - (C_1 - C_2) * H(theta_max - (B_bnd - Y))
+! =============================================================================
+subroutine yu_ps_ck(C_1, C_2, B_bnd, Y, theta_max, C_k)
+    implicit none
+    double precision, intent(in)  :: C_1, C_2, B_bnd, Y, theta_max
+    double precision, intent(out) :: C_k
+
+    double precision :: hv
+
+    call yu_ps_smooth_heaviside(theta_max - (B_bnd - Y), hv)
+    C_k = C_1 - (C_1 - C_2) * hv
+
+end subroutine yu_ps_ck
+
+
+! =============================================================================
+! yu_ps_calc_residual
+!
+! Computes the full 10-element residual vector for the Newton-Raphson system.
+!   r = [R_stress(3), R_yield(1), R_theta(3), R_beta(3)]
+!
+! R_stress = sigma - sigma_trial + dlambda * C @ (P @ xi)
+! R_yield  = 0.5 * xi^T P xi - Y^2/3
+! R_theta  = theta - theta_n - 2/3*(C_k*a*xi - C_k*Y*sqrt(a/theta_bar)*theta)*dl
+! R_beta   = beta  - beta_n  - 2/3*(k*b_kin*xi - k*Y*beta)*dl
+! with xi = sigma - theta - beta  (dev is the identity under P) and
+! a = B_bnd + R - Y.
+!
+! Parameters
+! ----------
+! E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+!             : 12 material parameters (order = model.param_names)
+! stress_new(3), theta_new(3), beta_new(3)  : NR iterates
+! R_new       : current R iterate
+! eps_eq_new  : equivalent plastic strain at the current iterate
+! theta_n(3), beta_n(3)  : states at step start
+! theta_max_n : theta_max at step start (NOT updated during NR)
+! stress_trial(3) : elastic predictor stress
+! dlambda     : current dlambda iterate
+! r_vec(10)   : output residual vector
+! =============================================================================
+subroutine yu_ps_calc_residual(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                                stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                                theta_n, beta_n, theta_max_n, &
+                                stress_trial, dlambda, &
+                                r_vec)
+    implicit none
+    double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    double precision, intent(in)  :: stress_new(3), theta_new(3), beta_new(3)
+    double precision, intent(in)  :: R_new, eps_eq_new
+    double precision, intent(in)  :: theta_n(3), beta_n(3), theta_max_n
+    double precision, intent(in)  :: stress_trial(3), dlambda
+    double precision, intent(out) :: r_vec(10)
+
+    double precision :: C(3,3), xi(3), Pxi(3), Cn_flow(3)
+    double precision :: a, theta_bar, C_k, xiPxi, sq_a_tb
+    integer :: ii, jj
+
+    call yu_ps_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
+
+    do ii = 1, 3
+        xi(ii) = stress_new(ii) - theta_new(ii) - beta_new(ii)
+    end do
+    call yu_ps_pmul(xi, Pxi)
+
+    a = B_bnd + R_new - Y
+    call yu_ps_vonmises_norm(theta_new, theta_bar)
+    call yu_ps_ck(C_1, C_2, B_bnd, Y, theta_max_n, C_k)
+    call yu_ps_smooth_sqrt(a / theta_bar, sq_a_tb)
+
+    ! R_stress = sigma - sigma_trial + dlambda * C @ (P @ xi)
+    do ii = 1, 3
+        Cn_flow(ii) = 0.0d0
+        do jj = 1, 3
+            Cn_flow(ii) = Cn_flow(ii) + C(ii,jj) * Pxi(jj)
+        end do
+    end do
+    do ii = 1, 3
+        r_vec(ii) = stress_new(ii) - stress_trial(ii) + dlambda * Cn_flow(ii)
+    end do
+
+    ! R_yield (quadratic form)
+    call yu_ps_dev_inner(xi, xi, xiPxi)
+    r_vec(4) = 0.5d0 * xiPxi - Y * Y / 3.0d0
+
+    ! R_theta / R_beta
+    do ii = 1, 3
+        r_vec(4 + ii) = theta_new(ii) - theta_n(ii) &
+            - 2.0d0 / 3.0d0 * (C_k * a * xi(ii) &
+                               - C_k * Y * sq_a_tb * theta_new(ii)) * dlambda
+        r_vec(7 + ii) = beta_new(ii) - beta_n(ii) &
+            - 2.0d0 / 3.0d0 * (k * b_kin * xi(ii) - k * Y * beta_new(ii)) * dlambda
+    end do
+
+end subroutine yu_ps_calc_residual
+
+
+! =============================================================================
+! Jacobian blocks
+!
+! Row/column naming mirrors the Python methods so the benchmark tests map 1:1:
+!   yu_ps_fy_*  <-> calc_fy_*  (R_yield  row)
+!   yu_ps_fe_*  <-> calc_fe_*  (R_stress row)
+!   yu_ps_ft_*  <-> calc_ft_*  (R_theta  row)
+!   yu_ps_fb_*  <-> calc_fb_*  (R_beta   row)
+! =============================================================================
+
+
+! =============================================================================
+! yu_ps_fy_fs / yu_ps_fy_ft / yu_ps_fy_fb / yu_ps_fy_fl
+!
+! d(R_yield)/d(sigma) = P @ eta;  d/d(theta) = d/d(beta) = -P @ eta;  d/dl = 0.
+! =============================================================================
+subroutine yu_ps_fy_fs(stress, theta, beta, jvec)
+    implicit none
+    double precision, intent(in)  :: stress(3), theta(3), beta(3)
+    double precision, intent(out) :: jvec(3)
+
+    double precision :: eta(3)
+    integer :: ii
+
+    do ii = 1, 3
+        eta(ii) = stress(ii) - theta(ii) - beta(ii)
+    end do
+    call yu_ps_pmul(eta, jvec)
+
+end subroutine yu_ps_fy_fs
+
+
+subroutine yu_ps_fy_ft(stress, theta, beta, jvec)
+    implicit none
+    double precision, intent(in)  :: stress(3), theta(3), beta(3)
+    double precision, intent(out) :: jvec(3)
+
+    integer :: ii
+
+    call yu_ps_fy_fs(stress, theta, beta, jvec)
+    do ii = 1, 3
+        jvec(ii) = -jvec(ii)
+    end do
+
+end subroutine yu_ps_fy_ft
+
+
+subroutine yu_ps_fy_fb(stress, theta, beta, jvec)
+    implicit none
+    double precision, intent(in)  :: stress(3), theta(3), beta(3)
+    double precision, intent(out) :: jvec(3)
+
+    call yu_ps_fy_ft(stress, theta, beta, jvec)
+
+end subroutine yu_ps_fy_fb
+
+
+subroutine yu_ps_fy_fl(jval)
+    implicit none
+    double precision, intent(out) :: jval
+
+    jval = 0.0d0
+
+end subroutine yu_ps_fy_fl
+
+
+! =============================================================================
+! yu_ps_dc_deq  (internal helper, not f2py-callable)
+!
+! The dC/dsigma contribution shared by the R_stress blocks.  C depends on
+! eps_eq through the E-degradation factor, and eps_eq depends on sigma through
+! dlambda*sqrt(2/3*g), so d(R_sigma)/d(sigma) is NOT just I + dl*C@P.
+!
+!   fb      = -xi_param*(1 - Ea/E)*exp(-xi_param*eps_eq)
+!   f       = E-degradation factor
+!   deq_ds  = 2/3*dl*P@eta / sqrt(2/3 * eta^T P eta)
+!   dC_deq  = fb/f * C @ deq_ds
+! =============================================================================
+subroutine yu_ps_dc_deq(E, Ea, xi_param, eps_eq, C, eta, dlambda, dC_deq, Peta)
+    implicit none
+    double precision, intent(in)  :: E, Ea, xi_param, eps_eq, C(3,3), eta(3), dlambda
+    double precision, intent(out) :: dC_deq(3), Peta(3)
+
+    double precision :: fb, f, etaPeta, sq, deq_ds(3)
+    integer :: ii, jj
+
+    fb = -xi_param * (1.0d0 - Ea / E) * exp(-xi_param * eps_eq)
+    f  = 1.0d0 - (1.0d0 - Ea / E) * (1.0d0 - exp(-xi_param * eps_eq))
+
+    call yu_ps_pmul(eta, Peta)
+    call yu_ps_dev_inner(eta, eta, etaPeta)
+    call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * etaPeta, sq)
+
+    do ii = 1, 3
+        deq_ds(ii) = 2.0d0 / 3.0d0 * dlambda * Peta(ii) / sq
+    end do
+    do ii = 1, 3
+        dC_deq(ii) = 0.0d0
+        do jj = 1, 3
+            dC_deq(ii) = dC_deq(ii) + C(ii,jj) * deq_ds(jj)
+        end do
+        dC_deq(ii) = fb / f * dC_deq(ii)
+    end do
+
+end subroutine yu_ps_dc_deq
+
+
+! =============================================================================
+! yu_ps_fe_fs
+!
+! d(R_stress)/d(sigma) = I + dl*C@P + dl*outer(dC_deq, P@eta)
+! =============================================================================
+subroutine yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: E, nu, Ea, xi_param, eps_eq
+    double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    double precision :: C(3,3), P(3,3), CP(3,3), eta(3), dC_deq(3), Peta(3)
+    integer :: ii, jj, kk
+
+    call yu_ps_elastic_stiffness(E, nu, eps_eq, Ea, xi_param, C)
+    call yu_ps_pmat(P)
+    do ii = 1, 3
+        eta(ii) = stress(ii) - theta(ii) - beta(ii)
+    end do
+    call yu_ps_dc_deq(E, Ea, xi_param, eps_eq, C, eta, dlambda, dC_deq, Peta)
+
+    do jj = 1, 3
+        do ii = 1, 3
+            CP(ii,jj) = 0.0d0
+            do kk = 1, 3
+                CP(ii,jj) = CP(ii,jj) + C(ii,kk) * P(kk,jj)
+            end do
+        end do
+    end do
+
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = dlambda * CP(ii,jj) + dlambda * dC_deq(ii) * Peta(jj)
+        end do
+        jmat(jj,jj) = jmat(jj,jj) + 1.0d0
+    end do
+
+end subroutine yu_ps_fe_fs
+
+
+! =============================================================================
+! yu_ps_fe_ft / yu_ps_fe_fb
+!
+! d(R_stress)/d(theta) = d/d(beta) = -dl*C@P - dl*outer(dC_deq, P@eta)
+! =============================================================================
+subroutine yu_ps_fe_ft(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: E, nu, Ea, xi_param, eps_eq
+    double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    integer :: ii, jj
+
+    call yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
+    ! fe_fs = I + M  =>  fe_ft = -M
+    do jj = 1, 3
+        jmat(jj,jj) = jmat(jj,jj) - 1.0d0
+    end do
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = -jmat(ii,jj)
+        end do
+    end do
+
+end subroutine yu_ps_fe_ft
+
+
+subroutine yu_ps_fe_fb(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: E, nu, Ea, xi_param, eps_eq
+    double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    call yu_ps_fe_ft(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
+
+end subroutine yu_ps_fe_fb
+
+
+! =============================================================================
+! yu_ps_fe_fl
+!
+! d(R_stress)/d(dlambda) = C@P@eta + dl*dC_dl@P@eta, where
+!   deq_dl = sqrt(2/3 * eta^T P eta)
+!   dC_dl  = fb/f * deq_dl * C
+! =============================================================================
+subroutine yu_ps_fe_fl(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jvec)
+    implicit none
+    double precision, intent(in)  :: E, nu, Ea, xi_param, eps_eq
+    double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
+    double precision, intent(out) :: jvec(3)
+
+    double precision :: C(3,3), eta(3), Peta(3), CPeta(3)
+    double precision :: fb, f, etaPeta, deq_dl, scale
+    integer :: ii, jj
+
+    call yu_ps_elastic_stiffness(E, nu, eps_eq, Ea, xi_param, C)
+    do ii = 1, 3
+        eta(ii) = stress(ii) - theta(ii) - beta(ii)
+    end do
+    call yu_ps_pmul(eta, Peta)
+    do ii = 1, 3
+        CPeta(ii) = 0.0d0
+        do jj = 1, 3
+            CPeta(ii) = CPeta(ii) + C(ii,jj) * Peta(jj)
+        end do
+    end do
+
+    fb = -xi_param * (1.0d0 - Ea / E) * exp(-xi_param * eps_eq)
+    f  = 1.0d0 - (1.0d0 - Ea / E) * (1.0d0 - exp(-xi_param * eps_eq))
+    call yu_ps_dev_inner(eta, eta, etaPeta)
+    call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * etaPeta, deq_dl)
+
+    ! dC_dl = fb/f * deq_dl * C, so dl*dC_dl@P@eta = dl*(fb/f*deq_dl)*C@P@eta
+    scale = 1.0d0 + dlambda * fb / f * deq_dl
+    do ii = 1, 3
+        jvec(ii) = scale * CPeta(ii)
+    end do
+
+end subroutine yu_ps_fe_fl
+
+
+! =============================================================================
+! yu_ps_ft_fs / yu_ps_ft_fb
+!
+! d(R_theta)/d(sigma) = -2/3*C_k*a*dl*I
+! d(R_theta)/d(beta)  = +2/3*C_k*a*dl*I
+! =============================================================================
+subroutine yu_ps_ft_fs(B_bnd, Y, C_1, C_2, R_new, theta_max, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: B_bnd, Y, C_1, C_2, R_new, theta_max, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    double precision :: a, C_k
+    integer :: ii, jj
+
+    a = B_bnd + R_new - Y
+    call yu_ps_ck(C_1, C_2, B_bnd, Y, theta_max, C_k)
+
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = 0.0d0
+        end do
+        jmat(jj,jj) = -2.0d0 / 3.0d0 * C_k * a * dlambda
+    end do
+
+end subroutine yu_ps_ft_fs
+
+
+subroutine yu_ps_ft_fb(B_bnd, Y, C_1, C_2, R_new, theta_max, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: B_bnd, Y, C_1, C_2, R_new, theta_max, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    integer :: ii, jj
+
+    call yu_ps_ft_fs(B_bnd, Y, C_1, C_2, R_new, theta_max, dlambda, jmat)
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = -jmat(ii,jj)
+        end do
+    end do
+
+end subroutine yu_ps_ft_fb
+
+
+! =============================================================================
+! yu_ps_ft_ft
+!
+! d(R_theta)/d(theta) = f1*I + f2*outer(theta, dthb_dth) with
+!   f1 = 1 + 2/3*C_k*a*dl + 2/3*C_k*Y*dl*sqrt(a/theta_bar)
+!   f2 = -C_k*Y*dl/(3*theta_bar) * sqrt(a/theta_bar)
+!   dthb_dth = sqrt(1.5) * P@theta / sqrt(theta^T P theta)
+! =============================================================================
+subroutine yu_ps_ft_ft(B_bnd, Y, C_1, C_2, R_new, theta, theta_max, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: B_bnd, Y, C_1, C_2, R_new
+    double precision, intent(in)  :: theta(3), theta_max, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    double precision :: a, C_k, theta_bar, sq_a_tb, f1, f2
+    double precision :: Pth(3), thPth, sq_thPth, dthb_dth(3)
+    integer :: ii, jj
+
+    a = B_bnd + R_new - Y
+    call yu_ps_ck(C_1, C_2, B_bnd, Y, theta_max, C_k)
+    call yu_ps_vonmises_norm(theta, theta_bar)
+    call yu_ps_smooth_sqrt(a / theta_bar, sq_a_tb)
+
+    f1 = 1.0d0 + 2.0d0 / 3.0d0 * C_k * a * dlambda &
+       + 2.0d0 / 3.0d0 * C_k * Y * dlambda * sq_a_tb
+    f2 = -C_k * Y * dlambda / 3.0d0 / theta_bar * sq_a_tb
+
+    call yu_ps_pmul(theta, Pth)
+    call yu_ps_dev_inner(theta, theta, thPth)
+    call yu_ps_smooth_sqrt(thPth, sq_thPth)
+    do ii = 1, 3
+        dthb_dth(ii) = sqrt(1.5d0) * Pth(ii) / sq_thPth
+    end do
+
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = f2 * theta(ii) * dthb_dth(jj)
+        end do
+        jmat(jj,jj) = jmat(jj,jj) + f1
+    end do
+
+end subroutine yu_ps_ft_ft
+
+
+! =============================================================================
+! yu_ps_ft_fl
+!
+! d(R_theta)/d(dlambda).  da_dl is gated: R is frozen unless the stagnation
+! surface is active, so differentiating its evolution law unconditionally is
+! wrong on exactly those steps.  Same test as yu_kinematic_3d's
+! yu_prepare_rtheta: abs(R - R_n) > 1e-15*max(|R_n|, 1).
+! =============================================================================
+subroutine yu_ps_ft_fl(B_bnd, Y, k, Rsat, C_1, C_2, &
+                       stress, theta, beta, R_new, R_n, theta_max, dlambda, jvec)
+    implicit none
+    double precision, intent(in)  :: B_bnd, Y, k, Rsat, C_1, C_2
+    double precision, intent(in)  :: stress(3), theta(3), beta(3)
+    double precision, intent(in)  :: R_new, R_n, theta_max, dlambda
+    double precision, intent(out) :: jvec(3)
+
+    double precision :: a, C_k, theta_bar, eta(3)
+    double precision :: s, ds_dl, da_dl, active
+    double precision :: f1, f2, f3, sq_a_tb, sq_inv
+    integer :: ii
+
+    a = B_bnd + R_new - Y
+    call yu_ps_ck(C_1, C_2, B_bnd, Y, theta_max, C_k)
+    call yu_ps_vonmises_norm(theta, theta_bar)
+    do ii = 1, 3
+        eta(ii) = stress(ii) - theta(ii) - beta(ii)
+    end do
+
+    s = 1.0d0 / (1.0d0 + 2.0d0 / 3.0d0 * k * Y * dlambda)
+    ds_dl = -2.0d0 / 3.0d0 * k * Y * s * s
+
+    if (abs(R_new - R_n) > 1.0d-15 * max(abs(R_n), 1.0d0)) then
+        active = 1.0d0
+    else
+        active = 0.0d0
+    end if
+    da_dl = active * (ds_dl * (R_n + 2.0d0 / 3.0d0 * k * Y * Rsat * dlambda) &
+                      + 2.0d0 / 3.0d0 * s * k * Y * Rsat)
+
+    call yu_ps_smooth_sqrt(a / theta_bar, sq_a_tb)
+    call yu_ps_smooth_sqrt(1.0d0 / a / theta_bar, sq_inv)
+
+    f1 = -2.0d0 / 3.0d0 * C_k * dlambda * da_dl
+    f2 = -2.0d0 / 3.0d0 * C_k * a
+    f3 =  2.0d0 / 3.0d0 * C_k * Y * (dlambda / 2.0d0 * sq_inv * da_dl + sq_a_tb)
+
+    do ii = 1, 3
+        jvec(ii) = f1 * eta(ii) + f2 * eta(ii) + f3 * theta(ii)
+    end do
+
+end subroutine yu_ps_ft_fl
+
+
+! =============================================================================
+! yu_ps_fb_fs / yu_ps_fb_ft / yu_ps_fb_fb / yu_ps_fb_fl
+!
+! d(R_beta)/d(sigma) = -2/3*k*b_kin*dl*I
+! d(R_beta)/d(theta) = +2/3*k*b_kin*dl*I
+! d(R_beta)/d(beta)  = (1 + 2/3*k*b_kin*dl + 2/3*k*Y*dl)*I
+! d(R_beta)/d(dl)    = 2/3*(k*Y*beta - k*b_kin*eta)
+! =============================================================================
+subroutine yu_ps_fb_fs(Y, k, b_kin, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: Y, k, b_kin, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    integer :: ii, jj
+
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = 0.0d0
+        end do
+        jmat(jj,jj) = -2.0d0 / 3.0d0 * k * b_kin * dlambda
+    end do
+
+end subroutine yu_ps_fb_fs
+
+
+subroutine yu_ps_fb_ft(Y, k, b_kin, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: Y, k, b_kin, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    integer :: ii, jj
+
+    call yu_ps_fb_fs(Y, k, b_kin, dlambda, jmat)
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = -jmat(ii,jj)
+        end do
+    end do
+
+end subroutine yu_ps_fb_ft
+
+
+subroutine yu_ps_fb_fb(Y, k, b_kin, dlambda, jmat)
+    implicit none
+    double precision, intent(in)  :: Y, k, b_kin, dlambda
+    double precision, intent(out) :: jmat(3,3)
+
+    double precision :: diag
+    integer :: ii, jj
+
+    diag = 1.0d0 + 2.0d0 / 3.0d0 * k * b_kin * dlambda &
+         + 2.0d0 / 3.0d0 * k * Y * dlambda
+    do jj = 1, 3
+        do ii = 1, 3
+            jmat(ii,jj) = 0.0d0
+        end do
+        jmat(jj,jj) = diag
+    end do
+
+end subroutine yu_ps_fb_fb
+
+
+subroutine yu_ps_fb_fl(Y, k, b_kin, stress, theta, beta, jvec)
+    implicit none
+    double precision, intent(in)  :: Y, k, b_kin, stress(3), theta(3), beta(3)
+    double precision, intent(out) :: jvec(3)
+
+    double precision :: eta(3)
+    integer :: ii
+
+    do ii = 1, 3
+        eta(ii) = stress(ii) - theta(ii) - beta(ii)
+    end do
+    do ii = 1, 3
+        jvec(ii) = 2.0d0 / 3.0d0 * (k * Y * beta(ii) - k * b_kin * eta(ii))
+    end do
+
+end subroutine yu_ps_fb_fl
+
+
+! =============================================================================
+! yu_ps_calc_jacobian
+!
+! Assembles the 10x10 Newton-Raphson Jacobian.
+!   rows/cols: stress(1..3), dlambda(4), theta(5..7), beta(8..10)
+! =============================================================================
+subroutine yu_ps_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                                stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                                theta_max_n, R_n, dlambda, &
+                                jac)
+    implicit none
+    double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    double precision, intent(in)  :: stress_new(3), theta_new(3), beta_new(3)
+    double precision, intent(in)  :: R_new, eps_eq_new, theta_max_n, R_n, dlambda
+    double precision, intent(out) :: jac(10,10)
+
+    double precision :: Rs_s(3,3), Rs_t(3,3), Rs_b(3,3), Rs_l(3)
+    double precision :: Rt_s(3,3), Rt_t(3,3), Rt_b(3,3), Rt_l(3)
+    double precision :: Rb_s(3,3), Rb_t(3,3), Rb_b(3,3), Rb_l(3)
+    double precision :: Ry_s(3), Ry_t(3), Ry_b(3), Ry_l
+    integer :: ii, jj
+
+    call yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_s)
+    call yu_ps_fe_ft(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_t)
+    call yu_ps_fe_fb(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_b)
+    call yu_ps_fe_fl(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_l)
+
+    call yu_ps_ft_fs(B_bnd, Y, C_1, C_2, R_new, theta_max_n, dlambda, Rt_s)
+    call yu_ps_ft_ft(B_bnd, Y, C_1, C_2, R_new, theta_new, theta_max_n, dlambda, Rt_t)
+    call yu_ps_ft_fb(B_bnd, Y, C_1, C_2, R_new, theta_max_n, dlambda, Rt_b)
+    call yu_ps_ft_fl(B_bnd, Y, k, Rsat, C_1, C_2, &
+                     stress_new, theta_new, beta_new, R_new, R_n, theta_max_n, dlambda, Rt_l)
+
+    call yu_ps_fb_fs(Y, k, b_kin, dlambda, Rb_s)
+    call yu_ps_fb_ft(Y, k, b_kin, dlambda, Rb_t)
+    call yu_ps_fb_fb(Y, k, b_kin, dlambda, Rb_b)
+    call yu_ps_fb_fl(Y, k, b_kin, stress_new, theta_new, beta_new, Rb_l)
+
+    call yu_ps_fy_fs(stress_new, theta_new, beta_new, Ry_s)
+    call yu_ps_fy_ft(stress_new, theta_new, beta_new, Ry_t)
+    call yu_ps_fy_fb(stress_new, theta_new, beta_new, Ry_b)
+    call yu_ps_fy_fl(Ry_l)
+
+    do jj = 1, 10
+        do ii = 1, 10
+            jac(ii,jj) = 0.0d0
+        end do
+    end do
+
+    ! Rows 1..3: R_stress
+    do ii = 1, 3
+        do jj = 1, 3
+            jac(ii, jj)     = Rs_s(ii,jj)
+            jac(ii, 4 + jj) = Rs_t(ii,jj)
+            jac(ii, 7 + jj) = Rs_b(ii,jj)
+        end do
+        jac(ii, 4) = Rs_l(ii)
+    end do
+
+    ! Row 4: R_yield
+    do jj = 1, 3
+        jac(4, jj)     = Ry_s(jj)
+        jac(4, 4 + jj) = Ry_t(jj)
+        jac(4, 7 + jj) = Ry_b(jj)
+    end do
+    jac(4, 4) = Ry_l
+
+    ! Rows 5..7: R_theta
+    do ii = 1, 3
+        do jj = 1, 3
+            jac(4 + ii, jj)     = Rt_s(ii,jj)
+            jac(4 + ii, 4 + jj) = Rt_t(ii,jj)
+            jac(4 + ii, 7 + jj) = Rt_b(ii,jj)
+        end do
+        jac(4 + ii, 4) = Rt_l(ii)
+    end do
+
+    ! Rows 8..10: R_beta
+    do ii = 1, 3
+        do jj = 1, 3
+            jac(7 + ii, jj)     = Rb_s(ii,jj)
+            jac(7 + ii, 4 + jj) = Rb_t(ii,jj)
+            jac(7 + ii, 7 + jj) = Rb_b(ii,jj)
+        end do
+        jac(7 + ii, 4) = Rb_l(ii)
+    end do
+
+end subroutine yu_ps_calc_jacobian
+
+
+! =============================================================================
+! yu_ps_solve  (internal helper, not f2py-callable)
+!
+! In-place LU solve of an N x N system with NRHS right-hand sides, Gaussian
+! elimination with partial pivoting.  B is overwritten with the solution.
+! info = 0 on success, k if pivot k is essentially zero.
+! =============================================================================
+subroutine yu_ps_solve(N, A, LDB, B, NRHS, info)
+    implicit none
+    integer,          intent(in)    :: N, LDB, NRHS
+    double precision, intent(inout) :: A(N,N)
+    double precision, intent(inout) :: B(LDB,NRHS)
+    integer,          intent(out)   :: info
+
+    integer :: i, j, kk, piv
+    double precision :: amax, tmp, factor
+
+    info = 0
+
+    do kk = 1, N
+        piv = kk
+        amax = abs(A(kk,kk))
+        do i = kk + 1, N
+            if (abs(A(i,kk)) > amax) then
+                amax = abs(A(i,kk))
+                piv = i
+            end if
+        end do
+        if (amax < 1.0d-300) then
+            info = kk
+            return
+        end if
+        if (piv /= kk) then
+            do j = 1, N
+                tmp = A(kk,j)
+                A(kk,j) = A(piv,j)
+                A(piv,j) = tmp
+            end do
+            do j = 1, NRHS
+                tmp = B(kk,j)
+                B(kk,j) = B(piv,j)
+                B(piv,j) = tmp
+            end do
+        end if
+        do i = kk + 1, N
+            factor = A(i,kk) / A(kk,kk)
+            if (factor /= 0.0d0) then
+                do j = kk, N
+                    A(i,j) = A(i,j) - factor * A(kk,j)
+                end do
+                do j = 1, NRHS
+                    B(i,j) = B(i,j) - factor * B(kk,j)
+                end do
+            end if
+        end do
+    end do
+
+    do j = 1, NRHS
+        do i = N, 1, -1
+            tmp = B(i,j)
+            do kk = i + 1, N
+                tmp = tmp - A(i,kk) * B(kk,j)
+            end do
+            B(i,j) = tmp / A(i,i)
+        end do
+    end do
+
+end subroutine yu_ps_solve
+
+
+! =============================================================================
+! yu_ps_calc_ddsdde
+!
+! Consistent algorithmic tangent (3x3) from the converged state.
+! Matches Python YUKinematicPS.calc_ddsdde.
+!
+!   1. Build the 10x10 Jacobian
+!   2. Pre-multiply the R_stress rows by C_n^{-1}
+!   3. Invert and take the upper-left 3x3 block
+!
+! C_n (step-start stiffness) is the correct scaling: sigma_trial is built with
+! C(state_n), so J*dx/de = [C_n; 0; ...].  Using C(state_new) is a bug when E
+! varies with eps_eq.
+!
+! Parameters
+! ----------
+! (12 props + converged state, as yu_ps_calc_jacobian)
+! eps_eq_n     [in]  : step-start eps_eq, for C_n
+! ddsdde(3,3)  [out] : consistent tangent
+! =============================================================================
+subroutine yu_ps_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                              stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                              theta_max_n, R_n, dlambda, eps_eq_n, &
+                              ddsdde)
+    implicit none
+    double precision, intent(in)  :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    double precision, intent(in)  :: stress_new(3), theta_new(3), beta_new(3)
+    double precision, intent(in)  :: R_new, eps_eq_new, theta_max_n, R_n, dlambda, eps_eq_n
+    double precision, intent(out) :: ddsdde(3,3)
+
+    double precision :: jac(10,10), C_n(3,3), C_work(3,3), C_inv(3,3)
+    double precision :: rhs10(10,10), row_copy(3,10)
+    integer :: ii, jj, kk, info_lu
+
+    call yu_ps_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                             stress_new, theta_new, beta_new, R_new, eps_eq_new, &
+                             theta_max_n, R_n, dlambda, jac)
+
+    call yu_ps_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C_n)
+    do jj = 1, 3
+        do ii = 1, 3
+            C_work(ii,jj) = C_n(ii,jj)
+            C_inv(ii,jj) = 0.0d0
+        end do
+        C_inv(jj,jj) = 1.0d0
+    end do
+    call yu_ps_solve(3, C_work, 3, C_inv, 3, info_lu)
+    if (info_lu /= 0) then
+        do jj = 1, 3
+            do ii = 1, 3
+                ddsdde(ii,jj) = C_n(ii,jj)
+            end do
+        end do
+        return
+    end if
+
+    ! Pre-multiply R_stress rows by C_inv (copy first to avoid aliasing)
+    do ii = 1, 3
+        do jj = 1, 10
+            row_copy(ii,jj) = jac(ii,jj)
+        end do
+    end do
+    do ii = 1, 3
+        do jj = 1, 10
+            jac(ii,jj) = 0.0d0
+            do kk = 1, 3
+                jac(ii,jj) = jac(ii,jj) + C_inv(ii,kk) * row_copy(kk,jj)
+            end do
+        end do
+    end do
+
+    do jj = 1, 10
+        do ii = 1, 10
+            rhs10(ii,jj) = 0.0d0
+        end do
+        rhs10(jj,jj) = 1.0d0
+    end do
+    call yu_ps_solve(10, jac, 10, rhs10, 10, info_lu)
+    if (info_lu /= 0) then
+        do jj = 1, 3
+            do ii = 1, 3
+                ddsdde(ii,jj) = C_n(ii,jj)
+            end do
+        end do
+        return
+    end if
+
+    do jj = 1, 3
+        do ii = 1, 3
+            ddsdde(ii,jj) = rhs10(ii,jj)
+        end do
+    end do
+
+end subroutine yu_ps_calc_ddsdde
+
+
+! =============================================================================
+! yu_ps_inner_mu_newton  (internal helper, not f2py-callable)
+!
+! Inner Newton loop for mu (stagnation surface update).  Mirrors
+! yu_inner_mu_newton in yu_kinematic_3d.f90; the P metric enters only through
+! the caller's Gn / Fn.
+! =============================================================================
+subroutine yu_ps_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
+    implicit none
+    double precision, intent(in)  :: h, r_n, Gn, Fn
+    double precision, intent(out) :: mu_out
+    integer,          intent(out) :: info
+
+    integer :: i
+    double precision :: mu, H_mu, F_mu, F_mu_prime
+
+    mu = 0.0d0
+    info = 0
+
+    ! When r_n = 0 the mu equation has no physical solution (mu >= 0) and the
+    ! sqrt argument can go negative; mu = 0 (no stagnation update) is correct.
+    if (r_n < 1.0d-14) then
+        mu_out = 0.0d0
+        return
+    end if
+
+    info = 1
+    do i = 1, 10
+        call yu_ps_smooth_sqrt(r_n * r_n + 6.0d0 * h * Fn / (1.0d0 + mu), H_mu)
+        F_mu = 3.0d0 * Gn - r_n * (r_n + H_mu) * (1.0d0 + mu)**2 &
+             - 3.0d0 * h * Fn * (1.0d0 + mu)
+        if (F_mu < 1.0d-16) then
+            info = 0
+            exit
+        end if
+        F_mu_prime = 3.0d0 * h * Fn / H_mu * (r_n - H_mu) &
+                   - 2.0d0 * r_n * (1.0d0 + mu) * (r_n + H_mu)
+        mu = mu - F_mu / F_mu_prime
+    end do
+
+    mu_out = mu
+
+end subroutine yu_ps_inner_mu_newton
+
+
+! =============================================================================
+! yu_kinematic_ps
+!
+! Main entry: one constitutive integration step (elastic trial -> yield check
+! -> return mapping -> consistent tangent).  Equivalent to one UMAT call.
+! Mirrors YUKinematicPS.user_defined_return_mapping + user_defined_tangent.
+!
+! The stagnation flag is LATCHED across NR iterations, matching
+! user_defined_return_mapping (and yu_kinematic_3d.f90).  The autograd path in
+! update_state instead re-evaluates a smooth_heaviside every iteration; the two
+! converge to the same trajectory but the latch is what the analytical route
+! defines.
+!
+! Parameters
+! ----------
+! E .. xi_param                  [in]  : 12 material parameters
+! stress_n(3)                    [in]  : stress at step start
+! theta_n(3), beta_n(3)          [in]  : backstresses at step start
+! Rbnd_n, q_n(3), rstag_n        [in]  : boundary/stagnation state at step start
+! eps_eq_n, theta_max_n          [in]  : scalar history at step start
+! dstran(3)                      [in]  : strain increment (engineering shear)
+! stress_out(3)                  [out] : updated stress
+! theta_out(3), beta_out(3)      [out] : updated backstresses
+! Rbnd_out, q_out(3), rstag_out  [out] : updated boundary/stagnation state
+! eps_eq_out, theta_max_out      [out] : updated scalar history
+! ddsdde(3,3)                    [out] : consistent algorithmic tangent
+! n_iter                         [out] : outer NR iterations performed
+! converged                      [out] : 1 = converged, 0 = not converged
+! r_hist(50)                     [out] : residual norm per NR iteration
+! =============================================================================
+subroutine yu_kinematic_ps( &
+        E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+        stress_n, &
+        theta_n, beta_n, Rbnd_n, q_n, rstag_n, eps_eq_n, theta_max_n, &
+        dstran, &
+        stress_out, &
+        theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
+        ddsdde, &
+        n_iter, converged, r_hist)
+    implicit none
+    double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
+    double precision, intent(in) :: stress_n(3)
+    double precision, intent(in) :: theta_n(3), beta_n(3), Rbnd_n, q_n(3), rstag_n
+    double precision, intent(in) :: eps_eq_n, theta_max_n
+    double precision, intent(in) :: dstran(3)
+    double precision, intent(out) :: stress_out(3)
+    double precision, intent(out) :: theta_out(3), beta_out(3), Rbnd_out, q_out(3)
+    double precision, intent(out) :: rstag_out, eps_eq_out, theta_max_out
+    double precision, intent(out) :: ddsdde(3,3)
+    integer,          intent(out) :: n_iter, converged
+    double precision, intent(out) :: r_hist(50)
+
+    double precision :: C(3,3), stress_trial(3)
+    double precision :: stress_new(3), theta_new(3), beta_new(3)
+    double precision :: Rbnd_new, q_new(3), rstag_new, eps_eq_new
+    double precision :: xi_trial(3), f_trial, xiPxi
+    double precision :: r_vec(10), jac(10,10), dx(10,1)
+    double precision :: dlambda, r_norm
+    double precision :: eta(3), g, delta_eps_eq, s_fac
+    double precision :: d_beta(3), g_xi(3), stag_norm, g_stag, g_flag
+    ! delta_rstag / delta_Rbnd, not delta_r / delta_R: Fortran is
+    ! case-insensitive, so the Python names for the stagnation radius and the
+    ! bound-surface radius would be the same symbol.
+    double precision :: Gn, Fn, mu, delta_q(3), delta_rstag, delta_Rbnd, H_val
+    double precision :: theta_norm_final
+    logical :: g_latched
+    integer :: ii, jj, iter, info_lu, info_mu
+    double precision, parameter :: TOL_NR = 1.0d-10
+
+    do ii = 1, 50
+        r_hist(ii) = 0.0d0
+    end do
+
+    ! ---- elastic predictor -------------------------------------------------
+    call yu_ps_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C)
+    do ii = 1, 3
+        stress_trial(ii) = stress_n(ii)
+        do jj = 1, 3
+            stress_trial(ii) = stress_trial(ii) + C(ii,jj) * dstran(jj)
+        end do
+    end do
+
+    do ii = 1, 3
+        xi_trial(ii) = stress_trial(ii) - theta_n(ii) - beta_n(ii)
+    end do
+    call yu_ps_dev_inner(xi_trial, xi_trial, xiPxi)
+    f_trial = 0.5d0 * xiPxi - Y * Y / 3.0d0
+
+    if (f_trial <= 0.0d0) then
+        ! Elastic step: state unchanged, tangent is the secant stiffness.
+        do ii = 1, 3
+            stress_out(ii)  = stress_trial(ii)
+            theta_out(ii)   = theta_n(ii)
+            beta_out(ii)    = beta_n(ii)
+            q_out(ii)       = q_n(ii)
+            do jj = 1, 3
+                ddsdde(ii,jj) = C(ii,jj)
+            end do
+        end do
+        Rbnd_out      = Rbnd_n
+        rstag_out     = rstag_n
+        eps_eq_out    = eps_eq_n
+        theta_max_out = theta_max_n
+        n_iter        = 0
+        converged     = 1
+        return
+    end if
+
+    ! ---- plastic: Newton-Raphson on [stress, dlambda, theta, beta] ---------
+    do ii = 1, 3
+        stress_new(ii) = stress_trial(ii)
+        theta_new(ii)  = theta_n(ii)
+        beta_new(ii)   = beta_n(ii)
+        q_new(ii)      = q_n(ii)
+    end do
+    Rbnd_new   = Rbnd_n
+    rstag_new  = rstag_n
+    eps_eq_new = eps_eq_n
+    dlambda    = 0.0d0
+    n_iter     = 0
+    converged  = 0
+    g_latched  = .false.
+
+    do iter = 1, 50
+        call yu_ps_calc_residual(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                                 stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                                 theta_n, beta_n, theta_max_n, &
+                                 stress_trial, dlambda, r_vec)
+
+        r_norm = 0.0d0
+        do ii = 1, 10
+            r_norm = r_norm + r_vec(ii)**2
+        end do
+        r_norm = sqrt(r_norm)
+        r_hist(iter) = r_norm
+
+        if (r_norm < TOL_NR) then
+            converged = 1
+            n_iter    = iter - 1
+            exit
+        end if
+
+        call yu_ps_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                                 stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                                 theta_max_n, Rbnd_n, dlambda, jac)
+
+        do ii = 1, 10
+            dx(ii,1) = r_vec(ii)
+        end do
+        call yu_ps_solve(10, jac, 10, dx, 1, info_lu)
+        if (info_lu /= 0) then
+            converged = 0
+            n_iter    = iter
+            exit
+        end if
+
+        do ii = 1, 3
+            stress_new(ii) = stress_new(ii) - dx(ii, 1)
+            theta_new(ii)  = theta_new(ii)  - dx(4 + ii, 1)
+            beta_new(ii)   = beta_new(ii)   - dx(7 + ii, 1)
+        end do
+        dlambda = dlambda - dx(4, 1)
+
+        ! ---- explicit state updates (stagnation surface) -------------------
+        do ii = 1, 3
+            eta(ii)    = stress_new(ii) - theta_new(ii) - beta_new(ii)
+            d_beta(ii) = beta_new(ii) - beta_n(ii)
+            g_xi(ii)   = beta_new(ii) - q_n(ii)
+        end do
+
+        call yu_ps_dev_inner(eta, eta, g)
+        call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * g, delta_eps_eq)
+        delta_eps_eq = dlambda * delta_eps_eq
+
+        s_fac = 1.0d0 / (1.0d0 + 2.0d0 / 3.0d0 * k * Y * dlambda)
+
+        call yu_ps_vonmises_norm(g_xi, stag_norm)
+        g_stag = stag_norm - rstag_n
+        if (g_stag > -1.0d-10) g_latched = .true.   ! dead band + latch
+        if (g_latched) then
+            g_flag = 1.0d0
+        else
+            g_flag = 0.0d0
+        end if
+
+        call yu_ps_dev_inner(g_xi, g_xi, Gn)
+        call yu_ps_dev_inner(g_xi, d_beta, Fn)
+        call yu_ps_inner_mu_newton(h, rstag_n, Gn, Fn, mu, info_mu)
+
+        do ii = 1, 3
+            delta_q(ii) = mu * g_xi(ii) / (1.0d0 + mu)
+        end do
+        call yu_ps_smooth_sqrt(rstag_n * rstag_n + 6.0d0 * h * Fn / (1.0d0 + mu), H_val)
+        delta_rstag = 0.5d0 * (rstag_n + H_val) - rstag_n
+        delta_Rbnd  = s_fac * (Rbnd_n + 2.0d0 / 3.0d0 * Y * k * Rsat * dlambda) - Rbnd_n
+
+        Rbnd_new  = Rbnd_n  + g_flag * delta_Rbnd
+        rstag_new = rstag_n + g_flag * delta_rstag
+        do ii = 1, 3
+            q_new(ii) = q_n(ii) + g_flag * delta_q(ii)
+        end do
+        eps_eq_new = eps_eq_n + delta_eps_eq
+
+        n_iter = iter
+    end do
+
+    ! theta_max is updated once, after convergence
+    call yu_ps_vonmises_norm(theta_new, theta_norm_final)
+    theta_max_out = max(theta_max_n, theta_norm_final)
+
+    do ii = 1, 3
+        stress_out(ii) = stress_new(ii)
+        theta_out(ii)  = theta_new(ii)
+        beta_out(ii)   = beta_new(ii)
+        q_out(ii)      = q_new(ii)
+    end do
+    Rbnd_out   = Rbnd_new
+    rstag_out  = rstag_new
+    eps_eq_out = eps_eq_new
+
+    call yu_ps_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
+                           stress_new, theta_new, beta_new, Rbnd_new, eps_eq_new, &
+                           theta_max_n, Rbnd_n, dlambda, eps_eq_n, ddsdde)
+
+end subroutine yu_kinematic_ps
