@@ -92,14 +92,10 @@ docker-test:
 		python -m pytest tests/benchmarks -m fortran -v"
 
 ## Build both YU Fortran modules and run the YU Fortran benchmarks in Docker
-# Names the two Fortran test files explicitly: the sibling test_yu*.py scratch
-# scripts import matplotlib, which the container image does not carry.
 docker-test-yu:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
 		make PY=python fortran-build-yu-ps && \
-		python -m pytest \
-			tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py \
-			tests/benchmarks/yu_kinematic/test_ps_vs_fortran.py -m fortran -v"
+		python -m pytest tests/benchmarks/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------
 # Cleanup
