@@ -1132,6 +1132,17 @@ end subroutine yu_ps_inner_mu_newton
 ! n_iter                         [out] : outer NR iterations performed
 ! converged                      [out] : 1 = converged, 0 = not converged
 ! r_hist(50)                     [out] : residual norm per NR iteration
+! fail_code                      [out] : 0 = converged, 1 = outer NR exhausted,
+!                                        2 = mu Newton failed, 3 = linear solve
+!                                        failed.  n_iter alone cannot separate
+!                                        2 from 3 -- both exit early.
+! fail_diag(6)                   [out] : state at the failing iteration:
+!                                        [r_n, Fn, Gn, sqrt_arg, dbeta_norm,
+!                                        dlambda].  sqrt_arg = r_n^2 + 6*h*Fn
+!                                        is the mu Newton radicand: negative
+!                                        means the mu equation has no real
+!                                        root, which is the failure mode a
+!                                        cutback cannot fix.  Zero on success.
 ! =============================================================================
 subroutine yu_kinematic_ps( &
         E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
@@ -1141,7 +1152,7 @@ subroutine yu_kinematic_ps( &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
         ddsdde, &
-        n_iter, converged, r_hist)
+        n_iter, converged, r_hist, fail_code, fail_diag)
     implicit none
     double precision, intent(in) :: E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param
     double precision, intent(in) :: stress_n(3)
@@ -1154,6 +1165,8 @@ subroutine yu_kinematic_ps( &
     double precision, intent(out) :: ddsdde(3,3)
     integer,          intent(out) :: n_iter, converged
     double precision, intent(out) :: r_hist(50)
+    integer,          intent(out) :: fail_code
+    double precision, intent(out) :: fail_diag(6)
 
     double precision :: C(3,3), stress_trial(3)
     double precision :: stress_new(3), theta_new(3), beta_new(3)
@@ -1167,12 +1180,16 @@ subroutine yu_kinematic_ps( &
     ! case-insensitive, so the Python names for the stagnation radius and the
     ! bound-surface radius would be the same symbol.
     double precision :: Gn, Fn, mu, delta_q(3), delta_rstag, delta_Rbnd, H_val
-    double precision :: theta_norm_final
+    double precision :: theta_norm_final, dbeta_norm
     integer :: ii, jj, iter, info_lu, info_mu
     double precision, parameter :: TOL_NR = 1.0d-10
 
     do ii = 1, 50
         r_hist(ii) = 0.0d0
+    end do
+    fail_code = 0
+    do ii = 1, 6
+        fail_diag(ii) = 0.0d0
     end do
 
     ! ---- elastic predictor -------------------------------------------------
@@ -1254,6 +1271,8 @@ subroutine yu_kinematic_ps( &
         if (info_lu /= 0) then
             converged = 0
             n_iter    = iter
+            fail_code = 3
+            fail_diag(6) = dlambda
             exit
         end if
 
@@ -1294,6 +1313,15 @@ subroutine yu_kinematic_ps( &
         if (info_mu /= 0) then
             converged = 0
             n_iter    = iter
+            fail_code = 2
+            call yu_ps_dev_inner(d_beta, d_beta, dbeta_norm)
+            dbeta_norm = sqrt(max(dbeta_norm, 0.0d0))
+            fail_diag(1) = rstag_n
+            fail_diag(2) = Fn
+            fail_diag(3) = Gn
+            fail_diag(4) = rstag_n * rstag_n + 6.0d0 * h * Fn
+            fail_diag(5) = dbeta_norm
+            fail_diag(6) = dlambda
             exit
         end if
 
@@ -1315,7 +1343,18 @@ subroutine yu_kinematic_ps( &
     ! Exhausting the loop leaves n_iter at its initial 0; 50 distinguishes
     ! "outer NR ran out of iterations" from the early exits above, which the
     ! UMAT diagnostics use to separate NR from internal (mu / solve) failures.
-    if (converged == 0 .and. n_iter == 0) n_iter = 50
+    if (converged == 0 .and. n_iter == 0) then
+        n_iter    = 50
+        fail_code = 1
+        call yu_ps_dev_inner(d_beta, d_beta, dbeta_norm)
+        dbeta_norm = sqrt(max(dbeta_norm, 0.0d0))
+        fail_diag(1) = rstag_n
+        fail_diag(2) = Fn
+        fail_diag(3) = Gn
+        fail_diag(4) = rstag_n * rstag_n + 6.0d0 * h * Fn
+        fail_diag(5) = dbeta_norm
+        fail_diag(6) = dlambda
+    end if
 
     ! theta_max is updated once, after convergence
     call yu_ps_vonmises_norm(theta_new, theta_norm_final)
@@ -1378,16 +1417,26 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
     double precision :: ddsdde_local(3,3)
     double precision :: theta_rot(3), beta_rot(3), q_rot(3)
     double precision :: r_hist_val(50)
-    integer :: i, j, n_iter, converged
+    double precision :: fail_diag(6)
+    integer :: i, j, n_iter, converged, fail_code
     ! Debug output control: change to .true. to enable YU-* diagnostic writes
     logical, parameter :: YU_DEBUG = .false.
+    ! Detail lines per increment.  Failures usually arrive in bulk (a whole
+    ! plastic band at once), so an unbounded dump buries the pattern; the true
+    ! count still appears in the YU-NC summary.
+    integer, parameter :: YU_MAX_DETAIL = 20
 
-    ! Diagnostic: per-increment failure counters (retained across calls via save)
+    ! Diagnostic: per-increment failure counters (retained across calls via save).
+    ! NOTE these are not thread-safe.  Under domain-level parallelism
+    ! (mp_mode=threads) the counters race and the detail cap is approximate;
+    ! results are unaffected.  Run cpus=1 when reading these numbers.
     integer,          save :: yu_kstep = -1
     integer,          save :: yu_kinc  = -1
     integer,          save :: yu_nfail = 0
     integer,          save :: yu_nnr   = 0
     integer,          save :: yu_nmu   = 0
+    integer,          save :: yu_nlu   = 0
+    integer,          save :: yu_ndet  = 0
     double precision, save :: yu_time  = 0.0d0
     double precision, save :: yu_dtime = 0.0d0
 
@@ -1433,7 +1482,7 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
         DSTRAN, &
         stress_out, &
         theta_out, beta_out, Rbnd_out, q_out, rstag_out, eps_eq_out, theta_max_out, &
-        ddsdde_local, n_iter, converged, r_hist_val)
+        ddsdde_local, n_iter, converged, r_hist_val, fail_code, fail_diag)
 
     ! Non-convergence: set PNEWDT and return WITHOUT updating STRESS/STATEV, so
     ! the retry starts from the original state rather than a partially-converged
@@ -1445,15 +1494,16 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             PROPS(1), PROPS(2), eps_eq_n, PROPS(11), PROPS(12), DDSDDE)
 
         if (YU_DEBUG) then
-            ! One summary line per increment (grep "YU-NC"):
-            !   YU-NC  kstep  kinc  time  dtime  n_fail  n_nr  n_mu
-            ! n_nr: outer NR ran out of iterations (n_iter>=50)
-            ! n_mu: internal failure -- mu Newton or the linear solve (n_iter<50)
+            ! Summary of the PREVIOUS increment, flushed when the increment
+            ! changes (grep "YU-NC"):
+            !   YU-NC  kstep  kinc  time  dtime  n_fail  n_nr  n_mu  n_lu
+            ! The final increment never gets a summary -- a UMAT has no
+            ! end-of-analysis hook -- but its YU-FL lines are written live.
             if (KSTEP /= yu_kstep .or. KINC /= yu_kinc) then
                 if (yu_kinc /= -1) then
-                    write(7,'(A,2I6,2ES11.3,3I8)') 'YU-NC ', &
+                    write(7,'(A,2I6,2ES11.3,4I8)') 'YU-NC ', &
                         yu_kstep, yu_kinc, yu_time, yu_dtime, &
-                        yu_nfail, yu_nnr, yu_nmu
+                        yu_nfail, yu_nnr, yu_nmu, yu_nlu
                 end if
                 yu_kstep = KSTEP
                 yu_kinc  = KINC
@@ -1462,6 +1512,10 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
                 yu_nfail = 0
                 yu_nnr   = 0
                 yu_nmu   = 0
+                yu_nlu   = 0
+                yu_ndet  = 0
+                ! Increment context, written once: the first failing point of
+                ! the increment, in full.
                 write(7,'(A,4I6,ES11.3)') 'YU-DT ', KSTEP, KINC, NOEL, NPT, DTIME
                 write(7,'(A,3ES22.14)') 'YU-DS ', (DSTRAN(i), i=1,3)
                 write(7,'(A,3ES22.14)') 'YU-SS ', (STRESS(i), i=1,3)
@@ -1473,10 +1527,24 @@ subroutine umat(STRESS, STATEV, DDSDDE, SSE, SPD, SCD, &
             end if
 
             yu_nfail = yu_nfail + 1
-            if (n_iter >= 50) then
+            if (fail_code == 1) then
                 yu_nnr = yu_nnr + 1
-            else
+            else if (fail_code == 2) then
                 yu_nmu = yu_nmu + 1
+            else
+                yu_nlu = yu_nlu + 1
+            end if
+
+            ! Per-point detail, capped (grep "YU-FL"):
+            !   YU-FL  code  noel  npt  n_iter  r_n  Fn  Gn  sqrt_arg  |dbeta|  dlambda
+            ! code: 1=NR exhausted, 2=mu Newton, 3=linear solve.
+            ! sqrt_arg = r_n^2 + 6*h*Fn < 0 means the mu equation has no real
+            ! root, so no cutback can rescue the point -- the stagnation
+            ! formulation itself is out of range there.
+            if (yu_ndet < YU_MAX_DETAIL) then
+                yu_ndet = yu_ndet + 1
+                write(7,'(A,4I7,6ES13.5)') 'YU-FL ', &
+                    fail_code, NOEL, NPT, n_iter, (fail_diag(i), i=1,6)
             end if
         end if
 

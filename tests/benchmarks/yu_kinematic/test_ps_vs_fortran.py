@@ -332,6 +332,34 @@ class TestReturnMapping:
         np.testing.assert_allclose(np.asarray(out[8]), np.asarray(py.ddsdde),
                                    rtol=1e-8, atol=1e-8)
 
+    def test_fail_code_distinguishes_exit_paths(self, model, fortran_mod):
+        """fail_code must separate the three non-convergence exits.
+
+        n_iter alone cannot: a mu failure and a singular solve both exit early,
+        so a UMAT reading only n_iter reports "internal failure" for two very
+        different causes.  sqrt_arg is the discriminator that matters -- when
+        negative the mu equation has no real root, which a time-increment
+        cutback cannot fix.
+        """
+        state_n = _initial_state(model)
+
+        # converged: no diagnostics
+        out = self._call_core(model, fortran_mod, np.zeros(3), state_n,
+                              np.array([1.0e-5, 0.0, 0.0]))
+        assert int(out[10]) == 1
+        assert int(out[12]) == 0
+        np.testing.assert_array_equal(np.asarray(out[13]), np.zeros(6))
+
+        # outer NR exhausted: code 1, and n_iter pinned at the 50-iteration cap
+        out = self._call_core(model, fortran_mod, np.zeros(3), state_n,
+                              np.array([5.0, -2.0, 1.0]))
+        assert int(out[10]) == 0
+        assert int(out[12]) == 1
+        assert int(out[9]) == 50
+        diag = np.asarray(out[13])
+        assert np.isfinite(diag).all(), "diagnostics must not be NaN"
+        assert diag[5] != 0.0, "dlambda should be recorded"
+
 
 # ---------------------------------------------------------------------------
 # TestCrosscheckTrajectory
