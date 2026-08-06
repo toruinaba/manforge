@@ -1165,7 +1165,17 @@ subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
         H_mu = sqrt(r_n*r_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
         F_mu = 3.0d0*Gn - r_n*(r_n + H_mu)*(1.0d0+mu)**2 &
              - 3.0d0*h*Fn*(1.0d0 + mu)
-        if (F_mu < 1.0d-16) then
+        ! F_mu decreases in mu, so F_mu(0) < 0 puts the root at mu < 0: beta is
+        ! inside the surface and the stagnation state holds, so mu = 0 is the
+        ! answer.  Otherwise only the magnitude may stop the iteration -- a
+        ! signed test accepts the first step past the root, which leaves beta
+        ! off the stagnation surface by ~1e-1 (see the Python counterpart).
+        if (F_mu < 0.0d0 .and. mu <= 0.0d0) then
+            mu   = 0.0d0
+            info = 0
+            exit
+        end if
+        if (abs(F_mu) < 1.0d-12 * max(abs(3.0d0*Gn), 1.0d0)) then
             info = 0
             exit
         end if

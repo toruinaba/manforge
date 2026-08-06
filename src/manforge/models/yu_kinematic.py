@@ -86,7 +86,15 @@ class YUKinematic(MaterialModel):
             for _ in range(10):
                 H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
                 F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                if F_mu < 1.0e-16:
+                # F_mu decreases in mu, so F_mu(0) < 0 puts the root at mu < 0:
+                # beta is inside the surface and the stagnation state holds, so
+                # mu = 0 is the answer.  Only the magnitude test may stop the
+                # iteration otherwise -- a signed test would accept the first
+                # step past the root, leaving beta off the surface by ~1e-1.
+                if F_mu < 0.0 and mu <= 0.0:
+                    mu = 0.0
+                    break
+                if abs(F_mu) < 1.0e-12 * max(abs(3 * Gn), 1.0):
                     break
                 F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
                 mu -= F_mu / F_mu_prime

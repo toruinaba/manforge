@@ -167,6 +167,53 @@ def test_stagnation_update_raises_on_mu_non_convergence():
         model._stagnation_update(r_n, 0.0, g_xi, 5.0, d_beta, 1.0e-3)
 
 
+def test_stagnation_update_lands_beta_on_the_surface():
+    """The mu equation exists to keep beta on the stagnation surface.
+
+    The inner Newton used a signed convergence test, which accepts the first
+    step past the root -- F_mu goes from +23 to -0.5 in one step and the loop
+    took that as converged, leaving beta ~1e-1 inside the surface.  The
+    magnitude test finds the actual root, and the consistency condition then
+    holds to machine precision, matching the projected variant.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n, g_stag = 10.0, 2.0
+    direction = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    direction = direction / model.vonmises_norm(direction)
+    g_xi = (r_n + g_stag) * direction
+    d_beta = 0.3 * (r_n + g_stag) * direction   # beta advancing: Fn > 0
+
+    delta_q, delta_r, _ = model._stagnation_update(
+        r_n, 0.0, g_xi, g_stag, d_beta, 1.0e-3)
+
+    residual = model.vonmises_norm(g_xi - delta_q) - (r_n + delta_r)
+    assert abs(float(residual)) < 1.0e-10, f"beta is {residual:.3e} off the surface"
+
+
+def test_stagnation_update_pins_mu_at_zero_when_the_root_is_negative():
+    """A root at mu < 0 means beta is inside the surface: hold q and r.
+
+    F_mu decreases in mu, so F_mu(0) < 0 is the test.  This is the case the
+    signed convergence check happened to handle correctly, and it must survive
+    the switch to a magnitude test.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    direction = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    direction = direction / model.vonmises_norm(direction)
+    g_xi = 0.5 * r_n * direction          # well inside
+    d_beta = 0.01 * r_n * direction
+
+    Gn = model.deviatoric_inner_product(g_xi, g_xi)
+    Fn = model.deviatoric_inner_product(g_xi, d_beta)
+    H0 = (r_n * r_n + 6 * model.h * Fn) ** 0.5
+    assert 3 * Gn - r_n * (r_n + H0) - 3 * model.h * Fn < 0, "root is not negative here"
+
+    delta_q, _delta_r, _ = model._stagnation_update(
+        r_n, 0.0, g_xi, -0.5 * r_n, d_beta, 1.0e-3)
+    npt.assert_allclose(np.asarray(delta_q, dtype=float), np.zeros(6), atol=1e-14)
+
+
 def test_stagnation_update_gates_internally():
     """The activity gate belongs to _stagnation_update, not its callers.
 
