@@ -73,12 +73,36 @@ class YUKinematicProj3D(YUKinematic3D):
     def _stagnation_update(self, r_n, R_n, g_xi, g_stag, d_beta, dlambda):
         return _stagnation_update_proj(self, r_n, R_n, g_xi, g_stag, d_beta, dlambda)
 
+    def dRtheta_dbeta(self, theta, theta_max, R, R_n, dlambda):
+        """Placeholder for the gate-derivative term; currently the inherited block.
+
+        ``a = B + R - Y`` depends on beta through ``R = R_n + Gg·ΔR`` and
+        ``Gg = smooth_heaviside(‖beta - q_n‖ - r_n)``, a term the published
+        derivation drops because mu came from an inner Newton and ∂mu/∂beta was
+        not available in closed form.  Here it is, so the term can be supplied.
+
+        Deferred: the omission costs ~2% on this block, and only while the
+        converged state sits inside the 0.01 MPa gate transition band.  This
+        override exists to hold the place and the reasoning; measurements are in
+        tests/benchmarks/yu_kinematic/test_proj_jacobian.py.
+        """
+        return super().dRtheta_dbeta(theta, theta_max, R, R_n, dlambda)
+
 
 class YUKinematicProjPS(YUKinematicPS):
     """Plane stress (P metric); projected stagnation update."""
 
     def _stagnation_update(self, r_n, R_n, g_xi, g_stag, d_beta, dlambda):
         return _stagnation_update_proj(self, r_n, R_n, g_xi, g_stag, d_beta, dlambda)
+
+    def calc_ft_fb(self, state, dlambda, state_n):
+        """Placeholder for the gate-derivative term; currently the inherited block.
+
+        See :meth:`YUKinematicProj3D.dRtheta_dbeta` -- same missing term, same
+        reason it is available here and not in the published formulation, same
+        ~2% magnitude confined to the gate transition band.
+        """
+        return super().calc_ft_fb(state, dlambda, state_n)
 
 
 class YUKinematicProj1D(YUKinematic1D):

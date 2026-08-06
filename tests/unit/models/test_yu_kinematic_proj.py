@@ -54,18 +54,60 @@ def test_k_eff_matches_published(variant, published, _dim):
     assert variant(**PARAMS).k_eff == published(**PARAMS).k_eff
 
 
-@pytest.mark.parametrize("variant,published,_dim", PAIRS)
-def test_only_stagnation_update_is_overridden(variant, published, _dim):
-    """The variant must override _stagnation_update and nothing else.
+# Overrides each variant is allowed to carry.  The gate-derivative blocks are
+# placeholders that still delegate upward -- listed so that adding a fourth
+# override has to be a deliberate edit here rather than a silent divergence.
+_ALLOWED_OVERRIDES = {
+    YUKinematicProj3D: {"_stagnation_update", "dRtheta_dbeta"},
+    YUKinematicProjPS: {"_stagnation_update", "calc_ft_fb"},
+    YUKinematicProj1D: {"_stagnation_update"},
+}
 
-    Any second override is a place where the two formulations could drift
-    apart for reasons unrelated to the stagnation surface.
+
+@pytest.mark.parametrize("variant,published,_dim", PAIRS)
+def test_overrides_are_limited_to_the_stagnation_surface(variant, published, _dim):
+    """Every override must be about the stagnation surface, nothing else.
+
+    Any other override is a place where the two formulations could drift apart
+    for reasons unrelated to the formulation under test.
     """
     own = {
         name for name, attr in vars(variant).items()
         if not name.startswith("__") and callable(attr)
     }
-    assert own == {"_stagnation_update"}
+    assert own == _ALLOWED_OVERRIDES[variant]
+
+
+@pytest.mark.parametrize("variant,published,_dim", PAIRS)
+def test_gate_derivative_blocks_still_delegate(variant, published, _dim):
+    """The placeholder blocks must return exactly what the parent returns.
+
+    They exist to hold the place for the missing gate-derivative term; until it
+    is derived, adding one must not change any number.
+    """
+    placeholders = _ALLOWED_OVERRIDES[variant] - {"_stagnation_update"}
+    if not placeholders:
+        pytest.skip("no placeholder blocks on this dimension")
+
+    v, p = variant(**PARAMS), published(**PARAMS)
+    ntens = v.dimension.ntens
+    state = v.initial_state()
+    state["stress"] = np.zeros(ntens)
+    state["theta"] = np.full(ntens, 3.0)
+    state["R"] = 12.0
+    state_n = dict(state, theta_max=5.0, R=10.0)
+
+    for name in placeholders:
+        if name == "calc_ft_fb":
+            got = v.calc_ft_fb(state, 1e-3, state_n)
+            ref = p.calc_ft_fb(state, 1e-3, state_n)
+        else:
+            got = v.dRtheta_dbeta(state["theta"], 5.0, 12.0, 10.0, 1e-3)
+            ref = p.dRtheta_dbeta(state["theta"], 5.0, 12.0, 10.0, 1e-3)
+        np.testing.assert_array_equal(
+            np.asarray(got, dtype=float), np.asarray(ref, dtype=float),
+            err_msg=f"{name} placeholder changed the result",
+        )
 
 
 @pytest.mark.parametrize("variant,published,_dim", PAIRS)
