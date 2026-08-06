@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-proj-ps test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -29,6 +29,10 @@ fortran-build-yu:
 ## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
 fortran-build-yu-ps:
 	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
+
+## Compile YU Kinematic plane-stress UMAT with the projected stagnation update
+fortran-build-yu-proj-ps:
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_proj_ps.f90 -m yu_kinematic_proj_ps -llapack -lblas
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -95,6 +99,7 @@ docker-test:
 docker-test-yu:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
 		make PY=python fortran-build-yu-ps && \
+		make PY=python fortran-build-yu-proj-ps && \
 		python -m pytest tests/benchmarks/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------
