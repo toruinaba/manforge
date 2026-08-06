@@ -147,17 +147,43 @@ def test_update_state_rn_zero_returns_mu_zero():
     assert result is not None
 
 
-def test_user_defined_return_mapping_has_raise():
-    """B-2 lock-in: user_defined_return_mapping contains 'raise ValueError' for mu non-convergence.
+def test_stagnation_update_raises_on_mu_non_convergence():
+    """B-2 lock-in: mu non-convergence must raise, not return a corrupt increment.
 
-    Triggering the raise dynamically requires a beta that stays fixed across outer NR
-    iterations, which is not achievable from outside the NR loop. Instead we verify
-    the raise is present in the source and carries the expected message.
+    The mu equation's radicand is r_n² + 6·h·Fn.  Fn goes negative when beta
+    moves away from the stagnation centre, and once |Fn| exceeds r_n²/(6h) the
+    radicand is negative, so mu has no real root and the inner Newton spins to
+    its iteration limit on NaN.  Returning silently there would store a
+    corrupt stagnation surface; the Fortran port signals the same condition
+    through fail_code=2.
     """
-    import inspect
-    src = inspect.getsource(YUKinematic3D.user_defined_return_mapping)
-    assert "raise ValueError" in src
-    assert "user_defined_return_mapping" in src
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    g_xi = np.array([r_n, 0.0, 0.0, 0.0, 0.0, 0.0])
+    d_beta = -g_xi  # beta receding from the centre: Fn < 0
+    assert r_n**2 + 6 * model.h * model.deviatoric_inner_product(g_xi, d_beta) < 0
+
+    with pytest.raises(ValueError, match="mu"):
+        model._stagnation_update(r_n, 0.0, g_xi, 5.0, d_beta, 1.0e-3)
+
+
+def test_stagnation_update_gates_internally():
+    """The activity gate belongs to _stagnation_update, not its callers.
+
+    Callers add the returned increments raw; gating again outside would square
+    the sigmoid and halve the increment on the transition band, which would
+    read as a formulation difference when comparing against a subclass.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    g_xi = np.array([r_n, 0.0, 0.0, 0.0, 0.0, 0.0])
+    d_beta = np.zeros(6)
+
+    inside = model._stagnation_update(r_n, 0.0, g_xi, -1.0, d_beta, 1.0e-3)
+    outside = model._stagnation_update(r_n, 0.0, g_xi, +1.0, d_beta, 1.0e-3)
+
+    assert abs(float(inside[2])) < 1.0e-12, "delta_R must be gated off inside the surface"
+    assert abs(float(outside[2])) > 1.0e-6, "delta_R must evolve once active"
 
 
 # ---------------------------------------------------------------------------

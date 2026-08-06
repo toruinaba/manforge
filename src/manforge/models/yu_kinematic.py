@@ -54,24 +54,36 @@ class YUKinematic(MaterialModel):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
         return self.vonmises_norm(s_xi) - self.Y
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        R_n = state_n["R"]
-        q_n = state_n["q"]
-        r_n = state_n["r"]
-        s = 1 / (1 + self.k * dlambda)
-        beta_new = state_new["beta"]
-        d_beta = beta_new - state_n["beta"]
-        theta_new = state_new["theta"]
-        theta_norm = self.vonmises_norm(theta_new)
-        g_xi = beta_new - q_n
-        stag_norm = self.vonmises_norm(g_xi)
-        g_stag = stag_norm - r_n
-        g_flag = smooth_heaviside(g_stag + 1.0e-10)  # dead band: shift by +1e-10 so boundary noise activates
+    @property
+    def k_eff(self):
+        """Boundary-surface hardening rate as it enters the R evolution law.
+
+        The norm-form and quadratic-form yield functions scale dlambda
+        differently, so each dimension supplies its own effective rate; the
+        evolution law itself is shared.
+        """
+        return self.k
+
+    def _stagnation_update(self, r_n, R_n, g_xi, g_stag, d_beta, dlambda):
+        """Return the gated ``(delta_q, delta_r, delta_R)``.
+
+        The activity gate is applied HERE and nowhere else -- callers add the
+        returned increments raw.  Applying it again outside would square the
+        sigmoid, halving the increment on the transition band and changing its
+        shape, which would show up as a spurious formulation difference when
+        comparing against a subclass that gates differently.
+
+        Subclasses override this to change how the stagnation surface evolves.
+        mu is an implementation detail of this method, not part of the
+        contract: an override may compute the increments without it.
+        """
+        # Dead band: shift by +1e-10 so boundary noise activates.
+        g_flag = smooth_heaviside(g_stag + 1.0e-10)
         Gn = self.deviatoric_inner_product(g_xi, g_xi)
         Fn = self.deviatoric_inner_product(g_xi, d_beta)
         mu = 0.0
         if r_n >= 1e-14:
-            for i in range(10):
+            for _ in range(10):
                 H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
                 F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
                 if F_mu < 1.0e-16:
@@ -79,14 +91,29 @@ class YUKinematic(MaterialModel):
                 F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
                 mu -= F_mu / F_mu_prime
             else:
-                raise ValueError("Not converged mu (update_state)")
+                raise ValueError("Not converged mu")
         delta_q = mu * g_xi / (1 + mu)
         delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
-        delta_R = s * (R_n + self.k * self.Rsat * dlambda) - R_n
+        k_eff = self.k_eff
+        delta_R = (R_n + k_eff * self.Rsat * dlambda) / (1 + k_eff * dlambda) - R_n
+        return g_flag * delta_q, g_flag * delta_r, g_flag * delta_R
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        R_n = state_n["R"]
+        q_n = state_n["q"]
+        r_n = state_n["r"]
+        beta_new = state_new["beta"]
+        d_beta = beta_new - state_n["beta"]
+        theta_new = state_new["theta"]
+        theta_norm = self.vonmises_norm(theta_new)
+        g_xi = beta_new - q_n
+        g_stag = self.vonmises_norm(g_xi) - r_n
+        delta_q, delta_r, delta_R = self._stagnation_update(
+            r_n, R_n, g_xi, g_stag, d_beta, dlambda)
         return [
-            self.R(R_n + g_flag * delta_R),
-            self.q(q_n + g_flag * delta_q),
-            self.r(r_n + g_flag * delta_r),
+            self.R(R_n + delta_R),
+            self.q(q_n + delta_q),
+            self.r(r_n + delta_r),
             self.eps_eq(state_n["eps_eq"] + dlambda),
             self.theta_max(smooth_max(state_n["theta_max"], theta_norm))
         ]
@@ -168,38 +195,20 @@ class YUKinematic3D(YUKinematic):
             state_new["theta"] -= dx[7:13]
             state_new["beta"] -= dx[13:]
             dlambda -= dx[6]
-            theta_norm = self.vonmises_norm(state_new["theta"])
-            s = 1 / (1 + self.k * dlambda)
             d_beta = state_new["beta"] - state_n["beta"]
             g_xi = state_new["beta"] - state_n["q"]
-            stag_norm = self.vonmises_norm(g_xi)
-            g_stag = stag_norm - state_n["r"]
-            # Same smooth gate as update_state, re-evaluated every iteration.
-            # A hard branch here would be discontinuous across iterations, and
-            # the one-way latch that used to guard it kept R evolving on steps
-            # whose converged g_stag is negative — 0.30 MPa of stress error via
-            # a = B + R − Y in R_theta, so the two routes solved different
-            # systems.  smooth_heaviside cannot chatter, so no latch is needed.
-            g_flag = smooth_heaviside(g_stag + 1.0e-10)
-            Gn = self.deviatoric_inner_product(g_xi, g_xi)
-            Fn = self.deviatoric_inner_product(g_xi, d_beta)
-            mu = 0.0
-            if state_n["r"] >= 1e-14:
-                for i in range(10):
-                    H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
-                    F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                    if F_mu < 1.0e-16:
-                        break
-                    F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
-                    mu -= F_mu / F_mu_prime
-                else:
-                    raise ValueError("Not converged mu (user_defined_return_mapping)")
-            delta_q = mu * g_xi / (1 + mu)
-            delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
-            delta_R = s * (state_n["R"] + self.k * self.Rsat * dlambda) - state_n["R"]
-            state_new["R"] = state_n["R"] + delta_R * g_flag
-            state_new["q"] = state_n["q"] + delta_q * g_flag
-            state_new["r"] = state_n["r"] + delta_r * g_flag
+            g_stag = self.vonmises_norm(g_xi) - state_n["r"]
+            # The gate inside _stagnation_update is re-evaluated every
+            # iteration.  A hard branch here would be discontinuous across
+            # iterations, and the one-way latch that used to guard it kept R
+            # evolving on steps whose converged g_stag is negative — 0.30 MPa
+            # of stress error via a = B + R − Y in R_theta, so the two routes
+            # solved different systems.
+            delta_q, delta_r, delta_R = self._stagnation_update(
+                state_n["r"], state_n["R"], g_xi, g_stag, d_beta, dlambda)
+            state_new["R"] = state_n["R"] + delta_R
+            state_new["q"] = state_n["q"] + delta_q
+            state_new["r"] = state_n["r"] + delta_r
             state_new["eps_eq"] = state_n["eps_eq"] + dlambda
             n_iteration += 1
         else:
@@ -512,6 +521,11 @@ class YUKinematicPS(YUKinematic):
         """Plane-stress deviatoric metric; delegates to the dimension."""
         return self.dimension.P
 
+    @property
+    def k_eff(self):
+        """(2/3)·Y·k: the quadratic-form dlambda is (2/3)Y times smaller."""
+        return 2.0 / 3.0 * self.Y * self.k
+
     def yield_function(self, state):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
         return 0.5 * self.deviatoric_inner_product(s_xi, s_xi) - self.Y * self.Y / 3.0
@@ -525,35 +539,18 @@ class YUKinematicPS(YUKinematic):
         # Rescales the quadratic-form Δλ to the norm-form increment: on the
         # yield surface √(2/3·g) = (2/3)Y.
         delta_eps_eq = dlambda * smooth_sqrt(2.0 / 3.0 * g)
-        s = 1.0 / (1.0 + 2.0 / 3.0 * self.Y * self.k * dlambda)
         beta_new = state_new["beta"]
         d_beta = beta_new - state_n["beta"]
         theta_new = state_new["theta"]
         theta_norm = self.vonmises_norm(theta_new)
         g_xi = beta_new - q_n
-        stag_norm = self.vonmises_norm(g_xi)
-        g_stag = stag_norm - r_n
-        g_flag = smooth_heaviside(g_stag + 1.0e-10)  # dead band: shift by +1e-10 so boundary noise activates
-        Gn = self.deviatoric_inner_product(g_xi, g_xi)
-        Fn = self.deviatoric_inner_product(g_xi, d_beta)
-        mu = 0.0
-        if r_n >= 1e-14:
-            for i in range(10):
-                H_mu = smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))
-                F_mu = 3 * Gn - r_n * (r_n + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                if F_mu < 1.0e-16:
-                    break
-                F_mu_prime = 3 * self.h * Fn / H_mu * (r_n - H_mu) - 2 * r_n * (1 + mu) * (r_n + H_mu)
-                mu -= F_mu / F_mu_prime
-            else:
-                raise ValueError("Not converged mu (update_state)")
-        delta_q = mu * g_xi / (1 + mu)
-        delta_r = 0.5 * (r_n + smooth_sqrt(r_n * r_n + 6 * self.h * Fn / (1 + mu))) - r_n
-        delta_R = s * (R_n + 2.0 / 3.0 * self.Y * self.k * self.Rsat * dlambda) - R_n
+        g_stag = self.vonmises_norm(g_xi) - r_n
+        delta_q, delta_r, delta_R = self._stagnation_update(
+            r_n, R_n, g_xi, g_stag, d_beta, dlambda)
         return [
-            self.R(R_n + g_flag * delta_R),
-            self.q(q_n + g_flag * delta_q),
-            self.r(r_n + g_flag * delta_r),
+            self.R(R_n + delta_R),
+            self.q(q_n + delta_q),
+            self.r(r_n + delta_r),
             self.eps_eq(state_n["eps_eq"] + delta_eps_eq),
             self.theta_max(smooth_max(state_n["theta_max"], theta_norm))
         ]
@@ -603,33 +600,16 @@ class YUKinematicPS(YUKinematic):
             theta_norm = self.vonmises_norm(state_new["theta"])
             g = self.deviatoric_inner_product(eta, eta)
             delta_eps_eq = dlambda * smooth_sqrt(2.0 / 3.0 * g)
-            s = 1 / (1 + 2 / 3 * self.k * self.Y * dlambda)
             d_beta = state_new["beta"] - state_n["beta"]
             g_xi = state_new["beta"] - state_n["q"]
-            stag_norm = self.vonmises_norm(g_xi)
-            g_stag = stag_norm - state_n["r"]
-            # Same smooth gate as update_state; see YUKinematic3D for why the
+            g_stag = self.vonmises_norm(g_xi) - state_n["r"]
+            # Same gate as update_state; see YUKinematic3D for why the
             # hard-branch latch was removed.
-            g_flag = smooth_heaviside(g_stag + 1.0e-10)
-            Gn = self.deviatoric_inner_product(g_xi, g_xi)
-            Fn = self.deviatoric_inner_product(g_xi, d_beta)
-            mu = 0.0
-            if state_n["r"] >= 1e-14:
-                for i in range(10):
-                    H_mu = smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))
-                    F_mu = 3 * Gn - state_n["r"] * (state_n["r"] + H_mu) * (1 + mu) * (1 + mu) - 3 * self.h * Fn * (1 + mu)
-                    if F_mu < 1.0e-16:
-                        break
-                    F_mu_prime = 3 * self.h * Fn / H_mu * (state_n["r"] - H_mu) - 2 * state_n["r"] * (1 + mu) * (state_n["r"] + H_mu)
-                    mu -= F_mu / F_mu_prime
-                else:
-                    raise ValueError("Not converged mu (user_defined_return_mapping)")
-            delta_q = mu * g_xi / (1 + mu)
-            delta_r = 0.5 * (state_n["r"] + smooth_sqrt(state_n["r"] * state_n["r"] + 6 * self.h * Fn / (1 + mu))) - state_n["r"]
-            delta_R = s * (state_n["R"] + 2.0 / 3.0 * self.Y * self.k * self.Rsat * dlambda) - state_n["R"]
-            state_new["R"] = state_n["R"] + delta_R * g_flag
-            state_new["q"] = state_n["q"] + delta_q * g_flag
-            state_new["r"] = state_n["r"] + delta_r * g_flag
+            delta_q, delta_r, delta_R = self._stagnation_update(
+                state_n["r"], state_n["R"], g_xi, g_stag, d_beta, dlambda)
+            state_new["R"] = state_n["R"] + delta_R
+            state_new["q"] = state_n["q"] + delta_q
+            state_new["r"] = state_n["r"] + delta_r
             state_new["eps_eq"] = state_n["eps_eq"] + delta_eps_eq
             n_iteration += 1
         else:
