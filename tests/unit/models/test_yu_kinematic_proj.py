@@ -102,8 +102,59 @@ def test_stagnation_update_delegates_to_single_implementation():
 
 
 @pytest.mark.parametrize("variant,_published,_dim", PAIRS)
-def test_stagnation_update_not_implemented_yet(variant, _published, _dim):
-    m = variant(**PARAMS)
+@pytest.mark.parametrize("h", [0.0, 0.4, 0.8, 1.0])
+def test_projection_lands_beta_on_the_surface(variant, _published, _dim, h):
+    """The defining property: after the update, beta lies exactly on the surface.
+
+    ``‖beta_new - q_new‖ - r_new == 0`` for any h -- h only splits the
+    correction between moving the centre and growing the radius, so getting it
+    wrong shows up as a nonzero residual here rather than as a subtly wrong
+    hardening curve later.
+    """
+    m = variant(**dict(PARAMS, h=h))
     ntens = m.dimension.ntens
-    with pytest.raises(NotImplementedError):
-        m._stagnation_update(1.0, 0.0, np.zeros(ntens), 1.0, np.zeros(ntens), 1e-3)
+    direction = np.zeros(ntens)
+    direction[0] = 1.0
+    direction = direction / m.vonmises_norm(direction)
+
+    r_n, g_stag = 10.0, 2.0
+    g_xi = (r_n + g_stag) * direction   # beta_new - q_n, outside the surface
+    beta_new = g_xi                     # q_n = 0
+
+    delta_q, delta_r, _ = m._stagnation_update(
+        r_n, 0.0, g_xi, g_stag, np.zeros(ntens), 1.0e-3)
+
+    residual = m.vonmises_norm(beta_new - delta_q) - (r_n + delta_r)
+    assert abs(float(residual)) < 1.0e-12, f"beta is off the surface by {residual}"
+
+
+def test_survives_the_case_that_breaks_the_published_formulation():
+    """The state observed failing in a real analysis must integrate here.
+
+    Values taken from an ABAQUS run (h=0.8, Y=360, S4 shells) where the
+    published inner Newton hit a negative radicand: r_n² + 6·h·Fn < 0 leaves mu
+    without a real root, and no time-increment cutback recovers it because Δβ
+    shrinks with the increment while r_n does not.  The projected update never
+    forms that radical.
+    """
+    params = dict(PARAMS, h=0.8)
+    published, variant = YUKinematicPS(**params), YUKinematicProjPS(**params)
+
+    r_n = 2.95726150413642e-04
+    direction = np.array([1.0, 0.0, 0.0])
+    direction = direction / published.vonmises_norm(direction)
+    g_xi = (1.5 * 1.79487e-07) ** 0.5 * direction        # ‖g_xi‖ from logged Gn
+    d_beta = (-2.05386e-08 / published.deviatoric_inner_product(g_xi, direction)) * direction
+    g_stag = published.vonmises_norm(g_xi) - r_n
+    dlambda = 2.01196e-10
+
+    Fn = published.deviatoric_inner_product(g_xi, d_beta)
+    assert r_n**2 + 6 * params["h"] * Fn < 0, "test no longer reproduces the failure"
+
+    with pytest.raises(ValueError, match="mu"):
+        published._stagnation_update(r_n, 0.0, g_xi, g_stag, d_beta, dlambda)
+
+    delta_q, delta_r, delta_R = variant._stagnation_update(
+        r_n, 0.0, g_xi, g_stag, d_beta, dlambda)
+    assert np.isfinite(np.asarray(delta_q)).all()
+    assert np.isfinite(float(delta_r)) and np.isfinite(float(delta_R))
