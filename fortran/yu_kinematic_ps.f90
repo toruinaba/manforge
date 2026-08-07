@@ -971,12 +971,18 @@ end subroutine yu_ps_solve
 ! Matches Python YUKinematicPS.calc_ddsdde.
 !
 !   1. Build the 10x10 Jacobian
-!   2. Pre-multiply the R_stress rows by C_n^{-1}
-!   3. Invert and take the upper-left 3x3 block
+!   2. Solve J X = [I_3; 0] for the leading 3 columns of J^-1
+!   3. ddsdde = X[1:3,1:3] @ C_n
 !
 ! C_n (step-start stiffness) is the correct scaling: sigma_trial is built with
 ! C(state_n), so J*dx/de = [C_n; 0; ...].  Using C(state_new) is a bug when E
 ! varies with eps_eq.
+!
+! Only the first THREE columns of J^-1 are needed and C_n enters as a plain
+! right-multiply.  The equivalent route via M = blockdiag(C_n^-1, I_7),
+!   (M J)^-1 = J^-1 M^-1 = J^-1 @ blockdiag(C_n, I_7),
+! costs an explicit 3x3 inverse, a 3x10 row premultiply and 7 extra right-hand
+! sides for the same answer, so it is not taken.
 !
 ! Parameters
 ! ----------
@@ -994,8 +1000,7 @@ subroutine yu_ps_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, x
     double precision, intent(in)  :: R_new, eps_eq_new, theta_max_n, R_n, dlambda, eps_eq_n
     double precision, intent(out) :: ddsdde(3,3)
 
-    double precision :: jac(10,10), C_n(3,3), C_work(3,3), C_inv(3,3)
-    double precision :: rhs10(10,10), row_copy(3,10)
+    double precision :: jac(10,10), C_n(3,3), X(10,3)
     integer :: ii, jj, kk, info_lu
 
     call yu_ps_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_param, &
@@ -1003,45 +1008,14 @@ subroutine yu_ps_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, x
                              theta_max_n, R_n, dlambda, jac)
 
     call yu_ps_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C_n)
+
     do jj = 1, 3
-        do ii = 1, 3
-            C_work(ii,jj) = C_n(ii,jj)
-            C_inv(ii,jj) = 0.0d0
-        end do
-        C_inv(jj,jj) = 1.0d0
-    end do
-    call yu_ps_solve(3, C_work, 3, C_inv, 3, info_lu)
-    if (info_lu /= 0) then
-        do jj = 1, 3
-            do ii = 1, 3
-                ddsdde(ii,jj) = C_n(ii,jj)
-            end do
-        end do
-        return
-    end if
-
-    ! Pre-multiply R_stress rows by C_inv (copy first to avoid aliasing)
-    do ii = 1, 3
-        do jj = 1, 10
-            row_copy(ii,jj) = jac(ii,jj)
-        end do
-    end do
-    do ii = 1, 3
-        do jj = 1, 10
-            jac(ii,jj) = 0.0d0
-            do kk = 1, 3
-                jac(ii,jj) = jac(ii,jj) + C_inv(ii,kk) * row_copy(kk,jj)
-            end do
-        end do
-    end do
-
-    do jj = 1, 10
         do ii = 1, 10
-            rhs10(ii,jj) = 0.0d0
+            X(ii,jj) = 0.0d0
         end do
-        rhs10(jj,jj) = 1.0d0
+        X(jj,jj) = 1.0d0
     end do
-    call yu_ps_solve(10, jac, 10, rhs10, 10, info_lu)
+    call yu_ps_solve(10, jac, 10, X, 3, info_lu)
     if (info_lu /= 0) then
         do jj = 1, 3
             do ii = 1, 3
@@ -1053,7 +1027,10 @@ subroutine yu_ps_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, x
 
     do jj = 1, 3
         do ii = 1, 3
-            ddsdde(ii,jj) = rhs10(ii,jj)
+            ddsdde(ii,jj) = 0.0d0
+            do kk = 1, 3
+                ddsdde(ii,jj) = ddsdde(ii,jj) + X(ii,kk) * C_n(kk,jj)
+            end do
         end do
     end do
 

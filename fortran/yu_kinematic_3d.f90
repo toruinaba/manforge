@@ -1195,12 +1195,18 @@ end subroutine yu_inner_mu_newton
 ! Computes the consistent algorithmic tangent (6x6) from the converged state.
 ! Matches Python YUKinematic3D.calc_ddsdde (:421-447).
 !
+! Differentiating the converged NR system with respect to strain gives
+!   J dx/de = [C_n; 0; ...]   ->   ddsdde = (J^-1)[1:6,1:6] @ C_n
+! so only the first SIX columns of J^-1 are needed and C_n enters as a plain
+! right-multiply.  The equivalent route via M = blockdiag(C_n^-1, I_13),
+!   (M J)^-1 = J^-1 M^-1 = J^-1 @ blockdiag(C_n, I_13),
+! costs an explicit 6x6 inverse, a 6x19 row premultiply and 13 extra
+! right-hand sides for the same answer, so it is not taken.
+!
 ! Algorithm:
 !   1. Build the full 19x19 Jacobian via yu_calc_jacobian
-!   2. Reconstruct C and compute C_inv (via 6x6 LU solve with I_6 RHS)
-!   3. Pre-multiply stress-block rows (1..6) by C_inv
-!   4. Invert the modified 19x19 Jacobian (solve with I_19 RHS)
-!   5. Extract upper-left 6x6 block as ddsdde
+!   2. Solve J X = [I_6; 0] for the leading 6 columns of J^-1
+!   3. ddsdde = X[1:6,1:6] @ C_n
 !
 ! Parameters
 ! ----------
@@ -1218,8 +1224,7 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
     double precision, intent(out) :: ddsdde(6,6)
     double precision, intent(in)  :: eps_eq_n  ! step-start eps_eq for C_n (rhs scaling)
 
-    double precision :: jac(19,19), C(6,6), C_n(6,6), C_inv(6,6), C_work(6,6)
-    double precision :: rhs19(19,19), jac_stress_block(6,19)
+    double precision :: jac(19,19), C_n(6,6), X(19,6)
     integer :: ii, jj, kk, info_lu
     double precision, parameter :: ZERO = 0.0d0, ONE = 1.0d0
 
@@ -1229,87 +1234,38 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
                           theta_max_new, R_n, dlambda, &
                           jac)
 
-    ! Step 2: Reconstruct C for Jacobian (eps_eq_new) and C_n for rhs scaling (eps_eq_n).
-    ! C_n (step-start stiffness) is the correct rhs scaling: J*dx/de = [C_n; 0; ...]
-    ! -> ddsdde = J^{-1}[0:6,0:6]*C_n. Using C(state_new) was a bug when E varies.
-    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
-    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n,   Ea, xi_param, C_n)
-    do ii = 1, 6
-        do jj = 1, 6
-            C_work(ii,jj) = C_n(ii,jj)
-            C_inv(ii,jj) = ZERO
+    ! C_n is the step-start stiffness: the rhs of J*dx/de is [C_n; 0; ...].
+    ! Using C(state_new) here was a bug when E varies with eps_eq.
+    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C_n)
+
+    ! Step 2: leading 6 columns of J^-1
+    do jj = 1, 6
+        do ii = 1, 19
+            X(ii,jj) = ZERO
         end do
-        C_inv(ii,ii) = ONE
+        X(jj,jj) = ONE
     end do
-    call solve6_inplace(C_work, C_inv, info_lu)
+    call solve19(jac, X, 6, info_lu)
     if (info_lu /= 0) then
-        do ii = 1, 6
-            do jj = 1, 6
+        do jj = 1, 6
+            do ii = 1, 6
                 ddsdde(ii,jj) = C_n(ii,jj)
             end do
         end do
         return
     end if
 
-    ! Step 3: Pre-multiply stress-block rows (rows 1..6) by C_inv.
-    ! Copy rows first to avoid overwrite aliasing.
-    do ii = 1, 6
-        do jj = 1, 19
-            jac_stress_block(ii,jj) = jac(ii,jj)
-        end do
-    end do
-    do ii = 1, 6
-        do jj = 1, 19
-            jac(ii,jj) = ZERO
-            do kk = 1, 6
-                jac(ii,jj) = jac(ii,jj) + C_inv(ii,kk) * jac_stress_block(kk,jj)
-            end do
-        end do
-    end do
-
-    ! Step 4: Invert modified Jacobian by solving jac * X = I_19
-    do ii = 1, 19
-        do jj = 1, 19
-            rhs19(ii,jj) = ZERO
-        end do
-        rhs19(ii,ii) = ONE
-    end do
-    call solve19(jac, rhs19, 19, info_lu)
-    if (info_lu /= 0) then
+    ! Step 3: ddsdde = X[1:6,1:6] @ C_n
+    do jj = 1, 6
         do ii = 1, 6
-            do jj = 1, 6
-                ddsdde(ii,jj) = C(ii,jj)
+            ddsdde(ii,jj) = ZERO
+            do kk = 1, 6
+                ddsdde(ii,jj) = ddsdde(ii,jj) + X(ii,kk) * C_n(kk,jj)
             end do
-        end do
-        return
-    end if
-
-    ! Step 5: Extract upper-left 6x6 block
-    do ii = 1, 6
-        do jj = 1, 6
-            ddsdde(ii,jj) = rhs19(ii,jj)
         end do
     end do
 
 end subroutine yu_calc_ddsdde
-
-
-! =============================================================================
-! solve6_inplace -- in-place LU solver for a 6x6 system with NRHS=6
-!
-! Internal helper for yu_calc_ddsdde (C_inv computation).
-! Solves A*X = B with Gaussian elimination + partial pivoting.
-! =============================================================================
-subroutine solve6_inplace(A, B, info)
-    ! Thin wrapper around LAPACK dgesv for numerical stability.
-    implicit none
-    double precision, intent(inout) :: A(6,6), B(6,6)
-    integer,          intent(out)   :: info
-
-    integer :: ipiv(6)
-    call dgesv(6, 6, A, 6, ipiv, B, 6, info)
-
-end subroutine solve6_inplace
 
 
 ! =============================================================================
