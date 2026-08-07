@@ -212,3 +212,23 @@ def test_jacobian_fd_branch_c2():
     steps = _collect_plastic_steps(model, history)
     assert steps, "no plastic steps collected"
     _check_jacobian(model, steps)
+
+
+def test_jacobian_fd_multiaxial():
+    """calc_jacobian consistent with FD when direct and shear components are
+    both nonzero.
+
+    Neither test above can see a transposed outer product in
+    ``dRtheta_dtheta``: T's shear weighting only makes ``outer(Tθ, θ)`` differ
+    from ``outer(θ, Tθ)`` when θ has direct *and* shear components at once.
+    dRtheta_dtheta was transposed for exactly this reason (rel-err 2.6e-2).
+    """
+    model = YUKinematic3D(**PARAMS)
+    n = 60
+    t = np.linspace(0.0, 1.0, n)
+    history = np.zeros((n, 6))
+    history[:, 0] = 5e-3 * t
+    history[:, 3] = 8e-3 * np.sin(np.pi * t)
+    steps = _collect_plastic_steps(model, history)
+    assert steps, "no plastic steps collected"
+    _check_jacobian(model, steps)

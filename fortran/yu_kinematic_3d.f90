@@ -695,8 +695,14 @@ subroutine yu_dRt_dtheta(B_bnd, Y, k, Rsat, C_1, C_2, &
         outer_coeff = SQRT15 * C_k * dlambda * sqrt(a / theta_bar) / (2.0d0 * theta_bar)
         do ii = 1, 6
             do jj = 1, 6
-                ! outer product: (theta_flow/sqrt(1.5))_i * theta_j
-                jmat(ii,jj) = -outer_coeff * (theta_flow(ii) / SQRT15) * theta(jj)
+                ! outer product theta (x) d(theta_bar)/d(theta):
+                !   theta_i * (theta_flow/sqrt(1.5))_j
+                ! The gradient belongs in the second slot.  Transposing this is
+                ! invisible under uniaxial or pure-shear loading, because T's
+                ! shear weighting only makes outer(T.theta, theta) differ from
+                ! outer(theta, T.theta) when direct and shear components are
+                ! simultaneously nonzero.
+                jmat(ii,jj) = -outer_coeff * theta(ii) * (theta_flow(jj) / SQRT15)
             end do
             jmat(ii,ii) = jmat(ii,ii) + diag_coeff
         end do
@@ -1159,7 +1165,17 @@ subroutine yu_inner_mu_newton(h, r_n, Gn, Fn, mu_out, info)
         H_mu = sqrt(r_n*r_n + 6.0d0*h*Fn / (1.0d0 + mu) + EPS_SQRT**2)
         F_mu = 3.0d0*Gn - r_n*(r_n + H_mu)*(1.0d0+mu)**2 &
              - 3.0d0*h*Fn*(1.0d0 + mu)
-        if (F_mu < 1.0d-16) then
+        ! F_mu decreases in mu, so F_mu(0) < 0 puts the root at mu < 0: beta is
+        ! inside the surface and the stagnation state holds, so mu = 0 is the
+        ! answer.  Otherwise only the magnitude may stop the iteration -- a
+        ! signed test accepts the first step past the root, which leaves beta
+        ! off the stagnation surface by ~1e-1 (see the Python counterpart).
+        if (F_mu < 0.0d0 .and. mu <= 0.0d0) then
+            mu   = 0.0d0
+            info = 0
+            exit
+        end if
+        if (abs(F_mu) < 1.0d-12 * max(abs(3.0d0*Gn), 1.0d0)) then
             info = 0
             exit
         end if
@@ -1179,12 +1195,18 @@ end subroutine yu_inner_mu_newton
 ! Computes the consistent algorithmic tangent (6x6) from the converged state.
 ! Matches Python YUKinematic3D.calc_ddsdde (:421-447).
 !
+! Differentiating the converged NR system with respect to strain gives
+!   J dx/de = [C_n; 0; ...]   ->   ddsdde = (J^-1)[1:6,1:6] @ C_n
+! so only the first SIX columns of J^-1 are needed and C_n enters as a plain
+! right-multiply.  The equivalent route via M = blockdiag(C_n^-1, I_13),
+!   (M J)^-1 = J^-1 M^-1 = J^-1 @ blockdiag(C_n, I_13),
+! costs an explicit 6x6 inverse, a 6x19 row premultiply and 13 extra
+! right-hand sides for the same answer, so it is not taken.
+!
 ! Algorithm:
 !   1. Build the full 19x19 Jacobian via yu_calc_jacobian
-!   2. Reconstruct C and compute C_inv (via 6x6 LU solve with I_6 RHS)
-!   3. Pre-multiply stress-block rows (1..6) by C_inv
-!   4. Invert the modified 19x19 Jacobian (solve with I_19 RHS)
-!   5. Extract upper-left 6x6 block as ddsdde
+!   2. Solve J X = [I_6; 0] for the leading 6 columns of J^-1
+!   3. ddsdde = X[1:6,1:6] @ C_n
 !
 ! Parameters
 ! ----------
@@ -1202,8 +1224,7 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
     double precision, intent(out) :: ddsdde(6,6)
     double precision, intent(in)  :: eps_eq_n  ! step-start eps_eq for C_n (rhs scaling)
 
-    double precision :: jac(19,19), C(6,6), C_n(6,6), C_inv(6,6), C_work(6,6)
-    double precision :: rhs19(19,19), jac_stress_block(6,19)
+    double precision :: jac(19,19), C_n(6,6), X(19,6)
     integer :: ii, jj, kk, info_lu
     double precision, parameter :: ZERO = 0.0d0, ONE = 1.0d0
 
@@ -1213,87 +1234,38 @@ subroutine yu_calc_ddsdde(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea, xi_p
                           theta_max_new, R_n, dlambda, &
                           jac)
 
-    ! Step 2: Reconstruct C for Jacobian (eps_eq_new) and C_n for rhs scaling (eps_eq_n).
-    ! C_n (step-start stiffness) is the correct rhs scaling: J*dx/de = [C_n; 0; ...]
-    ! -> ddsdde = J^{-1}[0:6,0:6]*C_n. Using C(state_new) was a bug when E varies.
-    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_new, Ea, xi_param, C)
-    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n,   Ea, xi_param, C_n)
-    do ii = 1, 6
-        do jj = 1, 6
-            C_work(ii,jj) = C_n(ii,jj)
-            C_inv(ii,jj) = ZERO
+    ! C_n is the step-start stiffness: the rhs of J*dx/de is [C_n; 0; ...].
+    ! Using C(state_new) here was a bug when E varies with eps_eq.
+    call yu_kinematic_3d_elastic_stiffness(E, nu, eps_eq_n, Ea, xi_param, C_n)
+
+    ! Step 2: leading 6 columns of J^-1
+    do jj = 1, 6
+        do ii = 1, 19
+            X(ii,jj) = ZERO
         end do
-        C_inv(ii,ii) = ONE
+        X(jj,jj) = ONE
     end do
-    call solve6_inplace(C_work, C_inv, info_lu)
+    call solve19(jac, X, 6, info_lu)
     if (info_lu /= 0) then
-        do ii = 1, 6
-            do jj = 1, 6
+        do jj = 1, 6
+            do ii = 1, 6
                 ddsdde(ii,jj) = C_n(ii,jj)
             end do
         end do
         return
     end if
 
-    ! Step 3: Pre-multiply stress-block rows (rows 1..6) by C_inv.
-    ! Copy rows first to avoid overwrite aliasing.
-    do ii = 1, 6
-        do jj = 1, 19
-            jac_stress_block(ii,jj) = jac(ii,jj)
-        end do
-    end do
-    do ii = 1, 6
-        do jj = 1, 19
-            jac(ii,jj) = ZERO
-            do kk = 1, 6
-                jac(ii,jj) = jac(ii,jj) + C_inv(ii,kk) * jac_stress_block(kk,jj)
-            end do
-        end do
-    end do
-
-    ! Step 4: Invert modified Jacobian by solving jac * X = I_19
-    do ii = 1, 19
-        do jj = 1, 19
-            rhs19(ii,jj) = ZERO
-        end do
-        rhs19(ii,ii) = ONE
-    end do
-    call solve19(jac, rhs19, 19, info_lu)
-    if (info_lu /= 0) then
+    ! Step 3: ddsdde = X[1:6,1:6] @ C_n
+    do jj = 1, 6
         do ii = 1, 6
-            do jj = 1, 6
-                ddsdde(ii,jj) = C(ii,jj)
+            ddsdde(ii,jj) = ZERO
+            do kk = 1, 6
+                ddsdde(ii,jj) = ddsdde(ii,jj) + X(ii,kk) * C_n(kk,jj)
             end do
-        end do
-        return
-    end if
-
-    ! Step 5: Extract upper-left 6x6 block
-    do ii = 1, 6
-        do jj = 1, 6
-            ddsdde(ii,jj) = rhs19(ii,jj)
         end do
     end do
 
 end subroutine yu_calc_ddsdde
-
-
-! =============================================================================
-! solve6_inplace -- in-place LU solver for a 6x6 system with NRHS=6
-!
-! Internal helper for yu_calc_ddsdde (C_inv computation).
-! Solves A*X = B with Gaussian elimination + partial pivoting.
-! =============================================================================
-subroutine solve6_inplace(A, B, info)
-    ! Thin wrapper around LAPACK dgesv for numerical stability.
-    implicit none
-    double precision, intent(inout) :: A(6,6), B(6,6)
-    integer,          intent(out)   :: info
-
-    integer :: ipiv(6)
-    call dgesv(6, 6, A, 6, ipiv, B, 6, info)
-
-end subroutine solve6_inplace
 
 
 ! =============================================================================
@@ -1375,7 +1347,6 @@ subroutine yu_kinematic_3d( &
     double precision :: r_vec(19), jac(19,19), dx(19,1)
     double precision :: r_norm, xi_trial(6), dev_s(6), xi_trial_norm
     double precision :: g_xi(6), d_beta(6), stag_norm, g_stag, g_flag
-    logical :: g_latched
     double precision :: Gn, Fn, mu, delta_q(6), delta_rstag, delta_Rbnd, s_fac
     double precision :: H_mu_fin, theta_new_norm, theta_max_cand
     integer :: iter, ii, jj, info_lu, info_mu
@@ -1444,7 +1415,6 @@ subroutine yu_kinematic_3d( &
     dlambda    = 0.0d0
     n_iter     = 0
     converged  = 0
-    g_latched  = .false.  ! latch: once stagnation surface activates, stays active this increment
 
     do iter = 1, 50
         ! Residual (theta_max passed as state_n value -- not updated during NR)
@@ -1494,7 +1464,14 @@ subroutine yu_kinematic_3d( &
 
         ! ----------------------------------------------------------------
         ! Explicit state updates (stagnation surface)
-        ! g_flag: hard branch (matches user_defined_return_mapping:158)
+        ! g_flag: smooth gate, re-evaluated every iteration (matches
+        ! user_defined_return_mapping and update_state).
+        ! A hard branch here is discontinuous across iterations, and the
+        ! one-way latch that used to guard it kept R evolving on steps whose
+        ! converged g_stag is negative -- 0.30 MPa of stress error, because R
+        ! enters R_theta through a = B_bnd + R - Y, so the analytical and
+        ! autograd routes were solving different systems.  smooth_heaviside
+        ! cannot chatter, so no latch is needed.
         ! ----------------------------------------------------------------
         do ii = 1, 6
             d_beta(ii) = beta_new(ii) - beta_n(ii)
@@ -1502,12 +1479,7 @@ subroutine yu_kinematic_3d( &
         end do
         call yu_vonmises_norm(g_xi, stag_norm)
         g_stag = stag_norm - rstag_n
-        if (g_stag > -1.0d-10) g_latched = .true.  ! dead band + latch: absorb convergence noise at boundary
-        if (g_latched) then
-            g_flag = 1.0d0
-        else
-            g_flag = 0.0d0
-        end if
+        call yu_smooth_heaviside(g_stag + 1.0d-10, g_flag)
 
         ! deviatoric_inner_product for SOLID_3D:
         !   Gn = sum(g_xi(1:3)^2) + 2*sum(g_xi(4:6)^2)   (Mandel)

@@ -186,12 +186,19 @@ end subroutine SPRINC
 !
 ! Parameters
 ! ----------
+! Component count is NDI + NSHR, so the shear block starts at NDI+1, not at 4.
+! Components absent from the reduced storage (33 for NDI=2; 13/23 for NSHR<3)
+! are treated as zero on the way in and dropped on the way out -- matching the
+! real ROTSIG, and valid for the in-plane rotations those element types see.
+!
+! Parameters
+! ----------
 ! S(NTENS)    [in]  : input tensor in Voigt notation
 ! DROT(3,3)   [in]  : incremental rotation matrix
 ! SROT(NTENS) [out] : rotated tensor in Voigt notation
 ! LSTR        [in]  : 1 = stress, 2 = strain
-! NDI         [in]  : number of direct components (3)
-! NSHR        [in]  : number of shear components (3)
+! NDI         [in]  : number of direct components (2 or 3)
+! NSHR        [in]  : number of shear components (1 or 3)
 ! -----------------------------------------------------------------------------
 subroutine ROTSIG(S, DROT, SROT, LSTR, NDI, NSHR)
     implicit none
@@ -210,11 +217,16 @@ subroutine ROTSIG(S, DROT, SROT, LSTR, NDI, NSHR)
         sfac = 1.0d0
     end if
 
-    ! Build 3x3 from Voigt
-    A(1,1) = S(1);  A(2,2) = S(2);  A(3,3) = S(3)
-    A(1,2) = sfac * S(4);  A(2,1) = A(1,2)
-    A(1,3) = sfac * S(5);  A(3,1) = A(1,3)
-    A(2,3) = sfac * S(6);  A(3,2) = A(2,3)
+    ! Build 3x3 from Voigt; absent components are zero
+    A = 0.0d0
+    do i = 1, NDI
+        A(i,i) = S(i)
+    end do
+    A(1,2) = sfac * S(NDI + 1);  A(2,1) = A(1,2)
+    if (NSHR >= 3) then
+        A(1,3) = sfac * S(NDI + 2);  A(3,1) = A(1,3)
+        A(2,3) = sfac * S(NDI + 3);  A(3,2) = A(2,3)
+    end if
 
     ! B = DROT * A
     do i = 1, 3
@@ -237,8 +249,12 @@ subroutine ROTSIG(S, DROT, SROT, LSTR, NDI, NSHR)
     end do
 
     ! Convert back to Voigt
-    SROT(1) = C(1,1);  SROT(2) = C(2,2);  SROT(3) = C(3,3)
-    SROT(4) = C(1,2) / sfac
-    SROT(5) = C(1,3) / sfac
-    SROT(6) = C(2,3) / sfac
+    do i = 1, NDI
+        SROT(i) = C(i,i)
+    end do
+    SROT(NDI + 1) = C(1,2) / sfac
+    if (NSHR >= 3) then
+        SROT(NDI + 2) = C(1,3) / sfac
+        SROT(NDI + 3) = C(2,3) / sfac
+    end if
 end subroutine ROTSIG

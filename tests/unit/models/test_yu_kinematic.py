@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import numpy.testing as npt
 from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,
@@ -35,7 +35,7 @@ def test_state_names():
 
 @pytest.mark.parametrize("cls,dim", [
     (YUKinematic3D,  SOLID_3D),
-    (YUKinematicPS,  PLANE_STRESS),
+    (YUKinematicPS,  PLANE_STRESS_P),
     (YUKinematic1D,  UNIAXIAL_1D),
 ])
 def test_subclass_dimension(cls, dim):
@@ -100,16 +100,19 @@ def test_yield_function_outside_is_positive():
     assert model.yield_function(state) > 0
 
 
-@pytest.mark.parametrize("cls,ntens", [
-    (YUKinematicPS, 3),
-    (YUKinematic1D, 1),
-])
-def test_yield_function_subclasses(cls, ntens):
-    model = cls(**PARAMS)
+def test_yield_function_1d_at_origin():
+    model = YUKinematic1D(**PARAMS)
     Y = PARAMS["Y"]
-    sigma = np.zeros(ntens)
-    state = _make_state(model, sigma)
+    state = _make_state(model, np.zeros(1))
     assert model.yield_function(state) == pytest.approx(-Y)
+
+
+def test_yield_function_ps_at_origin():
+    """YUKinematicPS uses the quadratic form f = ½ξᵀPξ − ⅓Y², not f = q − Y."""
+    model = YUKinematicPS(**PARAMS)
+    Y = PARAMS["Y"]
+    state = _make_state(model, np.zeros(3))
+    assert model.yield_function(state) == pytest.approx(-Y * Y / 3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -144,17 +147,90 @@ def test_update_state_rn_zero_returns_mu_zero():
     assert result is not None
 
 
-def test_user_defined_return_mapping_has_raise():
-    """B-2 lock-in: user_defined_return_mapping contains 'raise ValueError' for mu non-convergence.
+def test_stagnation_update_raises_on_mu_non_convergence():
+    """B-2 lock-in: mu non-convergence must raise, not return a corrupt increment.
 
-    Triggering the raise dynamically requires a beta that stays fixed across outer NR
-    iterations, which is not achievable from outside the NR loop. Instead we verify
-    the raise is present in the source and carries the expected message.
+    The mu equation's radicand is r_n² + 6·h·Fn.  Fn goes negative when beta
+    moves away from the stagnation centre, and once |Fn| exceeds r_n²/(6h) the
+    radicand is negative, so mu has no real root and the inner Newton spins to
+    its iteration limit on NaN.  Returning silently there would store a
+    corrupt stagnation surface; the Fortran port signals the same condition
+    through fail_code=2.
     """
-    import inspect
-    src = inspect.getsource(YUKinematic3D.user_defined_return_mapping)
-    assert "raise ValueError" in src
-    assert "user_defined_return_mapping" in src
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    g_xi = np.array([r_n, 0.0, 0.0, 0.0, 0.0, 0.0])
+    d_beta = -g_xi  # beta receding from the centre: Fn < 0
+    assert r_n**2 + 6 * model.h * model.deviatoric_inner_product(g_xi, d_beta) < 0
+
+    with pytest.raises(ValueError, match="mu"):
+        model._stagnation_update(r_n, 0.0, g_xi, 5.0, d_beta, 1.0e-3)
+
+
+def test_stagnation_update_lands_beta_on_the_surface():
+    """The mu equation exists to keep beta on the stagnation surface.
+
+    The inner Newton used a signed convergence test, which accepts the first
+    step past the root -- F_mu goes from +23 to -0.5 in one step and the loop
+    took that as converged, leaving beta ~1e-1 inside the surface.  The
+    magnitude test finds the actual root, and the consistency condition then
+    holds to machine precision, matching the projected variant.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n, g_stag = 10.0, 2.0
+    direction = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    direction = direction / model.vonmises_norm(direction)
+    g_xi = (r_n + g_stag) * direction
+    d_beta = 0.3 * (r_n + g_stag) * direction   # beta advancing: Fn > 0
+
+    delta_q, delta_r, _ = model._stagnation_update(
+        r_n, 0.0, g_xi, g_stag, d_beta, 1.0e-3)
+
+    residual = model.vonmises_norm(g_xi - delta_q) - (r_n + delta_r)
+    assert abs(float(residual)) < 1.0e-10, f"beta is {residual:.3e} off the surface"
+
+
+def test_stagnation_update_pins_mu_at_zero_when_the_root_is_negative():
+    """A root at mu < 0 means beta is inside the surface: hold q and r.
+
+    F_mu decreases in mu, so F_mu(0) < 0 is the test.  This is the case the
+    signed convergence check happened to handle correctly, and it must survive
+    the switch to a magnitude test.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    direction = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    direction = direction / model.vonmises_norm(direction)
+    g_xi = 0.5 * r_n * direction          # well inside
+    d_beta = 0.01 * r_n * direction
+
+    Gn = model.deviatoric_inner_product(g_xi, g_xi)
+    Fn = model.deviatoric_inner_product(g_xi, d_beta)
+    H0 = (r_n * r_n + 6 * model.h * Fn) ** 0.5
+    assert 3 * Gn - r_n * (r_n + H0) - 3 * model.h * Fn < 0, "root is not negative here"
+
+    delta_q, _delta_r, _ = model._stagnation_update(
+        r_n, 0.0, g_xi, -0.5 * r_n, d_beta, 1.0e-3)
+    npt.assert_allclose(np.asarray(delta_q, dtype=float), np.zeros(6), atol=1e-14)
+
+
+def test_stagnation_update_gates_internally():
+    """The activity gate belongs to _stagnation_update, not its callers.
+
+    Callers add the returned increments raw; gating again outside would square
+    the sigmoid and halve the increment on the transition band, which would
+    read as a formulation difference when comparing against a subclass.
+    """
+    model = YUKinematic3D(**PARAMS)
+    r_n = 10.0
+    g_xi = np.array([r_n, 0.0, 0.0, 0.0, 0.0, 0.0])
+    d_beta = np.zeros(6)
+
+    inside = model._stagnation_update(r_n, 0.0, g_xi, -1.0, d_beta, 1.0e-3)
+    outside = model._stagnation_update(r_n, 0.0, g_xi, +1.0, d_beta, 1.0e-3)
+
+    assert abs(float(inside[2])) < 1.0e-12, "delta_R must be gated off inside the surface"
+    assert abs(float(outside[2])) > 1.0e-6, "delta_R must evolve once active"
 
 
 # ---------------------------------------------------------------------------

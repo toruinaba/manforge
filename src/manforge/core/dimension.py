@@ -231,6 +231,116 @@ class _PlaneStressDimension(StressDimension):
         return smooth_sqrt(1.5 * (s[0]*s[0] + s[1]*s[1] + s33*s33 + 2.0*s[2]*s[2]))
 
 
+P_PLANE_STRESS = np.array([
+    [2.0, -1.0, 0.0],
+    [-1.0, 2.0, 0.0],
+    [0.0, 0.0, 6.0],
+]) / 3.0
+"""Plane-stress deviatoric metric: ``sᵀ P t = dev₃D(s):dev₃D(t)`` for σ33 ≡ 0.
+
+Factorises as ``P = T · Π_dev`` with ``T = diag(1, 1, 2)``, so it absorbs both
+the deviatoric projection and the Mandel shear weighting into one bilinear
+form.  Positive-definite (eigenvalues 1, 1/3, 2) — a metric, not a projector.
+The shear entry 6/3 = 2 makes ``P @ ξ`` come out in the engineering-shear
+convention, matching what :meth:`_PlaneStressPDimension.isotropic_C` expects.
+"""
+
+
+@dataclass(frozen=True)
+class _PlaneStressPDimension(StressDimension):
+    """Plane stress storing raw in-plane tensor components with σ33 ≡ 0.
+
+    Differs from :class:`_PlaneStressDimension` in what the three stored
+    components *mean* for stress-like quantities.  Here they are the tensor
+    itself with the 33 component identically zero; there they are part of a
+    3D deviator, so the 33 component is reconstructed as −(s11 + s22).
+    The two conventions disagree on backstress-bearing yield functions.
+
+    Deviatoric operations route through :data:`P_PLANE_STRESS` instead of an
+    explicit projection, so :meth:`dev` is the identity — the deviatoric part
+    lives in the metric, not in the vector.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        if not self.is_plane_stress:
+            raise ValueError(
+                f"_PlaneStressPDimension '{self.name}' requires is_plane_stress=True."
+            )
+        if self.ntens != 3:
+            raise ValueError(
+                f"_PlaneStressPDimension '{self.name}' requires ntens=3 "
+                f"(got ntens={self.ntens})."
+            )
+
+    @property
+    def P(self) -> np.ndarray:
+        """Deviatoric metric, shape (3, 3).  See :data:`P_PLANE_STRESS`."""
+        return P_PLANE_STRESS
+
+    @property
+    def T(self) -> np.ndarray:
+        """Mandel weighting diag(1, 1, 2) for raw double contraction."""
+        return np.array([1.0, 1.0, 2.0])
+
+    def hydrostatic(self, stress):
+        return (stress[0] + stress[1]) / 3.0
+
+    def dev(self, stress):
+        # Identity: P already carries the deviatoric projection, so projecting
+        # here too would double-project.
+        return stress
+
+    def isotropic_C(self, lam, mu):
+        delta_6 = anp.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0])
+        scale_6 = anp.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
+        C6 = lam * anp.outer(delta_6, delta_6) + mu * anp.diag(scale_6)
+        idx4 = anp.array([0, 1, 2, 3])
+        C4 = C6[anp.ix_(idx4, idx4)]
+        retain = anp.array([0, 1, 3])
+        C_rr = C4[anp.ix_(retain, retain)]
+        C_rc = C4[retain, 2]
+        C_cc = C4[2, 2]
+        return C_rr - anp.outer(C_rc, C_rc) / C_cc
+
+    def I_vol(self):
+        delta = self.identity_np
+        return anp.outer(delta, delta) / 3.0
+
+    def I_dev(self):
+        # Consistent with dev() being the identity.
+        return anp.eye(self.ntens)
+
+    def vonmises_norm(self, s):
+        return smooth_sqrt(1.5 * anp.dot(s, anp.dot(P_PLANE_STRESS, s)))
+
+    def inner_product(self, a, b):
+        """Raw double contraction A:B for stored tensors with the 33 component zero."""
+        return anp.dot(a * self.T, b)
+
+    def deviatoric_inner_product(self, s, t):
+        """dev(s):dev(t) via the P metric.
+
+        Overrides the base implementation, which composes ``inner_product``
+        with reconstructed missing components and would yield the raw A:B.
+        """
+        return anp.dot(s, anp.dot(P_PLANE_STRESS, t))
+
+    def strain_norm(self, strain):
+        """Equivalent strain ε_eq = √(2/3 ε:ε) for isochoric engineering-shear strain.
+
+        The P metric does **not** apply here: it presumes the 33 component is
+        zero, which holds for stress but not for strain, where plastic
+        incompressibility fixes ε33 = −(ε11 + ε22).  So reconstruct ε33 and
+        contract in the 3D deviatoric convention.
+        """
+        e = strain / self.eng_to_phys_strain_factors_np
+        e33 = -(e[0] + e[1])
+        return smooth_sqrt(
+            (2.0 / 3.0) * (e[0] * e[0] + e[1] * e[1] + e33 * e33 + 2.0 * e[2] * e[2])
+        )
+
+
 @dataclass(frozen=True)
 class _Uniaxial1DDimension(StressDimension):
     """Uniaxial 1D dimension (UNIAXIAL_1D): ntens=1."""
@@ -294,6 +404,16 @@ PLANE_STRAIN = _Solid3DLikeDimension(
 
 PLANE_STRESS = _PlaneStressDimension(
     name="PLANE_STRESS",
+    ntens=3,
+    ndi=2,
+    nshr=1,
+    ndi_phys=3,
+    mandel_factors=(1.0, 1.0, _sqrt2),
+    is_plane_stress=True,
+)
+
+PLANE_STRESS_P = _PlaneStressPDimension(
+    name="PLANE_STRESS_P",
     ntens=3,
     ndi=2,
     nshr=1,
