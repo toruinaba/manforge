@@ -1,9 +1,8 @@
 ! =============================================================================
 ! manforge -- timing harness for yu_kinematic_3d
 !
-! Companion to yu_projps_bench.f90; same reasoning for keeping it in a separate
-! compilation unit (the optimiser must not see the callee bodies, or it would
-! hoist the calls out of the repeat loops).
+! Kept in a separate compilation unit from the UMAT it times: the optimiser must
+! not see the callee bodies, or it would hoist the calls out of the repeat loops.
 !
 ! The 3-D system carries 19 unknowns against the plane-stress 10, and
 ! yu_calc_ddsdde inverts it with NRHS=19 while only the leading 6 columns are

@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-proj-ps fortran-build-yu-proj-ps-bench fortran-build-yu-3d-bench docker-bench-yu-proj-ps docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -29,10 +29,6 @@ fortran-build-yu:
 ## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
 fortran-build-yu-ps:
 	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
-
-## Compile YU Kinematic plane-stress UMAT with the projected stagnation update
-fortran-build-yu-proj-ps:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_proj_ps.f90 -m yu_kinematic_proj_ps -llapack -lblas
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -99,7 +95,6 @@ docker-test:
 docker-test-yu:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
 		make PY=python fortran-build-yu-ps && \
-		make PY=python fortran-build-yu-proj-ps && \
 		python -m pytest tests/benchmarks/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------
@@ -111,14 +106,6 @@ docker-test-yu:
 # they must stay separate compilation units, otherwise the optimiser sees the
 # callee bodies and hoists the repeat loops away.
 BENCH_DIR = benchmarks/umat_timing
-
-## Measure absolute us/call for the projected-PS UMAT inside Docker
-docker-bench-yu-proj-ps:
-	$(DOCKER_RUN) bash -c "cd $(BENCH_DIR) && \
-		python -m numpy.f2py -c ../../fortran/abaqus_stubs.f90 \
-			../../fortran/yu_kinematic_proj_ps.f90 yu_projps_bench.f90 \
-			-m yu_projps_bench -llapack -lblas && \
-		PYTHONPATH=/workspace/src:\$$PWD python bench_proj_ps.py"
 
 ## Measure absolute us/call for the 3D UMAT inside Docker
 docker-bench-yu-3d:
