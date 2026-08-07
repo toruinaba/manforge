@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-proj-ps test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-proj-ps fortran-build-yu-proj-ps-bench fortran-build-yu-3d-bench docker-bench-yu-proj-ps docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -103,9 +103,36 @@ docker-test-yu:
 		python -m pytest tests/benchmarks/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------
+# UMAT timing harness (benchmarks/umat_timing, kept out of fortran/)
+# ---------------------------------------------------------------------------
+
+# The harness lives outside fortran/ so that directory stays purely shippable
+# UMAT sources.  Each build pairs one implementation file with its wrapper file;
+# they must stay separate compilation units, otherwise the optimiser sees the
+# callee bodies and hoists the repeat loops away.
+BENCH_DIR = benchmarks/umat_timing
+
+## Measure absolute us/call for the projected-PS UMAT inside Docker
+docker-bench-yu-proj-ps:
+	$(DOCKER_RUN) bash -c "cd $(BENCH_DIR) && \
+		python -m numpy.f2py -c ../../fortran/abaqus_stubs.f90 \
+			../../fortran/yu_kinematic_proj_ps.f90 yu_projps_bench.f90 \
+			-m yu_projps_bench -llapack -lblas && \
+		PYTHONPATH=/workspace/src:\$$PWD python bench_proj_ps.py"
+
+## Measure absolute us/call for the 3D UMAT inside Docker
+docker-bench-yu-3d:
+	$(DOCKER_RUN) bash -c "cd $(BENCH_DIR) && \
+		python -m numpy.f2py -c ../../fortran/abaqus_stubs.f90 \
+			../../fortran/yu_kinematic_3d.f90 yu_3d_bench.f90 \
+			-m yu_3d_bench -llapack -lblas && \
+		PYTHONPATH=/workspace/src:\$$PWD python bench_3d.py"
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 
 ## Remove f2py compiled artifacts in fortran/
 clean:
 	rm -f fortran/*.so fortran/*.mod fortran/*.o fortran/*module.c fortran/*-f2pywrappers*.f90
+	rm -f $(BENCH_DIR)/*.so $(BENCH_DIR)/*.mod $(BENCH_DIR)/*.o $(BENCH_DIR)/*module.c $(BENCH_DIR)/*-f2pywrappers*.f
