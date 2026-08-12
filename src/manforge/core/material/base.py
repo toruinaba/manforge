@@ -369,6 +369,52 @@ class MaterialModel(ABC):
             "Models with implicit states must implement state_residual()."
         )
 
+    def elastic_update_state(
+        self,
+        state_n: "State | StateDict",
+        *,
+        stress_trial: "StressVec",
+        strain_inc: "FloatArray | None" = None,
+    ) -> list[StateUpdate]:
+        """Return explicit state variables that track σ even without plastic flow.
+
+        Called on every step the yield check sends down the elastic path — the
+        initial elastic loading, unloading after yield, and the elastic portion
+        of a reload alike.  Δλ is zero for all of them, so any evolution law
+        proportional to Δλ contributes nothing and the update is algebraic in
+        ``stress_trial``.
+
+        The subloading-surface normal yield ratio R is the motivating case: the
+        subloading surface passes through the current stress by construction, so
+        R follows σ down during unloading even though no plastic flow occurs.
+        Freezing R here would make the next loading step compare against a stale
+        R_n and start plastic flow at the wrong point.
+
+        This is a separate hook rather than ``update_state(dlambda=0)`` because
+        Δλ cannot serve as the discriminator: the plastic NR path also starts
+        from Δλ = 0, so a model could not tell the two situations apart.
+
+        Return only the fields that need to move — omitted explicit fields keep
+        their ``state_n`` values.  The default returns an empty list, leaving
+        every internal variable frozen on elastic steps.
+
+        Parameters
+        ----------
+        state_n : State or dict
+            State at the beginning of the increment.
+        stress_trial : anp.ndarray, shape (ntens,), keyword-only
+            Elastic predictor σ_trial = σ_n + C Δε.  This *is* the converged
+            stress for an elastic step, so write the algebraic update against it.
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε for the current load step.
+
+        Returns
+        -------
+        list[StateUpdate]
+            Updated explicit state items (``self.<field>(value)``); possibly empty.
+        """
+        return []
+
     # ------------------------------------------------------------------
     # Default helpers provided by the framework
     # ------------------------------------------------------------------

@@ -438,6 +438,7 @@ def _validate_state_items(
     model_name: str,
     *,
     extract_dlambda: bool = False,
+    allow_subset: bool = False,
     hint: str = "",
 ) -> "StateDict | tuple[StateDict, FloatArray | None]":
     """Validate a list of StateResidual / StateUpdate and return a name→value dict.
@@ -460,6 +461,11 @@ def _validate_state_items(
     extract_dlambda : bool, optional
         When ``True``, ``DlambdaResidual`` items are separated from the state
         items and returned as the second element of a tuple.
+    allow_subset : bool, optional
+        When ``True``, a returned subset of *expected_names* is accepted and
+        omitted names are simply absent from the result.  Used by
+        ``elastic_update_state``, where a model updates only the fields that
+        track σ and leaves the rest at their step-n values.
     hint : str, optional
         Extra guidance appended to missing-key error messages.
 
@@ -513,13 +519,14 @@ def _validate_state_items(
         parts = []
         missing = expected_names - actual
         extra = actual - expected_names
-        if missing:
+        if missing and not allow_subset:
             parts.append(f"missing: {sorted(missing)}")
             if hint:
                 parts.append(hint)
         if extra:
             parts.append(f"unexpected: {sorted(extra)}")
-        raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
+        if parts:
+            raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
     if extract_dlambda:
         r_dl = anp.array(dl_items[0].value) if dl_items else None
         return out, r_dl

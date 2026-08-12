@@ -203,6 +203,33 @@ class _PythonIntegratorBase:
         dxde = np.linalg.solve(np.array(A), rhs)
         return anp.array(dxde[:ntens, :])
 
+    def _elastic_state(
+        self, state_n: StateDict, stress_trial: StressVec,
+        strain_inc: "FloatArray | None" = None,
+    ) -> StateDict:
+        """Apply ``elastic_update_state`` to state_n; omitted fields stay put."""
+        from manforge.core.state import StateUpdate, _validate_state_items
+
+        model = self._model
+        returned = model.elastic_update_state(
+            _wrap_state(state_n, model),
+            stress_trial=stress_trial,
+            strain_inc=strain_inc,
+        )
+        if not returned:
+            return state_n
+        explicit_keys = {
+            k for k, f in model.state_fields.items()
+            if f.kind == "explicit" and k != "stress"
+        }
+        updated = _validate_state_items(
+            returned, explicit_keys, StateUpdate,
+            "elastic_update_state", type(model).__name__,
+            allow_subset=True,
+        )
+        assert isinstance(updated, dict)
+        return {**state_n, **updated}
+
     def return_mapping(
         self, stress_trial: StressVec, state_n: StateDict,
         strain_inc: "FloatArray | None" = None,
@@ -241,7 +268,7 @@ class _PythonIntegratorBase:
                 ddsdde=C_n,
                 stress_trial=stress_trial,
                 is_plastic=False,
-                _state_n=state_n,
+                _state_n=self._elastic_state(state_n, stress_trial, strain_inc),
             )
 
         rm = self.return_mapping(stress_trial, state_n, strain_inc)

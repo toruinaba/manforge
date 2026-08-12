@@ -874,3 +874,134 @@ class TestCaseResultBaseConverged:
         assert result.n_a_nonconverged == 2
         assert result.n_b_nonconverged == 2
         assert result.n_cases == 3
+
+
+# ---------------------------------------------------------------------------
+# elastic_update_state — state that tracks σ without plastic flow
+# ---------------------------------------------------------------------------
+
+_F0 = 250.0
+_U0 = 200.0
+
+
+class _Subloading(MaterialModel):
+    """Subloading-surface-like model: R follows σ even on elastic steps.
+
+    The subloading surface passes through the current stress by construction,
+    so R = σ_vm / F holds whether or not plastic flow occurs.  ``ep`` is here to
+    check that fields omitted from ``elastic_update_state`` stay at state_n.
+    """
+
+    param_names = ["E", "nu"]
+    stress = Implicit(shape=NTENS)
+    R = Explicit(shape=(), default=lambda m: anp.array(0.5))
+    ep = Explicit(shape=())
+
+    def __init__(self, *, E, nu):
+        super().__init__()
+        self.E = E
+        self.nu = nu
+
+    def elastic_stiffness(self, state=None):
+        return self.isotropic_C(_LAM, _MU)
+
+    def yield_function(self, state):
+        return self.vonmises(state["stress"]) - state["R"] * _F0
+
+    def flow(self, state):
+        d = self.dev(state["stress"])
+        return self.stress_flow(1.5 * d / self.dimension.vonmises_norm(d))
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        U = -_U0 * anp.log(anp.clip(state_n["R"], 1e-10, 1.0 - 1e-14))
+        return [self.R(state_n["R"] + U * dlambda), self.ep(state_n["ep"] + dlambda)]
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        return [self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))]
+
+    def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+        return [self.R(self.vonmises(stress_trial) / _F0)]
+
+
+class TestElasticUpdateState:
+    @pytest.fixture
+    def model(self):
+        return _Subloading(E=_E, nu=_NU)
+
+    def test_default_hook_returns_empty(self):
+        assert J2Isotropic3D(E=_E, nu=_NU, sigma_y0=250.0, H=1000.0).elastic_update_state(
+            {}, stress_trial=anp.zeros(6)
+        ) == []
+
+    def test_r_tracks_geometry_on_initial_elastic_loading(self, model):
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        r = PythonNumericalIntegrator(model).stress_update(
+            deps, anp.zeros(6), model.initial_state()
+        )
+        assert r.is_plastic is False
+        assert float(r.state["R"]) == pytest.approx(
+            float(model.vonmises(r.stress)) / _F0, rel=1e-12
+        )
+
+    def test_omitted_field_stays_at_state_n(self, model):
+        state_n = {**model.initial_state(), "ep": anp.array(0.42)}
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        r = PythonNumericalIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
+        assert r.is_plastic is False
+        assert float(r.state["ep"]) == pytest.approx(0.42)
+
+    def test_r_tracks_geometry_through_unload_and_reload(self, model):
+        """R must follow σ on every elastic step, else the next yield check is stale."""
+        integrator = PythonNumericalIntegrator(model)
+        eps = np.concatenate([
+            np.linspace(0.0, 1.5e-3, 7),
+            np.linspace(1.5e-3, 0.3e-3, 6),
+            np.linspace(0.3e-3, 2.5e-3, 6),
+        ])
+        stress_n = np.zeros(6)
+        state_n = model.initial_state()
+        n_elastic = 0
+        prev = 0.0
+        for e in eps:
+            deps = np.zeros(6)
+            deps[0] = e - prev
+            prev = e
+            r = integrator.stress_update(deps, stress_n, state_n)
+            if not r.is_plastic:
+                n_elastic += 1
+                assert float(r.state["R"]) == pytest.approx(
+                    float(model.vonmises(r.stress)) / _F0, rel=1e-12
+                ), f"R lost the geometric condition at eps={e}"
+            stress_n = r.stress
+            state_n = r.state
+        assert n_elastic >= 4, "history should exercise several elastic steps"
+
+    def test_hook_rejects_field_of_another_model(self, model):
+        """A subset is fine, but a name outside the model's explicit fields is not."""
+        other = _Subloading(E=_E, nu=_NU)
+        stray = Explicit(shape=())
+        object.__setattr__(stray, "name", "not_a_field")
+
+        class _Bad(_Subloading):
+            def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+                return [self.R(0.5), stray(1.0)]
+
+        bad = _Bad(E=_E, nu=_NU)
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        with pytest.raises(ValueError, match="unexpected"):
+            PythonNumericalIntegrator(bad).stress_update(
+                deps, anp.zeros(6), bad.initial_state()
+            )
+
+    def test_hook_rejects_implicit_field(self, model):
+        """``stress`` is Implicit, so ``self.stress(...)`` yields a StateResidual."""
+        class _Bad(_Subloading):
+            def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+                return [self.R(0.5), self.stress(anp.zeros(6))]
+
+        bad = _Bad(E=_E, nu=_NU)
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        with pytest.raises(TypeError, match="must be StateUpdate"):
+            PythonNumericalIntegrator(bad).stress_update(
+                deps, anp.zeros(6), bad.initial_state()
+            )
