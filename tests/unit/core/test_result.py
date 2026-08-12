@@ -66,3 +66,28 @@ def test_state_unchanged_in_elastic_step(model, initial_state):
     deps = anp.array([1e-4, 0, 0, 0, 0, 0])
     result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), initial_state)
     assert float(result.state["ep"]) == pytest.approx(0.0)
+
+
+def test_elastic_step_state_stress_advances(model, initial_state):
+    deps = anp.array([1e-4, 0, 0, 0, 0, 0])
+    result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), initial_state)
+    assert result.is_plastic is False
+    np.testing.assert_allclose(
+        np.array(result.state["stress"]), np.array(result.stress), rtol=1e-14
+    )
+
+
+def test_elastic_step_state_stress_matches_next_step_input(model, initial_state):
+    """state["stress"] must equal the stress_n the driver carries to step n+1."""
+    integrator = PythonIntegrator(model)
+    deps = anp.array([1e-4, 0, 0, 0, 0, 0])
+    stress_n = anp.zeros(6)
+    state_n = initial_state
+    for _ in range(3):
+        result = integrator.stress_update(deps, stress_n, state_n)
+        assert result.is_plastic is False
+        np.testing.assert_allclose(
+            np.array(result.state["stress"]), np.array(result.stress), rtol=1e-14
+        )
+        stress_n = result.stress
+        state_n = result.state

@@ -282,6 +282,17 @@ class TestStrainDriverStepResults:
         ep_from_steps = np.array([float(rm.state["ep"]) for rm in result.step_results])
         np.testing.assert_allclose(result.fields["ep"].data, ep_from_steps, rtol=1e-12)
 
+    def test_collect_state_stress_matches_stress_property(self, model):
+        """result.fields["stress"] reads state["stress"]; must not lag on elastic steps."""
+        load = _uniaxial_strain_load(n_steps=10, max_strain=5e-3)
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(
+            load, collect_state={"stress": FieldType.STRESS}
+        )
+        assert not result.step_results[0].is_plastic, "expected elastic steps in this range"
+        np.testing.assert_allclose(
+            np.array(result.fields["stress"].data), np.array(result.stress), rtol=1e-14
+        )
+
     def test_step_n_minus_1_state_is_previous_step(self, model):
         load = _uniaxial_strain_load(n_steps=15, max_strain=5e-3)
         result = StrainDriver(PythonNumericalIntegrator(model)).run(load)

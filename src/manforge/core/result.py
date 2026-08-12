@@ -97,9 +97,14 @@ class StressUpdateResult:
 
     @property
     def state(self) -> StateDict:
-        """Converged internal state (unchanged state_n for elastic steps)."""
+        """Converged internal state at step n+1.
+
+        On elastic steps the internal variables are unchanged from step n, but
+        ``"stress"`` advances to σ_trial — otherwise it would lag a step behind
+        :attr:`stress` and behind the ``stress_n`` the driver carries forward.
+        """
         if self.return_mapping is None:
-            return self._state_n
+            return {**self._state_n, "stress": self.stress_trial}
         return self.return_mapping.state
 
     @property
