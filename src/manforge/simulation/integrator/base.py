@@ -9,7 +9,6 @@ import numpy as np
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
-from manforge.core.state import _state_with_stress
 from manforge._typing import FloatArray, Stiffness, StressVec, StateDict
 
 
@@ -173,6 +172,7 @@ class _PythonIntegratorBase:
     def _consistent_tangent(
         self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict,
         strain_inc: "FloatArray | None" = None,
+        stress_trial: "StressVec | None" = None,
     ) -> Stiffness:
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
         model = self._model
@@ -185,13 +185,18 @@ class _PythonIntegratorBase:
         state_with_stress_dict["stress"] = stress
         state_full = _wrap_state(state_with_stress_dict, model)
         C_n = model.elastic_stiffness(state_n)
-        C_conv = model.elastic_stiffness(state_full)
-        n_conv = autograd.grad(  # type: ignore[call-arg]
-            lambda s: model.yield_function(_state_with_stress(state_full, s))
-        )(anp.array(stress))
-        stress_trial = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
+        if stress_trial is None:
+            # Reached only via a bare return_mapping() call, which never had a
+            # σ_trial of its own.  Invert the σ row of the converged residual
+            # instead of re-deriving the direction from grad(yield_function),
+            # which is wrong for any model that overrides flow().
+            C_conv = model.elastic_stiffness(state_full)
+            n_conv = model.flow(state_full).strain_like
+            trial: StressVec = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
+        else:
+            trial = stress_trial
 
-        residual_fn, layout = build_residual(model, stress_trial, state_n, strain_inc)
+        residual_fn, layout = build_residual(model, trial, state_n, strain_inc)
 
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)
@@ -259,10 +264,18 @@ class _PythonIntegratorBase:
         C_n = self._model.elastic_stiffness(state_n)
         stress_trial = stress_n + C_n @ strain_inc
 
-        from manforge.core.state import _state_with_stress as _swst
-        state_trial = _swst(state_n, stress_trial)
-        f_trial = self._model.yield_function(state_trial)
-        if f_trial <= 0.0:
+        is_elastic = self._model.elastic_check(
+            _wrap_state(state_n, self._model),
+            stress_trial=stress_trial,
+            strain_inc=strain_inc,
+        )
+        if not isinstance(is_elastic, bool):
+            raise TypeError(
+                f"{type(self._model).__name__}.elastic_check must return a bool "
+                f"(it selects a code path and is never differentiated), got "
+                f"{type(is_elastic).__name__}"
+            )
+        if is_elastic:
             return StressUpdateResult(
                 return_mapping=None,
                 ddsdde=C_n,
@@ -275,7 +288,9 @@ class _PythonIntegratorBase:
 
         ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n, stress_trial, strain_inc)
         if ddsdde is None:
-            ddsdde = self._consistent_tangent(rm, stress_n, state_n, strain_inc)
+            ddsdde = self._consistent_tangent(
+                rm, stress_n, state_n, strain_inc, stress_trial
+            )
 
         return StressUpdateResult(
             return_mapping=rm,

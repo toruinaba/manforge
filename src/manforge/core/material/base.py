@@ -369,6 +369,65 @@ class MaterialModel(ABC):
             "Models with implicit states must implement state_residual()."
         )
 
+    def elastic_check(
+        self,
+        state_n: "State | StateDict",
+        *,
+        stress_trial: "StressVec",
+        strain_inc: "FloatArray | None" = None,
+    ) -> bool:
+        """Return ``True`` when the increment stays elastic (no return mapping).
+
+        This is the elastic/plastic branch.  The default is the classical test
+        ``f(σ_trial) ≤ 0``, which is correct whenever the elastic domain *is* the
+        interior of the surface written in :meth:`yield_function` — so classical
+        plasticity models override nothing and keep ``yield_function`` as the
+        single source of truth.
+
+        Subloading-surface models are the motivating case for overriding.  Put
+        the subloading surface ``‖s‖ − R·F`` in :meth:`yield_function` and the Δλ
+        row and the ``grad``-derived :meth:`flow` both come out right; neither
+        :meth:`flow` nor the Δλ row needs an override.  What that surface's sign
+        cannot express is the branch, which is a *disjunction*::
+
+            elastic  ⟺  R̂(σ_trial) ≤ R_e   (below the elastic limit)
+                     or  R̂(σ_trial) ≤ R_n   (unloading)
+
+        Test only the elastic limit and unloading runs the return mapping, since
+        R̂ stays above R_e on the way down.  Test neither and the very first step
+        is plastic, because R starts at zero and ``f`` is then positive for any
+        non-zero stress.  A disjunction is not the zero level set of one smooth
+        function, and folding it into :meth:`yield_function` would destroy the
+        gradient :meth:`flow` depends on.
+
+        Unlike :meth:`yield_function`, this hook receives ``strain_inc`` and the
+        full step-n state, so direction tests of the form ``n : Δε > 0`` are
+        expressible here.
+
+        The return value must be a plain ``bool`` — it selects a code path and is
+        never differentiated, so a smoothed indicator is neither needed nor
+        allowed.
+
+        Parameters
+        ----------
+        state_n : State or dict
+            State at the beginning of the increment.  ``state_n["stress"]`` is
+            σ_n, *not* the trial stress.
+        stress_trial : anp.ndarray, shape (ntens,), keyword-only
+            Elastic predictor σ_trial = σ_n + C Δε.
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε for the current load step.
+
+        Returns
+        -------
+        bool
+            ``True`` → elastic step (state advances via
+            :meth:`elastic_update_state`); ``False`` → run the return mapping.
+        """
+        from manforge.core.state import _state_with_stress
+        state_trial = _state_with_stress(state_n, stress_trial)
+        return bool(self.yield_function(state_trial) <= 0.0)
+
     def elastic_update_state(
         self,
         state_n: "State | StateDict",
@@ -378,10 +437,10 @@ class MaterialModel(ABC):
     ) -> list[StateUpdate]:
         """Return explicit state variables that track σ even without plastic flow.
 
-        Called on every step the yield check sends down the elastic path — the
-        initial elastic loading, unloading after yield, and the elastic portion
-        of a reload alike.  Δλ is zero for all of them, so any evolution law
-        proportional to Δλ contributes nothing and the update is algebraic in
+        Called on every step :meth:`elastic_check` sends down the elastic path —
+        the initial elastic loading, unloading after yield, and the elastic
+        portion of a reload alike.  Δλ is zero for all of them, so any evolution
+        law proportional to Δλ contributes nothing and the update is algebraic in
         ``stress_trial``.
 
         The subloading-surface normal yield ratio R is the motivating case: the

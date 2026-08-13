@@ -1005,3 +1005,236 @@ class TestElasticUpdateState:
             PythonNumericalIntegrator(bad).stress_update(
                 deps, anp.zeros(6), bad.initial_state()
             )
+
+
+# ---------------------------------------------------------------------------
+# elastic_check — elastic/plastic branch decoupled from yield_function
+# ---------------------------------------------------------------------------
+
+_RE = 0.4
+
+
+class _SubloadingNatural(MaterialModel):
+    """Subloading model written the natural way: ``elastic_check`` is the only hook.
+
+    ``yield_function`` holds the subloading surface ‖s‖ − R·F0 itself, which makes
+    every other framework default come out right — the Δλ row is exactly the
+    subloading consistency condition, and ``grad(yield_function)`` is the correct
+    outward normal, so neither ``self.dlambda(...)`` nor a ``flow`` override is
+    needed.
+
+    What the surface's sign cannot express is the branch.  ``f(σ_trial) ≤ 0`` is
+    positive for any non-zero stress at R = 0, and stays positive while unloading
+    because R̂ has not yet fallen below R_e.  The branch is the disjunction
+    ``R̂ ≤ R_e or R̂ ≤ R_n``, which is why it lives in its own hook.
+    """
+
+    param_names = ["E", "nu"]
+    stress = Implicit(shape=NTENS)
+    R = Explicit(shape=(), default=lambda m: anp.array(0.0))
+
+    def __init__(self, *, E, nu):
+        super().__init__()
+        self.E = E
+        self.nu = nu
+
+    def elastic_stiffness(self, state=None):
+        return self.isotropic_C(_LAM, _MU)
+
+    def yield_function(self, state):
+        return self.vonmises(state["stress"]) - state["R"] * _F0
+
+    def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
+        R_hat = float(self.vonmises(stress_trial)) / _F0
+        return R_hat <= _RE or R_hat <= float(state_n["R"])
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        R_n = anp.clip(state_n["R"], 1e-12, 1.0 - 1e-12)
+        U = -_U0 * anp.log(R_n)  # U(1) = 0, so R saturates at the normal-yield surface
+        return [self.R(R_n + U * dlambda)]
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        # σ row only — the Δλ row is left to the framework default, i.e. f = 0.
+        return [self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))]
+
+    def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+        return [self.R(self.vonmises(stress_trial) / _F0)]
+
+
+class TestElasticCheck:
+    @pytest.fixture
+    def model(self):
+        return _SubloadingNatural(E=_E, nu=_NU)
+
+    def _uniaxial(self, model, eps_history, **kw):
+        integrator = PythonNumericalIntegrator(model, **kw)
+        stress_n, state_n, prev = np.zeros(6), model.initial_state(), 0.0
+        steps = []
+        for e in eps_history:
+            deps = np.zeros(6)
+            deps[0] = e - prev
+            prev = e
+            r = integrator.stress_update(deps, stress_n, state_n)
+            steps.append(r)
+            stress_n, state_n = r.stress, r.state
+        return steps
+
+    def test_default_matches_yield_function_sign(self):
+        """Models that do not override the hook keep the classical f(σ_trial) ≤ 0 test."""
+        m = J2Isotropic3D(E=_E, nu=_NU, sigma_y0=250.0, H=1000.0)
+        state_n = m.initial_state()
+        for scale, expected in [(0.5, True), (1.5, False)]:
+            stress_trial = anp.array([250.0 * scale, 0.0, 0.0, 0.0, 0.0, 0.0])
+            assert m.elastic_check(state_n, stress_trial=stress_trial) is expected
+
+    def test_plasticity_starts_at_the_elastic_limit(self, model):
+        """Onset lands on R̂ = R_e, which the yield-function sign cannot locate.
+
+        The subloading surface passes through the current stress by construction,
+        so ``f`` is zero on every converged step, elastic and plastic alike.  Its
+        sign therefore carries no information about where plastic flow begins —
+        only the hook's elastic-limit test does.
+        """
+        eps = np.linspace(0.0, 1.6e-3, 9)
+        steps = self._uniaxial(model, eps)
+        first = next(i for i, s in enumerate(steps) if s.is_plastic)
+        # Uniaxial *strain* loading, so σ_vm per unit ε comes from the stiffness.
+        e1 = np.zeros(6)
+        e1[0] = 1.0
+        vm_per_eps = float(model.vonmises(model.elastic_stiffness() @ e1))
+        eps_elastic_limit = _RE * _F0 / vm_per_eps
+        assert eps[first] > eps_elastic_limit
+        assert eps[first - 1] <= eps_elastic_limit
+        for s in steps:
+            assert float(model.yield_function(s.state)) == pytest.approx(0.0, abs=1e-9)
+
+    def test_default_dlambda_row_is_the_subloading_condition(self, model):
+        """No ``self.dlambda(...)`` override: the default f = 0 row is already correct."""
+        assert type(model).flow is MaterialModel.flow, "flow must stay the framework default"
+        steps = self._uniaxial(model, np.linspace(0.0, 1.6e-3, 9))
+        plastic = [s for s in steps if s.is_plastic]
+        assert plastic
+        for s in plastic:
+            assert s.converged
+            # Converged Δλ row == subloading consistency ‖s‖ = R·F0.
+            assert float(model.vonmises(s.stress)) == pytest.approx(
+                float(s.state["R"]) * _F0, rel=1e-10
+            )
+
+    def test_default_flow_is_the_subloading_normal(self, model):
+        """``grad(yield_function)`` reproduces the hand-derived 1.5·s/‖s‖."""
+        steps = self._uniaxial(model, np.linspace(0.0, 1.6e-3, 9))
+        state = model.make_state(**dict(steps[-1].state))
+        n_default = np.array(model.flow(state).stress_like)
+        d = model.dev(state["stress"])
+        n_hand = np.array(1.5 * d / model.dimension.vonmises_norm(d))
+        assert n_default == pytest.approx(n_hand, abs=1e-12)
+
+    def test_both_tests_in_the_disjunction_are_load_bearing(self, model):
+        """Drop either half and the branch breaks in a different way.
+
+        Elastic limit alone → unloading runs the return mapping (R̂ is still above
+        R_e on the way down).  Neither → the very first step is plastic, because R
+        starts at zero so f > 0 for any non-zero stress.
+        """
+        class _LimitOnly(_SubloadingNatural):
+            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
+                return float(self.vonmises(stress_trial)) / _F0 <= _RE
+
+        class _NoHook(_SubloadingNatural):
+            elastic_check = MaterialModel.elastic_check
+
+        eps = np.concatenate([
+            np.linspace(0.0, 1.6e-3, 9)[1:],
+            1.6e-3 - np.arange(1, 4) * 4e-5,
+        ])
+        assert [s.is_plastic for s in self._uniaxial(model, eps)[8:]] == [False] * 3
+        assert [s.is_plastic for s in self._uniaxial(_LimitOnly(E=_E, nu=_NU), eps)[8:]] \
+            == [True] * 3
+        assert self._uniaxial(_NoHook(E=_E, nu=_NU), eps)[0].is_plastic is True
+
+    def test_elastic_below_elastic_limit(self, model):
+        """Below R_e every step is elastic, and R still tracks σ geometrically."""
+        eps_y_at_re = _RE * _F0 / _E
+        steps = self._uniaxial(model, np.linspace(0.0, 0.8 * eps_y_at_re, 5))
+        assert [s.is_plastic for s in steps] == [False] * 5
+        last = steps[-1]
+        assert float(last.state["R"]) == pytest.approx(
+            float(model.vonmises(last.stress)) / _F0, rel=1e-12
+        )
+
+    def test_unloading_is_elastic_even_above_elastic_limit(self, model):
+        """Only the direction test can catch unloading that stays above R_e.
+
+        The unload steps are small on purpose: R never drops back below the
+        elastic limit, so the elastic-limit test alone still reads "yielding".
+        Any branch built from a single monotone surface function would run the
+        return mapping on all three of these steps.
+        """
+        eps = np.concatenate([
+            np.linspace(0.0, 1.6e-3, 9)[1:],
+            1.6e-3 - np.arange(1, 4) * 4e-5,
+        ])
+        steps = self._uniaxial(model, eps)
+        unload = steps[8:]
+        assert all(not s.is_plastic for s in unload), "unloading must not run return mapping"
+        assert all(float(s.state["R"]) > _RE for s in unload)
+
+    def test_reload_resumes_plasticity_at_the_unload_peak(self, model):
+        """Reload stays elastic until σ passes the peak it was unloaded from."""
+        eps = np.concatenate([
+            np.linspace(0.0, 1.6e-3, 9)[1:],
+            np.linspace(1.6e-3, 0.9e-3, 5)[1:],
+            np.linspace(0.9e-3, 2.2e-3, 9)[1:],
+        ])
+        steps = self._uniaxial(model, eps)
+        reload_steps = steps[12:]
+        assert any(not s.is_plastic for s in reload_steps), "reload has an elastic portion"
+        assert reload_steps[-1].is_plastic, "reload must eventually yield again"
+        flags = [s.is_plastic for s in reload_steps]
+        assert flags == sorted(flags), f"plasticity must not flicker on reload: {flags}"
+
+    def test_non_bool_return_is_rejected(self, model):
+        """A smoothed indicator would silently make every step plastic-ish."""
+        class _Bad(_SubloadingNatural):
+            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
+                return anp.array(1.0)
+
+        bad = _Bad(E=_E, nu=_NU)
+        with pytest.raises(TypeError, match="must return a bool"):
+            PythonNumericalIntegrator(bad).stress_update(
+                anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0]), anp.zeros(6), bad.initial_state()
+            )
+
+    def test_hook_receives_strain_inc_and_step_n_stress(self, model):
+        """Direction tests of the form n : Δε > 0 must be expressible."""
+        seen = {}
+
+        class _Recording(_SubloadingNatural):
+            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
+                seen["stress_n"] = np.array(state_n["stress"])
+                seen["strain_inc"] = np.array(strain_inc)
+                return super().elastic_check(
+                    state_n, stress_trial=stress_trial, strain_inc=strain_inc
+                )
+
+        m = _Recording(E=_E, nu=_NU)
+        stress_n = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        deps = np.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        state_n = {**m.initial_state(), "stress": stress_n}
+        PythonNumericalIntegrator(m).stress_update(deps, stress_n, state_n)
+        assert seen["stress_n"] == pytest.approx(stress_n)
+        assert seen["strain_inc"] == pytest.approx(deps)
+
+    def test_consistent_tangent_matches_finite_difference(self, model):
+        """σ_trial is now handed to the tangent instead of re-derived from grad(f)."""
+        steps = self._uniaxial(model, np.linspace(0.0, 1.6e-3, 9))
+        plastic_idx = [i for i, s in enumerate(steps) if s.is_plastic]
+        assert plastic_idx
+        prev = steps[plastic_idx[-1] - 1]
+        deps = np.zeros(6)
+        deps[0] = 1.6e-3 / 8
+        res = check_tangent(
+            PythonNumericalIntegrator(model), prev.stress, prev.state, deps, tol=1e-4
+        )
+        assert res.passed, f"max rel err = {res.max_rel_error:.3e}"
