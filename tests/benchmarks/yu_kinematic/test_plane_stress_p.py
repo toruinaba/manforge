@@ -4,11 +4,15 @@ YUKinematicPS stores in-plane tensor components with the 33 component
 identically zero and routes deviatoric contractions through PLANE_STRESS_P's
 P metric.  It is solved purely by the framework autograd path.
 
-Three independent axes, none of which needs a hand-derived Jacobian:
+Four independent axes, none of which needs a hand-derived Jacobian:
 
   1. Uniaxial equivalence — under uniaxial loading (σ22 = σ12 = 0) the model
      must reproduce YUKinematic1D and YUKinematic3D exactly.  This validates
      the convention physically rather than algebraically.
+  1b. P-metric covariance — under multiaxial loading the internal variables
+     must map onto the 3D model's through M(x) = dev₃D(x), which is what pins
+     down where P belongs in the formulation.  Axis 1 is blind to this because
+     P's ×2 shear weighting vanishes when σ12 = 0.
   2. Tangent vs finite differences — the AD consistent tangent must match
      central differences.
   3. Cyclic convergence — every step of a reversed history must converge.
@@ -27,7 +31,7 @@ from manforge.simulation.integrator import (
     PythonAnalyticalIntegrator,
     PythonNumericalIntegrator,
 )
-from manforge.simulation.types import FieldHistory
+from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import JacobianChecker
 from manforge.verification.tangent import TangentChecker
 
@@ -141,6 +145,210 @@ def test_uniaxial_matches_3d():
     np.testing.assert_allclose(
         result_ps.stress[:, 0], result_3d.stress[:, 0], rtol=1e-9, atol=1e-8
     )
+
+
+# ---------------------------------------------------------------------------
+# Axis 1b: P-metric covariance against 3D under multiaxial loading
+#
+# The P metric implies a bijection between the PS storage convention and 3D
+# deviators,  M(x) = dev₃D([x11, x22, 0, x12, 0, 0]),  satisfying xᵀPy = M(x):M(y).
+# Every stress-like state (θ, β, q) is the M-preimage of its 3D counterpart, and
+# because dev is linear the 3D evolution law keeps its form under M — which is
+# why no P appears in R_theta / R_beta, only in the norms and in ∂f/∂σ.  Adding
+# one would double the shear component and drop the 33 component, turning θ into
+# a strain-like quantity.
+#
+# The uniaxial tests above cannot catch that: σ22 = σ12 = 0 makes P's ×2 shear
+# weighting invisible.  Neither can the autograd-vs-closed-form Jacobian tests
+# below, since both sides differentiate the same residual.
+# ---------------------------------------------------------------------------
+
+def _to_3d_deviator(x):
+    """M: PS stored (11, 22, 12) → 3D deviator (6,)."""
+    full = np.array([x[0], x[1], 0.0, x[2], 0.0, 0.0])
+    p = (full[0] + full[1]) / 3.0
+    return full - np.array([p, p, p, 0.0, 0.0, 0.0])
+
+
+def _to_3d_state(state_ps):
+    """σ33 ≡ 0 so σ maps by embedding; θ, β, q are stress-like and map by M."""
+    sig = state_ps["stress"]
+    return dict(
+        stress=np.array([sig[0], sig[1], 0.0, sig[2], 0.0, 0.0]),
+        theta=_to_3d_deviator(state_ps["theta"]),
+        beta=_to_3d_deviator(state_ps["beta"]),
+        q=_to_3d_deviator(state_ps["q"]),
+        R=state_ps["R"], r=state_ps["r"],
+        eps_eq=state_ps["eps_eq"], theta_max=state_ps["theta_max"],
+    )
+
+
+def _named(items):
+    return {item.name: item.value for item in items}
+
+
+# B − Y = 75, so these bracket the C_1 / C_2 branch of C_k.
+@pytest.mark.parametrize("theta_max", [20.0, 110.0])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_state_residual_is_covariant_with_3d(theta_max, seed):
+    """M(R_PS) == R_3D row by row, with Δλ_3D = (2/3)·Y·Δλ_PS.
+
+    Evaluates both models at the *same* physical state — no solver, no driver —
+    so a failure localises to a single residual row rather than to an
+    accumulated trajectory difference.
+
+    The σ row is excluded on purpose: it carries C, whose plane-stress form is
+    a Schur condensation of the 3D one, so it does not transform by M.
+    """
+    model_ps = YUKinematicPS(**PARAMS)
+    model_3d = YUKinematic3D(**PARAMS)
+    Y = PARAMS["Y"]
+
+    rng = np.random.default_rng(seed)
+    theta = rng.normal(size=3) * 20.0
+    beta = rng.normal(size=3) * 40.0
+    q = rng.normal(size=3) * 10.0
+    # Put ξ on the yield surface: ξᵀPξ = (2/3)Y² ⟺ f = 0.
+    xi = rng.normal(size=3)
+    xi *= np.sqrt(2.0 / 3.0) * Y / np.sqrt(
+        model_ps.deviatoric_inner_product(xi, xi)
+    )
+
+    state_ps = dict(stress=xi + theta + beta, theta=theta, beta=beta, q=q,
+                    R=40.0, r=15.0, eps_eq=4e-3, theta_max=theta_max)
+    # Step-start state pulled back so the residuals are not trivially zero.
+    state_n_ps = dict(state_ps, stress=state_ps["stress"] * 0.98,
+                      theta=theta * 0.9, beta=beta * 0.95, q=q * 0.9,
+                      R=38.0, r=14.0, eps_eq=4e-3 - 1e-4)
+
+    dlambda_ps = 1e-5
+    dlambda_3d = 2.0 / 3.0 * Y * dlambda_ps
+
+    args_ps = (model_ps.make_state(**state_ps), model_ps.make_state(**state_n_ps))
+    args_3d = (model_3d.make_state(**_to_3d_state(state_ps)),
+               model_3d.make_state(**_to_3d_state(state_n_ps)))
+
+    res_ps = _named(model_ps.state_residual(
+        args_ps[0], dlambda_ps, args_ps[1], stress_trial=np.zeros(3)))
+    res_3d = _named(model_3d.state_residual(
+        args_3d[0], dlambda_3d, args_3d[1], stress_trial=np.zeros(6)))
+    for key in ("theta", "beta"):
+        np.testing.assert_allclose(
+            _to_3d_deviator(res_ps[key]), res_3d[key],
+            rtol=1e-10, atol=1e-12, err_msg=f"R_{key} is not M-covariant",
+        )
+
+    up_ps = _named(model_ps.update_state(
+        dlambda_ps, args_ps[0], args_ps[1], stress_trial=np.zeros(3)))
+    up_3d = _named(model_3d.update_state(
+        dlambda_3d, args_3d[0], args_3d[1], stress_trial=np.zeros(6)))
+    np.testing.assert_allclose(
+        _to_3d_deviator(up_ps["q"]), up_3d["q"], rtol=1e-10, atol=1e-12
+    )
+    for key in ("R", "r", "eps_eq", "theta_max"):
+        assert float(up_ps[key]) == pytest.approx(float(up_3d[key]), rel=1e-10), key
+
+    # Δλ·n is the plastic strain increment, so the in-plane components must
+    # agree even though the two Δλ differ.  This is where P legitimately enters.
+    dep_ps = dlambda_ps * model_ps.flow(args_ps[0]).strain_like
+    dep_3d = dlambda_3d * model_3d.flow(args_3d[0]).strain_like
+    np.testing.assert_allclose(dep_ps, dep_3d[[0, 1, 3]], rtol=1e-10, atol=1e-16)
+
+
+def _multiaxial_path(waypoints, n_per_segment):
+    """Piecewise-linear (N, 3) in-plane strain history through the waypoints."""
+    rows = []
+    for a, b in zip(waypoints[:-1], waypoints[1:]):
+        for t in np.linspace(0.0, 1.0, n_per_segment, endpoint=False)[1:]:
+            rows.append(a + (b - a) * t)
+        rows.append(b)
+    return FieldHistory(FieldType.STRAIN, "eps", np.array(rows))
+
+
+_MONOTONIC = [np.zeros(3), np.array([6e-3, -3e-3, 4e-3])]
+_NON_PROPORTIONAL = [
+    np.zeros(3),
+    np.array([1.2e-2, -6e-3, 8e-3]),
+    np.array([-1.2e-2, 6e-3, 8e-3]),   # shear held while the axial pair reverses
+    np.array([1.2e-2, -6e-3, -8e-3]),
+]
+
+_COLLECT = {
+    "theta": FieldType.STRESS, "beta": FieldType.STRESS, "q": FieldType.STRESS,
+    "R": FieldType.STRESS, "r": FieldType.STRESS, "theta_max": FieldType.STRESS,
+    "eps_eq": FieldType.STRAIN,
+}
+
+
+def _run_ps_and_3d(history):
+    """PS under full in-plane strain control vs 3D with σ33 = σ13 = σ23 = 0."""
+    res_ps = StrainDriver(
+        PythonNumericalIntegrator(YUKinematicPS(**PARAMS))
+    ).run(history, collect_state=_COLLECT)
+    res_3d = MixedDriver(
+        PythonNumericalIntegrator(YUKinematic3D(**PARAMS)),
+        prescribed_strain_idx=[0, 1, 3],
+    ).run(history, collect_state=_COLLECT)
+    return res_ps, res_3d
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("waypoints,n_per_segment", [
+    (_MONOTONIC, 20),
+    (_NON_PROPORTIONAL, 20),
+])
+def test_multiaxial_state_matches_3d(waypoints, n_per_segment):
+    """Internal variables must track the 3D model through M over a full path.
+
+    Unlike the pointwise residual test this exercises the whole PS route —
+    elastic condensation, flow direction, NR — under biaxial + shear loading.
+    """
+    history = _multiaxial_path(waypoints, n_per_segment)
+    res_ps, res_3d = _run_ps_and_3d(history)
+
+    assert any(r.is_plastic for r in res_ps.step_results), "no plastic step"
+    # θ̄ starts at 0 and ends past B − Y = 75, so both C_k branches are covered.
+    assert res_ps.fields["theta_max"].data.max() > PARAMS["B"] - PARAMS["Y"]
+    np.testing.assert_allclose(res_3d.stress[:, 2], 0.0, atol=1e-8)
+    for col, idx_3d in enumerate([0, 1, 3]):
+        np.testing.assert_allclose(
+            res_ps.stress[:, col], res_3d.stress[:, idx_3d], rtol=1e-8, atol=1e-8
+        )
+
+    for key in ("theta", "beta", "q"):
+        mapped = np.array([_to_3d_deviator(row) for row in res_ps.fields[key].data])
+        np.testing.assert_allclose(
+            mapped, res_3d.fields[key].data, rtol=1e-8, atol=1e-8,
+            err_msg=f"{key} diverges from the 3D model under M",
+        )
+    for key in ("R", "r", "eps_eq", "theta_max"):
+        np.testing.assert_allclose(
+            res_ps.fields[key].data, res_3d.fields[key].data, rtol=1e-8, atol=1e-10,
+            err_msg=key,
+        )
+
+
+@pytest.mark.slow
+def test_multiaxial_tangent_matches_condensed_3d():
+    """The PS tangent must equal the static condensation of the 3D one.
+
+    D_PP − D_PF·D_FF⁻¹·D_FP over P = (11, 22, 12), F = (33, 13, 23) — the same
+    reduction ``isotropic_C`` applies elastically, here checked on the plastic
+    consistent tangent along a multiaxial path.
+    """
+    p_idx, f_idx = [0, 1, 3], [2, 4, 5]
+    res_ps, res_3d = _run_ps_and_3d(_multiaxial_path(_MONOTONIC, 20))
+
+    for i, (step_ps, step_3d) in enumerate(
+        zip(res_ps.step_results, res_3d.step_results)
+    ):
+        d3 = step_3d.ddsdde
+        condensed = d3[np.ix_(p_idx, p_idx)] - d3[np.ix_(p_idx, f_idx)] @ np.linalg.solve(
+            d3[np.ix_(f_idx, f_idx)], d3[np.ix_(f_idx, p_idx)]
+        )
+        np.testing.assert_allclose(
+            step_ps.ddsdde, condensed, rtol=1e-7, atol=1e-6, err_msg=f"step {i}"
+        )
 
 
 # ---------------------------------------------------------------------------
