@@ -310,6 +310,56 @@ result.params["B"]  # 復元済み
 
 `model.param_names` に無い変数（`B_ratio`）は自動的に除外してモデルへ渡す。`result.params` には free / fixed / derived すべてが入る。`fixed_params=` 引数は dict 形式専用で、`ParameterSpace` と併用すると `ValueError`。
 
+**複数カーブへの同時フィッティング — `FitTarget` / `Observation`**
+
+`exp_data` に `FitTarget` のリストを渡すと複数の実験カーブを同時にフィットできる。2 階層になっているのは計算コストが違うため:
+
+- `FitTarget` = **1 回の解析**。載荷履歴 1 本 + driver 1 つ。別実験（単調引張、ひずみ振幅の違う繰返し、応力制御のラチェッティング）はそれぞれ別ターゲットで、目的関数 1 評価あたり driver run 1 回のコストがかかる。
+- `Observation` = **1 本の実験カーブ**。同一ターゲット上の複数 observation（σ11 と σ22、応力と ep）は解析結果を共有するので追加コストはほぼゼロ。
+
+```python
+from manforge.fitting import FitTarget, Observation, fit_params
+from manforge.simulation.driver import StrainDriver, StressDriver
+from manforge.simulation.types import FieldHistory, FieldType
+
+targets = [
+    # ひずみ制御: σ11 と ep を同じ解析から比較
+    FitTarget(
+        load=FieldHistory(FieldType.STRAIN, "Strain", strain_hist),
+        observations=[
+            Observation(values=sigma11_exp, component=0),
+            Observation(values=ep_exp, field="ep", weight=1e8),
+        ],
+        name="tension",
+    ),
+    # 応力制御: このターゲットだけ driver が違う
+    FitTarget(
+        load=FieldHistory(FieldType.STRESS, "Stress", stress_hist),
+        observations=[Observation(values=strain_exp, field="Strain", component=0)],
+        driver_factory=lambda i: StressDriver(i),
+        name="ratchetting",
+    ),
+]
+result = fit_params(model, lambda i: StrainDriver(i), targets, fit_config,
+                   fixed_params={"E": 210_000.0, "nu": 0.3})
+```
+
+`Observation` の主な引数:
+
+| 引数 | 意味 |
+|------|------|
+| `values` | 実験値。`(N,)` または `(N, ntens)` |
+| `field` | 比較対象。`"Stress"` / `"Strain"` / モデルの state キー（`"ep"` 等） |
+| `component` | 比較する列。`None` (default) で全成分（`values` は 2-D 必須） |
+| `weights` | データ点ごとの重み（長さ `N`） |
+| `weight` | このカーブ全体の重み |
+
+**重み付けの規約** — 各 observation の残差二乗和は**データ点数で割られる**（平均二乗誤差）。点数の多いカーブが単に長いだけで支配的になるのを防ぐため。応力レベルやオーダーの違うカーブを混ぜる場合は `weight` で明示的に調整する（上の例では ep が O(1e-3)、応力が O(1e2) なので `weight=1e8`）。
+
+`driver_factory` はターゲットごとに指定でき、省略時は `fit_params` に渡したものを使う。全ターゲットが自前の `driver_factory` を持つなら `fit_params(model, None, ...)` でよい。`initial_stress` / `initial_state` もターゲット単位で指定できる（予荷重・予硬化状態の再現）。
+
+従来の `{"strain": ..., "stress": ...}` dict は 1 ターゲット・1 observation の短縮形として引き続き使える。
+
 ---
 
 ### 5.4 検証
@@ -439,7 +489,7 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `PythonIntegrator`, `PythonNumericalIntegrator`, `PythonAnalyticalIntegrator`, `FortranIntegrator` | `manforge.simulation` |
 | `StrainDriver`, `StressDriver` | `manforge.simulation` |
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
-| `fit_params`, `FitResult`, `ParameterSpace` | `manforge.fitting` |
+| `fit_params`, `FitResult`, `ParameterSpace`, `FitTarget`, `Observation` | `manforge.fitting` |
 | `TangentChecker`, `TangentCheckResult` | `manforge.verification` |
 | `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
@@ -479,8 +529,9 @@ src/manforge/
 │       ├── fortran.py         # FortranIntegrator
 │       └── fortran_module.py  # FortranModule (f2py 薄ラッパ)
 ├── fitting/
-│   ├── objective.py       # 残差二乗和
+│   ├── objective.py       # 残差二乗和 + build_objective
 │   ├── space.py           # ParameterSpace (最適化変数 → モデルパラメータ)
+│   ├── target.py          # FitTarget / Observation (複数カーブ同時フィット)
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
 │   ├── comparator_base.py     # Comparator 抽象基底

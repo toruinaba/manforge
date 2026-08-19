@@ -21,7 +21,7 @@ from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory
-from manforge.fitting import ParameterSpace, fit_params
+from manforge.fitting import FitTarget, Observation, ParameterSpace, fit_params
 
 try:
     import matplotlib
@@ -120,6 +120,43 @@ print(f"  Fitted sigma_y0 = {result_ratio.params['sigma_y0']:.2f} MPa")
 print(f"  Fitted H_ratio  = {result_ratio.params['H_ratio']:.3f}")
 print(f"  Derived H       = {result_ratio.params['H']:.2f} MPa")
 print(f"  Residual        = {result_ratio.residual:.4f}")
+print()
+
+# ---------------------------------------------------------------------------
+# Multi-target fit: two strain amplitudes measured as separate experiments.
+# Each FitTarget is one simulation run; the residuals are normalised by data
+# point count so the longer history does not dominate.
+# ---------------------------------------------------------------------------
+loads_multi = [
+    FieldHistory.cyclic_strain(peaks=[3e-3, -3e-3], n_per_segment=10, ntens=1),
+    FieldHistory.cyclic_strain(peaks=[8e-3, -8e-3, 8e-3], n_per_segment=15, ntens=1),
+]
+targets = [
+    FitTarget(
+        load=load_i,
+        observations=[
+            Observation(
+                values=driver_factory(PythonIntegrator(true_model))
+                .run(load_i)
+                .stress[:, 0]
+                + rng.normal(0.0, noise_std, size=len(load_i.data)),
+                component=0,
+            )
+        ],
+        name=f"amplitude-{i}",
+    )
+    for i, load_i in enumerate(loads_multi)
+]
+
+result_multi = fit_params(
+    true_model, driver_factory, targets, fit_config,
+    fixed_params=fixed_params, method="L-BFGS-B", max_iter=200,
+)
+
+print("  Multi-target (2 strain amplitudes):")
+print(f"  Fitted sigma_y0 = {result_multi.params['sigma_y0']:.2f} MPa")
+print(f"  Fitted H        = {result_multi.params['H']:.2f} MPa")
+print(f"  Residual        = {result_multi.residual:.4f}  (mean sq. per curve)")
 print()
 
 # ---------------------------------------------------------------------------

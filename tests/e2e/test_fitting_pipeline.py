@@ -15,10 +15,10 @@ run in the fast suite.
 import numpy as np
 import pytest
 
-from manforge.simulation.driver import StrainDriver
+from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.fitting import ParameterSpace
+from manforge.fitting import FitTarget, Observation, ParameterSpace
 from manforge.fitting.optimizer import fit_params, FitResult
 
 
@@ -108,6 +108,117 @@ def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_data):
     for iterate in [*result.history, result.params]:
         values = space.resolve([iterate["sigma_y0"], iterate["H_ratio"]])
         assert values["H"] >= values["sigma_y0"]
+
+
+# ---------------------------------------------------------------------------
+# Multiple targets
+# ---------------------------------------------------------------------------
+
+def _strain_target(model, peak, n=20, **kwargs):
+    """Strain-driven target whose curve is this model's own response."""
+    load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, peak, n))
+    computed = StrainDriver(PythonIntegrator(model)).run(load).stress[:, 0]
+    return FitTarget(
+        load=load,
+        observations=[Observation(values=computed, component=0)],
+        **kwargs,
+    )
+
+
+def test_multiple_strain_targets_recover_params(model, driver_factory):
+    """Two loading histories fitted at once still recover the true params."""
+    targets = [
+        _strain_target(model, 3e-3, name="small"),
+        _strain_target(model, 8e-3, name="large"),
+    ]
+    fit_config = {
+        "sigma_y0": (220.0, (50.0, 600.0)),
+        "H":        (800.0, (0.0, 5000.0)),
+    }
+    fixed = {"E": model.E, "nu": model.nu}
+
+    result = fit_params(model, driver_factory, targets, fit_config,
+                        fixed_params=fixed, max_iter=60)
+
+    assert result.residual < 1e-3
+    assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
+    assert result.params["H"] == pytest.approx(model.H, rel=0.05)
+
+
+def test_stress_driven_target(model):
+    """A target may be driven by stress, with its own driver_factory."""
+    stress_hist = np.zeros((15, 6))
+    stress_hist[:, 0] = np.linspace(0.0, 300.0, 15)
+    load = FieldHistory(FieldType.STRESS, "Stress", stress_hist)
+    strain_computed = StressDriver(PythonIntegrator(model)).run(load).strain[:, 0]
+
+    target = FitTarget(
+        load=load,
+        observations=[Observation(values=strain_computed, field="Strain", component=0)],
+        driver_factory=lambda i: StressDriver(i),
+        name="ratchetting",
+    )
+    fit_config = {"sigma_y0": (240.0, (50.0, 600.0))}
+    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+
+    result = fit_params(model, None, target, fit_config,
+                        fixed_params=fixed, max_iter=40)
+
+    assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
+
+
+def test_mixed_strain_and_stress_driven_targets(model, driver_factory):
+    """Strain- and stress-driven targets coexist in one objective."""
+    stress_hist = np.zeros((15, 6))
+    stress_hist[:, 0] = np.linspace(0.0, 300.0, 15)
+    stress_load = FieldHistory(FieldType.STRESS, "Stress", stress_hist)
+    strain_computed = StressDriver(PythonIntegrator(model)).run(stress_load).strain[:, 0]
+
+    targets = [
+        _strain_target(model, 5e-3, name="tension"),
+        FitTarget(
+            load=stress_load,
+            observations=[
+                Observation(values=strain_computed, field="Strain", component=0)
+            ],
+            driver_factory=lambda i: StressDriver(i),
+            name="stress-controlled",
+        ),
+    ]
+    fit_config = {"sigma_y0": (230.0, (50.0, 600.0))}
+    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+
+    result = fit_params(model, driver_factory, targets, fit_config,
+                        fixed_params=fixed, max_iter=40)
+
+    assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
+
+
+def test_stress_and_state_observations_share_one_run(model, driver_factory):
+    """σ11 and ep from the same run are both fitted."""
+    load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 8e-3, 25))
+    run = StrainDriver(PythonIntegrator(model)).run(load)
+    ep_computed = np.array([r.state["ep"] for r in run.step_results])
+
+    target = FitTarget(
+        load=load,
+        observations=[
+            Observation(values=run.stress[:, 0], component=0, name="sigma11"),
+            # ep is O(1e-3) against stress O(1e2); weight to make it matter
+            Observation(values=ep_computed, field="ep", weight=1e8, name="ep"),
+        ],
+    )
+    fit_config = {
+        "sigma_y0": (220.0, (50.0, 600.0)),
+        "H":        (800.0, (0.0, 5000.0)),
+    }
+    fixed = {"E": model.E, "nu": model.nu}
+
+    result = fit_params(model, driver_factory, target, fit_config,
+                        fixed_params=fixed, max_iter=60)
+
+    assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
+    assert result.params["H"] == pytest.approx(model.H, rel=0.05)
 
 
 # ---------------------------------------------------------------------------

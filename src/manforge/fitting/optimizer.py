@@ -5,7 +5,7 @@ Main entry point: :func:`fit_params`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -15,6 +15,7 @@ from typing_extensions import TypeAlias
 
 from manforge.fitting.objective import ExpData, DriverFactoryFn, build_objective
 from manforge.fitting.space import FitConfig, ParameterSpace
+from manforge.fitting.target import FitTarget, coerce_targets
 from manforge._typing import FloatArray
 
 if TYPE_CHECKING:
@@ -55,8 +56,8 @@ class FitResult:
 
 def fit_params(
     model: "MaterialModel",
-    driver_factory: DriverFactoryFn,
-    exp_data: ExpData,
+    driver_factory: DriverFactoryFn | None,
+    exp_data: "ExpData | FitTarget | Sequence[FitTarget]",
     fit_config: ParameterSpace | FitConfig,
     fixed_params: dict[str, float] | None = None,
     method: Method = "L-BFGS-B",
@@ -71,12 +72,19 @@ def fit_params(
     ----------
     model : MaterialModel
         Constitutive model instance.
-    driver_factory : callable
+    driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` — constructs a driver
         bound to the given integrator for each objective evaluation.
-        Example: ``lambda i: StrainDriver(i)``.
-    exp_data : dict
-        ``{"strain": ..., "stress": ..., "weights": ...}``  (weights optional).
+        Example: ``lambda i: StrainDriver(i)``.  May be ``None`` only if every
+        target carries its own ``driver_factory``.
+    exp_data : dict, FitTarget, or sequence of FitTarget
+        The curves to fit.  ``{"strain": ..., "stress": ..., "weights": ...}``
+        is shorthand for a single strain-driven target with one stress curve.
+        Pass :class:`~manforge.fitting.target.FitTarget` instances to fit
+        several experiments at once, to drive a target by stress, or to
+        compare state variables as well as stress.  Each observation's squared
+        residual is divided by its point count before summing, so a longer
+        curve does not dominate; use ``Observation.weight`` to rebalance.
     fit_config : ParameterSpace or dict
         A :class:`~manforge.fitting.space.ParameterSpace`, or the plain dict
         form for the case where every free variable is a model parameter::
@@ -111,10 +119,11 @@ def fit_params(
     FitResult
     """
     space = ParameterSpace.coerce(fit_config, fixed_params)
+    targets = coerce_targets(exp_data)
     free_names = space.free_names
     bounds = space.bounds
 
-    obj_fn = build_objective(model, driver_factory, exp_data, space)
+    obj_fn = build_objective(model, driver_factory, targets, space)
 
     history: list[dict[str, float]] = []
 
