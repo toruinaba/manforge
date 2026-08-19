@@ -6,7 +6,6 @@ import inspect
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
-import numpy as np
 from typing_extensions import NotRequired, TypedDict
 
 from manforge.fitting.space import ParameterSpace
@@ -35,27 +34,6 @@ class DriverFactoryFn(Protocol):
     def __call__(self, integrator: object) -> "DriverBase": ...
 
 
-def residual_sum_of_squares(
-    stress_computed: FloatArray,
-    stress_experiment: FloatArray,
-    weights: FloatArray | None = None,
-) -> float:
-    """Weighted sum of squared residuals."""
-    sc = np.asarray(stress_computed, dtype=float)
-    se = np.asarray(stress_experiment, dtype=float)
-    diff = sc - se
-
-    if diff.ndim == 2:
-        sq = np.sum(diff ** 2, axis=1)
-    else:
-        sq = diff ** 2
-
-    if weights is not None:
-        w = np.asarray(weights, dtype=float)
-        return float(np.dot(w, sq))
-    return float(np.sum(sq))
-
-
 def build_objective(
     model: "MaterialModel",
     driver_factory: DriverFactoryFn | None,
@@ -64,9 +42,9 @@ def build_objective(
 ) -> Callable[[Sequence[float] | FloatArray], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
-    The objective is the sum over every target's observations of the
-    point-count-normalised weighted squared residual.  Each target costs one
-    driver run per evaluation; observations on the same target share that run.
+    The objective is the sum over every target's observations of each
+    observation's residual under its own metric.  Each target costs one driver
+    run per evaluation; observations on the same target share that run.
 
     Parameters
     ----------

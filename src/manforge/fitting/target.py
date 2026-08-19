@@ -11,10 +11,12 @@ amounts of compute:
   computed output of that run.  Several observations on the same target
   (σ11 and σ22, or stress and equivalent plastic strain) share a single run.
 
-Each observation's squared residual is divided by its number of data points,
-so a curve does not dominate the objective merely by being longer.  Use
-``Observation.weight`` to rebalance deliberately — e.g. when curves differ in
-stress scale.
+Each observation carries its own ``metric``.  The default ``"mse"`` divides the
+squared residual by the number of data points, so a curve does not dominate
+the objective merely by being longer; ``"pcm"`` compares curves by arc length
+and tolerates differing point counts.  Use ``Observation.weight`` to rebalance
+deliberately — e.g. when curves differ in stress scale, or when mixing metrics
+whose values are not commensurate.
 """
 
 from __future__ import annotations
@@ -25,7 +27,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from manforge.fitting.objective import residual_sum_of_squares
+from manforge.fitting.metrics import (
+    MetricName,
+    is_curve_metric,
+    mean_squared_error,
+    partial_curve_mapping,
+    resolve_metric,
+)
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge._typing import FloatArray
 
@@ -78,10 +86,33 @@ class Observation:
         Column of the computed history to compare.  ``None`` (default)
         compares every column, so ``values`` must then be 2-D.
     weights : array-like or None
-        Per-data-point weights, length ``N``.
+        Per-data-point weights, length ``N``.  Only meaningful for
+        ``metric="mse"`` — a curve metric has no per-point correspondence to
+        weight, so combining the two raises.
     weight : float
         Weight of this curve within the objective, applied on top of the
-        automatic ``1/N`` normalisation.
+        metric's own normalisation.
+    metric : {"mse", "pcm"}
+        How to compare the curves.  ``"mse"`` (default) is a point-by-point
+        mean squared error and requires ``values`` to be sampled at the same
+        points as the simulation.  ``"pcm"`` is
+        :func:`~manforge.fitting.metrics.partial_curve_mapping`, which
+        compares (x, y) curves by arc length and so permits different point
+        counts — use it when the simulation is forced onto a coarser
+        increment than the experiment was sampled at, or when the curve is
+        multi-valued.  Requires :attr:`x_values`.  Note that a coarse
+        increment biases a joint fit around the yield corner; see
+        :func:`~manforge.fitting.metrics.partial_curve_mapping`.
+    x_values : array-like or None
+        Experimental x coordinates, length ``N`` — required by ``"pcm"`` and
+        rejected by ``"mse"``.  The computed x history is taken from
+        :attr:`x_field`.
+    x_field : str
+        Which computed history supplies the x axis for a curve metric.
+        Defaults to ``"Strain"``.
+    x_component : int or None
+        Column of the computed x history.  ``None`` (default) means column 0
+        when that history is 2-D.
     name : str
         Label used in error messages.
     """
@@ -91,7 +122,47 @@ class Observation:
     component: int | None = None
     weights: FloatArray | None = None
     weight: float = 1.0
+    metric: MetricName = "mse"
+    x_values: FloatArray | None = None
+    x_field: str = STRAIN_FIELD
+    x_component: int | None = None
     name: str = ""
+
+    def __post_init__(self) -> None:
+        resolve_metric(self.metric)
+        if is_curve_metric(self.metric):
+            if self.x_values is None:
+                raise ValueError(
+                    f"observation {self.label!r}: metric {self.metric!r} compares "
+                    f"(x, y) curves, so x_values is required"
+                )
+            if len(np.asarray(self.x_values)) != self.n_points:
+                raise ValueError(
+                    f"observation {self.label!r}: {len(np.asarray(self.x_values))} "
+                    f"x_values for {self.n_points} values"
+                )
+            if self.weights is not None:
+                raise ValueError(
+                    f"observation {self.label!r}: per-point weights are meaningless "
+                    f"for metric {self.metric!r}, which matches points by arc length "
+                    f"rather than by index; use weight= to scale the whole curve"
+                )
+            if np.asarray(self.values).ndim != 1:
+                raise ValueError(
+                    f"observation {self.label!r}: metric {self.metric!r} compares a "
+                    f"single (x, y) curve, so values must be 1-D; set component= to "
+                    f"select one column"
+                )
+        elif self.x_values is not None:
+            raise ValueError(
+                f"observation {self.label!r}: x_values is only used by curve metrics, "
+                f"not by {self.metric!r}"
+            )
+
+    @property
+    def compares_curves(self) -> bool:
+        """Whether this observation's metric permits differing point counts."""
+        return is_curve_metric(self.metric)
 
     @property
     def label(self) -> str:
@@ -102,11 +173,18 @@ class Observation:
         return len(np.asarray(self.values))
 
     def residual(self, result: "DriverResult") -> float:
-        """Mean squared residual of this curve, scaled by :attr:`weight`."""
+        """Residual of this curve under :attr:`metric`, scaled by :attr:`weight`."""
         computed = _extract_field(result, self.field)
         if self.component is not None:
             computed = computed[:, self.component]
         expected = np.asarray(self.values, dtype=float)
+
+        if self.compares_curves:
+            return self.weight * partial_curve_mapping(
+                np.column_stack([self._computed_x(result), computed]),
+                np.column_stack([np.asarray(self.x_values, dtype=float), expected]),
+            )
+
         if computed.shape != expected.shape:
             raise ValueError(
                 f"observation {self.label!r}: computed {self.field} has shape "
@@ -114,8 +192,19 @@ class Observation:
                 + ("; set component= to select a single column"
                    if computed.ndim == 2 and expected.ndim == 1 else "")
             )
-        sse = residual_sum_of_squares(computed, expected, self.weights)
-        return self.weight * sse / self.n_points
+        return self.weight * mean_squared_error(computed, expected, self.weights)
+
+    def _computed_x(self, result: "DriverResult") -> FloatArray:
+        """The simulated x history a curve metric plots against."""
+        x = _extract_field(result, self.x_field)
+        if x.ndim == 2:
+            x = x[:, 0 if self.x_component is None else self.x_component]
+        elif self.x_component is not None:
+            raise ValueError(
+                f"observation {self.label!r}: x_component={self.x_component} but "
+                f"computed {self.x_field} is 1-D"
+            )
+        return x
 
 
 @dataclass(frozen=True)
@@ -156,11 +245,14 @@ class FitTarget:
             )
         n_steps = len(np.asarray(self.load.data))
         for obs in self.observations:
-            if obs.n_points != n_steps:
+            # Curve metrics match by arc length, so a coarser simulation than
+            # the experiment's sampling is the expected case, not an error.
+            if obs.n_points != n_steps and not obs.compares_curves:
                 raise ValueError(
                     f"target {self.label!r}, observation {obs.label!r}: "
                     f"{obs.n_points} data points but the loading history has "
-                    f"{n_steps} steps"
+                    f"{n_steps} steps; use metric=\"pcm\" to compare curves "
+                    f"sampled differently"
                 )
             if obs.weights is not None and len(np.asarray(obs.weights)) != n_steps:
                 raise ValueError(

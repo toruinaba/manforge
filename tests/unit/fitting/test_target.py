@@ -235,3 +235,131 @@ def test_coerce_empty_sequence_rejected():
 def test_coerce_rejects_non_target_sequence():
     with pytest.raises(TypeError, match="expected FitTarget"):
         coerce_targets(["not a target"])
+
+
+# ---------------------------------------------------------------------------
+# Curve metrics (metric="pcm")
+# ---------------------------------------------------------------------------
+
+def test_pcm_observation_matches_its_own_run(driver_result):
+    """A curve read back off the run it came from is a perfect match."""
+    obs = Observation(
+        values=driver_result.stress[:, 0],
+        component=0,
+        metric="pcm",
+        x_values=driver_result.strain[:, 0],
+    )
+    assert obs.residual(driver_result) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_pcm_observation_accepts_finer_experimental_sampling(model, strain_load):
+    """The motivating case: the simulation is coarser than the experiment.
+
+    The experiment is resampled onto 40 points from the same underlying
+    curve, so a metric that tolerates differing point counts must see it as
+    a near-perfect match.
+    """
+    coarse = StrainDriver(PythonIntegrator(model)).run(strain_load)
+    strain = coarse.strain[:, 0]
+    stress = coarse.stress[:, 0]
+
+    dense_strain = np.linspace(strain[0], strain[-1], 40)
+    dense_stress = np.interp(dense_strain, strain, stress)
+
+    obs = Observation(
+        values=dense_stress, component=0, metric="pcm", x_values=dense_strain
+    )
+    assert obs.n_points != len(coarse.step_results)
+    assert obs.residual(coarse) < 1e-3
+
+
+def test_pcm_observation_penalises_a_wrong_curve(driver_result):
+    scaled = 1.5 * driver_result.stress[:, 0]
+    obs = Observation(
+        values=scaled,
+        component=0,
+        metric="pcm",
+        x_values=driver_result.strain[:, 0],
+    )
+    assert obs.residual(driver_result) > 1e-3
+
+
+def test_pcm_weight_scales_residual(driver_result):
+    scaled = 1.5 * driver_result.stress[:, 0]
+    kwargs = dict(
+        component=0, metric="pcm", x_values=driver_result.strain[:, 0]
+    )
+    plain = Observation(values=scaled, **kwargs)
+    heavy = Observation(values=scaled, weight=3.0, **kwargs)
+    assert heavy.residual(driver_result) == pytest.approx(
+        3.0 * plain.residual(driver_result)
+    )
+
+
+def test_pcm_requires_x_values():
+    with pytest.raises(ValueError, match="x_values is required"):
+        Observation(values=np.zeros(5), component=0, metric="pcm")
+
+
+def test_pcm_rejects_mismatched_x_values_length():
+    with pytest.raises(ValueError, match="x_values for 5 values"):
+        Observation(
+            values=np.zeros(5), component=0, metric="pcm", x_values=np.zeros(3)
+        )
+
+
+def test_pcm_rejects_per_point_weights():
+    """Arc-length matching has no per-index correspondence to weight."""
+    with pytest.raises(ValueError, match="per-point weights are meaningless"):
+        Observation(
+            values=np.zeros(5),
+            component=0,
+            metric="pcm",
+            x_values=np.linspace(0.0, 1.0, 5),
+            weights=np.ones(5),
+        )
+
+
+def test_pcm_rejects_tensor_valued_observation():
+    with pytest.raises(ValueError, match="values must be 1-D"):
+        Observation(
+            values=np.zeros((5, 6)),
+            metric="pcm",
+            x_values=np.linspace(0.0, 1.0, 5),
+        )
+
+
+def test_mse_rejects_x_values():
+    with pytest.raises(ValueError, match="x_values is only used by curve metrics"):
+        Observation(
+            values=np.zeros(5), component=0, x_values=np.linspace(0.0, 1.0, 5)
+        )
+
+
+def test_unknown_metric_rejected():
+    with pytest.raises(ValueError, match="unknown metric"):
+        Observation(values=np.zeros(5), component=0, metric="nope")
+
+
+def test_target_allows_length_mismatch_for_curve_metric(strain_load):
+    """The point-count check must not fire for a metric that permits it."""
+    target = FitTarget(
+        load=strain_load,
+        observations=[
+            Observation(
+                values=np.linspace(0.0, 1.0, 37),
+                component=0,
+                metric="pcm",
+                x_values=np.linspace(0.0, 5e-3, 37),
+            )
+        ],
+    )
+    assert target.observations[0].n_points == 37
+
+
+def test_target_length_mismatch_message_suggests_pcm(strain_load):
+    with pytest.raises(ValueError, match='use metric="pcm"'):
+        FitTarget(
+            load=strain_load,
+            observations=[Observation(values=np.zeros(3), component=0)],
+        )
