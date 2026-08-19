@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from typing_extensions import NotRequired, TypedDict
 
+from manforge.fitting.space import ParameterSpace
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.simulation.integrator import PythonIntegrator
 from manforge._typing import FloatArray
@@ -55,8 +56,8 @@ def build_objective(
     model: "MaterialModel",
     driver_factory: DriverFactoryFn,
     exp_data: ExpData,
-    fixed_params: dict[str, float] | None = None,
-) -> Callable[[dict[str, float]], float]:
+    space: ParameterSpace,
+) -> Callable[[Sequence[float] | FloatArray], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
     Parameters
@@ -70,26 +71,26 @@ def build_objective(
         integrator.  Example: ``lambda i: StrainDriver(i)``.
     exp_data : dict
         Must contain ``"strain"`` and ``"stress"``.  Optionally ``"weights"``.
-    fixed_params : dict or None
-        Parameters held constant during optimisation.
+    space : ParameterSpace
+        Maps the optimisation vector onto model parameters.
 
     Returns
     -------
     callable
-        ``objective(free_params: dict) -> float``
+        ``objective(x: Sequence[float]) -> float``
     """
     model_cls = type(model)
     dimension = model.dimension
     _accepts_dimension = "dimension" in inspect.signature(model_cls.__init__).parameters
-    fixed = dict(fixed_params) if fixed_params else {}
+    param_names = model.param_names
     load = FieldHistory(
         FieldType.STRAIN, "Strain", np.asarray(exp_data["strain"], dtype=float)
     )
     stress_exp = np.asarray(exp_data["stress"], dtype=float)
     weights = exp_data.get("weights", None)
 
-    def objective(free_params: dict[str, float]) -> float:
-        all_params = {**fixed, **free_params}
+    def objective(x: Sequence[float] | FloatArray) -> float:
+        all_params = space.model_params(x, param_names)
         extra = {"dimension": dimension} if _accepts_dimension else {}
         m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
         integrator = PythonIntegrator(m)

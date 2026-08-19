@@ -276,11 +276,39 @@ result = fit_params(
     fit_config=fit_config,
     fixed_params={"E": 210_000.0, "nu": 0.3},
     method="L-BFGS-B",
+    max_iter=1000,          # 試行回数上限 (テストでは小さく)
+    tol=1e-12,              # 収束判定 (method ごとの主要 tolerance にマップ)
+    options={"eps": 1e-6},  # それ以外は scipy へ素通し
 )
 print(result.params, result.residual)
 ```
 
 `exp_data` は `{"strain": ..., "stress": ...}` の dict。詳細: `examples/example_fit_j2.py`
+
+**相関パラメータ — `ParameterSpace`**
+
+`Y < B` のような順序制約があるパラメータは、比を最適化変数にして下限 1.0 を課すと不等式制約なしで表現できる。`ParameterSpace` は「最適化変数」と「モデルパラメータ」を分離し、後者を前者から組み立てる。
+
+```python
+from manforge.fitting import ParameterSpace, fit_params
+
+space = ParameterSpace(
+    free={
+        "Y":       (200.0, (50.0, 600.0)),
+        "B_ratio": (1.5,   (1.0, 5.0)),    # B/Y >= 1 ⇔ Y <= B
+    },
+    fixed={"E": 210_000.0, "nu": 0.3},
+    derived={"B": lambda p: p["Y"] * p["B_ratio"]},
+)
+result = fit_params(model, driver_factory, exp_data, space, max_iter=200)
+result.params["B"]  # 復元済み
+```
+
+- `free` — 最適化変数 `{name: (初期値, (下限, 上限))}`。`bounds` は `None` で無制約。モデルパラメータでなくてよい（`B_ratio` は補助変数）。
+- `fixed` — 最適化中固定する値。
+- `derived` — `{name: fn}` の `fn(values) -> float` で他の値から算出。宣言順に評価されるので、先の derived を参照できる。
+
+`model.param_names` に無い変数（`B_ratio`）は自動的に除外してモデルへ渡す。`result.params` には free / fixed / derived すべてが入る。`fixed_params=` 引数は dict 形式専用で、`ParameterSpace` と併用すると `ValueError`。
 
 ---
 
@@ -411,7 +439,7 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `PythonIntegrator`, `PythonNumericalIntegrator`, `PythonAnalyticalIntegrator`, `FortranIntegrator` | `manforge.simulation` |
 | `StrainDriver`, `StressDriver` | `manforge.simulation` |
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
-| `fit_params` | `manforge.fitting` |
+| `fit_params`, `FitResult`, `ParameterSpace` | `manforge.fitting` |
 | `TangentChecker`, `TangentCheckResult` | `manforge.verification` |
 | `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
 | `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
@@ -452,6 +480,7 @@ src/manforge/
 │       └── fortran_module.py  # FortranModule (f2py 薄ラッパ)
 ├── fitting/
 │   ├── objective.py       # 残差二乗和
+│   ├── space.py           # ParameterSpace (最適化変数 → モデルパラメータ)
 │   └── optimizer.py       # fit_params() + FitResult
 ├── verification/
 │   ├── comparator_base.py     # Comparator 抽象基底

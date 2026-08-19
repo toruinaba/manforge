@@ -5,20 +5,22 @@ Main entry point: :func:`fit_params`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy.optimize import minimize, differential_evolution
 from typing_extensions import TypeAlias
 
 from manforge.fitting.objective import ExpData, DriverFactoryFn, build_objective
+from manforge.fitting.space import FitConfig, ParameterSpace
 from manforge._typing import FloatArray
 
 if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
 
-FitConfig: TypeAlias = dict[str, tuple[float, tuple[float | None, float | None] | None]]
+Method: TypeAlias = Literal["L-BFGS-B", "Nelder-Mead", "differential_evolution"]
 
 
 @dataclass
@@ -28,7 +30,8 @@ class FitResult:
     Attributes
     ----------
     params : dict[str, float]
-        Optimised parameter values (free + fixed).
+        Optimised parameter values — free variables, fixed values, and
+        derived parameters alike.
     residual : float
         Objective function value at the optimum.
     success : bool
@@ -38,7 +41,7 @@ class FitResult:
     message : str
         Optimiser status message.
     history : list[dict[str, float]]
-        Parameter values at each optimiser callback (populated only when
+        Free-variable values at each optimiser callback (populated only when
         ``method="L-BFGS-B"`` or ``"Nelder-Mead"``; empty otherwise).
     """
 
@@ -54,9 +57,13 @@ def fit_params(
     model: "MaterialModel",
     driver_factory: DriverFactoryFn,
     exp_data: ExpData,
-    fit_config: FitConfig,
+    fit_config: ParameterSpace | FitConfig,
     fixed_params: dict[str, float] | None = None,
-    method: Literal["L-BFGS-B", "Nelder-Mead", "differential_evolution"] = "L-BFGS-B",
+    method: Method = "L-BFGS-B",
+    *,
+    max_iter: int = 1000,
+    tol: float | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> FitResult:
     """Fit material parameters to experimental stress-strain data.
 
@@ -70,91 +77,90 @@ def fit_params(
         Example: ``lambda i: StrainDriver(i)``.
     exp_data : dict
         ``{"strain": ..., "stress": ..., "weights": ...}``  (weights optional).
-    fit_config : dict
-        Free parameters to optimise, format::
+    fit_config : ParameterSpace or dict
+        A :class:`~manforge.fitting.space.ParameterSpace`, or the plain dict
+        form for the case where every free variable is a model parameter::
 
             {
                 "sigma_y0": (initial_value, (lower_bound, upper_bound)),
                 "H":        (500.0,         (0.0, 10000.0)),
             }
 
-        Use ``(None, None)`` as bounds for unbounded parameters.
+        Use ``None`` (or ``(None, None)``) as bounds for unbounded parameters.
+        Use ``ParameterSpace`` when parameters are correlated — see its
+        docstring for the ``Y < B`` ratio example.
     fixed_params : dict or None
-        Parameters held constant during optimisation.
+        Parameters held constant during optimisation.  Dict form only;
+        with a ``ParameterSpace`` declare them in ``ParameterSpace(fixed=...)``.
     method : str
         Optimisation algorithm:
         - ``"L-BFGS-B"``              — gradient-free quasi-Newton (default)
         - ``"Nelder-Mead"``           — simplex, no bounds
         - ``"differential_evolution"``— global stochastic (slow but robust)
+    max_iter : int
+        Maximum optimiser iterations.  Set small (e.g. 2) to keep tests fast.
+    tol : float or None
+        Convergence tolerance passed to the optimiser's primary tolerance
+        (``ftol`` for L-BFGS-B, ``fatol`` for Nelder-Mead, ``tol`` for
+        differential_evolution).  ``None`` keeps the method default.
+    options : Mapping or None
+        Extra options forwarded verbatim to scipy, overriding the above.
 
     Returns
     -------
     FitResult
     """
-    fixed = dict(fixed_params) if fixed_params else {}
+    space = ParameterSpace.coerce(fit_config, fixed_params)
+    free_names = space.free_names
+    bounds = space.bounds
 
-    # Extract ordered free-parameter names, initial values, and bounds
-    free_names = list(fit_config.keys())
-    x0 = np.array([fit_config[n][0] for n in free_names], dtype=float)
-    bounds = [fit_config[n][1] for n in free_names]  # list of (lb, ub) or None
-
-    # Normalise bounds: replace None with (-inf, inf)
-    def _norm_bound(b: tuple[float | None, float | None] | None) -> tuple[float, float]:
-        if b is None:
-            return (-np.inf, np.inf)
-        lo = b[0] if b[0] is not None else -np.inf
-        hi = b[1] if b[1] is not None else np.inf
-        return (lo, hi)
-
-    bounds_clean = [_norm_bound(b) for b in bounds]
-
-    # Build objective — accepts a dict of free params
-    obj_fn = build_objective(model, driver_factory, exp_data, fixed_params=fixed)
+    obj_fn = build_objective(model, driver_factory, exp_data, space)
 
     history: list[dict[str, float]] = []
 
-    def _scalar_obj(x: FloatArray) -> float:
-        free: dict[str, float] = dict(zip(free_names, x))
-        return obj_fn(free)
-
     def _callback(x: FloatArray) -> None:
-        history.append(dict(zip(free_names, x.tolist())))
+        history.append(dict(zip(free_names, np.asarray(x, dtype=float).tolist())))
+
+    extra = dict(options) if options else {}
 
     # ------------------------------------------------------------------ #
     if method == "differential_evolution":
         # differential_evolution needs finite bounds
-        de_bounds = [
-            (max(b[0], -1e9), min(b[1], 1e9))
-            for b in bounds_clean
-        ]
+        de_bounds = [(max(b[0], -1e9), min(b[1], 1e9)) for b in bounds]
+        de_kwargs: dict[str, Any] = {
+            "seed": 0,
+            "tol": tol if tol is not None else 1e-8,
+            "maxiter": max_iter,
+        }
+        de_kwargs.update(extra)
         result = differential_evolution(
-            _scalar_obj,
+            obj_fn,
             de_bounds,
-            seed=0,  # type: ignore[call-arg]  # scipy stubs omit seed
-            tol=1e-8,
-            maxiter=1000,
             callback=lambda xk, convergence=None: _callback(xk),
+            **de_kwargs,
         )
     else:
+        opts: dict[str, Any]
         if method == "Nelder-Mead":
-            opts = {"maxiter": 1000, "xatol": 1e-8, "fatol": 1e-10}
+            opts = {"maxiter": max_iter, "xatol": 1e-8, "fatol": 1e-10}
+            if tol is not None:
+                opts["fatol"] = tol
         else:
-            opts = {"maxiter": 1000, "ftol": 1e-12, "gtol": 1e-8}
+            opts = {"maxiter": max_iter, "ftol": 1e-12, "gtol": 1e-8}
+            if tol is not None:
+                opts["ftol"] = tol
+        opts.update(extra)
         result = minimize(
-            _scalar_obj,
-            x0,
+            obj_fn,
+            space.x0,
             method=method,
-            bounds=bounds_clean if method != "Nelder-Mead" else None,
+            bounds=bounds if method != "Nelder-Mead" else None,
             callback=_callback,
             options=opts,
         )
 
-    # Reconstruct full parameter dict
-    best_free = dict(zip(free_names, result.x.tolist()))
-    best_params = {**fixed, **best_free}
-
     return FitResult(
-        params=best_params,
+        params=space.resolve(result.x),
         residual=float(result.fun),
         success=bool(result.success),
         n_iter=int(result.nfev),

@@ -5,6 +5,7 @@ Demonstrates:
 - Generating synthetic cyclic stress-strain data from known parameters
 - Adding measurement noise to simulate experimental data
 - Fitting sigma_y0 and H using fit_params (L-BFGS-B)
+- Reparametrising H as a ratio of sigma_y0 via ParameterSpace
 - Comparing true vs fitted parameters on the hysteresis loop
 - Plotting the fit quality (saved as PNG)
 
@@ -20,7 +21,7 @@ from manforge.models.j2_isotropic import J2Isotropic1D
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory
-from manforge.fitting.optimizer import fit_params
+from manforge.fitting import ParameterSpace, fit_params
 
 try:
     import matplotlib
@@ -80,6 +81,7 @@ result = fit_params(
     fit_config,
     fixed_params=fixed_params,
     method="L-BFGS-B",
+    max_iter=200,
 )
 
 fitted_sigma_y0 = result.params["sigma_y0"]
@@ -93,6 +95,31 @@ print(f"  Fitted sigma_y0 = {fitted_sigma_y0:.2f} MPa   (err {err_sy:.1f}%)")
 print(f"  Fitted H        = {fitted_H:.2f} MPa   (err {err_H:.1f}%)")
 print(f"  Residual        = {result.residual:.4f}")
 print(f"  Converged       = {result.success}  ({result.n_iter} func. evals)")
+print()
+
+# ---------------------------------------------------------------------------
+# Same fit, reparametrised: optimise H/sigma_y0 instead of H.
+# A ratio bounded below by 1.0 enforces H >= sigma_y0 without an inequality
+# constraint — the pattern for correlated parameters such as YU's Y < B.
+# ---------------------------------------------------------------------------
+space = ParameterSpace(
+    free={
+        "sigma_y0": (180.0, (50.0, 600.0)),
+        "H_ratio":  (2.0,   (1.0, 20.0)),   # H/sigma_y0 >= 1
+    },
+    fixed={"E": true_model.E, "nu": true_model.nu},
+    derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
+)
+result_ratio = fit_params(
+    true_model, driver_factory, exp_data, space,
+    method="L-BFGS-B", max_iter=200,
+)
+
+print("  Reparametrised (H = sigma_y0 x H_ratio):")
+print(f"  Fitted sigma_y0 = {result_ratio.params['sigma_y0']:.2f} MPa")
+print(f"  Fitted H_ratio  = {result_ratio.params['H_ratio']:.3f}")
+print(f"  Derived H       = {result_ratio.params['H']:.2f} MPa")
+print(f"  Residual        = {result_ratio.residual:.4f}")
 print()
 
 # ---------------------------------------------------------------------------

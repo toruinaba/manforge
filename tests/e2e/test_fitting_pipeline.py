@@ -7,6 +7,9 @@ Strategy
 2. Start optimisation from a perturbed initial point.
 3. Verify the recovered parameters are close to the true values (rtol=0.1).
 4. Verify residual is near zero and FitResult structure is complete.
+
+Convergence tests are ``slow``; the wiring tests cap ``max_iter`` so they
+run in the fast suite.
 """
 
 import numpy as np
@@ -15,9 +18,8 @@ import pytest
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
+from manforge.fitting import ParameterSpace
 from manforge.fitting.optimizer import fit_params, FitResult
-
-pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------
@@ -39,9 +41,80 @@ def synthetic_data(model, driver_factory):
 
 
 # ---------------------------------------------------------------------------
+# Wiring tests — capped iterations, fast suite
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "method", ["L-BFGS-B", "Nelder-Mead", "differential_evolution"]
+)
+def test_max_iter_bounds_work(model, driver_factory, synthetic_data, method):
+    """max_iter caps the optimiser for every method."""
+    fit_config = {
+        "sigma_y0": (220.0, (50.0, 600.0)),
+        "H":        (800.0, (0.0, 5000.0)),
+    }
+    fixed = {"E": model.E, "nu": model.nu}
+
+    result = fit_params(model, driver_factory, synthetic_data, fit_config,
+                        fixed_params=fixed, method=method, max_iter=1)
+
+    assert result.n_iter > 0
+    assert set(result.params) == {"E", "nu", "sigma_y0", "H"}
+
+
+def test_options_override_max_iter(model, driver_factory, synthetic_data):
+    """options= wins over the max_iter keyword."""
+    fit_config = {"sigma_y0": (220.0, (50.0, 600.0))}
+    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+
+    capped = fit_params(model, driver_factory, synthetic_data, fit_config,
+                        fixed_params=fixed, max_iter=50, options={"maxiter": 1})
+
+    assert len(capped.history) <= 1
+
+
+def test_derived_param_reaches_model(model, driver_factory, synthetic_data):
+    """A derived parameter is reconstructed and passed to the model.
+
+    ``H`` is optimised as a multiple of ``sigma_y0`` — the helper variable
+    ``H_ratio`` is not a model parameter and must not reach the constructor.
+    """
+    space = ParameterSpace(
+        free={"sigma_y0": (220.0, (50.0, 600.0)), "H_ratio": (2.0, (0.1, 20.0))},
+        fixed={"E": model.E, "nu": model.nu},
+        derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
+    )
+
+    result = fit_params(model, driver_factory, synthetic_data, space,
+                        max_iter=1)
+
+    assert result.params["H"] == pytest.approx(
+        result.params["sigma_y0"] * result.params["H_ratio"]
+    )
+    assert "H_ratio" in result.history[0]
+
+
+def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_data):
+    """A ratio bounded below by 1 keeps H >= sigma_y0 at every iterate."""
+    space = ParameterSpace(
+        free={"sigma_y0": (220.0, (50.0, 600.0)), "H_ratio": (2.0, (1.0, 20.0))},
+        fixed={"E": model.E, "nu": model.nu},
+        derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
+    )
+
+    result = fit_params(model, driver_factory, synthetic_data, space,
+                        max_iter=3)
+
+    for iterate in [*result.history, result.params]:
+        values = space.resolve([iterate["sigma_y0"], iterate["H_ratio"]])
+        assert values["H"] >= values["sigma_y0"]
+
+
+# ---------------------------------------------------------------------------
 # Structure test
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_fit_result_structure(model, driver_factory, synthetic_data):
     """FitResult has all required fields with correct types."""
     fit_config = {
@@ -69,6 +142,7 @@ def test_fit_result_structure(model, driver_factory, synthetic_data):
 # Convergence test — L-BFGS-B
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_data):
     """L-BFGS-B recovers sigma_y0 and H within 10% of true values."""
     fit_config = {
@@ -89,6 +163,7 @@ def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_data):
 # Convergence test — Nelder-Mead
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_fit_nelder_mead(model, driver_factory, synthetic_data):
     """Nelder-Mead also converges to true parameters."""
     fit_config = {
@@ -108,6 +183,7 @@ def test_fit_nelder_mead(model, driver_factory, synthetic_data):
 # History populated for gradient-based methods
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_fit_history_populated(model, driver_factory, synthetic_data):
     """History list is non-empty after L-BFGS-B run."""
     fit_config = {
