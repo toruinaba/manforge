@@ -239,10 +239,23 @@ class _PythonIntegratorBase:
         self, stress_trial: StressVec, state_n: StateDict,
         strain_inc: "FloatArray | None" = None,
     ) -> ReturnMappingResult:
-        """Perform the plastic correction (return mapping) for one load increment."""
+        """Perform the plastic correction (return mapping) for one load increment.
+
+        Both the ``user_defined`` and ``numerical_newton`` paths honour
+        ``raise_on_nonconverged``: a ``converged=False`` result raises
+        ``RuntimeError`` unless the integrator was built with
+        ``raise_on_nonconverged=False``, in which case the flag is returned as-is.
+        """
         C_n = self._model.elastic_stiffness(state_n)
         rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
         if rm is not None:
+            if not rm.converged and self._raise_on_nonconverged:
+                res = rm.residual_history[-1] if rm.residual_history else float("nan")
+                raise RuntimeError(
+                    f"{type(self._model).__name__}.user_defined_return_mapping "
+                    f"reported converged=False after {rm.n_iterations} iterations "
+                    f"(final residual = {res:.3e})"
+                )
             return rm
 
         stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(
