@@ -11,6 +11,7 @@ from manforge.simulation.integrator import (
     PythonNumericalIntegrator,
     PythonAnalyticalIntegrator,
     FortranIntegrator,
+    SubSteppingIntegrator,
 )
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "PythonNumericalIntegrator",
     "PythonAnalyticalIntegrator",
     "FortranIntegrator",
+    "SubSteppingIntegrator",
 ]

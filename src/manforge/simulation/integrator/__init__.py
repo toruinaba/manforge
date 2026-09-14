@@ -1,6 +1,6 @@
 """StressIntegrator protocol and adapter implementations.
 
-Four adapters implement the :class:`StressIntegrator` protocol:
+Five adapters implement the :class:`StressIntegrator` protocol:
 
 :class:`PythonIntegrator`
     Wraps a :class:`~manforge.core.material.MaterialModel` and uses the
@@ -18,7 +18,12 @@ Four adapters implement the :class:`StressIntegrator` protocol:
     Wraps a :class:`~manforge.verification.FortranModule` and the four hook
     functions that map between Python state dicts and Fortran argument lists.
 
-Submodules: :mod:`base`, :mod:`python`, :mod:`fortran`.
+:class:`SubSteppingIntegrator`
+    Wraps any of the above and retries a failed increment in 2, 4, 8, ...
+    substeps.  Opt-in; an increment that already converged is passed through
+    untouched.
+
+Submodules: :mod:`base`, :mod:`python`, :mod:`fortran`, :mod:`substepping`.
 """
 
 from manforge.simulation.integrator.base import (
@@ -32,6 +37,7 @@ from manforge.simulation.integrator.python import (
 )
 from manforge.simulation.integrator.fortran import FortranIntegrator
 from manforge.simulation.integrator.fortran_module import FortranModule
+from manforge.simulation.integrator.substepping import SubSteppingIntegrator
 
 __all__ = [
     "StressIntegrator",
@@ -41,4 +47,5 @@ __all__ = [
     "PythonAnalyticalIntegrator",
     "FortranIntegrator",
     "FortranModule",
+    "SubSteppingIntegrator",
 ]

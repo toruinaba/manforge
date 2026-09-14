@@ -74,10 +74,22 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 | `PythonNumericalIntegrator(model)` | numerical_newton 固定 | NR 強制 |
 | `PythonAnalyticalIntegrator(model)` | user_defined 固定 | 閉形式解と比較する場合 |
 | `FortranIntegrator.from_model(fortran, subroutine, model)` | Fortran f2py | UMAT クロス検証 |
+| `SubSteppingIntegrator(integrator)` | 上記をラップ | 大きい Δε で収束しない場合 |
 
 **Voigt 規約** — 3D ソリッドは `[σ11, σ22, σ33, σ12, σ13, σ23]` (6 成分)。剪断成分には Mandel スケーリング (×√2) を内部適用。
 
 **収束判定と Δλ の符号** — リターンマッピングの残差系は Δλ < 0 側にも根を持つ。Δλ は塑性乗数なので負は塑性ひずみの巻き戻りを意味し、KKT 条件に違反する。残差ノルムはこの2つの根を区別できない（`||R|| ~ 1e-14` まで収束しうる）ため、**フレームワークは Δλ < 0 を非収束として扱う**。Δε が大きいと弾性予測 σ_trial が許容枝の外に出てこの根に落ちることがある。既定では `RuntimeError`、`raise_on_nonconverged=False` なら `converged=False` が返る。`user_defined_return_mapping` が返す `converged` も同じ規約で扱われる。
+
+**増分の自動分割** — `SubSteppingIntegrator` は上記の非収束を検知して、同じ増分を 2 → 4 → 8 分割で再試行する。ABAQUS の `PNEWDT` が全体増分を縮めるのに対し、こちらは**失敗した `stress_update` 呼び出しの内側だけ**を刻む。
+
+```python
+from manforge.simulation import StrainDriver, PythonNumericalIntegrator, SubSteppingIntegrator
+
+integrator = SubSteppingIntegrator(PythonNumericalIntegrator(model), max_substeps=16)
+result = StrainDriver(integrator).run(load)
+```
+
+opt-in のラッパで、1回目は必ず未分割で委譲する。収束する増分は結果・反復数・接線が一切変わらない。分割数は `StressUpdateResult.n_substeps` で確認できる（分割なしなら 1）。分割時の `ddsdde` は**最終サブステップの整合接線**で、連鎖律による厳密な合成ではない（`StressDriver` / `MixedDriver` の外側 NR の収束が僅かに鈍る可能性がある）。`max_substeps` を使い切っても収束しない場合は、内側と同じ規約で raise / `converged=False` を返す。
 
 ---
 
@@ -489,6 +501,7 @@ assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 | `SOLID_3D`, `PLANE_STRAIN`, `PLANE_STRESS`, `UNIAXIAL_1D` | `manforge.core.dimension` |
 | `ReturnMappingResult`, `StressUpdateResult` | `manforge.core` |
 | `PythonIntegrator`, `PythonNumericalIntegrator`, `PythonAnalyticalIntegrator`, `FortranIntegrator` | `manforge.simulation` |
+| `SubSteppingIntegrator` | `manforge.simulation` |
 | `StrainDriver`, `StressDriver` | `manforge.simulation` |
 | `FieldHistory`, `FieldType` | `manforge.simulation.types` |
 | `fit_params`, `FitResult`, `ParameterSpace`, `FitTarget`, `Observation` | `manforge.fitting` |
@@ -529,7 +542,8 @@ src/manforge/
 │       ├── base.py            # _PythonIntegratorBase (NR + consistent tangent)
 │       ├── python.py          # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
 │       ├── fortran.py         # FortranIntegrator
-│       └── fortran_module.py  # FortranModule (f2py 薄ラッパ)
+│       ├── fortran_module.py  # FortranModule (f2py 薄ラッパ)
+│       └── substepping.py     # SubSteppingIntegrator (増分の自動分割)
 ├── fitting/
 │   ├── objective.py       # 残差二乗和 + build_objective
 │   ├── space.py           # ParameterSpace (最適化変数 → モデルパラメータ)

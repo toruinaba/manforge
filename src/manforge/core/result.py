@@ -80,6 +80,12 @@ class StressUpdateResult:
     _state_n : dict
         Internal state at step n (stored for the ``state`` convenience
         property on elastic steps).  Not part of the public API.
+    n_substeps : int
+        Number of substeps the increment was divided into.  ``1`` means the
+        increment was integrated in one pass — the only value any integrator
+        other than :class:`~manforge.simulation.integrator.SubSteppingIntegrator`
+        ever produces.  Reported separately because :attr:`n_iterations` sums
+        over substeps and would otherwise hide the subdivision.
     """
 
     return_mapping: "ReturnMappingResult | None"
@@ -87,6 +93,7 @@ class StressUpdateResult:
     stress_trial: "StressVec | None"
     is_plastic: "bool | None"
     _state_n: StateDict = field(repr=False)
+    n_substeps: int = 1
 
     @property
     def stress(self) -> StressVec:
