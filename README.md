@@ -77,6 +77,8 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 
 **Voigt 規約** — 3D ソリッドは `[σ11, σ22, σ33, σ12, σ13, σ23]` (6 成分)。剪断成分には Mandel スケーリング (×√2) を内部適用。
 
+**収束判定と Δλ の符号** — リターンマッピングの残差系は Δλ < 0 側にも根を持つ。Δλ は塑性乗数なので負は塑性ひずみの巻き戻りを意味し、KKT 条件に違反する。残差ノルムはこの2つの根を区別できない（`||R|| ~ 1e-14` まで収束しうる）ため、**フレームワークは Δλ < 0 を非収束として扱う**。Δε が大きいと弾性予測 σ_trial が許容枝の外に出てこの根に落ちることがある。既定では `RuntimeError`、`raise_on_nonconverged=False` なら `converged=False` が返る。`user_defined_return_mapping` が返す `converged` も同じ規約で扱われる。
+
 ---
 
 ## User Guide

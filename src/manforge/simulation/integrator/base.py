@@ -160,6 +160,24 @@ class _PythonIntegratorBase:
         state_new = build_state_from_x(model, x, state_n, layout, stress_trial, strain_inc)
         sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
 
+        # A small residual only says NR found *a* root of f = 0 and the flow
+        # rule.  That system has roots with Δλ < 0, which violate KKT loading /
+        # unloading: plastic strain cannot run backwards.  Large Δε can push
+        # σ_trial past the admissible branch, and NR then converges tightly
+        # (||R|| ~ 1e-14) onto a non-physical root, so the residual norm alone
+        # cannot reject it.  Subdividing the increment recovers the admissible
+        # branch, which is why this is reported as non-convergence rather than
+        # returned as a solution.
+        if converged and float(dlambda_val) < 0.0:
+            converged = False
+            if self._raise_on_nonconverged:
+                raise RuntimeError(
+                    f"_numerical_newton: NR converged to an inadmissible root "
+                    f"(Δλ = {float(dlambda_val):.3e} < 0 violates KKT; "
+                    f"||R||_2 = {residual_history[-1]:.3e}).  The strain "
+                    f"increment is likely too large for the admissible branch."
+                )
+
         return (
             state_new["stress"],
             state_new,

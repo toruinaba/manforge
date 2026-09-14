@@ -6,6 +6,7 @@ Covers:
 - TestConvergenceHistory: NR residual history records
 - TestDlambdaOverride: self.dlambda(R) user-overridable Δλ residual
 - TestSolverNonconverged: raise_on_nonconverged=False behaviour
+- TestInadmissibleRoot: a tightly converged root with Δλ < 0 is rejected
 - TestCaseResultBaseConverged: CaseResult / ComparisonResult converged flags
 """
 
@@ -826,6 +827,69 @@ class TestSolverNonconverged:
 
 
 # ===========================================================================
+# TestInadmissibleRoot — Δλ < 0 is not a solution, however small ||R|| is
+# ===========================================================================
+
+class TestInadmissibleRoot:
+    """A converged root with Δλ < 0 must be reported as non-convergence.
+
+    The residual system has roots on both sides of Δλ = 0, and a small ``||R||``
+    only says NR found one of them.  Δλ < 0 means plastic strain ran backwards,
+    which KKT loading/unloading forbids, so the sign has to be tested separately
+    from the residual norm.
+
+    ``H < -3μ`` makes J2's own Δλ = f_trial / (3μ + H) negative, which is the
+    cheapest faithful stand-in for the motivating case: plane-stress Continuous
+    YU under a too-large Δε settles onto a Δλ < 0 root at ``||R|| ~ 1e-14``.
+    Subdividing the increment recovers the admissible branch, so reporting this
+    as non-convergence is what gives a caller something to act on.
+    """
+
+    SOFTENING = dict(E=210_000.0, nu=0.3, sigma_y0=250.0, H=-300_000.0)
+    PLASTIC_DEPS = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    @pytest.fixture
+    def model(self):
+        return J2Isotropic3D(**self.SOFTENING)
+
+    def _su(self, model, **kw):
+        return PythonNumericalIntegrator(model, **kw).stress_update(
+            self.PLASTIC_DEPS, anp.zeros(6), model.initial_state()
+        )
+
+    def test_the_root_really_is_tightly_converged(self, model):
+        """Guards the premise: without the sign check ||R|| looks perfect."""
+        r = self._su(model, raise_on_nonconverged=False)
+        assert float(r.dlambda) < 0.0
+        assert r.residual_history[-1] < 1e-10
+
+    def test_raises_by_default(self, model):
+        with pytest.raises(RuntimeError, match="inadmissible root"):
+            self._su(model)
+
+    def test_message_reports_kkt(self, model):
+        with pytest.raises(RuntimeError, match="KKT"):
+            self._su(model)
+
+    def test_returns_flag_when_not_raising(self, model):
+        assert self._su(model, raise_on_nonconverged=False).converged is False
+
+    def test_admissible_root_is_untouched(self):
+        """The gate must fire on the sign, not on plasticity as such."""
+        r = self._su(J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0))
+        assert r.is_plastic is True
+        assert float(r.dlambda) > 0.0
+        assert r.converged is True
+
+    def test_elastic_step_is_untouched(self, model):
+        r = PythonNumericalIntegrator(model).stress_update(
+            anp.array([1e-6, 0, 0, 0, 0, 0]), anp.zeros(6), model.initial_state()
+        )
+        assert r.is_plastic is False
+        assert r.converged is True
+
+
+# ===========================================================================
 # TestCaseResultBaseConverged
 # — from tests/unit/test_case_result_base_converged.py
 # ===========================================================================
@@ -1136,6 +1200,13 @@ class TestElasticCheck:
         Elastic limit alone → unloading runs the return mapping (R̂ is still above
         R_e on the way down).  Neither → the very first step is plastic, because R
         starts at zero so f > 0 for any non-zero stress.
+
+        Those unload steps converge tightly onto Δλ < 0 — an unloading step has
+        no plastic flow to find — so ``raise_on_nonconverged=False`` is needed to
+        observe them at all: the KKT gate in ``_numerical_newton`` now rejects an
+        inadmissible root even when ``||R||`` is at machine precision.  That the
+        gate fires here is the same signal the assertion is after, so it is
+        checked too.
         """
         class _LimitOnly(_SubloadingNatural):
             def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
@@ -1149,8 +1220,14 @@ class TestElasticCheck:
             1.6e-3 - np.arange(1, 4) * 4e-5,
         ])
         assert [s.is_plastic for s in self._uniaxial(model, eps)[8:]] == [False] * 3
-        assert [s.is_plastic for s in self._uniaxial(_LimitOnly(E=_E, nu=_NU), eps)[8:]] \
-            == [True] * 3
+
+        limit_only = self._uniaxial(
+            _LimitOnly(E=_E, nu=_NU), eps, raise_on_nonconverged=False
+        )[8:]
+        assert [s.is_plastic for s in limit_only] == [True] * 3
+        assert [s.converged for s in limit_only] == [False] * 3
+        assert all(float(s.dlambda) < 0.0 for s in limit_only)
+
         assert self._uniaxial(_NoHook(E=_E, nu=_NU), eps)[0].is_plastic is True
 
     def test_elastic_below_elastic_limit(self, model):
