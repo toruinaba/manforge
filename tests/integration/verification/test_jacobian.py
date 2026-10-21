@@ -1,8 +1,10 @@
 """Tests for JacobianChecker.compare."""
 
+import autograd.numpy as anp
 import numpy as np
 import pytest
 
+from manforge.models import J2Isotropic3D
 from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
 from manforge.verification.jacobian import JacobianChecker, JacobianComparisonResult
 
@@ -58,3 +60,42 @@ class TestCompareJacobiansJ2:
         r, state0 = _result(model, 3e-3)
         out = JacobianChecker(model).compare(r, r, state0)
         assert out.max_rel_err == pytest.approx(max(out.blocks.values()), abs=1e-15)
+
+
+class _StrainIncDependentJ2(J2Isotropic3D):
+    """J2 whose explicit update actually reads strain_inc.
+
+    Physically contrived (ep picks up a Δε-proportional term), but it makes
+    the residual strain_inc-dependent the same way an elastic/plastic strain
+    decomposition would.
+    """
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        bump = anp.sum(strain_inc * strain_inc)
+        return [self.ep(state_n["ep"] + dlambda + bump)]
+
+
+class TestComputeStrainInc:
+    """compute() must evaluate the same residual the solver solved.
+
+    A model whose update_state reads strain_inc gets a *different* residual
+    (or a TypeError on strain_inc=None) when the checker omits it.
+    """
+
+    def _plastic_result(self):
+        model = _StrainIncDependentJ2(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+        deps = np.zeros(6)
+        deps[0] = 3e-3
+        state0 = model.initial_state()
+        result = PythonIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        return model, deps, state0, result
+
+    def test_compute_forwards_strain_inc(self):
+        model, deps, state0, result = self._plastic_result()
+        jac = JacobianChecker(model).compute(result, state0, strain_inc=deps)
+        assert jac.full.shape == (7, 7)
+
+    def test_compare_forwards_strain_inc(self):
+        model, deps, state0, result = self._plastic_result()
+        out = JacobianChecker(model).compare(result, result, state0, strain_inc=deps)
+        assert out.passed

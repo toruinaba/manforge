@@ -140,7 +140,14 @@ class JacobianChecker:
         self.model = model
         self.rtol = rtol
 
-    def compute(self, result: object, state_n: StateDict, *, stress_trial: "StressVec | None" = None) -> JacobianBlocks:
+    def compute(
+        self,
+        result: object,
+        state_n: StateDict,
+        *,
+        stress_trial: "StressVec | None" = None,
+        strain_inc: "FloatArray | None" = None,
+    ) -> JacobianBlocks:
         """Compute the residual Jacobian at the converged point and decompose into blocks.
 
         Parameters
@@ -152,6 +159,12 @@ class JacobianChecker:
         stress_trial : array-like, optional
             Required when *result* is a
             :class:`~manforge.core.result.ReturnMappingResult`.
+        strain_inc : array-like, optional
+            Strain increment Δε of the step.  Must be supplied for models
+            whose ``update_state`` / ``state_residual`` read ``strain_inc``
+            (e.g. elastic/plastic strain decomposition) — the solver passes it
+            to the same residual, and a Jacobian built without it would be
+            computed on a *different* residual than the one NR solved.
 
         Returns
         -------
@@ -182,7 +195,7 @@ class JacobianChecker:
                 )
 
         assert stress_trial is not None
-        residual_fn, layout = build_residual(self.model, stress_trial, state_n)
+        residual_fn, layout = build_residual(self.model, stress_trial, state_n, strain_inc)
 
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)  # type: ignore[arg-type]
@@ -205,7 +218,12 @@ class JacobianChecker:
         return JacobianBlocks(layout=layout, part=part, full=J)
 
     def compare(
-        self, result_a: object, result_b: object, state_n: StateDict
+        self,
+        result_a: object,
+        result_b: object,
+        state_n: StateDict,
+        *,
+        strain_inc: "FloatArray | None" = None,
     ) -> JacobianComparisonResult:
         """Compare Jacobian blocks from two StressUpdateResults.
 
@@ -217,13 +235,15 @@ class JacobianChecker:
             Second result (e.g. from ``PythonAnalyticalIntegrator``).
         state_n : dict
             Initial state at the start of the step (before the increment).
+        strain_inc : array-like, optional
+            Strain increment Δε of the step — see :meth:`compute`.
 
         Returns
         -------
         JacobianComparisonResult
         """
-        jac_a = self.compute(result_a, state_n)
-        jac_b = self.compute(result_b, state_n)
+        jac_a = self.compute(result_a, state_n, strain_inc=strain_inc)
+        jac_b = self.compute(result_b, state_n, strain_inc=strain_inc)
 
         block_errs: dict[str, float] = {}
         blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
