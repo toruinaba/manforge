@@ -9,7 +9,7 @@ import autograd.numpy as anp
 import numpy as np
 
 from manforge.core.state import (
-    StateResidual, StateUpdate, _validate_state_items, State,
+    DlambdaResidual, StateResidual, StateUpdate, _validate_state_items, State,
 )
 from manforge.simulation._layout import ResidualLayout
 from manforge._typing import FloatArray, StressVec, StateDict
@@ -77,8 +77,28 @@ def build_residual(
             "— this should not happen."
         )
 
+    # The user methods' return structure (item types, names, duplicates) is a
+    # property of the model class, not of the NR iterate, so validating it on
+    # every residual evaluation — including inside every autodiff trace —
+    # repays nothing after the first pass.  Validate once, then switch to a
+    # bare extraction.  Measured at ~40% of residual_fn time on YU 3D.
+    validated = {"done": False}
+
+    def _extract_updates(returned):
+        return {item.name: item.value for item in returned}
+
+    def _extract_residuals(returned):
+        out, r_dl = {}, None
+        for item in returned:
+            if isinstance(item, DlambdaResidual):
+                r_dl = item.value
+            else:
+                out[item.name] = item.value
+        return out, r_dl
+
     def residual_fn(x):
         sigma, dlambda, q_imp = layout.unpack(x)
+        first = not validated["done"]
 
         # state_new for update_state: σ_k + implicit iterates + state_n for explicit keys
         state_new_for_update: StateDict = {**state_n, "stress": sigma, **q_imp}
@@ -86,7 +106,6 @@ def build_residual(
         # Explicit non-stress states
         q_exp: StateDict = {}
         if layout.explicit_keys:
-            expected_explicit = set(layout.explicit_keys)
             state_n_wrapped = _wrap_state(state_n, model)
             state_new_wrapped = _wrap_state(state_new_for_update, model)
             returned = model.update_state(
@@ -94,12 +113,15 @@ def build_residual(
                 stress_trial=stress_trial_arr,
                 strain_inc=strain_inc_arr,
             )
-            raw = _validate_state_items(
-                returned, expected_explicit, StateUpdate,
-                "update_state", model_name,
-            )
-            assert isinstance(raw, dict)
-            q_exp = raw
+            if first:
+                raw = _validate_state_items(
+                    returned, set(layout.explicit_keys), StateUpdate,
+                    "update_state", model_name,
+                )
+                assert isinstance(raw, dict)
+                q_exp = raw
+            else:
+                q_exp = _extract_updates(returned)
 
         # Assemble full state (explicit keys now hold updated values)
         q_full = {"stress": sigma, **q_imp, **q_exp}
@@ -109,9 +131,6 @@ def build_residual(
         R_state_dict: StateDict = {}
         r_dl_override = None
         if user_has_state_residual:
-            expected_implicit = set(layout.implicit_keys)
-            if layout.is_stress_implicit:
-                expected_implicit = expected_implicit | {"stress"}
             state_new_full_wrapped = _wrap_state(q_full, model)
             state_n_wrapped = _wrap_state(state_n, model)
             returned = model.state_residual(
@@ -119,19 +138,27 @@ def build_residual(
                 stress_trial=stress_trial_arr,
                 strain_inc=strain_inc_arr,
             )
-            hint = (
-                "add self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))"
-                " for associative flow, or self.stress(R_custom) for non-associative"
-                if layout.is_stress_implicit else ""
-            )
-            raw2 = _validate_state_items(
-                returned, expected_implicit, StateResidual,
-                "state_residual", model_name,
-                extract_dlambda=True,
-                hint=hint,
-            )
-            assert isinstance(raw2, tuple)
-            R_state_dict, r_dl_override = raw2
+            if first:
+                expected_implicit = set(layout.implicit_keys)
+                if layout.is_stress_implicit:
+                    expected_implicit = expected_implicit | {"stress"}
+                hint = (
+                    "add self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))"
+                    " for associative flow, or self.stress(R_custom) for non-associative"
+                    if layout.is_stress_implicit else ""
+                )
+                raw2 = _validate_state_items(
+                    returned, expected_implicit, StateResidual,
+                    "state_residual", model_name,
+                    extract_dlambda=True,
+                    hint=hint,
+                )
+                assert isinstance(raw2, tuple)
+                R_state_dict, r_dl_override = raw2
+            else:
+                R_state_dict, r_dl_override = _extract_residuals(returned)
+
+        validated["done"] = True
 
         # Δλ row
         R_dl = r_dl_override if r_dl_override is not None else model.yield_function(q_full_state)

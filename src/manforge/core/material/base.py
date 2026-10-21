@@ -238,9 +238,21 @@ class MaterialModel(ABC):
                 "requires self.E and self.nu — override for anisotropic or "
                 "parameter-less models."
             )
+        # This default ignores `state`, so C is a constant of the instance —
+        # but it is evaluated inside every residual call (and every autodiff
+        # trace of it) via default_stress_residual.  Cache keyed on (E, nu) so
+        # the matrix assembly happens once; the key guards against parameters
+        # being reassigned after construction.  State-dependent stiffness
+        # (damage, YU) overrides this method and is unaffected.
+        key = (self.E, self.nu)
+        cached = getattr(self, "_elastic_C_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         mu = self.E / (2.0 * (1.0 + self.nu))
         lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self.isotropic_C(lam, mu)
+        C = self.isotropic_C(lam, mu)
+        self._elastic_C_cache = (key, C)
+        return C
 
     @abstractmethod
     def yield_function(
