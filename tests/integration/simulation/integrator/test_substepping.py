@@ -423,6 +423,55 @@ class TestExhaustion:
         ).stress_update(_plastic_deps(), stress_n, state_n)
         assert np.all(np.isfinite(np.asarray(r.ddsdde)))
 
+    def test_exhaustion_without_stiffness_hook_returns_flag(self, hopeless):
+        """The non-raising fallback must not require elastic_stiffness.
+
+        FortranIntegrator without a stiffness hook has no elastic_stiffness
+        attribute; the fallback used to call it unconditionally and died with
+        AttributeError instead of returning converged=False.
+        """
+
+        class _NoStiffness:
+            def __init__(self, inner):
+                self._inner = inner
+                self.dimension = inner.dimension
+                self.ntens = inner.ntens
+
+            def initial_state(self):
+                return self._inner.initial_state()
+
+            def stress_update(self, deps, stress_n, state_n):
+                return self._inner.stress_update(deps, stress_n, state_n)
+
+        wrapped = SubSteppingIntegrator(
+            _NoStiffness(hopeless), max_substeps=2, raise_on_nonconverged=False
+        )
+        stress_n, state_n = _zero_start(hopeless)
+        r = wrapped.stress_update(_plastic_deps(), stress_n, state_n)
+        assert r.converged is False
+        assert r.stress_trial is None  # no stiffness hook, no big trial
+
+    def test_linalgerror_triggers_subdivision(self):
+        """A singular NR Jacobian at a large increment is recoverable by
+        subdivision, so it must be treated like non-convergence, not a bug."""
+        calls = {"n": 0}
+        inner = PythonNumericalIntegrator(J2Isotropic3D(**PARAMS))
+        orig = inner.stress_update
+
+        def flaky(deps, stress_n, state_n):
+            calls["n"] += 1
+            if calls["n"] == 1:  # fail only the first (undivided) attempt
+                raise np.linalg.LinAlgError("Singular matrix")
+            return orig(deps, stress_n, state_n)
+
+        inner.stress_update = flaky
+        stress_n, state_n = _zero_start(inner)
+        r = SubSteppingIntegrator(inner, max_substeps=4).stress_update(
+            _plastic_deps(), stress_n, state_n
+        )
+        assert r.converged
+        assert r.n_substeps == 2
+
     def test_max_substeps_one_is_a_bare_passthrough(self):
         """m=1 only: the wrapper adds nothing but the failure convention."""
         model = _FailsAboveDlambda(**PARAMS)

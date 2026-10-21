@@ -100,9 +100,11 @@ class SubSteppingIntegrator:
         last: "StressUpdateResult | None" = None
 
         for _ in range(m):
+            # LinAlgError too: a singular NR Jacobian at a large increment is
+            # exactly the failure mode subdivision recovers from.
             try:
                 res = self._integrator.stress_update(deps, stress_cur, state_cur)
-            except RuntimeError:
+            except (RuntimeError, np.linalg.LinAlgError):
                 return None
             if not res.converged:
                 return None
@@ -185,9 +187,17 @@ class SubSteppingIntegrator:
             residual_history=[],
             converged=False,
         )
+        # elastic_stiffness exists only when the wrapped integrator has one
+        # (mirrored in __init__); without it there is no meaningful tangent
+        # for a failed step, so fall back to identity as a typed placeholder.
+        ddsdde = (
+            self.elastic_stiffness(state_n)
+            if hasattr(self, "elastic_stiffness")
+            else np.eye(self.ntens)
+        )
         return StressUpdateResult(
             return_mapping=rm,
-            ddsdde=self.elastic_stiffness(state_n),
+            ddsdde=ddsdde,
             stress_trial=self._big_trial(strain_inc, stress_n, state_n),
             is_plastic=None,
             _state_n=state_n,
