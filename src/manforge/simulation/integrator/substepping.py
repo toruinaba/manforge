@@ -139,7 +139,8 @@ class SubSteppingIntegrator:
             # is therefore slightly wrong, which can mildly slow the outer NR in
             # StressDriver/MixedDriver.  Composing it exactly would require new
             # hand-derived terms per model; that trade was taken deliberately.
-            ddsdde=last.ddsdde,
+            # Thunked so the wrapped result's own lazy tangent stays deferred.
+            ddsdde=lambda: last.ddsdde,
             stress_trial=self._big_trial(strain_inc, stress_n, state_n),
             is_plastic=any_plastic,
             _state_n=state_n,

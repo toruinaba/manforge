@@ -13,6 +13,7 @@ Terminology
     Corresponds to what ABAQUS calls from a UMAT subroutine.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import autograd.numpy as anp
@@ -70,7 +71,12 @@ class StressUpdateResult:
         Plastic correction result.  ``None`` for elastic steps (no plastic
         correction was performed).
     ddsdde : anp.ndarray, shape (ntens, ntens)
-        Consistent tangent operator dσ_{n+1}/dΔε.
+        Consistent tangent operator dσ_{n+1}/dΔε.  May be computed lazily on
+        first access: integrators are allowed to store a zero-argument
+        callable instead of the array, because strain-controlled stepping
+        never consumes the tangent and its computation (autodiff Jacobian)
+        can dominate the step cost.  The materialised array is cached, so
+        repeated access costs nothing extra.
     stress_trial : anp.ndarray, shape (ntens,)
         Elastic trial stress σ_trial = σ_n + C Δε.
     is_plastic : bool or None
@@ -89,11 +95,19 @@ class StressUpdateResult:
     """
 
     return_mapping: "ReturnMappingResult | None"
-    ddsdde: Stiffness
+    # repr=False: repr must not trigger the lazy tangent computation.
+    ddsdde: "Stiffness | Callable[[], Stiffness]" = field(repr=False)
     stress_trial: "StressVec | None"
     is_plastic: "bool | None"
     _state_n: StateDict = field(repr=False)
     n_substeps: int = 1
+
+    def __getattribute__(self, name: str):
+        value = object.__getattribute__(self, name)
+        if name == "ddsdde" and callable(value):
+            value = value()
+            object.__setattr__(self, "ddsdde", value)
+        return value
 
     @property
     def stress(self) -> StressVec:

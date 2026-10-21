@@ -317,9 +317,13 @@ class _PythonIntegratorBase:
 
         rm = self.return_mapping(stress_trial, state_n, strain_inc)
 
+        # user_defined tangents stay eager: they are cheap, and _method ==
+        # "user_defined" must raise NotImplementedError here, not at first
+        # access.  Only the autodiff tangent is deferred — StrainDriver never
+        # reads ddsdde, and its Jacobian costs as much as several NR iterations.
         ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n, stress_trial, strain_inc)
         if ddsdde is None:
-            ddsdde = self._consistent_tangent(
+            ddsdde = lambda: self._consistent_tangent(
                 rm, stress_n, state_n, strain_inc, stress_trial
             )
 

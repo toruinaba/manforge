@@ -77,6 +77,49 @@ def test_elastic_step_state_stress_advances(model, initial_state):
     )
 
 
+def test_plastic_tangent_is_lazy_and_cached(model, initial_state, monkeypatch):
+    """The autodiff tangent must not be computed until ddsdde is read.
+
+    Strain-controlled stepping never consumes the tangent, and its Jacobian
+    costs as much as several NR iterations, so stress_update defers it.
+    """
+    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation.integrator.base import _PythonIntegratorBase
+
+    calls = {"n": 0}
+    orig = _PythonIntegratorBase._consistent_tangent
+
+    def counting(self, *args, **kwargs):
+        calls["n"] += 1
+        return orig(self, *args, **kwargs)
+
+    monkeypatch.setattr(_PythonIntegratorBase, "_consistent_tangent", counting)
+
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = PythonNumericalIntegrator(model).stress_update(deps, anp.zeros(6), initial_state)
+    assert result.is_plastic is True
+    assert calls["n"] == 0
+
+    first = result.ddsdde
+    assert calls["n"] == 1
+    assert first.shape == (6, 6)
+    assert result.ddsdde is first  # cached, not recomputed
+    assert calls["n"] == 1
+
+
+def test_lazy_tangent_matches_eager_value(model, initial_state):
+    """Deferral must not change the tangent — compare against a direct call."""
+    from manforge.simulation.integrator import PythonNumericalIntegrator
+
+    integ = PythonNumericalIntegrator(model)
+    deps = anp.array([3e-3, 0, 0, 0, 0, 0])
+    result = integ.stress_update(deps, anp.zeros(6), initial_state)
+    direct = integ._consistent_tangent(
+        result.return_mapping, anp.zeros(6), initial_state, deps, result.stress_trial
+    )
+    np.testing.assert_allclose(np.asarray(result.ddsdde), np.asarray(direct), rtol=1e-12)
+
+
 def test_elastic_step_state_stress_matches_next_step_input(model, initial_state):
     """state["stress"] must equal the stress_n the driver carries to step n+1."""
     integrator = PythonIntegrator(model)
