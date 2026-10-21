@@ -155,6 +155,13 @@ class TestStrainDriverIterRun:
         for step in driver.iter_run(load):
             assert "ep" in step.result.state
 
+    def test_rejects_stress_typed_load(self, model):
+        """A STRESS-typed history must not be silently read as strain."""
+        load = FieldHistory(FieldType.STRESS, "Stress", np.linspace(0, 1e-3, 5))
+        driver = StrainDriver(PythonNumericalIntegrator(model))
+        with pytest.raises(ValueError, match="StrainDriver expects"):
+            list(driver.iter_run(load))
+
     def test_nonconverged_integrator_stops_and_reports(self, model):
         """A non-converged return mapping must not advance the state.
 
@@ -233,6 +240,14 @@ class TestStressDriverIterRun:
         assert len(steps) == 1
         assert steps[0].converged is False
         assert steps[0].residual_inf > driver.tol
+
+    def test_rejects_strain_typed_load(self, model):
+        """A STRAIN-typed history must not be silently read as stress."""
+        load = FieldHistory(FieldType.STRAIN, "Strain",
+                            np.zeros((5, model.ntens)))
+        driver = StressDriver(PythonNumericalIntegrator(model))
+        with pytest.raises(ValueError, match="StressDriver expects"):
+            list(driver.iter_run(load))
 
     def test_nonconverged_inner_return_mapping_fails_outer(self, model):
         """A non-converged inner iterate must not satisfy the outer check.

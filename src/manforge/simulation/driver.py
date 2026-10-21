@@ -192,6 +192,10 @@ class StrainDriver(DriverBase):
         ------
         DriverStep
         """
+        if load.type != FieldType.STRAIN:
+            raise ValueError(
+                f"StrainDriver expects load.type=FieldType.STRAIN, got {load.type!r}"
+            )
         integrator = self.integrator
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
@@ -299,6 +303,10 @@ class StressDriver(DriverBase):
         RuntimeError
             If NR does not converge and ``raise_on_nonconverged=True``.
         """
+        if load.type != FieldType.STRESS:
+            raise ValueError(
+                f"StressDriver expects load.type=FieldType.STRESS, got {load.type!r}"
+            )
         integrator = self.integrator
         stress_history = np.asarray(load.data, dtype=float)
         ntens = integrator.ntens
