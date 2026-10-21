@@ -38,3 +38,23 @@ class TestResidualLayout:
         assert layout.residual_name_for("alpha") == "R_alpha"
         assert layout.residual_name_for("dlambda") == "R_yield"
         assert layout.residual_name_for("stress") == "stress"
+
+    def test_pack_roundtrip(self):
+        import numpy as np
+        model = self._make_default_model()
+        layout = ResidualLayout.from_model(model)
+        sigma = np.arange(6, dtype=float)
+        q = {"alpha": np.full(6, 2.0), "ep": np.array(0.5)}
+        x = layout.pack(sigma, 0.1, q)
+        s2, dl, q2 = layout.unpack(np.asarray(x))
+        np.testing.assert_allclose(np.asarray(s2), sigma)
+        assert float(dl) == pytest.approx(0.1)
+        np.testing.assert_allclose(np.asarray(q2["alpha"]), q["alpha"])
+
+    def test_pack_missing_implicit_key_raises(self):
+        """A typo or incomplete initial_state must not become silent zeros."""
+        import numpy as np
+        model = self._make_default_model()
+        layout = ResidualLayout.from_model(model)
+        with pytest.raises(KeyError, match="missing implicit state"):
+            layout.pack(np.zeros(6), 0.0, {"alpha": np.zeros(6)})  # ep missing

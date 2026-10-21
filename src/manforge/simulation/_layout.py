@@ -189,11 +189,20 @@ class ResidualLayout:
         sigma : array-like, shape (ntens,)
         dlambda : scalar
         q_imp : dict mapping implicit_keys → array
-            Only non-stress implicit states.  Missing keys default to zero.
+            Only non-stress implicit states.  Every implicit key must be
+            present — a missing key raises ``KeyError`` rather than silently
+            packing zeros, which would turn a typo or an incomplete
+            ``initial_state`` into a wrong NR starting point.
         """
+        missing = [k for k, _ in self._shapes if k not in q_imp]
+        if missing:
+            raise KeyError(
+                f"ResidualLayout.pack: missing implicit state value(s) {missing}; "
+                f"expected all of {[k for k, _ in self._shapes]}"
+            )
         parts = [anp.array(sigma), anp.atleast_1d(anp.array(dlambda))]
         for k, shp in self._shapes:
-            v = q_imp.get(k, np.zeros(shp))
+            v = q_imp[k]
             parts.append(anp.reshape(v, (-1,)) if shp else anp.atleast_1d(v))
         return anp.concatenate(parts) if len(parts) > 1 else parts[0]
 
