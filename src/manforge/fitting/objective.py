@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from typing_extensions import NotRequired, TypedDict
@@ -16,6 +18,28 @@ if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
     from manforge.fitting.target import FitTarget
     from manforge.simulation.driver import DriverBase
+
+
+@dataclass
+class FailureLog:
+    """Records evaluations the model could not complete.
+
+    A constitutive model need not be solvable everywhere in a box-bounded
+    parameter space — return mapping can legitimately have no real root — so a
+    failed evaluation is information ("not the optimum") rather than an error.
+    The objective reports it as ``inf`` and records it here, which keeps a long
+    fit alive instead of discarding every prior evaluation.
+    """
+
+    n_failed: int = 0
+    first_message: str = ""
+    first_params: dict[str, float] = field(default_factory=dict)
+
+    def record(self, exc: Exception, params: dict[str, float]) -> None:
+        self.n_failed += 1
+        if self.n_failed == 1:
+            self.first_message = f"{type(exc).__name__}: {exc}"
+            self.first_params = dict(params)
 
 
 class ExpData(TypedDict):
@@ -39,12 +63,20 @@ def build_objective(
     driver_factory: DriverFactoryFn | None,
     targets: Sequence["FitTarget"],
     space: ParameterSpace,
+    failures: FailureLog | None = None,
 ) -> Callable[[Sequence[float] | FloatArray], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
     The objective is the sum over every target's observations of each
     observation's residual under its own metric.  Each target costs one driver
     run per evaluation; observations on the same target share that run.
+
+    An evaluation the model cannot complete — return mapping or the driver's
+    outer NR failing to converge — yields ``inf`` rather than propagating, so
+    the optimiser steers away from that region instead of the whole fit dying
+    on one bad trial point.  Errors that indicate a broken *setup* rather than
+    an unsolvable parameter value (shape mismatches, unknown field names) are
+    left to propagate.
 
     Parameters
     ----------
@@ -59,6 +91,9 @@ def build_objective(
         :func:`~manforge.fitting.target.coerce_targets`.
     space : ParameterSpace
         Maps the optimisation vector onto model parameters.
+    failures : FailureLog or None
+        Collects the non-convergent evaluations.  ``None`` (default) still
+        penalises them, but does not report which ones.
 
     Returns
     -------
@@ -76,6 +111,21 @@ def build_objective(
         extra = {"dimension": dimension} if _accepts_dimension else {}
         m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
         integrator = PythonIntegrator(m)
-        return sum(t.residual(integrator, driver_factory) for t in targets)
+        try:
+            total = sum(t.residual(integrator, driver_factory) for t in targets)
+        except (RuntimeError, FloatingPointError, ZeroDivisionError) as exc:
+            if failures is not None:
+                failures.record(exc, all_params)
+            return math.inf
+        # A model can converge to nan without raising -- an inf/nan objective
+        # would make the optimiser's line search meaningless, so treat it the
+        # same way as an outright failure.
+        if not math.isfinite(total):
+            if failures is not None:
+                failures.record(
+                    ArithmeticError(f"objective evaluated to {total}"), all_params
+                )
+            return math.inf
+        return total
 
     return objective
