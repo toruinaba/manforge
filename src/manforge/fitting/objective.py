@@ -8,11 +8,22 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+import numpy as np
 from typing_extensions import NotRequired, TypedDict
 
 from manforge.fitting.space import ParameterSpace
 from manforge.simulation.integrator import PythonIntegrator
 from manforge._typing import FloatArray
+
+FAILURE_PENALTY = 1e30
+"""Objective value assigned to an evaluation the model could not complete.
+
+Large enough that no real fit ever reaches it, but deliberately *finite*:
+returning ``inf`` breaks L-BFGS-B, whose finite-difference gradient at a point
+with an ``inf`` neighbour evaluates to ``nan`` and silently poisons the line
+search.  A huge finite value keeps the gradient finite (and enormous), so the
+optimiser backs away from the failing region instead.
+"""
 
 if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
@@ -72,10 +83,11 @@ def build_objective(
     run per evaluation; observations on the same target share that run.
 
     An evaluation the model cannot complete — return mapping or the driver's
-    outer NR failing to converge — yields ``inf`` rather than propagating, so
-    the optimiser steers away from that region instead of the whole fit dying
-    on one bad trial point.  Errors that indicate a broken *setup* rather than
-    an unsolvable parameter value (shape mismatches, unknown field names) are
+    outer NR failing to converge, or a singular NR Jacobian — yields the large
+    finite :data:`FAILURE_PENALTY` rather than propagating, so the optimiser
+    steers away from that region instead of the whole fit dying on one bad
+    trial point.  Errors that indicate a broken *setup* rather than an
+    unsolvable parameter value (shape mismatches, unknown field names) are
     left to propagate.
 
     Parameters
@@ -111,12 +123,18 @@ def build_objective(
         extra = {"dimension": dimension} if _accepts_dimension else {}
         m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
         integrator = PythonIntegrator(m)
+        # LinAlgError is listed even though it subclasses ValueError (which is
+        # otherwise a setup error left to propagate): a singular NR Jacobian
+        # is precisely "this parameter value is unsolvable", not a bug.
         try:
             total = sum(t.residual(integrator, driver_factory) for t in targets)
-        except (RuntimeError, FloatingPointError, ZeroDivisionError) as exc:
+        except (
+            RuntimeError, FloatingPointError, ZeroDivisionError,
+            np.linalg.LinAlgError,
+        ) as exc:
             if failures is not None:
                 failures.record(exc, all_params)
-            return math.inf
+            return FAILURE_PENALTY
         # A model can converge to nan without raising -- an inf/nan objective
         # would make the optimiser's line search meaningless, so treat it the
         # same way as an outright failure.
@@ -125,7 +143,7 @@ def build_objective(
                 failures.record(
                     ArithmeticError(f"objective evaluated to {total}"), all_params
                 )
-            return math.inf
+            return FAILURE_PENALTY
         return total
 
     return objective

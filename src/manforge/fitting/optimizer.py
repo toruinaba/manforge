@@ -5,7 +5,6 @@ Main entry point: :func:`fit_params`.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -17,6 +16,7 @@ from typing_extensions import TypeAlias
 from manforge.fitting.objective import (
     ExpData,
     DriverFactoryFn,
+    FAILURE_PENALTY,
     FailureLog,
     build_objective,
 )
@@ -88,13 +88,24 @@ def _out_of_bounds_initials(space: ParameterSpace) -> list[str]:
     return offenders
 
 
+def _clipped_x0(space: ParameterSpace) -> FloatArray:
+    """``x0`` clipped into the bounds box — the point scipy actually starts at.
+
+    Probing the raw ``x0`` would check a *different* point than the search
+    uses whenever an initial value sits outside its bounds, and the diagnosis
+    ("cannot start" vs "search left the solvable region") would be wrong.
+    """
+    lo, hi = np.array(space.bounds, dtype=float).T
+    return np.clip(space.x0, lo, hi)
+
+
 def _check_initial_point(
     obj_fn: Callable[[Sequence[float] | FloatArray], float],
     space: ParameterSpace,
     failures: FailureLog,
 ) -> None:
     """Raise with a setup-focused message if the objective fails at ``x0``."""
-    if math.isfinite(obj_fn(space.x0)):
+    if obj_fn(_clipped_x0(space)) < FAILURE_PENALTY:
         return
 
     detail = failures.first_message or "objective was not finite"
@@ -239,7 +250,7 @@ def fit_params(
     # Every evaluation failing means no parameter set in the box was solvable,
     # so there is no optimum to report -- that is a setup problem, and silently
     # returning the initial guess would hide it.
-    if not math.isfinite(float(result.fun)):
+    if float(result.fun) >= FAILURE_PENALTY:
         # x0 was solvable (checked above), so the search itself left the
         # solvable region -- that points at the bounds, not the initial values.
         message = (

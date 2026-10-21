@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from manforge.fitting import fit_params
-from manforge.fitting.objective import FailureLog, build_objective
+from manforge.fitting.objective import FAILURE_PENALTY, FailureLog, build_objective
 from manforge.fitting.space import ParameterSpace
 from manforge.fitting.target import FitTarget, Observation
 from manforge.simulation.driver import StrainDriver
@@ -76,9 +76,59 @@ class _ExplodingDriver:
         raise RuntimeError("NR did not converge at step 3")
 
 
-def test_failed_evaluation_returns_inf(model, target, space):
+def test_failed_evaluation_returns_penalty(model, target, space):
     obj = build_objective(model, _ExplodingDriver, [target], space)
-    assert obj(space.x0) == math.inf
+    assert obj(space.x0) == FAILURE_PENALTY
+
+
+def test_failure_penalty_is_finite():
+    """inf would poison L-BFGS-B's finite-difference gradient with nan."""
+    assert math.isfinite(FAILURE_PENALTY)
+
+
+class _SingularJacobianDriver:
+    """Driver that fails the way a singular NR Jacobian does."""
+
+    def __init__(self, integrator):
+        self.integrator = integrator
+
+    def run(self, *args, **kwargs):
+        np.linalg.solve(np.zeros((2, 2)), np.ones(2))
+
+
+def test_singular_jacobian_is_penalised_not_raised(model, target, space):
+    """LinAlgError subclasses ValueError but means 'unsolvable here', not a bug."""
+    failures = FailureLog()
+    obj = build_objective(model, _SingularJacobianDriver, [target], space, failures)
+    assert obj(space.x0) == FAILURE_PENALTY
+    assert "LinAlgError" in failures.first_message
+
+
+def test_lbfgsb_gradient_stays_finite_next_to_a_failing_point(model, target):
+    """L-BFGS-B must survive a failure inside its finite-difference stencil.
+
+    With an inf penalty the FD gradient evaluates to nan and the line search
+    silently degenerates; scipy emits 'invalid value encountered' warnings.
+    With the finite penalty the same fit completes without them.
+    """
+    import warnings
+
+    space = ParameterSpace(
+        free={"sigma_y0": (248.0, (100.0, 400.0))},
+        fixed={"E": 210000.0, "nu": 0.3, "H": 1000.0},
+    )
+
+    def factory(integrator):
+        # Failing band directly adjacent to x0, inside the FD stencil.
+        if integrator._model.sigma_y0 > 248.5:
+            return _ExplodingDriver(integrator)
+        return StrainDriver(integrator)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = fit_params(model, factory, target, space,
+                            method="L-BFGS-B", max_iter=5)
+    assert math.isfinite(result.residual)
 
 
 def test_failed_evaluation_is_recorded(model, target, space):
@@ -97,7 +147,7 @@ def test_failed_evaluation_is_recorded(model, target, space):
 def test_failure_log_is_optional(model, target, space):
     """Penalisation must not depend on a log being supplied."""
     obj = build_objective(model, _ExplodingDriver, [target], space, None)
-    assert obj(space.x0) == math.inf
+    assert obj(space.x0) == FAILURE_PENALTY
 
 
 def test_non_finite_objective_is_penalised(model, driver_factory, target, space):
@@ -110,7 +160,7 @@ def test_non_finite_objective_is_penalised(model, driver_factory, target, space)
     failures = FailureLog()
     obj = build_objective(model, driver_factory, [nan_target], space, failures)
 
-    assert obj(space.x0) == math.inf
+    assert obj(space.x0) == FAILURE_PENALTY
     assert failures.n_failed == 1
     assert "nan" in failures.first_message
 
