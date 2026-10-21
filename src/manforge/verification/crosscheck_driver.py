@@ -343,8 +343,11 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         Maximum Newton iterations for :class:`~manforge.simulation.StressDriver`
         (default 20).
     tol : float, optional
-        Convergence tolerance for :class:`~manforge.simulation.StressDriver`
-        (default 1e-8).
+        Absolute convergence tolerance for
+        :class:`~manforge.simulation.StressDriver` (default 1e-8).
+    rtol : float, optional
+        Relative convergence tolerance for
+        :class:`~manforge.simulation.StressDriver` (default 1e-10).
 
     Examples
     --------
@@ -370,6 +373,7 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         state_tol: float = 1e-6,
         max_iter: int = 20,
         tol: float = 1e-8,
+        rtol: float = 1e-10,
     ) -> None:
         super().__init__(
             integrator_a,
@@ -380,9 +384,12 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         )
         self.max_iter = max_iter
         self.tol = tol
+        self.rtol = rtol
 
     def _make_driver(self, integrator):
-        return StressDriver(integrator, max_iter=self.max_iter, tol=self.tol)
+        return StressDriver(
+            integrator, max_iter=self.max_iter, tol=self.tol, rtol=self.rtol
+        )
 
     def _iter_driver(self, driver, load, **kwargs):
         return driver.iter_run(load, **kwargs)

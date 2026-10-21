@@ -253,14 +253,23 @@ class StressDriver(DriverBase):
     max_iter : int, optional
         Maximum Newton-Raphson iterations per step (default 20).
     tol : float, optional
-        Convergence tolerance on the infinity norm of the stress residual
-        (default 1e-8).
+        Absolute convergence tolerance on the infinity norm of the stress
+        residual (default 1e-8).
+    rtol : float, optional
+        Relative tolerance (default 1e-10).  The step converges when
+        ``||residual||_inf < tol + rtol * ||sigma_target||_inf``, so the
+        criterion stays reachable regardless of stress units — a purely
+        absolute ``1e-8`` is below round-off once stresses are O(1e8) (Pa).
     """
 
-    def __init__(self, integrator: object, *, max_iter: int = 20, tol: float = 1e-8) -> None:
+    def __init__(
+        self, integrator: object, *, max_iter: int = 20, tol: float = 1e-8,
+        rtol: float = 1e-10,
+    ) -> None:
         super().__init__(integrator)
         self.max_iter = max_iter
         self.tol = tol
+        self.rtol = rtol
 
     def iter_run(
         self,
@@ -319,6 +328,7 @@ class StressDriver(DriverBase):
 
         for i in range(stress_history.shape[0]):
             sigma_target = np.array(stress_history[i])
+            step_tol = self.tol + self.rtol * float(np.max(np.abs(sigma_target)))
             if hasattr(integrator, "elastic_stiffness"):
                 C = integrator.elastic_stiffness(state_n)
                 S = np.linalg.inv(np.array(C))
@@ -340,7 +350,7 @@ class StressDriver(DriverBase):
                 if not rm.converged:
                     break
                 residual = sigma_target - np.array(rm.stress)
-                if float(np.max(np.abs(residual))) < self.tol:
+                if float(np.max(np.abs(residual))) < step_tol:
                     converged = True
                     break
                 deps = deps + np.linalg.solve(np.array(rm.ddsdde), residual)
@@ -353,7 +363,7 @@ class StressDriver(DriverBase):
                     raise RuntimeError(
                         f"StressDriver: NR did not converge at step {i} "
                         f"(||residual||_inf = {residual_inf:.3e}, "
-                        f"tol = {self.tol:.3e})"
+                        f"tol = {step_tol:.3e})"
                     )
                 yield DriverStep(
                     i=i,
@@ -481,8 +491,10 @@ class MixedDriver(DriverBase):
     max_iter : int, optional
         Maximum inner Newton-Raphson iterations per step (default 20).
     tol : float, optional
-        Convergence tolerance on the L∞ norm of the stress residual on the
-        F components (default 1e-8).
+        Absolute convergence tolerance on the L∞ norm of the stress residual
+        on the F components (default 1e-8).
+    rtol : float, optional
+        Relative tolerance (default 1e-10) — see :class:`StressDriver`.
 
     Notes
     -----
@@ -510,6 +522,7 @@ class MixedDriver(DriverBase):
         prescribed_stress_idx=None,
         max_iter: int = 20,
         tol: float = 1e-8,
+        rtol: float = 1e-10,
     ) -> None:
         super().__init__(integrator)
         ntens = integrator.ntens
@@ -540,6 +553,7 @@ class MixedDriver(DriverBase):
         self._F = np.array(F, dtype=int)
         self.max_iter = max_iter
         self.tol = tol
+        self.rtol = rtol
 
     def iter_run(
         self,
@@ -630,6 +644,7 @@ class MixedDriver(DriverBase):
                 residual_inf = 0.0
             else:
                 sigma_F_target = sigF_hist[i]
+                step_tol = self.tol + self.rtol * float(np.max(np.abs(sigma_F_target)))
 
                 # Initial estimate: solve C0[F,F] @ deps[F] = rhs from elastic stiffness
                 if hasattr(integrator, "elastic_stiffness"):
@@ -652,7 +667,7 @@ class MixedDriver(DriverBase):
                     if not rm.converged:
                         break
                     residual_F = sigma_F_target - np.array(rm.stress)[F]
-                    if float(np.max(np.abs(residual_F))) < self.tol:
+                    if float(np.max(np.abs(residual_F))) < step_tol:
                         converged = True
                         break
                     D_FF = np.array(rm.ddsdde)[np.ix_(F, F)]
@@ -666,7 +681,7 @@ class MixedDriver(DriverBase):
                     raise RuntimeError(
                         f"MixedDriver: NR did not converge at step {i} "
                         f"(||residual_F||_inf = {residual_inf:.3e}, "
-                        f"tol = {self.tol:.3e})"
+                        f"tol = {step_tol if nF else self.tol:.3e})"
                     )
                 yield DriverStep(
                     i=i,

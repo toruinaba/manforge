@@ -219,27 +219,51 @@ class TestStressDriverIterRun:
         strain_from_iter = np.stack([s.strain for s in steps])
         np.testing.assert_allclose(strain_from_iter, result_run.strain)
 
+    # Non-convergence is forced with max_iter=1: a plastic step needs at
+    # least two outer iterations (elastic-stiffness predictor, then a
+    # consistent-tangent correction).  Driving the stress absurdly high no
+    # longer works — that relied on the absolute tolerance being unreachable
+    # at large stress scales, which was a unit-dependence bug, now fixed.
     def test_nonconverged_raises_by_default(self, model):
         integrator = PythonNumericalIntegrator(model)
-        huge_stress = np.zeros((5, model.ntens))
-        huge_stress[:, 0] = np.linspace(1e8, 5e8, 5)
-        load = FieldHistory(FieldType.STRESS, "Stress", huge_stress)
-        driver = StressDriver(integrator, max_iter=3)
+        sigma = np.zeros((5, model.ntens))
+        sigma[:, 0] = np.linspace(300.0, 500.0, 5)  # past yield (250)
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        driver = StressDriver(integrator, max_iter=1)
         with pytest.raises(RuntimeError, match="NR did not converge"):
             list(driver.iter_run(load))
 
     def test_nonconverged_opt_in_yields(self, model):
         integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
-        huge_stress = np.zeros((5, model.ntens))
-        huge_stress[:, 0] = np.linspace(1e8, 5e8, 5)
-        load = FieldHistory(FieldType.STRESS, "Stress", huge_stress)
-        driver = StressDriver(integrator, max_iter=3)
+        sigma = np.zeros((5, model.ntens))
+        sigma[:, 0] = np.linspace(300.0, 500.0, 5)
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        driver = StressDriver(integrator, max_iter=1)
         steps = []
         for step in driver.iter_run(load, raise_on_nonconverged=False):
             steps.append(step)
         assert len(steps) == 1
         assert steps[0].converged is False
         assert steps[0].residual_inf > driver.tol
+
+    def test_converges_in_pa_units(self):
+        """The criterion must stay reachable regardless of stress units.
+
+        With Pa-scale stresses (~1e8) a purely absolute tol=1e-8 sits below
+        round-off of the NR update, so convergence relied on luck; the
+        relative term keeps the threshold proportionate.
+        """
+        from manforge.models import J2Isotropic3D
+
+        model_pa = J2Isotropic3D(E=210e9, nu=0.3, sigma_y0=250e6, H=1e9)
+        sigma = np.zeros((5, 6))
+        sigma[:, 0] = np.linspace(100e6, 300e6, 5)  # crosses yield
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        driver = StressDriver(PythonNumericalIntegrator(model_pa))
+        result = driver.run(load)
+        np.testing.assert_allclose(
+            result.stress[:, 0], sigma[:, 0], rtol=1e-9
+        )
 
     def test_rejects_strain_typed_load(self, model):
         """A STRAIN-typed history must not be silently read as stress."""

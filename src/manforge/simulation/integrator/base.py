@@ -134,6 +134,16 @@ class _PythonIntegratorBase:
             {k: state_n[k] for k in layout.implicit_keys}
         )
 
+        # The residual rows carry stress units (R_σ and R_Δλ = f both scale
+        # with σ), so a purely absolute tolerance is unit-dependent: at Pa
+        # scale (σ ~ 1e8) the default 1e-10 sits below float64 round-off and
+        # NR can never satisfy it.  Scale by the trial-stress magnitude —
+        # not the initial residual, which is tiny whenever NR starts near the
+        # solution — floored at 1 to keep the absolute reading for O(1) units.
+        tol_eff = self._tol * max(
+            1.0, float(np.max(np.abs(np.asarray(stress_trial, dtype=float))))
+        )
+
         residual_history = []
         n_iterations = 0
         converged = False
@@ -141,7 +151,7 @@ class _PythonIntegratorBase:
             R = residual_fn(x)
             norm = float(np.linalg.norm(np.array(R)))
             residual_history.append(norm)
-            if norm < self._tol:
+            if norm < tol_eff:
                 converged = True
                 break
             J = autograd.jacobian(residual_fn)(x)  # type: ignore[call-arg]
@@ -154,7 +164,7 @@ class _PythonIntegratorBase:
                 f"_numerical_newton: NR did not converge in {self._max_iter} "
                 f"iterations (||R||_2 = "
                 f"{float(np.linalg.norm(np.array(residual_fn(x)))):.3e}, "
-                f"tol = {self._tol:.3e})"
+                f"tol = {tol_eff:.3e})"
             )
 
         state_new = build_state_from_x(model, x, state_n, layout, stress_trial, strain_inc)
