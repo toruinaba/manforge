@@ -398,10 +398,15 @@ class DriverStep:
     result : StressUpdateResult
         Full stress-update result: stress, state, ddsdde, dlambda, is_plastic, etc.
     converged : bool
-        NR convergence flag.  Always ``True`` for :class:`~manforge.simulation.driver.StrainDriver`.
-        For :class:`~manforge.simulation.driver.StressDriver` and
-        :class:`~manforge.simulation.driver.MixedDriver` reflects whether the
-        outer / inner Newton-Raphson loop converged within ``max_iter``.
+        NR convergence flag.  For :class:`~manforge.simulation.driver.StrainDriver`
+        this is the integrator's return-mapping flag — ``False`` is reachable
+        only with an integrator built with ``raise_on_nonconverged=False``, and
+        the driver stops after yielding that step.  For
+        :class:`~manforge.simulation.driver.StressDriver` and
+        :class:`~manforge.simulation.driver.MixedDriver` it additionally
+        covers whether the outer / inner Newton-Raphson loop converged within
+        ``max_iter``; a non-converged inner return mapping fails the outer
+        loop immediately rather than feeding it a garbage iterate.
     n_outer_iter : int
         Number of NR iterations taken.  ``1`` for
         :class:`~manforge.simulation.driver.StrainDriver`; the outer-loop count

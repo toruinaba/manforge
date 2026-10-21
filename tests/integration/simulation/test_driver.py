@@ -155,6 +155,24 @@ class TestStrainDriverIterRun:
         for step in driver.iter_run(load):
             assert "ep" in step.result.state
 
+    def test_nonconverged_integrator_stops_and_reports(self, model):
+        """A non-converged return mapping must not advance the state.
+
+        With raise_on_nonconverged=False the integrator hands back a
+        non-converged NR iterate; carrying it forward would silently corrupt
+        every later step, so the driver must yield converged=False and stop.
+        """
+        # max_iter=0 guarantees the first plastic step cannot converge.
+        integrator = PythonNumericalIntegrator(
+            model, max_iter=0, raise_on_nonconverged=False
+        )
+        load = _strain_load(n_steps=10, max_strain=5e-3)
+        steps = list(StrainDriver(integrator).iter_run(load))
+
+        assert len(steps) < 10, "driver must stop at the non-converged step"
+        assert steps[-1].converged is False
+        assert all(s.converged for s in steps[:-1])
+
 
 class TestStressDriverIterRun:
     def test_yields_driver_step_instances(self, model):
@@ -215,6 +233,28 @@ class TestStressDriverIterRun:
         assert len(steps) == 1
         assert steps[0].converged is False
         assert steps[0].residual_inf > driver.tol
+
+    def test_nonconverged_inner_return_mapping_fails_outer(self, model):
+        """A non-converged inner iterate must not satisfy the outer check.
+
+        The outer residual computed from a non-converged rm.stress is
+        meaningless and could even pass the tolerance; the driver must treat
+        the step as failed instead.
+        """
+        # max_iter=0: every plastic return mapping comes back converged=False.
+        integrator = PythonNumericalIntegrator(
+            model, max_iter=0, raise_on_nonconverged=False
+        )
+        sigma = np.zeros((5, model.ntens))
+        sigma[:, 0] = np.linspace(100.0, 2.0 * model.sigma_y0, 5)
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        driver = StressDriver(integrator)
+
+        with pytest.raises(RuntimeError, match="NR did not converge"):
+            list(driver.iter_run(load))
+
+        steps = list(driver.iter_run(load, raise_on_nonconverged=False))
+        assert steps[-1].converged is False
 
 
 # ===========================================================================

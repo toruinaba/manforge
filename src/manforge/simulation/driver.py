@@ -215,6 +215,15 @@ class StrainDriver(DriverBase):
                 strain_cum = np.array(data[i])
 
             rm = integrator.stress_update(strain_inc, stress_n, state_n)
+            # Reachable only when the integrator was built with
+            # raise_on_nonconverged=False: rm.state is then a non-converged NR
+            # iterate, so advancing with it would silently corrupt every
+            # subsequent step.  Report and stop, like StressDriver does.
+            if not rm.converged:
+                yield DriverStep(
+                    i=i, strain=strain_cum.copy(), result=rm, converged=False
+                )
+                return
             stress_n = rm.stress
             state_n = rm.state
             yield DriverStep(i=i, strain=strain_cum.copy(), result=rm)
@@ -316,6 +325,12 @@ class StressDriver(DriverBase):
             k = 0
             for k in range(self.max_iter):
                 rm = integrator.stress_update(deps, stress_n, state_n)
+                # Inner return mapping failed (integrator built with
+                # raise_on_nonconverged=False): rm.stress is a non-converged
+                # iterate, so the outer residual and tangent computed from it
+                # would be garbage — and could even pass the tolerance check.
+                if not rm.converged:
+                    break
                 residual = sigma_target - np.array(rm.stress)
                 if float(np.max(np.abs(residual))) < self.tol:
                     converged = True
@@ -602,7 +617,7 @@ class MixedDriver(DriverBase):
 
             if nF == 0:
                 rm = integrator.stress_update(deps, stress_n, state_n)
-                converged = True
+                converged = rm.converged
                 k = 0
                 residual_inf = 0.0
             else:
@@ -625,6 +640,9 @@ class MixedDriver(DriverBase):
                 k = 0
                 for k in range(self.max_iter):
                     rm = integrator.stress_update(deps, stress_n, state_n)
+                    # Non-converged inner return mapping — see StressDriver.
+                    if not rm.converged:
+                        break
                     residual_F = sigma_F_target - np.array(rm.stress)[F]
                     if float(np.max(np.abs(residual_F))) < self.tol:
                         converged = True
