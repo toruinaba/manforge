@@ -51,6 +51,18 @@ class _PythonIntegratorBase:
     """Shared implementation for Python-side integrators.
 
     Subclasses set the ``_method`` class variable to select the solver strategy.
+
+    Parameters
+    ----------
+    nr_jacobian : {"exact", "broyden"}
+        How the NR Jacobian is obtained on iterations after the first.
+        ``"exact"`` (default) re-derives it by autodiff every iteration —
+        robust, but the autodiff Jacobian dominates the step cost for models
+        without hand-derived solvers.  ``"broyden"`` computes the exact
+        Jacobian once per step and then applies Broyden rank-1 updates,
+        recomputing the exact Jacobian whenever the residual norm fails to
+        decrease.  Typically a few times faster at the cost of 1–2 extra
+        iterations; the *consistent tangent* is unaffected (always exact).
     """
 
     _method: str = "auto"
@@ -62,11 +74,17 @@ class _PythonIntegratorBase:
         max_iter: int = 50,
         tol: float = 1e-10,
         raise_on_nonconverged: bool = True,
+        nr_jacobian: str = "exact",
     ) -> None:
+        if nr_jacobian not in ("exact", "broyden"):
+            raise ValueError(
+                f"nr_jacobian must be 'exact' or 'broyden', got {nr_jacobian!r}"
+            )
         self._model = model
         self._max_iter = max_iter
         self._tol = tol
         self._raise_on_nonconverged = raise_on_nonconverged
+        self._nr_jacobian = nr_jacobian
 
     @property
     def dimension(self) -> StressDimension:
@@ -144,19 +162,37 @@ class _PythonIntegratorBase:
             1.0, float(np.max(np.abs(np.asarray(stress_trial, dtype=float))))
         )
 
+        jac_fn = autograd.jacobian(residual_fn)  # type: ignore[call-arg]
+        use_broyden = self._nr_jacobian == "broyden"
+
         residual_history = []
         n_iterations = 0
         converged = False
+        J: "np.ndarray | None" = None
+        R_prev: "np.ndarray | None" = None
+        dx_prev: "np.ndarray | None" = None
         for _ in range(self._max_iter):
-            R = residual_fn(x)
-            norm = float(np.linalg.norm(np.array(R)))
+            R = np.array(residual_fn(x))
+            norm = float(np.linalg.norm(R))
             residual_history.append(norm)
             if norm < tol_eff:
                 converged = True
                 break
-            J = autograd.jacobian(residual_fn)(x)  # type: ignore[call-arg]
-            dx = np.linalg.solve(np.array(J), np.array(R))
+
+            if J is None or not use_broyden:
+                J = np.array(jac_fn(x))
+            elif norm >= residual_history[-2]:
+                # The Broyden approximation stopped making progress — fall
+                # back to the exact Jacobian for this iteration.
+                J = np.array(jac_fn(x))
+            else:
+                # Broyden "good" rank-1 update: J += (ΔR − J Δx) Δxᵀ / (ΔxᵀΔx).
+                dR = R - R_prev
+                J = J + np.outer(dR - J @ dx_prev, dx_prev) / float(dx_prev @ dx_prev)
+
+            dx = np.linalg.solve(J, R)
             x = x - anp.array(dx)
+            R_prev, dx_prev = R, -dx
             n_iterations += 1
 
         if not converged and self._raise_on_nonconverged:

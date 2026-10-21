@@ -1315,3 +1315,59 @@ class TestElasticCheck:
             PythonNumericalIntegrator(model), prev.stress, prev.state, deps, tol=1e-4
         )
         assert res.passed, f"max rel err = {res.max_rel_error:.3e}"
+
+
+# ===========================================================================
+# nr_jacobian="broyden": approximate NR Jacobian (exact consistent tangent)
+# ===========================================================================
+
+class TestBroydenJacobian:
+    def _integrators(self):
+        from manforge.models import OWKinematic3D
+        model_kwargs = dict(E=210000.0, nu=0.3, sigma_y0=250.0,
+                            C_k=50000.0, gamma=300.0)
+        exact = PythonNumericalIntegrator(OWKinematic3D(**model_kwargs))
+        broyden = PythonNumericalIntegrator(
+            OWKinematic3D(**model_kwargs), nr_jacobian="broyden"
+        )
+        return exact, broyden
+
+    def test_invalid_mode_rejected(self):
+        model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+        with pytest.raises(ValueError, match="nr_jacobian"):
+            PythonNumericalIntegrator(model, nr_jacobian="typo")
+
+    def test_same_converged_stress(self):
+        exact, broyden = self._integrators()
+        deps = np.zeros(6); deps[0] = 3e-3
+        state0 = exact.initial_state()
+        r_e = exact.stress_update(deps, np.zeros(6), state0)
+        r_b = broyden.stress_update(deps, np.zeros(6), state0)
+        assert r_b.converged
+        np.testing.assert_allclose(
+            np.asarray(r_b.stress), np.asarray(r_e.stress), rtol=1e-8
+        )
+
+    def test_consistent_tangent_stays_exact(self):
+        """Broyden approximates only the NR path; ddsdde must not change."""
+        exact, broyden = self._integrators()
+        deps = np.zeros(6); deps[0] = 3e-3
+        state0 = exact.initial_state()
+        r_e = exact.stress_update(deps, np.zeros(6), state0)
+        r_b = broyden.stress_update(deps, np.zeros(6), state0)
+        np.testing.assert_allclose(
+            np.asarray(r_b.ddsdde), np.asarray(r_e.ddsdde), rtol=1e-6
+        )
+
+    def test_multistep_history_matches(self):
+        from manforge.simulation.driver import StrainDriver
+        from manforge.simulation.types import FieldHistory
+
+        exact, broyden = self._integrators()
+        load = FieldHistory.cyclic_strain(
+            [3e-3, -3e-3, 3e-3], n_per_segment=10, ntens=6
+        )
+        s_e = StrainDriver(exact).run(load).stress
+        s_b = StrainDriver(broyden).run(load).stress
+        np.testing.assert_allclose(np.asarray(s_b), np.asarray(s_e),
+                                   rtol=1e-6, atol=1e-6)
