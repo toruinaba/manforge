@@ -62,6 +62,22 @@ def test_objective_sums_over_targets(model, driver_factory, target, space):
     assert three(x) == pytest.approx(3.0 * one(x))
 
 
+def test_broyden_fit_matches_exact(model, driver_factory, target, space):
+    """nr_jacobian="broyden" must find the same optimum as "exact"."""
+    r_exact = fit_params(model, driver_factory, target, space, max_iter=20)
+    r_broyden = fit_params(model, driver_factory, target, space, max_iter=20,
+                           nr_jacobian="broyden")
+    assert r_broyden.params["sigma_y0"] == pytest.approx(
+        r_exact.params["sigma_y0"], rel=1e-6
+    )
+
+
+def test_invalid_nr_jacobian_rejected_before_search(model, driver_factory, target, space):
+    with pytest.raises(ValueError, match="nr_jacobian"):
+        fit_params(model, driver_factory, target, space, max_iter=2,
+                   nr_jacobian="typo")
+
+
 # ---------------------------------------------------------------------------
 # Failure handling — an unsolvable parameter value must not kill the fit
 # ---------------------------------------------------------------------------

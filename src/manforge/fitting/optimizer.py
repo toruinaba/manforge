@@ -137,6 +137,7 @@ def fit_params(
     max_iter: int = 1000,
     tol: float | None = None,
     options: Mapping[str, Any] | None = None,
+    nr_jacobian: str = "exact",
 ) -> FitResult:
     """Fit material parameters to experimental stress-strain data.
 
@@ -185,6 +186,15 @@ def fit_params(
         differential_evolution).  ``None`` keeps the method default.
     options : Mapping or None
         Extra options forwarded verbatim to scipy, overriding the above.
+    nr_jacobian : {"exact", "broyden"}
+        NR Jacobian strategy for the integrator each evaluation constructs —
+        see :class:`~manforge.simulation.integrator._PythonIntegratorBase`.
+        ``"broyden"`` is several times faster per evaluation on models
+        without hand-derived solvers (measured ~4× on YU) and a fit pays
+        that cost at every evaluation; the converged stresses agree with
+        ``"exact"`` to within the NR tolerance.  Opt-in because the extra
+        1–2 NR iterations per step can matter near the edge of the solvable
+        parameter region.
 
     Returns
     -------
@@ -196,7 +206,10 @@ def fit_params(
     bounds = space.bounds
 
     failures = FailureLog()
-    obj_fn = build_objective(model, driver_factory, targets, space, failures)
+    obj_fn = build_objective(
+        model, driver_factory, targets, space, failures,
+        nr_jacobian=nr_jacobian,
+    )
 
     # Probe the starting point before handing over to scipy.  If x0 itself is
     # unsolvable the optimiser cannot compute a first gradient and every

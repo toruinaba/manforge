@@ -75,6 +75,8 @@ def build_objective(
     targets: Sequence["FitTarget"],
     space: ParameterSpace,
     failures: FailureLog | None = None,
+    *,
+    nr_jacobian: str = "exact",
 ) -> Callable[[Sequence[float] | FloatArray], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
@@ -106,6 +108,11 @@ def build_objective(
     failures : FailureLog or None
         Collects the non-convergent evaluations.  ``None`` (default) still
         penalises them, but does not report which ones.
+    nr_jacobian : {"exact", "broyden"}
+        Forwarded to :class:`~manforge.simulation.integrator.PythonIntegrator`.
+        ``"broyden"`` cuts the per-evaluation cost several-fold for models
+        without hand-derived solvers — worthwhile here because a fit pays the
+        integration cost hundreds of times.
 
     Returns
     -------
@@ -122,7 +129,7 @@ def build_objective(
         all_params = space.model_params(x, param_names)
         extra = {"dimension": dimension} if _accepts_dimension else {}
         m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
-        integrator = PythonIntegrator(m)
+        integrator = PythonIntegrator(m, nr_jacobian=nr_jacobian)
         # LinAlgError is listed even though it subclasses ValueError (which is
         # otherwise a setup error left to propagate): a singular NR Jacobian
         # is precisely "this parameter value is unsolvable", not a bug.
