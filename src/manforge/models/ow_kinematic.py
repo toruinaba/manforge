@@ -56,7 +56,7 @@ Notes
 * The plastic increment is always solved via the vector NR (σ is Implicit).
 """
 
-from manforge.core.material import MaterialModel
+from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Implicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
@@ -80,6 +80,17 @@ class OWKinematic(MaterialModel):
 
     stress = Implicit(shape=NTENS, doc="Cauchy stress")
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    param_meta = {
+        "E": ParamMeta(doc="Young's modulus", unit="MPa",
+                       default=210_000.0, bounds=(1e3, 1e6)),
+        "nu": ParamMeta(doc="Poisson's ratio", default=0.3, bounds=(0.0, 0.49)),
+        "sigma_y0": ParamMeta(doc="Initial yield stress", unit="MPa",
+                              default=250.0, bounds=(1.0, 5e3)),
+        "C_k": ParamMeta(doc="Kinematic hardening modulus (Ohno-Wang)", unit="MPa",
+                         default=20_000.0, bounds=(0.0, 1e6)),
+        "gamma": ParamMeta(doc="Critical-state coefficient (Ohno-Wang)",
+                           default=100.0, bounds=(0.0, 1e4)),
+    }
     alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
@@ -122,6 +133,8 @@ class OWKinematic3D(OWKinematic):
         Material parameters.
     """
 
+    dimension = SOLID_3D
+
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
@@ -136,6 +149,8 @@ class OWKinematicPS(OWKinematic):
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
+
+    dimension = PLANE_STRESS
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
@@ -154,6 +169,8 @@ class OWKinematic1D(OWKinematic):
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
+
+    dimension = UNIAXIAL_1D
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

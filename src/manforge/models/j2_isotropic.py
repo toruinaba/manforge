@@ -24,7 +24,7 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 
 import autograd.numpy as anp
 
-from manforge.core.material import MaterialModel
+from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, SCALAR, State, StateUpdate, StateResidual
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
@@ -54,6 +54,15 @@ class J2Isotropic(MaterialModel):
     """
 
     param_names = ["E", "nu", "sigma_y0", "H"]
+    param_meta = {
+        "E": ParamMeta(doc="Young's modulus", unit="MPa",
+                       default=210_000.0, bounds=(1e3, 1e6)),
+        "nu": ParamMeta(doc="Poisson's ratio", default=0.3, bounds=(0.0, 0.49)),
+        "sigma_y0": ParamMeta(doc="Initial yield stress", unit="MPa",
+                              default=250.0, bounds=(1.0, 5e3)),
+        "H": ParamMeta(doc="Isotropic hardening modulus (linear)", unit="MPa",
+                       default=1000.0, bounds=(0.0, 1e5)),
+    }
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
     def __init__(self, dimension: StressDimension = SOLID_3D, *,
@@ -101,6 +110,8 @@ class J2Isotropic3D(J2Isotropic):
     H : float
         Isotropic hardening modulus (linear).
     """
+
+    dimension = SOLID_3D
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
@@ -227,6 +238,8 @@ class J2IsotropicPS(J2Isotropic):
         Isotropic hardening modulus (linear).
     """
 
+    dimension = PLANE_STRESS
+
     def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
         super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
@@ -251,6 +264,8 @@ class J2Isotropic1D(J2Isotropic):
     H : float
         Isotropic hardening modulus (linear).
     """
+
+    dimension = UNIAXIAL_1D
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)

@@ -51,7 +51,7 @@ Notes
   generic numerical_newton + autodiff path is used.
 """
 
-from manforge.core.material import MaterialModel
+from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, NTENS, SCALAR
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 
@@ -72,6 +72,17 @@ class AFKinematic(MaterialModel):
     """
 
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
+    param_meta = {
+        "E": ParamMeta(doc="Young's modulus", unit="MPa",
+                       default=210_000.0, bounds=(1e3, 1e6)),
+        "nu": ParamMeta(doc="Poisson's ratio", default=0.3, bounds=(0.0, 0.49)),
+        "sigma_y0": ParamMeta(doc="Initial yield stress", unit="MPa",
+                              default=250.0, bounds=(1.0, 5e3)),
+        "C_k": ParamMeta(doc="Kinematic hardening modulus (AF)", unit="MPa",
+                         default=20_000.0, bounds=(0.0, 1e6)),
+        "gamma": ParamMeta(doc="Dynamic recovery coefficient (AF)",
+                           default=100.0, bounds=(0.0, 1e4)),
+    }
     alpha = Explicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
 
@@ -108,6 +119,8 @@ class AFKinematic3D(AFKinematic):
         Material parameters.
     """
 
+    dimension = SOLID_3D
+
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
@@ -122,6 +135,8 @@ class AFKinematicPS(AFKinematic):
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
+
+    dimension = PLANE_STRESS
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
@@ -140,6 +155,8 @@ class AFKinematic1D(AFKinematic):
     E, nu, sigma_y0, C_k, gamma : float
         Material parameters.
     """
+
+    dimension = UNIAXIAL_1D
 
     def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

@@ -15,6 +15,7 @@ from manforge.core.state import (
 )
 from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.core.material.fortran_binding import collect_bindings as _collect_bindings
+from manforge.core.material.meta import ParamMeta
 from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
 from manforge.core.result import ReturnMappingResult
 
@@ -108,6 +109,10 @@ class MaterialModel(ABC):
     """
 
     param_names: list[str]
+    # Optional UI/schema metadata keyed by parameter name.  Keys must be a
+    # subset of param_names (validated in __init_subclass__); models without
+    # metadata stay valid.
+    param_meta: dict[str, "ParamMeta"] = {}
     dimension: StressDimension = SOLID_3D
 
     def __init__(self, *, dimension: StressDimension = SOLID_3D):
@@ -137,6 +142,14 @@ class MaterialModel(ABC):
         # Skip intermediate abstract classes that have not yet implemented yield_function.
         if cls.yield_function is MaterialModel.yield_function:
             return
+        # param_meta keys must be a subset of param_names (models without
+        # metadata remain valid).
+        unknown_meta = set(cls.param_meta) - set(cls.param_names)
+        if unknown_meta:
+            raise ValueError(
+                f"{cls.__name__}: param_meta keys {sorted(unknown_meta)} are not "
+                f"in param_names {cls.param_names}"
+            )
         # Collect StateField descriptors from MRO and derive state_names / implicit_state_names.
         fields = collect_state_fields(cls)
         # Auto-attach "stress" as Explicit if not declared.
