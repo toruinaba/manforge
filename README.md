@@ -3,39 +3,37 @@
 Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレームワーク。降伏関数と硬化則を実装するだけで、return mapping / consistent tangent (autograd 自動微分) / パラメータフィッティング / Fortran クロス検証がすべて使える。
 
 - autograd による **consistent tangent 自動計算** — 手動でアルゴリズム接線を導出する必要なし
-- **汎用 NR ソルバ** — スカラー Δλ / ベクトル `[σ, Δλ, q]` の 2 経路を自動選択
+- **汎用 NR ソルバ** — スカラー Δλ / ベクトル `[σ, Δλ, q]` の 2 経路を自動選択。Broyden 更新 (`nr_jacobian="broyden"`) で数倍高速化
 - **多次元対応** — 3D ソリッド / 平面ひずみ / 平面応力 / 1D を `StressDimension` で統一管理
 - **組み込みモデル** — J2 等方硬化 / Armstrong-Frederick / Ohno-Wang を同梱
+- **サービス契約層** — WebAPI などへの組み込み用に plain な入出力の `ModelRegistry` / `run_simulation` を提供
+
+詳細な API 仕様は各モジュールの docstring が正。本 README は入口と判断基準を提供する。
 
 ---
 
-## Installation
+## 1. Installation
+
+現状は PyPI 未公開のため、ソースからの導入が正:
 
 ```bash
-pip install manforge
-pip install "manforge[dev]"      # pytest 含む
-pip install "manforge[examples]" # matplotlib 含む
-pip install "manforge[fortran]"  # meson/ninja 含む (Fortran ビルド用)
-```
-
-開発環境 (ソースから):
-
-```bash
+git clone <this-repo> && cd manforge
 uv sync --extra dev          # テスト依存含む
-uv sync --all-extras         # 全 extras
+uv sync --all-extras         # matplotlib / Fortran ビルド依存含む
 
-# Fortran モジュールのビルド (gfortran 必須)
-uv sync --extra fortran
+# Fortran モジュールのビルド (gfortran 必須、無ければ Docker: make docker-build)
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 ```
 
+PyPI 公開後は `pip install manforge` (+ extras: `[dev]` / `[examples]` / `[fortran]`)。
+
 ---
 
-## Quick Start
+## 2. Quick Start
 
 ```python
 import numpy as np
-from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.models import J2Isotropic3D
 from manforge.simulation import StrainDriver, PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
 
@@ -49,14 +47,23 @@ result = StrainDriver(PythonIntegrator(model)).run(load)
 print(f"Final σ11: {result.stress[-1, 0]:.1f} MPa")
 ```
 
-詳しい使用例は `examples/` を参照。
+繰返し載荷は `FieldHistory` のコンストラクタ群で生成できる:
+
+```python
+load = FieldHistory.cyclic_strain(peaks=[5e-3, -5e-3, 5e-3], n_per_segment=25, ntens=6)
+# 他: triangular_strain / sine_strain / decaying_cyclic_strain (+ 各 stress 版)
+```
+
+実行できる使用例は `examples/` を参照。
 
 ---
 
-## Concepts
+## 3. Concepts
+
+### 3.1 三層構造
 
 ```
-MaterialModel  ──defines──▶  yield_function / update_state / state_residual
+MaterialModel  ──defines──▶  yield_function / update_state / state_residual / flow
       │
       ▼
   Integrator   ──wraps──▶  stress_update(strain_inc, stress_n, state_n) → StressUpdateResult
@@ -66,51 +73,206 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
                             iter_run(load) → Iterator[DriverStep]
 ```
 
-**Integrator の種類**
+### 3.2 Integrator の種類
 
 | クラス | 内部ソルバ | 用途 |
 |--------|----------|------|
 | `PythonIntegrator(model)` | auto (user_defined があれば使用、なければ NR) | 通常用途 |
-| `PythonNumericalIntegrator(model)` | numerical_newton 固定 | NR 強制 |
+| `PythonNumericalIntegrator(model)` | numerical_newton 固定 | NR 強制 (検証時) |
 | `PythonAnalyticalIntegrator(model)` | user_defined 固定 | 閉形式解と比較する場合 |
 | `FortranIntegrator.from_model(fortran, subroutine, model)` | Fortran f2py | UMAT クロス検証 |
 | `SubSteppingIntegrator(integrator)` | 上記をラップ | 大きい Δε で収束しない場合 |
 
-**Voigt 規約** — 3D ソリッドは `[σ11, σ22, σ33, σ12, σ13, σ23]` (6 成分)。剪断成分には Mandel スケーリング (×√2) を内部適用。
+**`nr_jacobian="broyden"`** (コンストラクタ kwarg、デフォルト `"exact"`) — NR ヤコビアンをステップ初回だけ autodiff で厳密計算し、以降は Broyden rank-1 更新で済ませる。残差が減らないと厳密再計算に自動フォールバック。実測で YU 級モデル 2〜4 倍高速 (反復 1〜2 回増)。**consistent tangent は常に厳密**なので精度への影響はない。閉形式フックを持たないモデル (AF/OW 等) の長い履歴・フィッティングで推奨。
 
-**収束判定と Δλ の符号** — リターンマッピングの残差系は Δλ < 0 側にも根を持つ。Δλ は塑性乗数なので負は塑性ひずみの巻き戻りを意味し、KKT 条件に違反する。残差ノルムはこの2つの根を区別できない（`||R|| ~ 1e-14` まで収束しうる）ため、**フレームワークは Δλ < 0 を非収束として扱う**。Δε が大きいと弾性予測 σ_trial が許容枝の外に出てこの根に落ちることがある。既定では `RuntimeError`、`raise_on_nonconverged=False` なら `converged=False` が返る。`user_defined_return_mapping` が返す `converged` も同じ規約で扱われる。
+### 3.3 Voigt 規約と FlowVector
 
-**増分の自動分割** — `SubSteppingIntegrator` は上記の非収束を検知して、同じ増分を 2 → 4 → 8 分割で再試行する。ABAQUS の `PNEWDT` が全体増分を縮めるのに対し、こちらは**失敗した `stress_update` 呼び出しの内側だけ**を刻む。
+3D ソリッドの応力・ひずみは 6 成分 `[11, 22, 33, 12, 13, 23]` (ABAQUS UMAT 規約)。剪断成分の扱いが**量の種類で異なる 2 層契約**になっている:
+
+- **応力系** (σ, s, 背応力 α など): **physical shear** — テンソル成分そのもの
+- **ひずみ系** (ε, ε_p, Δε): **engineering shear** (γ12 = 2ε12) — ABAQUS `DSTRAN`・弾性剛性 `σ = C:ε`・driver 入力すべてこちら
+
+塑性流れ方向 n は同じ方向に 2 つの Voigt 表現 (剪断 ×2 差) があり、取り違えると**単軸/二軸では消える silent error** になる。そこで `flow(state)` は生の ndarray ではなく `FlowVector` を返し、使用側が規約を名指しする:
 
 ```python
-from manforge.simulation import StrainDriver, PythonNumericalIntegrator, SubSteppingIntegrator
-
-integrator = SubSteppingIntegrator(PythonNumericalIntegrator(model), max_substeps=16)
-result = StrainDriver(integrator).run(load)
+n = model.flow(state)
+C @ n.strain_like          # engineering shear — Δε_p = Δλ·n、C@n、残差のひずみ次元
+n.stress_like              # physical shear — 背応力など応力系内部変数の発展則
+n * 2.0                    # TypeError — 規約を名指ししない演算は拒否される
 ```
 
-opt-in のラッパで、1回目は必ず未分割で委譲する。収束する増分は結果・反復数・接線が一切変わらない。分割数は `StressUpdateResult.n_substeps` で確認できる（分割なしなら 1）。分割時の `ddsdde` は**最終サブステップの整合接線**で、連鎖律による厳密な合成ではない（`StressDriver` / `MixedDriver` の外側 NR の収束が僅かに鈍る可能性がある）。`max_substeps` を使い切っても収束しない場合は、内側と同じ規約で raise / `converged=False` を返す。
+詳細 (オーバーライド方法含む) は § 5.3 と `core/state.py` の docstring。
+
+### 3.4 非収束との付き合い方
+
+材料点の return mapping は収束しないことがあり、フレームワークは層ごとに異なる扱いを用意している。
+
+**収束判定はスケール不変** — NR の許容値は `tol × max(1, ‖σ_trial‖_∞)` (driver 外側 NR は `tol + rtol·‖σ_target‖_∞`)。MPa でも Pa でも同じ挙動になる。
+
+**Δλ < 0 は非収束扱い** — 残差系は Δλ < 0 側にも根を持つが、負の塑性乗数は KKT 条件違反 (塑性ひずみの巻き戻り)。残差ノルムはこの根を区別できないため、フレームワークが符号で弾く。大きい Δε で σ_trial が許容枝の外に出ると起きる。
+
+**増分の自動分割** — `SubSteppingIntegrator(integrator, max_substeps=16)` は非収束を検知して同じ増分を 2 → 4 → 8 分割で再試行する。opt-in のラッパで、収束する増分では結果・反復数・接線が一切変わらない。詳細は `simulation/integrator/substepping.py` の docstring。
+
+**非収束を値として受け取る** — 既定では `RuntimeError`。`PythonIntegrator(model, raise_on_nonconverged=False)` にすると driver が `DriverStep.converged=False` の step を yield して停止し、呼び出し側が部分履歴を使って判断できる。
+
+**フィッティング中の非収束はペナルティ** — 探索空間には解の存在しないパラメータ値が普通に含まれるため、`fit_params` は非収束の評価を例外にせず有限の大ペナルティとして扱い、最適化を続行する (§ 4.3)。
 
 ---
 
-## User Guide
+## 4. モデルを使う
 
-### 5.1 モデルを定義する
+### 4.1 組み込みモデルと次元選択
 
-`MaterialModel` を直接継承し、`dimension=` 引数で応力状態を指定する:
-
-| `dimension` | NTENS | 想定要素 |
-|------------|-------|---------|
-| `SOLID_3D` (default) | 6 | C3D8 等 3D ソリッド |
-| `PLANE_STRAIN` | 4 | CPE4 / CAX4 |
-| `PLANE_STRESS` | 3 | CPS4 / シェル |
-| `UNIAXIAL_1D` | 1 | 1D トラス / フィッティング用 |
-
-**Explicit-state (J2 型)** — 状態変数を `Explicit` として宣言し `update_state` に closed-form 更新を書く。NR はスカラー Δλ のみ解く。
+モデルファミリごとに親クラス (物理) + 次元特化の具象クラスがある:
 
 ```python
-import autograd.numpy as anp
-from manforge.core import Implicit, Explicit, NTENS, SCALAR
+from manforge.models import (
+    J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,    # J2 等方硬化
+    AFKinematic3D, AFKinematicPS, AFKinematic1D,    # Armstrong-Frederick
+    OWKinematic3D, OWKinematicPS, OWKinematic1D,    # Ohno-Wang
+)
+model = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
+```
+
+| 次元 | NTENS | 想定要素 |
+|------|-------|---------|
+| `*3D` (`SOLID_3D`) | 6 | C3D8 等 3D ソリッド |
+| — (`PLANE_STRAIN`) | 4 | CPE4 / CAX4 |
+| `*PS` (`PLANE_STRESS`) | 3 | CPS4 / シェル |
+| `*1D` (`UNIAXIAL_1D`) | 1 | 1D トラス / フィッティング用 |
+
+平面ひずみは専用クラスが無いため親クラスに直接 `dimension=` を渡す:
+
+```python
+from manforge.models import J2Isotropic
+from manforge.core.dimension import PLANE_STRAIN
+model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+```
+
+### 4.2 シミュレーション実行
+
+```python
+from manforge.simulation import StrainDriver, StressDriver, PythonIntegrator
+from manforge.simulation.types import FieldHistory, FieldType
+
+# ひずみ制御
+result = StrainDriver(PythonIntegrator(model)).run(load)
+result.stress    # np.ndarray (N, ntens)
+result.strain    # np.ndarray (N, ntens)
+
+# 状態変数も収集
+result = StrainDriver(PythonIntegrator(model)).run(
+    load, collect_state={"ep": FieldType.STRAIN})
+result.fields["ep"].data   # np.ndarray (N,)
+
+# 応力制御 (目標応力を外側 NR で満たすひずみを解く)
+result = StressDriver(PythonIntegrator(model)).run(
+    FieldHistory(FieldType.STRESS, "Stress", stress_target))
+```
+
+**混合制御** — 一部成分はひずみ指定・残りは応力指定 (例: 3D モデルで ε11 を駆動し σ22..σ23 = 0 の単軸応力試験を再現):
+
+```python
+from manforge.simulation import MixedDriver
+driver = MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0])
+result = driver.run(load_eps11)   # load.data は (N, 1) — ε11 のみ
+```
+
+**iter_run** — ステップごとに `DriverStep` を受け取り、途中分岐・打切りができる:
+
+```python
+for step in StrainDriver(PythonIntegrator(model)).iter_run(load):
+    if step.result.is_plastic:
+        print(f"Plasticity onset at step {step.i}")
+        break
+```
+
+各ステップの詳細 (`dlambda`, `n_iterations`, NR 残差履歴 `residual_history`) は `result.step_results[i]` / `step.result` から参照できる。`StressDriver`/`MixedDriver` では `step.n_outer_iter` / `step.residual_inf` で外側 NR を確認できる。
+
+### 4.3 パラメータフィッティング
+
+```python
+from manforge.simulation.driver import StrainDriver
+from manforge.fitting import fit_params
+
+fit_config = {
+    "sigma_y0": (200.0, (100.0, 500.0)),  # (初期値, (下限, 上限))
+    "H":        (500.0, (0.0,  5000.0)),
+}
+result = fit_params(
+    model,
+    driver_factory=lambda i: StrainDriver(i),
+    exp_data={"strain": strain_exp, "stress": stress_exp},
+    fit_config=fit_config,
+    fixed_params={"E": 210_000.0, "nu": 0.3},
+    method="L-BFGS-B",          # / "Nelder-Mead" / "differential_evolution"
+    nr_jacobian="broyden",      # 閉形式フックの無いモデルでは数倍高速
+    max_iter=1000,
+)
+print(result.params, result.residual)
+```
+
+**非収束の扱い** — 探索空間には return mapping に実根が無いパラメータ値が普通に含まれる。そのため評価中の非収束は例外ではなく**有限の大ペナルティ** (1e30) としてスコアされ、最適化は続行する (`inf` にしないのは L-BFGS-B の有限差分勾配を汚染しないため)。`FitResult.n_failed` に失敗評価数、`failure_message` / `failure_params` に最初の失敗の再現情報が入る。**全評価が失敗**した場合のみ raise し、メッセージが 2 ケースを区別する: 初期値自体が解けない「fitting cannot start」(初期値を見直す; データ間引きで Δε が広がると起きやすい) と、初期値は解けたが探索が全滅した「no point the optimiser tried was」(bounds を狭める)。
+
+**相関パラメータ — `ParameterSpace`** — `Y < B` のような順序制約は、比を最適化変数にして下限 1.0 を課すと不等式制約なしで表現できる:
+
+```python
+from manforge.fitting import ParameterSpace
+
+space = ParameterSpace(
+    free={"Y": (200.0, (50.0, 600.0)),
+          "B_ratio": (1.5, (1.0, 5.0))},        # B/Y >= 1 ⇔ Y <= B
+    fixed={"E": 210_000.0, "nu": 0.3},
+    derived={"B": lambda p: p["Y"] * p["B_ratio"]},
+)
+result = fit_params(model, driver_factory, exp_data, space, max_iter=200)
+result.params["B"]   # 復元済み
+```
+
+**複数カーブ同時フィット — `FitTarget` / `Observation`** — 2 階層になっているのは計算コストが違うため。`FitTarget` = **1 回の解析** (載荷履歴 1 本 + driver 1 つ、目的関数 1 評価あたり driver run 1 回)。`Observation` = **1 本の実験カーブ** (同一ターゲット上の複数 observation は解析結果を共有、追加コストほぼゼロ):
+
+```python
+from manforge.fitting import FitTarget, Observation
+from manforge.simulation.driver import StressDriver
+
+targets = [
+    FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較
+        load=FieldHistory(FieldType.STRAIN, "Strain", strain_hist),
+        observations=[
+            Observation(values=sigma11_exp, component=0),
+            Observation(values=ep_exp, field="ep", weight=1e8),  # スケール差は weight で調整
+        ],
+    ),
+    FitTarget(                       # 応力制御実験: このターゲットだけ driver が違う
+        load=FieldHistory(FieldType.STRESS, "Stress", stress_hist),
+        observations=[Observation(values=strain_exp, field="Strain", component=0)],
+        driver_factory=lambda i: StressDriver(i),
+    ),
+]
+result = fit_params(model, lambda i: StrainDriver(i), targets, fit_config,
+                    fixed_params={"E": 210_000.0, "nu": 0.3})
+```
+
+各 observation の残差二乗和は**データ点数で割られる** (長いカーブが支配するのを防ぐ)。デフォルトの比較は点対点 MSE で、**実験とシミュレーションのサンプリングが一致している必要がある**。
+
+**サンプリングが一致しない実験データ — `metric="pcm"`** — 実験が細かく計測され、シミュレーションを粗い増分で回す場合は、点対点でなく曲線間面積で比較する Partial Curve Mapping を使う:
+
+```python
+Observation(values=stress_exp, x_values=strain_exp, metric="pcm", component=0)
+```
+
+点数・x 範囲が違ってよく、ヒステリシスループのような多価カーブも扱える。注意: 粗い増分は降伏コーナーを弦で切るため**複数パラメータの同時フィットにバイアス**が乗る (実測: 30 増分で H に 12% 誤差、400 増分で消失)。単一パラメータの掃引は不偏。詳細は `fitting/metrics.py` の docstring。
+
+---
+
+## 5. モデルを作る
+
+### 5.1 Explicit 型 (J2 型) — closed-form 更新
+
+状態変数を `Explicit` として宣言し、`update_state` に閉形式更新を書く。NR はスカラー Δλ のみ解く:
+
+```python
+from manforge.core import Explicit, SCALAR
 from manforge.core.material import MaterialModel
 from manforge.core.dimension import SOLID_3D, StressDimension
 
@@ -129,57 +291,14 @@ class MyModel(MaterialModel):
         return [self.ep(state_n["ep"] + dlambda)]
 ```
 
-`elastic_stiffness` は `self.E` と `self.nu` から自動生成。状態依存の場合のみ `elastic_stiffness(self, state=None)` を override する。
+`elastic_stiffness` は `self.E`/`self.nu` から自動生成 (状態依存の場合のみ override)。物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスはデフォルト `dimension` の指定のみを担う — 参照実装: `src/manforge/models/j2_isotropic.py`。
 
-**要素タイプの切り替え (モデル使用者向け)**
+### 5.2 Implicit 型 (Ohno-Wang 型) — 後方 Euler 残差
 
-組み込みモデルは stress-state ごとに専用クラスを提供する。対応するクラスを選ぶだけでよい:
-
-```python
-from manforge.models import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-
-model_3d = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # SOLID_3D
-model_ps = J2IsotropicPS(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # PLANE_STRESS
-model_1d = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)  # UNIAXIAL_1D
-```
-
-平面ひずみは専用クラスが無いため、親クラス `J2Isotropic` に `dimension=PLANE_STRAIN` を渡して直接インスタンス化する:
-
-```python
-from manforge.models import J2Isotropic
-from manforge.core.dimension import PLANE_STRAIN
-
-model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-```
-
-**新しいモデルを開発する場合 (モデル開発者向け)**
-
-物理ロジック (yield_function / update_state 等) は stress-state に依存しないため、親クラスに 1 度だけ実装する。stress-state ごとの専用クラスはデフォルト `dimension` の指定と閉形式 override のみを担う:
-
-```python
-from manforge.core.material import MaterialModel
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
-
-class MyModel(MaterialModel):            # 親クラス: 物理ロジックを 1 度実装
-    ...
-
-class MyModel3D(MyModel):                # デフォルト dimension のみ指定
-    def __init__(self, *, dimension: StressDimension = SOLID_3D, **kwargs):
-        super().__init__(dimension=dimension, **kwargs)
-
-class MyModelPS(MyModel):
-    def __init__(self, *, dimension: StressDimension = PLANE_STRESS, **kwargs):
-        super().__init__(dimension=dimension, **kwargs)
-```
-
-参照実装: `src/manforge/models/j2_isotropic.py`
-
-**Implicit-state (Ohno-Wang 型)** — `update_state` が closed-form で解けない場合は状態変数を `Implicit` として宣言し `state_residual` に後方 Euler 残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる。
+閉形式で解けない発展則は状態変数を `Implicit` として宣言し、`state_residual` に残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる (ベクトル NR):
 
 ```python
 from manforge.core import Implicit, NTENS, SCALAR
-from manforge.core.dimension import SOLID_3D, StressDimension
-from manforge.core.material import MaterialModel
 
 class MyImplicitModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
@@ -187,417 +306,163 @@ class MyImplicitModel(MaterialModel):
     alpha  = Implicit(shape=NTENS, doc="backstress tensor")
     ep     = Implicit(shape=SCALAR, doc="equivalent plastic strain")
 
-    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0, C_k, gamma):
-        super().__init__(dimension=dimension)
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-        self.C_k = C_k; self.gamma = gamma
-
     def yield_function(self, state):
-        xi = state["stress"] - state["alpha"]
-        return self.vonmises(xi) - self.sigma_y0
+        return self.vonmises(state["stress"] - state["alpha"]) - self.sigma_y0
 
     def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
         R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = ...         # shape (ntens,)
+        R_alpha = ...   # 後方 Euler 残差, shape (ntens,)
         R_ep = state_new["ep"] - state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 ```
 
-参照実装: `src/manforge/models/ow_kinematic.py`
+参照実装: `src/manforge/models/ow_kinematic.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
 
-**Δλ 行残差のカスタム指定 (粘塑性)** — `state_residual` に `self.dlambda(R_dl)` を含めると NR 残差の Δλ 行を差し替えられる。省略時は `yield_function(state) = 0`。
+### 5.3 flow のオーバーライド — 非関連流れ・手導出
 
-**user_defined フック** — 閉形式の return mapping が存在する場合は `user_defined_return_mapping(self, stress_trial, C, state_n)` を実装すると `method="auto"` で自動使用される。`None` を返すと汎用 NR にフォールバック。`J2Isotropic3D` は両フック実装済み。
-
-**組み込みモデル**
+デフォルトの流れ方向は関連流れ (`∂f/∂σ` を autodiff)。塑性ポテンシャル g ≠ f や手導出式を使う場合は `flow` を override する (**`default_stress_residual` は触らない** — 残差の代数は不変)。返り値は計算した規約を `strain_flow` / `stress_flow` で名指しする:
 
 ```python
-from manforge.models import AFKinematic3D, OWKinematic3D
+def flow(self, state):                       # 教科書形 (physical shear) で導出した場合
+    s_xi = self.dev(state["stress"]) - state["alpha"]
+    return self.stress_flow(1.5 * s_xi / self.vonmises_norm(s_xi))
 
-model_af = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
-model_ow = OWKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=0.05)
+def flow(self, state):                       # engineering shear で導出済みの場合
+    return self.strain_flow(my_n_voigt)
 ```
 
-`J2Isotropic` / `AFKinematic` / `OWKinematic` は親クラスとしても直接使用でき、3D / PS / 1D 派生 (`*3D`, `*PS`, `*1D`) を提供する (例: `AFKinematicPS`, `OWKinematic1D`)。
+生の ndarray を返すと境界で `TypeError`。モデル内で ×2/÷2 の変換算術を書かないことが設計意図 (§ 3.3)。
 
----
+### 5.4 弾塑性分岐のカスタム — elastic_check / elastic_update_state
 
-### 5.2 シミュレーションを実行する
+既定の弾性判定は `yield_function(state_trial) <= 0`。**弾性域が降伏関数の内部と一致しないモデル** (subloading-surface 系が典型: 分岐が 2 条件の論理和になり、1 つの滑らかな関数のゼロ等値面で書けない) のみ `elastic_check(state_n, *, stress_trial, strain_inc=None) -> bool` を override する。弾性ステップでも動く状態量 (応力に追従する正規降伏比など) は `elastic_update_state` に書く。古典的塑性では両方ともデフォルトで正しい。詳細な設計理由は `core/material/base.py` の docstring。
 
-```python
-import numpy as np
-from manforge.simulation import StrainDriver, StressDriver, PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+### 5.5 user_defined フック — 閉形式ソルバ
 
-# ひずみ制御
-strain_history = np.zeros((100, 6))
-strain_history[:, 0] = np.linspace(0, 5e-3, 100)
-load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
-result = StrainDriver(PythonIntegrator(model)).run(load)
-result.stress    # np.ndarray (N, ntens)
-result.strain    # np.ndarray (N, ntens)
+閉形式の return mapping が存在する場合は `user_defined_return_mapping(self, stress_trial, C, state_n)` を実装すると `PythonIntegrator` が自動使用する (`None` を返すと汎用 NR にフォールバック)。consistent tangent の閉形式は `user_defined_tangent`。`J2Isotropic3D` が両フックの参照実装。
 
-# 状態変数を収集する
-result = StrainDriver(PythonIntegrator(model)).run(
-    load,
-    collect_state={"ep": FieldType.STRAIN}
-)
-result.fields["ep"].data   # np.ndarray (N,)
+### 5.6 検証ワークフロー
 
-# 応力制御
-stress_target = np.zeros((100, 6))
-stress_target[:, 0] = np.linspace(0, 300.0, 100)
-result = StressDriver(PythonIntegrator(model)).run(
-    FieldHistory(FieldType.STRESS, "Stress", stress_target)
-)
-```
+新しいモデルを実装するときの推奨手順:
 
-`DriverResult.step_results` は `list[StressUpdateResult]`。各ステップの詳細にアクセスできる:
+1. **数値収束の確認** — `PythonNumericalIntegrator` で残差が落ちることを確認。`result.residual_history` で NR 収束履歴 (二次収束なら桁が倍々で落ちる) を見られる
+2. **ヤコビアンのブロック検証** — 手導出式がある場合、AD 値と要素ごとに照合:
 
 ```python
-step = result.step_results[15]
-print(step.dlambda, step.n_iterations)
-```
-
-**iter_run** — ステップごとに `DriverStep` を受け取るジェネレータ。途中で分岐・打切りができる:
-
-```python
-driver = StrainDriver(PythonIntegrator(model))
-for step in driver.iter_run(load):
-    if step.result.is_plastic:
-        print(f"Plasticity onset at step {step.i}, ep={step.result.state['ep']:.4e}")
-        break
-```
-
-`StressDriver` では `step.n_outer_iter` / `step.residual_inf` で外側 NR の収束状況を確認できる。非収束時は既定 `RuntimeError`; `raise_on_nonconverged=False` で `step.converged=False` の step を yield して consumer が判断することもできる。
-
----
-
-### 5.3 パラメータフィッティング
-
-```python
-from manforge.simulation.driver import StrainDriver
-from manforge.fitting import fit_params
-
-fit_config = {
-    "sigma_y0": (200.0, (100.0, 500.0)),  # (初期値, (下限, 上限))
-    "H":        (500.0, (0.0,  5000.0)),
-}
-result = fit_params(
-    model,
-    driver_factory=lambda i: StrainDriver(i),
-    exp_data=exp_data,
-    fit_config=fit_config,
-    fixed_params={"E": 210_000.0, "nu": 0.3},
-    method="L-BFGS-B",
-    max_iter=1000,          # 試行回数上限 (テストでは小さく)
-    tol=1e-12,              # 収束判定 (method ごとの主要 tolerance にマップ)
-    options={"eps": 1e-6},  # それ以外は scipy へ素通し
-)
-print(result.params, result.residual)
-```
-
-`exp_data` は `{"strain": ..., "stress": ...}` の dict。詳細: `examples/example_fit_j2.py`
-
-**相関パラメータ — `ParameterSpace`**
-
-`Y < B` のような順序制約があるパラメータは、比を最適化変数にして下限 1.0 を課すと不等式制約なしで表現できる。`ParameterSpace` は「最適化変数」と「モデルパラメータ」を分離し、後者を前者から組み立てる。
-
-```python
-from manforge.fitting import ParameterSpace, fit_params
-
-space = ParameterSpace(
-    free={
-        "Y":       (200.0, (50.0, 600.0)),
-        "B_ratio": (1.5,   (1.0, 5.0)),    # B/Y >= 1 ⇔ Y <= B
-    },
-    fixed={"E": 210_000.0, "nu": 0.3},
-    derived={"B": lambda p: p["Y"] * p["B_ratio"]},
-)
-result = fit_params(model, driver_factory, exp_data, space, max_iter=200)
-result.params["B"]  # 復元済み
-```
-
-- `free` — 最適化変数 `{name: (初期値, (下限, 上限))}`。`bounds` は `None` で無制約。モデルパラメータでなくてよい（`B_ratio` は補助変数）。
-- `fixed` — 最適化中固定する値。
-- `derived` — `{name: fn}` の `fn(values) -> float` で他の値から算出。宣言順に評価されるので、先の derived を参照できる。
-
-`model.param_names` に無い変数（`B_ratio`）は自動的に除外してモデルへ渡す。`result.params` には free / fixed / derived すべてが入る。`fixed_params=` 引数は dict 形式専用で、`ParameterSpace` と併用すると `ValueError`。
-
-**複数カーブへの同時フィッティング — `FitTarget` / `Observation`**
-
-`exp_data` に `FitTarget` のリストを渡すと複数の実験カーブを同時にフィットできる。2 階層になっているのは計算コストが違うため:
-
-- `FitTarget` = **1 回の解析**。載荷履歴 1 本 + driver 1 つ。別実験（単調引張、ひずみ振幅の違う繰返し、応力制御のラチェッティング）はそれぞれ別ターゲットで、目的関数 1 評価あたり driver run 1 回のコストがかかる。
-- `Observation` = **1 本の実験カーブ**。同一ターゲット上の複数 observation（σ11 と σ22、応力と ep）は解析結果を共有するので追加コストはほぼゼロ。
-
-```python
-from manforge.fitting import FitTarget, Observation, fit_params
-from manforge.simulation.driver import StrainDriver, StressDriver
-from manforge.simulation.types import FieldHistory, FieldType
-
-targets = [
-    # ひずみ制御: σ11 と ep を同じ解析から比較
-    FitTarget(
-        load=FieldHistory(FieldType.STRAIN, "Strain", strain_hist),
-        observations=[
-            Observation(values=sigma11_exp, component=0),
-            Observation(values=ep_exp, field="ep", weight=1e8),
-        ],
-        name="tension",
-    ),
-    # 応力制御: このターゲットだけ driver が違う
-    FitTarget(
-        load=FieldHistory(FieldType.STRESS, "Stress", stress_hist),
-        observations=[Observation(values=strain_exp, field="Strain", component=0)],
-        driver_factory=lambda i: StressDriver(i),
-        name="ratchetting",
-    ),
-]
-result = fit_params(model, lambda i: StrainDriver(i), targets, fit_config,
-                   fixed_params={"E": 210_000.0, "nu": 0.3})
-```
-
-`Observation` の主な引数:
-
-| 引数 | 意味 |
-|------|------|
-| `values` | 実験値。`(N,)` または `(N, ntens)` |
-| `field` | 比較対象。`"Stress"` / `"Strain"` / モデルの state キー（`"ep"` 等） |
-| `component` | 比較する列。`None` (default) で全成分（`values` は 2-D 必須） |
-| `weights` | データ点ごとの重み（長さ `N`） |
-| `weight` | このカーブ全体の重み |
-
-**重み付けの規約** — 各 observation の残差二乗和は**データ点数で割られる**（平均二乗誤差）。点数の多いカーブが単に長いだけで支配的になるのを防ぐため。応力レベルやオーダーの違うカーブを混ぜる場合は `weight` で明示的に調整する（上の例では ep が O(1e-3)、応力が O(1e2) なので `weight=1e8`）。
-
-`driver_factory` はターゲットごとに指定でき、省略時は `fit_params` に渡したものを使う。全ターゲットが自前の `driver_factory` を持つなら `fit_params(model, None, ...)` でよい。`initial_stress` / `initial_state` もターゲット単位で指定できる（予荷重・予硬化状態の再現）。
-
-従来の `{"strain": ..., "stress": ...}` dict は 1 ターゲット・1 observation の短縮形として引き続き使える。
-
----
-
-### 5.4 検証
-
-新しいモデルを実装するときの推奨ワークフロー:
-
-1. **数値解で収束確認** — `PythonNumericalIntegrator` で残差が 0 に落ちることを確認
-2. **AD 値との照合** — `JacobianBlocks` でヤコビアン各ブロックを要素ごとに検証
-3. **FD tangent チェック** — `TangentChecker` で consistent tangent の精度を確認
-4. **Fortran への移植** — 検証済みブロック構造をそのままサブルーチン構成に対応
-
-**JacobianBlocks**
-
-```python
-import numpy.testing as npt
-from manforge.simulation.integrator import PythonIntegrator
 from manforge.verification import JacobianChecker
 
 result = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
 jac = JacobianChecker(model).compute(result, state_n)
-
-# part[残差名][状態名] でブロックにアクセス（デフォルトは両者とも同じ名前）
-npt.assert_allclose(jac.part["dlambda"]["stress"], my_n, rtol=1e-8)   # 降伏面勾配
-npt.assert_allclose(float(jac.part["dlambda"]["dlambda"]), -H, rtol=1e-8)
-
-# implicit state 付きモデル (例: Ohno-Wang)
-jac.part["alpha"]["stress"]       # ∂R_alpha/∂σ
-jac.part["ep"]["dlambda"]         # ∂R_ep/∂Δλ
-
-# opt-in: residual_name でラベルをカスタマイズ
-# alpha = Implicit(shape=NTENS, residual_name="R_alpha")
-# dlambda_residual_name = "R_yield"
-# → jac.part["R_alpha"]["stress"],  jac.part["R_yield"]["alpha"]
+jac.part["alpha"]["stress"]    # ∂R_alpha/∂σ — 手導出と npt.assert_allclose で比較
+jac.part["dlambda"]["dlambda"]
 ```
 
-**TangentChecker**
+3. **FD tangent チェック** — consistent tangent を中心差分と比較:
 
 ```python
 from manforge.verification import TangentChecker
-
-checker = TangentChecker(PythonIntegrator(model))
-result = checker.check(stress_n, state_n, strain_inc)
-print(result.passed, result.max_rel_err)
+r = TangentChecker(PythonIntegrator(model)).check(stress_n, state_n, strain_inc)
+print(r.passed, r.max_rel_err)
 ```
 
-`check_tangent(integrator, stress, state, deps)` の関数形式も後方互換として残っている。
-
-**CrosscheckStrainDriver**
+4. **実装同士のクロスチェック** — 閉形式 vs NR、または Python vs Fortran を全履歴で比較:
 
 ```python
-from manforge.simulation import PythonNumericalIntegrator, PythonAnalyticalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import CrosscheckStrainDriver, generate_strain_history
 
-history = generate_strain_history(model)
-load = FieldHistory(FieldType.STRAIN, "eps", history)
-cc = CrosscheckStrainDriver(
-    PythonNumericalIntegrator(model),
-    PythonAnalyticalIntegrator(model),
-)
-result = cc.run(load)
-print(f"Passed: {result.passed}  max_stress_err={result.max_stress_rel_err:.2e}")
+cc = CrosscheckStrainDriver(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model))
+cr = cc.run(FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model)))
+print(cr.passed, cr.max_stress_rel_err)
 ```
 
-`iter_run` で失敗ステップを詳細デバッグできる:
+通しの実例: `examples/example_custom_model_workflow.py`
 
-```python
-from manforge.verification import JacobianChecker
+### 5.7 Fortran UMAT クロス検証
 
-checker = JacobianChecker(model)
-for cr in cc.iter_run(load):
-    if not cr.passed:
-        cmp = checker.compare(cr.result_a, cr.result_b, cr.state_n)
-        print(cmp.blocks)
-        break
-```
-
----
-
-### 5.5 Fortran UMAT クロス検証
-
-**Build → Load → Integrate → Crosscheck** の 4 ステップ:
+**Build → Load → Integrate → Crosscheck**:
 
 ```bash
-# Build
-uv sync --extra fortran
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 uv run manforge list   # 確認
 ```
 
 ```python
-import numpy as np
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation import FortranIntegrator, StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation import FortranIntegrator
 from manforge.verification import FortranModule, CrosscheckStrainDriver
 
-model   = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 fortran = FortranModule("j2_isotropic_3d")
-
-# Fortran UMAT を StrainDriver で実行
 fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)
-strain_data = np.zeros((50, model.ntens))
-strain_data[:, 0] = np.linspace(0.0, 5e-3, 50)
-load = FieldHistory(FieldType.STRAIN, "eps", strain_data)
-result = StrainDriver(fc_int).run(load)
 
-# Python 実装との照合
 cc = CrosscheckStrainDriver(PythonIntegrator(model), fc_int)
 cr = cc.run(load)
 assert cr.passed, f"max stress rel err: {cr.max_stress_rel_err:.2e}"
 ```
 
-詳細は `fortran/README.md` を参照。
+ビルド手順の詳細は `fortran/README.md`、通しの実例は `examples/example_fortran_crosscheck.py`。
 
 ---
 
-## API Reference
+## 6. サービスに組み込む
 
-| シンボル | import パス |
-|---------|------------|
-| `MaterialModel` | `manforge.core.material` |
-| `Implicit`, `Explicit`, `NTENS` | `manforge.core` |
-| `SOLID_3D`, `PLANE_STRAIN`, `PLANE_STRESS`, `UNIAXIAL_1D` | `manforge.core.dimension` |
-| `ReturnMappingResult`, `StressUpdateResult` | `manforge.core` |
-| `PythonIntegrator`, `PythonNumericalIntegrator`, `PythonAnalyticalIntegrator`, `FortranIntegrator` | `manforge.simulation` |
-| `SubSteppingIntegrator` | `manforge.simulation` |
-| `StrainDriver`, `StressDriver` | `manforge.simulation` |
-| `FieldHistory`, `FieldType` | `manforge.simulation.types` |
-| `fit_params`, `FitResult`, `ParameterSpace`, `FitTarget`, `Observation` | `manforge.fitting` |
-| `TangentChecker`, `TangentCheckResult` | `manforge.verification` |
-| `JacobianChecker`, `JacobianBlocks`, `JacobianComparisonResult` | `manforge.verification` |
-| `CrosscheckStrainDriver`, `CrosscheckStressDriver` | `manforge.verification` |
-| `FortranModule` | `manforge.verification` |
-| `generate_strain_history` | `manforge.verification` |
-| `J2Isotropic`, `J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D` | `manforge.models` |
-| `AFKinematic`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D` | `manforge.models` |
-| `OWKinematic`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D` | `manforge.models` |
+WebAPI やジョブワーカーへの組み込み用に、`manforge.service` が **Web 依存ゼロの契約層**を提供する。入出力は plain な dict / ndarray / dataclass のみで、pydantic / HTTP 変換はデプロイ側の仕事。
 
----
+```python
+import numpy as np
+from manforge.service import ModelRegistry, default_registry, run_simulation
 
-## Project Layout
+# レジストリ: 名前 → モデルクラスの明示対応 (シングルトン無し —
+# デプロイごとに作り、公開するモデルだけを登録して監査可能にする)
+reg = default_registry()               # 参照 1D モデル入り
+reg.names()                            # ['af_kinematic', 'j2_isotropic', 'ow_kinematic']
 
-```
-src/manforge/
-├── core/
-│   ├── dimension.py       # StressDimension (SOLID_3D / PLANE_STRAIN / PLANE_STRESS / UNIAXIAL_1D)
-│   ├── material/
-│   │   ├── base.py             # MaterialModel (ABC)
-│   │   └── fortran_binding.py  # @verified_against_fortran / FortranBinding / collect_bindings
-│   ├── result.py          # ReturnMappingResult / StressUpdateResult
-│   └── state.py           # Implicit / Explicit / StateField / State
-├── autodiff/
-│   ├── backend.py         # autograd バックエンド
-│   └── operators.py       # dev, vonmises, hydrostatic, norm_mandel 等
-├── models/
-│   ├── j2_isotropic.py    # J2Isotropic 親 + 3D/PS/1D 派生 (参照実装)
-│   ├── af_kinematic.py    # AFKinematic 親 + 3D/PS/1D 派生 (Armstrong-Frederick)
-│   └── ow_kinematic.py    # OWKinematic 親 + 3D/PS/1D 派生 (Ohno-Wang 修正 AF)
-├── simulation/
-│   ├── types.py           # FieldType / FieldHistory / DriverResult
-│   ├── driver.py          # StrainDriver / StressDriver
-│   ├── _residual.py       # make_nr_residual / make_tangent_residual
-│   └── integrator/
-│       ├── base.py            # _PythonIntegratorBase (NR + consistent tangent)
-│       ├── python.py          # PythonIntegrator / PythonNumericalIntegrator / PythonAnalyticalIntegrator
-│       ├── fortran.py         # FortranIntegrator
-│       ├── fortran_module.py  # FortranModule (f2py 薄ラッパ)
-│       └── substepping.py     # SubSteppingIntegrator (増分の自動分割)
-├── fitting/
-│   ├── objective.py       # 残差二乗和 + build_objective
-│   ├── space.py           # ParameterSpace (最適化変数 → モデルパラメータ)
-│   ├── target.py          # FitTarget / Observation (複数カーブ同時フィット)
-│   └── optimizer.py       # fit_params() + FitResult
-├── verification/
-│   ├── comparator_base.py     # Comparator 抽象基底
-│   ├── tangent.py             # TangentChecker / check_tangent()
-│   ├── jacobian.py            # JacobianChecker / JacobianBlocks / JacobianComparisonResult
-│   ├── crosscheck_driver.py   # CrosscheckStrainDriver / CrosscheckStressDriver
-│   ├── fortran_check.py       # check_bindings (Fortran ↔ Python ランタイム比較)
-│   └── test_cases.py          # generate_strain_history 等
-└── utils/
-    ├── voigt.py           # Voigt ↔ full tensor, Mandel 変換
-    ├── tensor.py          # 4 階テンソル演算
-    └── smooth.py          # smooth_sqrt / abs / norm / macaulay / direction
+# describe() = GET /models 相当。param_meta (単位・説明・デフォルト・範囲)
+# から WebUI の入力フォームを自動生成できる
+d = reg.describe("j2_isotropic")
+d.param_meta["E"]                      # ParamMeta(doc="Young's modulus", unit="MPa", default=210000.0, ...)
+
+# 実行: 生のリストを受け取り plain な配列を返す
+out = run_simulation(
+    reg.get("j2_isotropic"),
+    params={"E": 206e3, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0},
+    load=np.linspace(0, 5e-3, 1000),   # ひずみ履歴 (control="stress" で応力制御)
+    include_fields=["ep"],             # 状態量は選択制 (デフォルト応力のみ)
+    progress=lambda done, total: ...,  # ジョブ進捗の報告に
+)
+out.stress, out.strain, out.fields["ep"]
 ```
 
+**非収束は値で返る** — パラメータ探索中のユーザーは解の無い値を普通に入力するため、`run_simulation` は途中で解けなくなっても raise せず、そこまでの部分履歴 + `converged=False` / `failed_step` を返す (API 層は 200 で返し、UI が「ステップ k で非収束」と部分曲線を描ける)。一方、パラメータ名の過不足や未知の `include_fields` は**呼び出し側のバグ**なので `ValueError` (API 層で 400)。
+
+**非公開モデルの登録規約** — 非公開モデルパッケージは `MODELS: dict[str, type[MaterialModel]]` を公開し、デプロイ側がそれを import して自分のレジストリに登録する:
+
+```python
+from manforge_internal import MODELS      # 非公開パッケージ側
+for name, cls in MODELS.items():
+    reg.register(name, cls)
+```
+
+モデルの `param_meta` はモデルクラス自身に宣言する (`ParamMeta`) — メタ情報がリポジトリ間で乖離しないため。実行例: `examples/example_service.py`
+
 ---
 
-## Development
+## 7. Development
 
 ```bash
-# テスト
-make test                    # 高速テスト: unit + integration (slow・fortran 除く)
-make test-unit               # unit のみ
-make test-integration        # integration のみ
-make test-e2e                # E2E (CLI subprocess + fitting smoke)
-make test-e2e-slow           # 遅い e2e (フィッティングパイプライン全体)
-make test-slow               # unit + integration + e2e の slow マーカ付きテスト全て
-make test-benchmarks         # 数値同値ベンチ (解析解 vs NR; Fortran 不要)
-make test-benchmarks-fortran # 数値同値ベンチ (Python NR vs Fortran UMAT; .so 必須)
-make test-all                # 全スイート
-
-# CLI
-uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
-uv run manforge list
-uv run manforge clean
-
-# Docker (再現可能な gfortran 環境)
-make docker-build && make docker-test
+make test        # 高速テスト (unit + integration、slow/fortran 除く)
+make test-all    # 全スイート
 ```
+
+その他のターゲット (e2e / slow / benchmarks / docker) は `Makefile` を参照。テストレイアウトは `tests/{unit,integration}` が `src/manforge` を 1:1 ミラー、`tests/benchmarks/<model>/` が数値同値ハーネス。
 
 **Examples**
 
 | スクリプト | 内容 |
 |-----------|------|
-| `examples/example_j2_uniaxial.py` | 単軸引張 + tangent 検証 + プロット |
-| `examples/example_fit_j2.py` | J2 パラメータフィッティング |
-| `examples/example_ow_convergence.py` | NR 残差履歴で二次収束検証 |
-| `examples/example_verify_j2_analytical.py` | analytical return mapping vs AD jacobian |
-| `examples/example_fortran_uniaxial.py` | Fortran UMAT を StrainDriver で実行 (要コンパイル) |
-| `examples/crosscheck_umat_external.py` | Fortran UMAT crosscheck 最小例 |
-| `examples/crosscheck_umat_advanced.py` | Fortran UMAT crosscheck 全機能ツアー |
+| `examples/example_j2_uniaxial.py` | 繰返し単軸 + tangent 検証 + ヒステリシスのプロット |
+| `examples/example_fit_j2.py` | パラメータフィッティング (基本 / ParameterSpace / 複数ターゲット / PCM) |
+| `examples/example_custom_model_workflow.py` | 自作モデルの定義 → 検証の通しワークフロー |
+| `examples/example_fortran_crosscheck.py` | Fortran UMAT のビルド → 実行 → クロス検証 (要 gfortran) |
+| `examples/example_service.py` | service 層: registry → describe → run_simulation (非収束込み) |
 
 ---
 

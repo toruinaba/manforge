@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**API 契約の正は各モジュールの docstring。** この文書はコマンド・テスト規約・コードから導けない横断契約のみを持つ。設計意図の詳細は該当モジュール冒頭や該当メソッドの docstring を読むこと(例: `elastic_check` の分岐設計は `core/material/base.py`、fitting の失敗ペナルティ設計は `fitting/objective.py`、PCM の自前実装理由は `fitting/metrics.py`)。
+
 ## Commands
 
 ```bash
@@ -11,41 +13,47 @@ uv sync --all-extras         # All extras including matplotlib, meson/ninja
 
 # Test
 make test                    # Fast tests: unit + integration, excluding slow/fortran
-make test-unit               # Unit tests only (fastest)
-make test-integration        # Integration tests excluding slow and fortran
-make test-e2e                # E2E tests: CLI subprocess + fitting smoke
-make test-e2e-slow           # Slow e2e tests (fitting pipeline, >1s)
-make test-slow               # All slow-marked tests across unit + integration + e2e
-make test-benchmarks         # Benchmark tests: analytical vs numerical (no Fortran)
-make test-benchmarks-fortran # Benchmark tests: Python NR vs Fortran UMAT (requires .so)
 make test-all                # Full suite including slow and fortran
+# その他のターゲット (unit/integration/e2e/slow/benchmarks/docker) は Makefile を参照
 uv run pytest tests/benchmarks/j2_isotropic/ -m "not fortran" -v  # Single benchmark dir
-uv run pytest tests/ --durations=20                                 # Show 20 slowest tests
 
-# Fortran compilation (requires gfortran)
-# Option A: CLI (recommended for Python users)
-uv run manforge build fortran/test_basic.f90 --name manforge_test_basic
+# Fortran compilation (requires gfortran; this host has none — use Docker)
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
-uv run manforge list              # List compiled modules
-uv run manforge clean             # Remove compiled artifacts
-uv run manforge clean --dry-run   # Preview what would be removed
-
-# Option B: Makefile (lower-level)
-make fortran-build           # Compile test_basic.f90 via f2py
-make fortran-build-umat      # Compile abaqus_stubs.f90 + j2_isotropic_3d.f90 via f2py → j2_isotropic_3d module
-
-# Docker (reproducible gfortran environment)
+uv run manforge list / clean
 make docker-build && make docker-test
-
-# Cleanup compiled Fortran artifacts
-make clean
 ```
 
 There is no linter configured. No CI/CD workflows exist.
 
 ## Architecture
 
-manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via JAX autodiff), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines.
+manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Float64 is enabled globally in `src/manforge/__init__.py`.
+
+### Three-layer design
+
+1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。特殊フック(`elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。
+2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。NR 経路(スカラー/ベクトル)は宣言から自動選択。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
+3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`)、`fitting/`(`fit_params` + `ParameterSpace` / `FitTarget` / `Observation` / metrics)、`verification/`(`JacobianChecker` / `TangentChecker` / `CrosscheckStrainDriver` 等)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation` / `ParamMeta`。Web 依存ゼロ、plain I/O、非収束は値で返す)。
+
+### Voigt convention(横断契約 — 全層が従う)
+
+3D ソリッドは `[11, 22, 33, 12, 13, 23]`(ABAQUS UMAT 規約)。**量の種類で剪断の扱いが異なる 2 層契約**:
+
+- **応力系**(σ, s, 背応力 α など): **physical shear** — テンソル成分そのもの
+- **ひずみ系**(ε, ε_p, Δε): **engineering shear**(γ12 = 2ε12)— ABAQUS `DSTRAN`・弾性剛性 `σ = C:ε`・driver 入力すべて
+
+ノルムや等価量の計算では Mandel スケーリング(剪断 ×√2)を内部適用。ヘルパーは `utils/voigt.py`、次元ごとの演算子(`dev` / `vonmises` / `inner_product` / `strain_norm` 等)は `core/dimension.py` の `StressDimension` に集約され `MaterialModel` がデリゲートする。
+
+### FlowVector(横断契約)
+
+塑性流れ方向は同一方向に 2 つの Voigt 表現(剪断 ×2 差)があり、取り違えは単軸/二軸で消える silent error になる。そのため `model.flow(state)` は生 ndarray でなく `FlowVector` を返し、使用側が `.strain_like`(engineering shear — `C @ n`、Δε_p)か `.stress_like`(physical shear — 背応力発展則)を名指しする。生配列演算は `TypeError`。`flow` を override するときは `self.strain_flow(...)` / `self.stress_flow(...)` でタグ付けして返す(モデル内で ×2/÷2 の変換算術を書かない)。詳細は `core/state.py`。
+
+### 非収束の扱い(層ごとに方針が違う)
+
+- **Integrator**: 既定 raise。`raise_on_nonconverged=False` で `converged=False` を返す。Δλ<0 は KKT 違反なので非収束扱い。許容値はスケール不変(`tol × max(1, ‖σ_trial‖_∞)`)。
+- **Driver**: 非収束 step を yield して停止(非収束イテレートで状態を進めない)。
+- **fitting**: 評価の非収束は有限ペナルティ(`FAILURE_PENALTY`)でスコアし続行。全評価失敗時のみ raise。設計理由は `fitting/objective.py`。
+- **service**: `run_simulation` は部分履歴 + `converged` / `failed_step` を値で返す(呼び出し側バグのみ `ValueError`)。
 
 ### Test layout
 
@@ -58,171 +66,6 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 | `tests/e2e/` | CLI subprocess + fitting pipeline smoke |
 | `tests/benchmarks/` | Numerical equivalence harnesses only |
 
-### Three-layer design
+### Models / Fortran
 
-**1. Material model layer** — `src/manforge/core/material/base.py` (`MaterialModel` ABC, re-exported from `manforge.core.material`)
-
-`MaterialModel` is the ABC users subclass directly. Pass `dimension=` to the constructor to select the stress state (default: `SOLID_3D`). State variables are declared as class-level `StateField` attributes using `Implicit` / `Explicit` from `manforge.core.state` (importable via `from manforge.core import Implicit, Explicit`):
-
-```python
-from manforge.core import Implicit, Explicit, NTENS, SCALAR
-from manforge.core.dimension import SOLID_3D, StressDimension
-from manforge.core.material import MaterialModel
-
-class MyModel(MaterialModel):
-    param_names = ["E", "nu", "sigma_y0"]
-    ep    = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-    alpha = Implicit(shape=NTENS,  doc="backstress tensor")
-    stress = Implicit(shape=NTENS, doc="Cauchy stress (NR unknown)")  # optional
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0):
-        super().__init__(dimension=dimension)
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-```
-
-- `Explicit(shape, doc, residual_name=None)` — state updated in closed form via `update_state`; no NR unknown.
-- `Implicit(shape, doc, residual_name=None)` — state solved as NR unknown via `state_residual`.
-- `shape` accepts `NTENS` (resolved to `(ntens,)` when `resolve_shape` is called during layout/state initialization), `SCALAR` (scalar 0-d state, preferred over `()`), an `int`, or a tuple. Passing `()` directly is also accepted (backward compatible). The string `"ntens"` is no longer accepted — use `NTENS` instead.
-- **`residual_name`** (optional): when set on `Implicit`, renames the residual row label in `JacobianBlocks.part`. Default is the field name itself. Example: `alpha = Implicit(shape=NTENS, residual_name="R_alpha")` → `jac.part["R_alpha"]["stress"]`. Must be unique across all fields and `dlambda_residual_name`; `__init_subclass__` validates at class definition time.
-- **`dlambda_residual_name`**: class variable on the model (default `"dlambda"`); renames the Δλ row in `JacobianBlocks.part`. Example: `dlambda_residual_name = "R_yield"` → `jac.part["R_yield"]["stress"]`.
-- **`stress` field**: If not declared, the framework auto-attaches `stress = Explicit(shape=NTENS)` and uses the associative default update (`σ ← σ_trial − Δλ·C·∂f/∂σ`). Declaring `stress = Implicit(shape=NTENS)` makes σ an NR unknown (fully-coupled vector NR).
-- `state_names` and `implicit_state_names` are derived automatically from field declarations by `__init_subclass__`.
-
-`__init_subclass__` derives `cls.state_names`, `cls.implicit_state_names`, and `cls.state_fields` from the MRO. Subclass can override a parent field (e.g. `Explicit` → `Implicit`) by re-declaring it.
-
-User methods are unified on `State` arguments — stress is accessed via `state["stress"]` like any other state:
-
-- `yield_function(self, state)` → scalar (≤0 = elastic). **Must be implemented.** Write the surface the plastic state must lie on: the framework uses it for the Δλ residual row (`f = 0` at convergence), for the `flow` direction via `grad`, and — through the default `elastic_check` — for the elastic/plastic branch. For a subloading-surface model that means the subloading surface itself, which makes all three defaults correct.
-- `update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None)` → `list[StateUpdate]` with only the **explicit non-stress** state keys. Do **not** return `stress` — the framework drives σ via the NR system. Required whenever any non-stress state is `Explicit`.
-- `state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None)` → `list[StateResidual]` with the **implicit** state keys. May optionally include a `self.stress(R_stress)` item to provide the stress residual when `stress = Implicit`. Required whenever any state is `Implicit`.
-- `elastic_check(self, state_n, *, stress_trial, strain_inc=None)` → `bool`, default `yield_function(state_trial) <= 0`. The elastic/plastic branch. Override **only** when the elastic domain is not the interior of the surface written in `yield_function`; for classical plasticity the default is correct and `yield_function` remains the single source of truth. Subloading-surface models are the motivating case: writing the subloading surface `‖s‖ − R·F` in `yield_function` gives the correct Δλ row and the correct `grad`-derived `flow` (both defaults suffice — do **not** override `dlambda` or `flow` for this), but its sign cannot express the branch, which is the disjunction `R̂(σ_trial) ≤ R_e` (below the elastic limit) **or** `R̂(σ_trial) ≤ R_n` (unloading). Testing only the first makes unloading plastic; omitting both makes the very first step plastic since `R` starts at 0. A disjunction is not the zero level set of one smooth function, and folding it into `yield_function` would break the `grad` that `flow` relies on. Unlike `yield_function`, this hook receives `strain_inc` and the full step-n state, so direction tests of the form `n : Δε > 0` are expressible. Must return a plain `bool` (it selects a code path and is never differentiated); returning an array raises `TypeError`.
-- `elastic_update_state(self, state_n, *, stress_trial, strain_inc=None)` → `list[StateUpdate]`, default `[]`. Called on steps `elastic_check` sends down the elastic path (initial elastic loading, unloading, and the elastic portion of a reload alike) for state that tracks σ without plastic flow — e.g. the subloading-surface normal yield ratio, which follows σ down during unloading because the subloading surface passes through the current stress by construction. Δλ is zero on these steps, so the update is algebraic in `stress_trial`. Return only the fields that must move; omitted explicit fields keep their `state_n` values. This is a separate hook rather than `update_state(dlambda=0)` because the plastic NR path also starts from Δλ=0, so Δλ cannot discriminate the two.
-
-`state_new` semantics (both methods): the **current NR iterate** at step n+1. `state_new["stress"]` = σ_k (current σ NR iterate); `state_new[implicit_key]` = current implicit iterate (e.g. α_k); `state_new[explicit_key]` = `state_n` value in `update_state` (not yet updated), or the value returned by `update_state` in `state_residual` (already updated). `stress_trial` = fixed elastic predictor σ_n + C Δε (keyword-only, not part of `state_new`). `strain_inc` = Δε for the current load step (keyword-only; useful for elastic/plastic strain decomposition).
-
-Use `StateField.__call__` to wrap return values (produces `StateResidual` or `StateUpdate` depending on field kind):
-
-```python
-def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-    R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-    ...
-    return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]   # list of StateResidual
-
-def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-    ...
-    return [self.alpha(alpha_new), self.ep(ep_new)]  # list of StateUpdate (no stress)
-```
-
-The framework validates the list at the boundary: wrong kind (`StateResidual` where `StateUpdate` expected), duplicate names, missing or extra fields all raise `TypeError` / `ValueError` immediately.
-
-Both methods may coexist for mixed (partial-implicit) models; each returns only its own keys. When `state_residual` is called, `state_new[explicit_key]` already holds the result of `update_state` for the current iteration.
-
-`result.state` from the solver always contains `"stress"` — `model.yield_function(result.state)` works directly.
-
-Factory helper on the base class: `make_state(**kwargs)` assembles a full `State` wrapper with strict key validation (used for initial-state construction and prestress).
-
-Material parameters are passed at construction time (`model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)`) and stored as instance attributes (`self.E`, `self.nu`, etc.). The `params` property auto-generates a dict from `param_names` for internal use.
-
-`__init_subclass__` validates the required method is implemented at class definition time.
-
-Select the stress state via `dimension=` argument (or class variable). Available `StressDimension` instances:
-- `SOLID_3D` — ntens=6 (default)
-- `PLANE_STRAIN` — ntens=4
-- `PLANE_STRESS` — ntens=3; applies Schur condensation in `isotropic_C`
-- `UNIAXIAL_1D` — ntens=1; used for uniaxial fitting
-
-Operator methods (`dev`, `vonmises`, `isotropic_C`, `I_vol`, `I_dev`) are provided on `MaterialModel` and delegate to the `StressDimension` instance. `vonmises` includes the missing-component correction (n_missing × p²) for PLANE_STRESS and UNIAXIAL_1D automatically.
-
-Tensor double-contraction and strain-norm helpers (defined on `MaterialModel`, all stress states):
-- `inner_product(a, b)` — Mandel inner product A:B over stored components (shear ×2 automatic). Both arguments must be **physical-shear** (stress-like) quantities. Use when missing components are physically zero (e.g. σ:σ, α:α). To compute σ:Δε with engineering-shear Δε, divide shear components by `dimension.eng_to_phys_strain_factors_np` first.
-- `deviatoric_inner_product(s, t)` — Double contraction for **physical-shear deviatoric** tensors (caller guarantees tr s = tr t = 0); reconstructs missing direct components from `tr=0` and includes them. Generalises `vonmises_norm`. Used for s:s, α:dα, etc.
-- `strain_norm(strain)` — Equivalent strain ε_eq = √(2/3 ε:ε) conjugate to `vonmises`. Accepts **engineering-shear** strain (driver/UMAT convention, γ12 = 2ε12); converts internally. Assumes isochoric plastic strain with missing-component correction automatic for PS/1D.
-
-### Plastic flow direction (`flow`)
-
-`flow(state)` → `FlowVector` is the single access point for the plastic flow direction. The default is associative (`∂f/∂σ` via autodiff); override it for non-associative flow (plastic potential g ≠ f) or to supply a hand-derived expression. **Override `flow`, not `default_stress_residual`** — the residual algebra is unchanged.
-
-The same direction has two Voigt representations differing by ×2 on shear, and picking the wrong one is a silent error that vanishes under uniaxial/biaxial loading. `FlowVector` therefore refuses raw array arithmetic (`n * 2`, `C @ n`, `n[0]`, `np.asarray(n)` all raise `TypeError`); every use site must name a convention:
-
-- `.strain_like` — engineering shear, conjugate to Δε_p. Use for `C @ n`, `Δε_p = Δλ·n`, and residuals written in the strain dimension (`C⁻¹` applied — the form that lets DDSDDE be read off `J⁻¹` directly). `strain_norm(.strain_like) == 1` for J2-type yield functions.
-- `.stress_like` — physical shear, the textbook `(3/2)·s/‖s‖`. Use in evolution laws for stress-like internal variables (backstress α, θ, β). `vonmises_norm(.stress_like) == 1.5`.
-
-Overrides must tag their return value, declaring which convention they computed in — no conversion arithmetic in the model:
-
-```python
-def flow(self, state):                      # textbook form, as published
-    s_xi = self.dev(state["stress"]) - state["alpha"]
-    return self.stress_flow(1.5 * s_xi / self.vonmises_norm(s_xi))
-
-def flow(self, state):                      # already engineering shear (YUKinematic3D)
-    xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
-    return self.strain_flow(self.calc_norm_n_flow(xi)[1])
-```
-
-Returning a bare ndarray raises `TypeError` at the framework boundary. `StressDimension.to_stress_like` / `to_strain_like` provide the raw ÷2 / ×2 conversions for non-flow quantities. Note the normalisation invariants above hold only for J2-type yield functions, so the framework does not assert them.
-
-Optional hooks for user-supplied implementations: `user_defined_return_mapping(stress_trial, C, state_n)` → `ReturnMappingResult` or `None`; `user_defined_tangent(stress, state, dlambda, C, state_n, *, stress_trial=None, strain_inc=None)` → `(ntens, ntens)` array or `None`. Both default to `None` (framework falls back to autodiff/NR). `stress_trial` and `strain_inc` are forwarded keyword-only from `stress_update` so implementations can use them directly (e.g. for autograd traceability) without reconstructing σ_trial from the converged stress.
-
-The reference implementations live in `src/manforge/models/`. Each model family has a parent class that holds the shared physics (`J2Isotropic`, `AFKinematic`, `OWKinematic`) and three thin dimension-specialized subclasses that set the default `dimension=` value and, where applicable, provide closed-form solver hooks (`J2Isotropic3D` / `J2Isotropic1D`). All nine concrete classes (`J2Isotropic3D`, `J2IsotropicPS`, `J2Isotropic1D`, `AFKinematic3D`, `AFKinematicPS`, `AFKinematic1D`, `OWKinematic3D`, `OWKinematicPS`, `OWKinematic1D`) and the three parent classes are exported from `manforge.models`.
-
-**2. Solver layer** — `src/manforge/core/`
-
-- `result.py`: Result dataclasses only — no functions.
-  - `ReturnMappingResult` fields: `stress`, `state`, `dlambda`, `n_iterations`, `residual_history`, `converged`.
-  - `StressUpdateResult` fields: `return_mapping` (None for elastic), `ddsdde`, `stress_trial`, `is_plastic`. Convenience properties `stress`, `state`, `dlambda`, `n_iterations`, `residual_history` delegate to `return_mapping` (or elastic defaults).
-  - Both are importable via `from manforge.core import ReturnMappingResult, StressUpdateResult`.
-- (no `jacobian.py` or `residual.py` in `core/` — these live in `simulation/` and `verification/` respectively)
-
-autograd computes yield function gradients and the Hessian needed for the tangent. Float64 is enabled globally in `src/manforge/__init__.py`.
-
-**3. Application layer**
-
-- `simulation/integrator/` (package): `_PythonIntegratorBase.stress_update(strain_inc, stress_n, state_n)` → `StressUpdateResult` — full constitutive integration (elastic trial → `model.elastic_check` → return mapping → consistent tangent). Equivalent to one UMAT call. `_PythonIntegratorBase.return_mapping(stress_trial, state_n)` → `ReturnMappingResult` — plastic correction only (closest point projection). NR path selected by `model.state_fields["stress"].kind` and `model.implicit_state_names`: scalar NR on Δλ when stress is Explicit and no other implicit states; vector NR on `[Δλ, q_implicit]` or `[σ, Δλ, q_implicit]` (when `stress = Implicit`) otherwise (max 50 iter, tol=1e-10 scaled by `max(1, ‖σ_trial‖_∞)` so the criterion is unit-independent; Pa-scale stresses converge too). `nr_jacobian="broyden"` (constructor kwarg, default `"exact"`) computes the exact autodiff Jacobian once per step and applies Broyden rank-1 updates after, recomputing exactly whenever the residual norm fails to decrease — ~4× faster on YU-class models at 1–2 extra iterations; the consistent tangent is always exact regardless. `StressDriver`/`MixedDriver` outer NR likewise uses `tol + rtol·‖σ_target‖_∞` (rtol=1e-10). `_method` class variable on subclasses: `"auto"` (use `user_defined_return_mapping` if present, else `"numerical_newton"`), `"numerical_newton"` (framework NR), `"user_defined"` (requires model to implement `user_defined_return_mapping`). NR logic lives in `integrator/base.py`; consistent tangent via implicit differentiation in the same file (`_consistent_tangent`). `stress_update` forwards its own σ_trial to `_consistent_tangent`; only a bare `return_mapping` call falls back to reconstructing σ_trial by inverting the converged σ residual (via `model.flow`, not `grad(yield_function)`, so overridden flow directions stay correct).
-- `simulation/_layout.py`: `ResidualLayout` frozen dataclass — single source of truth for the NR unknown vector layout `x = [σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]`. Created via `ResidualLayout.from_model(model)`; provides `pack`, `unpack`, `state_slice`, `slot_slice(name)`, `slot_shape(name)`, `residual_name_for(state_name)`, `residual_names()` helpers. `slot_slice` / `slot_shape` accept `"stress"`, `"dlambda"`, or any implicit key and return absolute slices / shapes in the full vector.
-- `simulation/_residual.py`: `build_residual(model, stress_trial, state_n, strain_inc=None)` → `(residual_fn, layout)` — unified autograd-differentiable residual for both NR and tangent phases. `residual_fn(x)` returns a flat array. `build_state_from_x(model, x_conv, state_n, layout, stress_trial=None, strain_inc=None)` reconstructs the full state dict from a converged NR vector.
-- `simulation/driver.py`: `StrainDriver`, `StressDriver` (+ aliases `UniaxialDriver`, `GeneralDriver`) — step through strain/stress histories. Two APIs: `run(load, *, initial_stress=None, initial_state=None, collect_state)` → `DriverResult` (batch); `iter_run(load, *, initial_stress=None, initial_state=None)` → `Iterator[DriverStep]` (step-by-step, supports early break / mid-loop branching). `DriverStep` fields: `i`, `strain` (cumulative), `result` (`StressUpdateResult`), `converged`, `n_outer_iter`, `residual_inf`. `StressDriver.iter_run` accepts `raise_on_nonconverged=False` to yield non-converged steps instead of raising. All drivers honour the inner return mapping's `converged` flag (reachable only with an integrator built with `raise_on_nonconverged=False`): `StrainDriver` yields the step with `converged=False` and stops instead of advancing state from a non-converged iterate; `StressDriver`/`MixedDriver` fail the outer NR for that step immediately rather than computing residual/tangent from it. `DriverResult` fields: `step_results: list[StressUpdateResult]` (primary); `stress`, `strain`, `fields` are derived properties.
-- `fitting/optimizer.py`: `fit_params()` wraps scipy.optimize (L-BFGS-B, Nelder-Mead, differential_evolution); loss defined in `fitting/objective.py`; uses drivers from `simulation/`. Iteration budget and tolerance via `max_iter=` / `tol=` (mapped to the method's primary tolerance) and `options=` (forwarded verbatim to scipy, overriding both). `nr_jacobian="broyden"` (opt-in, default `"exact"`) forwards to the per-evaluation `PythonIntegrator` — several-fold cheaper evaluations on models without hand-derived solvers. `FitResult` reports `n_failed` / `failure_message` / `failure_params` for the non-convergent evaluations (see `objective.py`).
-- `fitting/objective.py`: `build_objective(model, driver_factory, targets, space, failures=None)`. **Non-convergence is scored `FAILURE_PENALTY` (1e30), not raised** — a box-bounded parameter space can legitimately contain values where return mapping has no real root, so a failed evaluation is information ("not the optimum") and the optimiser steers away instead of the whole fit dying on one trial point and discarding every prior evaluation. The penalty is deliberately *finite*: `inf` poisons L-BFGS-B's finite-difference gradient with `nan` and silently degenerates the line search. Caught: `RuntimeError` / `FloatingPointError` / `ZeroDivisionError` / `np.linalg.LinAlgError` (singular NR Jacobian = unsolvable value, listed explicitly since it subclasses `ValueError`), plus a non-finite objective that never raised. **Not** caught: setup errors (shape mismatch, unknown field name) — those propagate. `FailureLog` records the count and the *first* failure's message and parameters (earliest reproducible case). If **every** evaluation fails there is no optimum, so `fit_params` raises rather than silently returning the initial guess. It distinguishes two cases, because the fixes differ: `fit_params` probes `x0` (clipped into the bounds box — the point scipy actually starts at) before calling scipy, and an unsolvable **initial point** raises "fitting cannot start" (check initial values; decimation widens the strain increment and can make an otherwise workable set unsolvable), while `x0` succeeding but the whole search failing raises "no point the optimiser tried was" (tighten the bounds). Both messages list any initial value that sits outside its own bounds, since scipy silently clips those and the fit then does not start where the caller wrote.
-- `fitting/target.py`: `FitTarget` / `Observation` — multi-curve fitting. `FitTarget(load, observations, driver_factory=None, initial_stress=None, initial_state=None)` is **one simulation run**; separate experiments are separate targets, each costing one driver run per objective evaluation. `Observation(values, field="Stress", component=None, weights=None, weight=1.0, metric="mse", x_values=None, x_field="Strain", x_component=None)` is **one experimental curve**; observations on the same target share its single run. `field` accepts `"Stress"`, `"Strain"`, or any model state key (read off `step_results`, so no `collect_state` request is needed). A target's `load` FieldType must match its driver (`STRAIN` → `StrainDriver`, `STRESS` → `StressDriver`), so stress-controlled experiments are fittable by giving that target its own `driver_factory`. `metric` selects the comparison (see `fitting/metrics.py`); the default `"mse"` divides each observation's SSE by its point count so a longer curve does not dominate, and `weight` rebalances deliberately across differing scales. `fit_params(exp_data=...)` accepts an `ExpData` dict (shorthand for one strain-driven target with one stress curve), a single `FitTarget`, or a sequence (`coerce_targets`). `driver_factory` may be `None` when every target carries its own.
-- `fitting/metrics.py`: Curve-comparison metrics selected via `Observation(metric=...)`. `"mse"` (`mean_squared_error`) is point-by-point and requires identical sampling. `"pcm"` (`partial_curve_mapping`) implements Witowski & Stander (2012) — normalised area between two (x, y) curves, minimised over arc-length offset, so **point counts and x ranges may differ** and multi-valued curves (hysteresis loops, unloading) work. Use it when the simulation is forced onto a coarser increment than the experiment was sampled at. Requires `x_values` (the experimental x axis; the computed x comes from `x_field`), and rejects per-point `weights` and 2-D `values` since arc-length matching has no per-index correspondence. `FitTarget.__post_init__` skips its point-count check for curve metrics. **Not** a port of `similaritymeasures.pcm`, which multiplies each trapezoid width by the *cumulative* rather than the segment arc length and so scales linearly with point count instead of converging to an area; this implementation is resampling-invariant. Caveat: a coarse increment cuts the yield corner and biases a **joint** fit (measured 12% error in H at 30 increments, 6% at 120, exact at 400, where matched-sampling MSE was exact throughout) — single-parameter sweeps are unbiased.
-- `fitting/space.py`: `ParameterSpace(free, fixed, derived)` separates optimisation variables from model parameters. `free` = `{name: (init, bounds)}` (need not be model parameters), `fixed` = constants, `derived` = `{name: fn(values) -> float}` evaluated in declaration order. `model_params(x, param_names)` resolves the vector and selects exactly the model's parameters, dropping helper variables. Use for correlated parameters — e.g. `Y < B` becomes a ratio variable bounded below by 1.0 instead of an inequality constraint. `fit_params(fit_config=...)` accepts either a `ParameterSpace` or the plain dict form (`ParameterSpace.coerce`); the dict form pairs with `fixed_params=`, which raises if combined with a `ParameterSpace`.
-- `verification/fd_check.py`: Compares AD tangent vs central finite differences
-- `verification/crosscheck_driver.py`: `CrosscheckStrainDriver` / `CrosscheckStressDriver` (both `Comparator` subclasses). Mirror `StrainDriver` / `StressDriver` respectively. `CrosscheckStressDriver.__init__` accepts `max_iter` / `tol` directly (no dict wrapper). `iter_run(load, *, initial_stress=None, initial_state=None)` yields `CrosscheckCaseResult` per step; `run(load)` returns `CrosscheckResult`. `CrosscheckCaseResult` holds `result_a`, `result_b` (raw `StressUpdateResult`) and `state_n` (step-start state) for use with `JacobianChecker.compare`. Single-step comparison: pass a 1-row `FieldHistory` with `initial_stress`/`initial_state`.
-- `verification/jacobian.py`: `JacobianBlocks` dataclass, `JacobianComparisonResult` dataclass, and `JacobianChecker(model, *, rtol=1e-8)` — class-based interface for Jacobian computation and comparison. `checker.compute(result, state_n, *, stress_trial=None, strain_inc=None)` → `JacobianBlocks` computes the residual Jacobian and exposes blocks via `jac.part[row_residual_name][col_state_name]`. `checker.compare(result_a, result_b, state_n, *, strain_inc=None)` → `JacobianComparisonResult` compares blocks between two results. Pass `strain_inc=` for models whose `update_state`/`state_residual` read it — otherwise the checker differentiates a different residual than the one NR solved. Row names are residual labels (`effective_residual_name` from the field, or `model.dlambda_residual_name` for the Δλ slot); column names are state names (`"stress"`, `"dlambda"`, implicit non-stress keys). Default (no `residual_name` set): row and column names are identical (e.g. `jac.part["alpha"]["stress"]`). With opt-in: `Implicit(residual_name="R_alpha")` → `jac.part["R_alpha"]["stress"]`. `jac.row_names()` / `jac.col_names()` enumerate canonical name tuples; `jac.iter_blocks()` yields `("row::col", array)` pairs. `jac.full` is the full `(n_unknown, n_unknown)` matrix. `compute` accepts both `StressUpdateResult` and `ReturnMappingResult` (latter requires `stress_trial=` kwarg). Import from `manforge.verification.jacobian`.
-
-### Service layer (`src/manforge/service/`)
-
-Web-independent contract layer for service consumers (web APIs, job workers). Design rule: plain inputs (dict / ndarray / list) and plain dataclass outputs only — no framework objects (Driver, Integrator, FieldHistory) cross this boundary. Pydantic/HTTP conversion belongs to the consuming deployment (e.g. the private `manforge-api` repo), not here.
-
-- `service/registry.py`: `ModelRegistry` — explicit name → model-class mapping. **No global singleton**: each deployment builds its own instance and registers exactly what it exposes (auditable at the registration site; private-model packages provide a `MODELS` dict the deployment imports and loops over). `register(name, cls)` (duplicate name or non-`MaterialModel` → `ValueError`), `get(name)` (unknown name → `KeyError` listing registered names), `names()`, `describe(name)` → `ModelDescriptor` (name, class_name, param_names, param_meta, ntens, first docstring line — the `GET /models` payload). `default_registry()` returns the uniaxial reference models (`j2_isotropic`, `af_kinematic`, `ow_kinematic`).
-- `service/runner.py`: `run_simulation(model_cls, params, load, *, control="strain"|"stress", include_fields=(), nr_jacobian="broyden", progress=None)` → `SimulationOutput(stress, strain, fields, converged, failed_step, n_steps)`. Boundary validation is strict and raises `ValueError` (API layer maps to 400): `params` keys must equal `param_names` (missing/extra listed), `include_fields` ⊆ `state_names`, load shape must be 1-D or `(N, ntens)`. **Non-convergence is a value, not an exception**: runs on `raise_on_nonconverged=False` + `iter_run`, returns the partial history up to the failing step with `converged=False` / `failed_step` (API layer returns 200; a user exploring parameters routinely submits unsolvable values). `LinAlgError`/`FloatingPointError`/`ZeroDivisionError` during stepping are treated the same way. Default `nr_jacobian="broyden"` (measured ~2.4× on autodiff-NR models; consistent tangent stays exact). `fields` is opt-in per state key (default stress-only — full state histories are MB-scale at thousands of steps). `progress(done, total)` fires per completed step for job-worker progress reporting. `strain` is always returned (the driver-computed x-axis, authoritative for both control modes).
-- `core/material/meta.py`: `ParamMeta(doc, unit="", default=None, bounds=None)` frozen dataclass — UI/schema metadata declared on the model class itself (`param_meta` class variable) so metadata cannot drift from the model across repos. `__init_subclass__` validates `param_meta` keys ⊆ `param_names`; models without metadata stay valid. `bounds` is a form hint, **never enforced at runtime** (deliberately exploring outside the plausible range is legitimate). Reference parents (J2Isotropic/AFKinematic/OWKinematic) declare full metadata; all concrete subclasses inherit it. Importable via `from manforge.core.material import ParamMeta` (also re-exported from `manforge.service`).
-- Load-history generation for API endpoints: reuse `FieldHistory.cyclic_strain` / `triangular_strain` / `sine_strain` / `decaying_cyclic_strain` (`simulation/types.py`) — already model-independent; the main computation endpoint takes raw lists.
-- Concrete model classes declare `dimension` as a class variable (in addition to passing it in `__init__`), so `describe()` reads `ntens` without instantiation.
-
-### StressDimension (element dimensionality)
-
-`StressDimension` (`src/manforge/core/dimension.py`) is a frozen dataclass that encapsulates the element dimensionality (ABAQUS NTENS convention). Four pre-built instances: `SOLID_3D` (ntens=6), `PLANE_STRAIN` (ntens=4), `PLANE_STRESS` (ntens=3), `UNIAXIAL_1D` (ntens=1). The model's `dimension` attribute drives the size of all stress/strain arrays and the condensation of the elastic stiffness.
-
-### Voigt convention
-
-For 3D solid elements, stress/strain vectors are 6-component `[11, 22, 33, 12, 13, 23]` following the **ABAQUS UMAT convention**:
-
-- **Stress** (σ, s, backstress α, and other stress-like quantities): **physical shear** — the tensor component (σ12 = ε12_tensor).
-- **Strain** (ε, plastic strain ε_p, strain increment Δε): **engineering shear** (γ12 = 2 ε12_tensor) — matching the ABAQUS `DSTRAN` interface, the elastic stiffness `σ = C : ε`, and all driver inputs.
-
-For other element types the component count is `ntens` per the associated `StressDimension`. When computing norms or equivalences, Mandel scaling (×√2 on shear components) is applied internally. Helpers in `utils/voigt.py`.
-
-`StressDimension.eng_to_phys_strain_factors_np` returns `[1,...,1, 2,...,2]` (direct=1, shear=2). Divide an engineering-shear strain vector by these factors to obtain physical shear.
-
-### State variables
-
-State is `dict[str, anp.ndarray]` at the framework boundary (solver inputs/outputs, `ReturnMappingResult.state`, driver results). Inside `update_state` / `state_residual` the framework passes a `State` dict-wrapper (from `manforge.core.state`) that preserves declaration-order field metadata while supporting bracket access (`state["alpha"]`) with autograd compatibility. Use bracket notation consistently — dot access (`state.alpha`) is not supported.
-
-### Fortran UMAT
-
-`fortran/j2_isotropic_3d.f90` implements the same J2 algorithm as the Python reference. Subroutine names match Python class names: `j2_isotropic_3d` (core logic, f2py callable), `umat` (ABAQUS entry point), `j2_isotropic_3d_elastic_stiffness` (component check). `fortran/abaqus_stubs.f90` provides mock implementations of ABAQUS internals (SINV, SPRINC, ROTSIG) for standalone compilation. Compiled via f2py into the `j2_isotropic_3d` module. The `Dockerfile` provides a reproducible gfortran + Python 3.12 environment for Fortran builds.
-
-`FortranModule` (`simulation/integrator/fortran_module.py`) is a thin f2py wrapper whose only job is float64 type conversion. All subroutines are called via `fortran.call(name, *args)` — the same pattern for the full routine and for sub-components. Import via `from manforge.simulation.integrator import FortranModule` (also re-exported from `manforge.verification` for backward compatibility).
-
-`@verified_against_fortran` decorator, `FortranBinding`, and `collect_bindings` live in `core/material/fortran_binding.py` (importable via `from manforge.core.material import verified_against_fortran`). `check_bindings` (runtime Fortran comparison helper) lives in `verification/fortran_check.py` and is re-exported from `manforge.verification`.
+参照実装は `src/manforge/models/`(J2 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。非公開モデルは別リポジトリ(`manforge-internal`)に置き、`MODELS` dict で service 層に登録する。

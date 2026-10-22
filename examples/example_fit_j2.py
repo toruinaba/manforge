@@ -6,7 +6,9 @@ Demonstrates:
 - Adding measurement noise to simulate experimental data
 - Fitting sigma_y0 and H using fit_params (L-BFGS-B)
 - Reparametrising H as a ratio of sigma_y0 via ParameterSpace
-- Comparing true vs fitted parameters on the hysteresis loop
+- Multi-target fitting (two strain amplitudes as separate experiments)
+- metric="pcm" for experiments sampled differently from the simulation
+- nr_jacobian="broyden" to cut per-evaluation cost
 - Plotting the fit quality (saved as PNG)
 
 Usage
@@ -157,6 +159,59 @@ print("  Multi-target (2 strain amplitudes):")
 print(f"  Fitted sigma_y0 = {result_multi.params['sigma_y0']:.2f} MPa")
 print(f"  Fitted H        = {result_multi.params['H']:.2f} MPa")
 print(f"  Residual        = {result_multi.residual:.4f}  (mean sq. per curve)")
+print()
+
+# ---------------------------------------------------------------------------
+# Mismatched sampling: the experiment is densely sampled, the simulation runs
+# on a coarser increment.  Point-by-point MSE cannot compare these; PCM
+# (partial curve mapping) compares the area between the two curves instead,
+# so point counts and x ranges may differ.
+#
+# Caveat: a coarse increment cuts the yield corner, which biases a JOINT fit
+# of (sigma_y0, H).  Here only H is fitted — single-parameter fits are
+# unbiased (see fitting/metrics.py docstring).
+# ---------------------------------------------------------------------------
+dense_load = FieldHistory.cyclic_strain(peaks=[5e-3], n_per_segment=200, ntens=1)
+stress_dense = driver_factory(PythonIntegrator(true_model)).run(dense_load).stress[:, 0]
+strain_dense = dense_load.data[:, 0]
+
+coarse_load = FieldHistory.cyclic_strain(peaks=[5e-3], n_per_segment=25, ntens=1)
+targets_pcm = [
+    FitTarget(
+        load=coarse_load,                     # simulation: 25 steps
+        observations=[Observation(
+            values=stress_dense,              # experiment: 200 points
+            x_values=strain_dense,            # experimental x axis (required for pcm)
+            metric="pcm",
+            component=0,
+        )],
+    )
+]
+result_pcm = fit_params(
+    true_model, driver_factory, targets_pcm,
+    {"H": (500.0, (0.0, 10_000.0))},
+    fixed_params={"E": true_model.E, "nu": true_model.nu,
+                  "sigma_y0": true_model.sigma_y0},
+    method="L-BFGS-B", max_iter=100,
+)
+print("  PCM metric (200-pt experiment vs 25-step simulation):")
+print(f"  Fitted H        = {result_pcm.params['H']:.2f} MPa  (true {true_model.H:.0f})")
+print()
+
+# ---------------------------------------------------------------------------
+# nr_jacobian="broyden" — forwards to the per-evaluation integrator.  For
+# models without closed-form hooks (AF/OW/YU) each objective evaluation gets
+# several times cheaper; results are identical within fit tolerance.
+# ---------------------------------------------------------------------------
+result_b = fit_params(
+    true_model, driver_factory, exp_data, fit_config,
+    fixed_params=fixed_params, method="L-BFGS-B", max_iter=200,
+    nr_jacobian="broyden",
+)
+print("  nr_jacobian='broyden':")
+print(f"  Fitted sigma_y0 = {result_b.params['sigma_y0']:.2f} MPa")
+print(f"  Fitted H        = {result_b.params['H']:.2f} MPa")
+print(f"  n_failed        = {result_b.n_failed}  (non-convergent evaluations, penalised not raised)")
 print()
 
 # ---------------------------------------------------------------------------
