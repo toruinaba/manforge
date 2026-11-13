@@ -1371,3 +1371,156 @@ class TestBroydenJacobian:
         s_b = StrainDriver(broyden).run(load).stress
         np.testing.assert_allclose(np.asarray(s_b), np.asarray(s_e),
                                    rtol=1e-6, atol=1e-6)
+
+
+# ===========================================================================
+# Consistent tangent: dR/dΔε is differentiated, not assumed to be [−C_n; 0]
+# ===========================================================================
+
+_DMG_P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
+_DMG_DC, _DMG_A = 0.6, 20.0
+
+
+def _dmg_D(ep):
+    return _DMG_DC * (1.0 - anp.exp(-_DMG_A * ep))
+
+
+class _WeakDamageBase(MaterialModel):
+    """J2 in effective-stress space, σ = (1 − D(ep)) σ̃, D not fed back into plasticity."""
+
+    # stress = Implicit is declared on the concrete subclasses: this base has
+    # no state_residual, which __init_subclass__ requires for implicit states.
+    param_names = ["E", "nu", "sigma_y0", "H"]
+    ep = Explicit(shape=())
+    D = Explicit(shape=())
+
+    def __init__(self):
+        super().__init__()
+        for k, v in _DMG_P.items():
+            setattr(self, k, v)
+
+    def C0(self):
+        mu = self.E / (2 * (1 + self.nu))
+        lam = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
+        return self.isotropic_C(lam, mu)
+
+    def elastic_stiffness(self, state=None):
+        d = 0.0 if state is None else state["D"]
+        return (1.0 - d) * self.C0()
+
+    def yield_function(self, state):
+        s_eff = state["stress"] / (1.0 - state["D"])
+        return self.vonmises(s_eff) - (self.sigma_y0 + self.H * state["ep"])
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        ep = state_n["ep"] + dlambda
+        return [self.ep(ep), self.D(_dmg_D(ep))]
+
+    def n_eff(self, state):
+        s = self.dev(state["stress"] / (1.0 - state["D"]))
+        return self.stress_flow(1.5 * s / self.vonmises_norm(s)).strain_like
+
+
+class _WeakDamageScaled(_WeakDamageBase):
+    """Row scaled so that ∂R_σ/∂σ_trial = −I (the form the old tangent assumed)."""
+
+    stress = Implicit(shape=NTENS)
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        Dn, D1 = state_n["D"], state_new["D"]
+        R = ((1 - Dn) / (1 - D1)) * state_new["stress"] - stress_trial \
+            + dlambda * (1 - Dn) * (self.C0() @ self.n_eff(state_new))
+        return [self.stress(R)]
+
+
+class _WeakDamageUnscaled(_WeakDamageBase):
+    """Same root, but σ_trial enters with coefficient −(1−D_{n+1})/(1−D_n)."""
+
+    stress = Implicit(shape=NTENS)
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        Dn, D1 = state_n["D"], state_new["D"]
+        R = state_new["stress"] - ((1 - D1) / (1 - Dn)) * stress_trial \
+            + dlambda * (1 - D1) * (self.C0() @ self.n_eff(state_new))
+        return [self.stress(R)]
+
+
+class _J2StrainIncResidual(MaterialModel):
+    """J2 whose σ row uses strain_inc directly instead of stress_trial."""
+
+    param_names = ["E", "nu", "sigma_y0", "H"]
+    stress = Implicit(shape=NTENS)
+    ep = Explicit(shape=())
+
+    def __init__(self, *, E, nu, sigma_y0, H):
+        super().__init__()
+        self.E, self.nu, self.sigma_y0, self.H = E, nu, sigma_y0, H
+
+    def yield_function(self, state):
+        return self.vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
+
+    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+        return [self.ep(state_n["ep"] + dlambda)]
+
+    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        C = self.elastic_stiffness(state_new)
+        n = self.flow(state_new).strain_like
+        R = state_new["stress"] - state_n["stress"] - C @ (strain_inc - dlambda * n)
+        return [self.stress(R)]
+
+
+class TestTangentIncrementDependence:
+    _DIR = np.array([1.0, -0.2, -0.2, 0.6, 0.0, 0.3]) * 1e-3
+
+    def _advance(self, model, n_steps):
+        integ = PythonNumericalIntegrator(model)
+        stress, state = np.zeros(6), model.initial_state()
+        for _ in range(n_steps):
+            r = integ.stress_update(self._DIR, stress, state)
+            stress, state = np.asarray(r.stress), r.state
+        return integ, stress, state
+
+    @pytest.mark.parametrize("cls", [_WeakDamageScaled, _WeakDamageUnscaled])
+    def test_damage_tangent_matches_fd(self, cls):
+        """Any row scaling of the σ residual must give the same exact tangent."""
+        integ, stress, state = self._advance(cls(), 15)
+        assert float(state["D"]) > 0.1
+        res = check_tangent(integ, stress, state, self._DIR, eps=1e-8)
+        assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
+
+    def test_damage_matches_undamaged_reference(self):
+        """Weak coupling: σ = (1 − D(ep)) σ̃ with σ̃, ep from undamaged J2."""
+        _, stress, state = self._advance(_WeakDamageUnscaled(), 15)
+        _, s_ref, st_ref = self._advance(J2Isotropic3D(**_DMG_P), 15)
+        np.testing.assert_allclose(float(state["ep"]), float(st_ref["ep"]), rtol=1e-10)
+        np.testing.assert_allclose(
+            stress, (1.0 - _dmg_D(float(st_ref["ep"]))) * s_ref, atol=1e-8
+        )
+
+    def test_scaled_and_unscaled_tangents_agree(self):
+        integ_s, stress, state = self._advance(_WeakDamageScaled(), 15)
+        integ_u = PythonNumericalIntegrator(_WeakDamageUnscaled())
+        dd_s = np.asarray(integ_s.stress_update(self._DIR, stress, state).ddsdde)
+        dd_u = np.asarray(integ_u.stress_update(self._DIR, stress, state).ddsdde)
+        np.testing.assert_allclose(dd_u, dd_s, rtol=1e-8, atol=1e-6)
+
+    def test_strain_inc_residual_tangent_matches_reference(self):
+        """A σ row written with strain_inc (not stress_trial) gets the J2 tangent.
+
+        The old fixed rhs [C_n; 0] happens to be right here too; what this
+        pins is that dR/dΔε now flows through the strain_inc override — with
+        that path dropped, the residual would not see the increment at all and
+        the tangent would collapse to zero.
+        """
+        model = _J2StrainIncResidual(**_DMG_P)
+        deps = np.array([2e-3, -1e-3, -1e-3, 5e-4, 0.0, 0.0])
+        state0 = model.initial_state()
+        r = PythonNumericalIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        r_ref = PythonNumericalIntegrator(J2Isotropic3D(**_DMG_P)).stress_update(
+            deps, np.zeros(6), J2Isotropic3D(**_DMG_P).initial_state()
+        )
+        assert r.is_plastic
+        np.testing.assert_allclose(np.asarray(r.stress), np.asarray(r_ref.stress), atol=1e-8)
+        np.testing.assert_allclose(
+            np.asarray(r.ddsdde), np.asarray(r_ref.ddsdde), rtol=1e-8, atol=1e-6
+        )

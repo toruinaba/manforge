@@ -265,11 +265,30 @@ class _PythonIntegratorBase:
         q_imp = {k: state[k] for k in layout.implicit_keys}
         x_conv = layout.pack(stress, dlambda, q_imp)
 
-        A = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[call-arg]
-        rhs = np.vstack(
-            [np.array(C_n), np.zeros((layout.n_unknown - ntens, ntens))]
-        )
-        dxde = np.linalg.solve(np.array(A), rhs)
+        x_conv_arr = anp.array(x_conv)
+        A = autograd.jacobian(residual_fn)(x_conv_arr)  # type: ignore[call-arg]
+
+        # Implicit differentiation: A·dx/dΔε = −dR/dΔε.  The load increment
+        # reaches R through σ_trial = σ_n + C_n·Δε and through Δε itself, and
+        # a user residual may use either in any row with any coefficient (e.g.
+        # a damage residual scaled by (1−D_{n+1})/(1−D_n)).  Hard-coding
+        # dR/dΔε = [−C_n; 0] would silently assume R_σ = σ − σ_trial + h(x)
+        # and give a wrong tangent for every other form, so differentiate R
+        # in a perturbation d of the increment instead.  When strain_inc is
+        # unknown (bare return_mapping call) only the σ_trial path exists.
+        C_n_arr = anp.array(C_n)
+        trial_arr = anp.array(trial)
+        deps_arr = anp.array(strain_inc) if strain_inc is not None else None
+
+        def residual_of_increment(d):
+            return residual_fn(
+                x_conv_arr,
+                stress_trial=trial_arr + anp.dot(C_n_arr, d),
+                strain_inc=None if deps_arr is None else deps_arr + d,
+            )
+
+        B = autograd.jacobian(residual_of_increment)(anp.zeros(ntens))  # type: ignore[call-arg]
+        dxde = -np.linalg.solve(np.array(A), np.array(B))
         return anp.array(dxde[:ntens, :])
 
     def _elastic_state(

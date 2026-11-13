@@ -383,6 +383,16 @@ class MaterialModel(ABC):
         strain_inc : anp.ndarray, shape (ntens,), keyword-only
             Strain increment Δε for the current load step.
 
+        Notes
+        -----
+        ``stress_trial`` and ``strain_inc`` may enter any residual row with any
+        coefficient.  The autodiff consistent tangent differentiates the
+        residual with respect to the load increment through both, so it does
+        not require the ``R_σ = σ − σ_trial + …`` form — e.g. a weakly coupled
+        damage residual ``σ − (1−D_{n+1})/(1−D_n)·σ_trial + …`` gets the exact
+        tangent including the ∂D/∂Δε term.  Both arrive as autograd boxes
+        during that differentiation, so operate on them with ``autograd.numpy``.
+
         Returns
         -------
         list[StateResidual]
