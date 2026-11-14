@@ -71,3 +71,56 @@ def test_damage_residual_below_threshold_is_zero(rng):
 def test_state_declaration():
     assert J2IsotropicDamage.implicit_state_names == ["stress", "D"]
     assert J2IsotropicDamage.state_names == ["stress", "ep", "D"]
+
+
+# ---------------------------------------------------------------------------
+# Crack-closure variant
+# ---------------------------------------------------------------------------
+
+import autograd  # noqa: E402
+
+from manforge.models import (  # noqa: E402
+    J2IsotropicDamageCrackClosure3D, J2IsotropicDamageCrackClosurePS,
+    J2IsotropicDamageCrackClosure1D,
+)
+
+CC_PAIRS = [
+    (J2IsotropicDamageCrackClosure3D, J2IsotropicDamage3D),
+    (J2IsotropicDamageCrackClosurePS, J2IsotropicDamagePS),
+    (J2IsotropicDamageCrackClosure1D, J2IsotropicDamage1D),
+]
+
+
+@pytest.mark.parametrize("cc_cls,base_cls", CC_PAIRS)
+def test_crack_closure_h1_recovers_parent_y(cc_cls, base_cls, rng):
+    cc, base = cc_cls(**P, **DP, h=1.0), base_cls(**P, **DP)
+    sig = 100.0 * rng.standard_normal(cc.ntens)
+    assert float(cc.energy_release_rate(sig)) == pytest.approx(
+        float(base.energy_release_rate(sig)), rel=1e-12)
+    np.testing.assert_allclose(autograd.grad(cc.energy_release_rate)(sig),
+                               autograd.grad(base.energy_release_rate)(sig),
+                               rtol=1e-10, atol=1e-16)
+
+
+@pytest.mark.parametrize("h", [0.0, 0.2, 1.0])
+def test_crack_closure_uniaxial_y(h):
+    """1D: tension Y = σ²/2E, compression Y = h σ²/2E."""
+    m = J2IsotropicDamageCrackClosure1D(**P, **DP, h=h)
+    sig = 300.0
+    assert float(m.energy_release_rate(np.array([sig]))) == pytest.approx(sig ** 2 / (2 * P["E"]))
+    assert float(m.energy_release_rate(np.array([-sig]))) == pytest.approx(
+        h * sig ** 2 / (2 * P["E"]), abs=1e-15)
+
+
+def test_crack_closure_h0_purely_compressive_state_has_no_driving_force(rng):
+    m = J2IsotropicDamageCrackClosure3D(**P, **DP, h=0.0)
+    A = rng.standard_normal((3, 3))
+    T = -(A @ A.T) * 100.0                   # negative definite
+    sig = np.array([T[0, 0], T[1, 1], T[2, 2], T[0, 1], T[0, 2], T[1, 2]])
+    assert abs(float(m.energy_release_rate(sig))) < 1e-15
+
+
+def test_crack_closure_y_nonnegative(rng):
+    m = J2IsotropicDamageCrackClosure3D(**P, **DP, h=0.2)
+    for _ in range(200):
+        assert float(m.energy_release_rate(300.0 * rng.standard_normal(6))) >= 0.0

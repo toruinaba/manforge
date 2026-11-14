@@ -129,6 +129,7 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 from manforge.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,    # J2 等方硬化
     J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,  # J2 + Lemaitre 損傷 (弱連成)
+    J2IsotropicDamageCrackClosure3D, ...,           # 同上 + 主値分解による引張/圧縮分離 (Y のみ)
     AFKinematic3D, AFKinematicPS, AFKinematic1D,    # Armstrong-Frederick
     OWKinematic3D, OWKinematicPS, OWKinematic1D,    # Ohno-Wang
 )

@@ -80,6 +80,7 @@ from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, Implicit, NTENS, SCALAR, State, StateResidual, StateUpdate
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.utils.smooth import smooth_macaulay
+from manforge.utils.spectral import negative_part_sq, positive_part_sq
 from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
 
 
@@ -240,3 +241,100 @@ class J2IsotropicDamage1D(J2IsotropicDamage):
                  S: float, s: float, p_D: float = 0.0):
         super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
                          S=S, s=s, p_D=p_D)
+
+
+# ===========================================================================
+# Crack-closure variant: tension/compression split of the damage driving force
+# ===========================================================================
+
+class J2IsotropicDamageCrackClosure(J2IsotropicDamage):
+    """:class:`J2IsotropicDamage` whose Y is split into tensile/compressive parts.
+
+    Lemaitre's quasi-unilateral (crack-closure) energy release rate, with the
+    split taken on the principal effective stresses σ̃_i::
+
+        Y = (1+ν)/(2E) · [ Σ⟨σ̃_i⟩₊² + h Σ⟨σ̃_i⟩₋² ]
+          −    ν/(2E) · [ ⟨tr σ̃⟩₊² + h ⟨tr σ̃⟩₋² ]
+
+    h ∈ [0, 1] is the crack-closure parameter: compression drives damage h
+    times as hard as tension.  h = 1 recovers the parent's Y = σ̃ : C0⁻¹ : σ̃ / 2
+    exactly; h = 0 means purely compressive states do not damage at all.
+    Both brackets are non-negative for ν < 1/2, so Y ≥ 0.
+
+    **Scope (stage 1).**  Only the damage *driving force* is split.  The
+    nominal stress is still σ = (1 − D) σ̃ in both tension and compression, so
+    the stiffness does *not* recover when cracks close.  Splitting the stress
+    itself makes the elastic response piecewise linear, which the framework's
+    linear elastic branch (σ = σ_n + C_n Δε) cannot represent — that needs a
+    separate design.
+
+    **Autodiff.**  Σ⟨σ̃_i⟩±² comes from
+    :func:`manforge.utils.spectral.spectral_trace`, whose gradient is the matrix
+    function f'(σ̃) rather than the eigh derivative.  Uniaxial, plane-stress and
+    pure-shear states all have repeated principal values, where the eigh
+    derivative is NaN; the spectral form is exact there.
+
+    Parameters
+    ----------
+    h : float
+        Crack-closure parameter (default 0.2, a typical metal value).
+    Other parameters as in :class:`J2IsotropicDamage`.
+    """
+
+    param_names = J2IsotropicDamage.param_names + ["h"]
+    param_meta = {
+        **J2IsotropicDamage.param_meta,
+        "h": ParamMeta(doc="Crack-closure parameter (compression/tension damage ratio)",
+                       default=0.2, bounds=(0.0, 1.0)),
+    }
+
+    def __init__(self, dimension: StressDimension = SOLID_3D, *,
+                 E: float, nu: float, sigma_y0: float, H: float,
+                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
+        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
+                         S=S, s=s, p_D=p_D)
+        self.h = h
+
+    def energy_release_rate(self, stress_eff: StressVec) -> ScalarType:
+        """Crack-closure Y from the principal split of σ̃."""
+        dim = self.dimension
+        pos = positive_part_sq(stress_eff, dim)
+        neg = negative_part_sq(stress_eff, dim)
+        tr = 3.0 * self.hydrostatic(stress_eff)
+        tr_pos = anp.maximum(tr, 0.0) ** 2
+        tr_neg = anp.minimum(tr, 0.0) ** 2
+        return ((1.0 + self.nu) * (pos + self.h * neg)
+                - self.nu * (tr_pos + self.h * tr_neg)) / (2.0 * self.E)
+
+
+class J2IsotropicDamageCrackClosure3D(J2IsotropicDamageCrackClosure):
+    """3D solid variant of :class:`J2IsotropicDamageCrackClosure`."""
+
+    dimension = SOLID_3D
+
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
+                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
+        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
+                         S=S, s=s, p_D=p_D, h=h)
+
+
+class J2IsotropicDamageCrackClosurePS(J2IsotropicDamageCrackClosure):
+    """Plane-stress variant of :class:`J2IsotropicDamageCrackClosure`."""
+
+    dimension = PLANE_STRESS
+
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
+                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
+        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
+                         S=S, s=s, p_D=p_D, h=h)
+
+
+class J2IsotropicDamageCrackClosure1D(J2IsotropicDamageCrackClosure):
+    """Uniaxial (1D) variant of :class:`J2IsotropicDamageCrackClosure`."""
+
+    dimension = UNIAXIAL_1D
+
+    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
+                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
+        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
+                         S=S, s=s, p_D=p_D, h=h)

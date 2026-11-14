@@ -67,3 +67,45 @@ def test_stress_driver_uses_nominal_stress():
     load = FieldHistory(FieldType.STRESS, "sigma11", sig)
     res = StressDriver(PythonNumericalIntegrator(m)).run(load)
     np.testing.assert_allclose(np.asarray(res.stress)[:, 0], sig, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Crack-closure variant
+# ---------------------------------------------------------------------------
+
+from manforge.models import (  # noqa: E402
+    J2IsotropicDamage1D as _Base1D,
+    J2IsotropicDamageCrackClosure3D, J2IsotropicDamageCrackClosurePS,
+    J2IsotropicDamageCrackClosure1D,
+)
+
+CC_CASES = [
+    # uniaxial-like 3D path: repeated principal values throughout
+    (J2IsotropicDamageCrackClosure3D, [1.0, -0.5, -0.5, 0.0, 0.0, 0.0]),
+    (J2IsotropicDamageCrackClosure3D, DIRS[6]),
+    (J2IsotropicDamageCrackClosurePS, DIRS[3]),
+    (J2IsotropicDamageCrackClosure1D, DIRS[1]),
+]
+
+
+@pytest.mark.parametrize("cls,direction", CC_CASES)
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_crack_closure_tangent_matches_fd(cls, direction, sign):
+    m = cls(**P, **DP, h=0.2)
+    deps = sign * np.array(direction) * 2e-3
+    integ, stress, state = _advance(m, deps, 20)
+    assert float(state["D"]) > 1e-3
+    res = check_tangent(integ, stress, state, deps, eps=1e-8)
+    assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
+
+
+@pytest.mark.parametrize("h", [0.0, 0.2, 1.0])
+def test_crack_closure_1d_compression_damages_h_times_tension(h):
+    """1D, s = 1: |σ̃| and ep histories are sign-symmetric, so D_comp = h · D_tens."""
+    m = J2IsotropicDamageCrackClosure1D(**P, **DP, h=h)
+    deps = np.array([2e-3])
+    _, s_t, st_t = _advance(m, deps, 20)
+    _, s_c, st_c = _advance(m, -deps, 20)
+    _, _, st_base = _advance(_Base1D(**P, **DP), deps, 20)
+    assert float(st_t["D"]) == pytest.approx(float(st_base["D"]), rel=1e-10)
+    assert float(st_c["D"]) == pytest.approx(h * float(st_t["D"]), rel=1e-8, abs=1e-14)
