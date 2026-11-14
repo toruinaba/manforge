@@ -128,6 +128,7 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 ```python
 from manforge.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,    # J2 等方硬化
+    J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,  # J2 + Lemaitre 損傷 (弱連成)
     AFKinematic3D, AFKinematicPS, AFKinematic1D,    # Armstrong-Frederick
     OWKinematic3D, OWKinematicPS, OWKinematic1D,    # Ohno-Wang
 )
