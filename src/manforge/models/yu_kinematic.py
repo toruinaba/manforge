@@ -542,11 +542,12 @@ class YUKinematicPS(YUKinematic):
         R_n = state_n["R"]
         q_n = state_n["q"]
         r_n = state_n["r"]
-        s_xi = self.dev(state_new["stress"]) - state_new["theta"] - state_new["beta"]
-        g = self.deviatoric_inner_product(s_xi, s_xi)
-        # Rescales the quadratic-form Δλ to the norm-form increment: on the
-        # yield surface √(2/3·g) = (2/3)Y.
-        delta_eps_eq = dlambda * smooth_sqrt(2.0 / 3.0 * g)
+        # Rescales the quadratic-form Δλ to the norm-form increment.  The exact
+        # factor √(2/3·ξᵀPξ) equals (2/3)Y on the yield surface, so substituting
+        # the constant leaves the converged state unchanged while keeping eps_eq
+        # free of σ, θ, β -- without it C(eps_eq) couples into every block of the
+        # sigma row.  Same substitution as k_eff.
+        delta_eps_eq = dlambda * 2.0 / 3.0 * self.Y
         beta_new = state_new["beta"]
         d_beta = beta_new - state_n["beta"]
         theta_new = state_new["theta"]
@@ -604,10 +605,7 @@ class YUKinematicPS(YUKinematic):
             state_new["theta"] -= dx[4:7]
             state_new["beta"] -= dx[7:]
             dlambda -= dx[3]
-            eta = state_new["stress"] - state_new["theta"] - state_new["beta"]
-            theta_norm = self.vonmises_norm(state_new["theta"])
-            g = self.deviatoric_inner_product(eta, eta)
-            delta_eps_eq = dlambda * smooth_sqrt(2.0 / 3.0 * g)
+            delta_eps_eq = dlambda * 2.0 / 3.0 * self.Y
             d_beta = state_new["beta"] - state_n["beta"]
             g_xi = state_new["beta"] - state_n["q"]
             g_stag = self.vonmises_norm(g_xi) - state_n["r"]
@@ -686,64 +684,25 @@ class YUKinematicPS(YUKinematic):
         return 0.0
 
     def calc_fe_fs(self, state, dlambda, state_n):
-        stress = state["stress"]
-        beta = state["beta"]
-        theta = state["theta"]
-        eps_eq = state["eps_eq"]
-        eps_eq_n = state_n["eps_eq"]
-        eta = stress - beta - theta
-        d_eps_eq = dlambda * np.sqrt(eta @ (self.P @ eta))
         C = self.elastic_stiffness(state)
-        f = self._calc_E_factor(eps_eq)
-        fb = -self.xi * (1 - self.Ea / self.E) * np.exp(-self.xi * (eps_eq))
-        deq_ds = 2 / 3 * dlambda * self.P @ eta / smooth_sqrt(2 / 3 * eta @ self.P @ eta) 
-        dC_deq = fb / f * C @ deq_ds
-        return np.eye(3) + dlambda * C @ self.P + dlambda * np.outer(dC_deq, self.P @ eta)
+        return np.eye(3) + dlambda * C @ self.P
 
     def calc_fe_ft(self, state, dlambda, state_n):
-        stress = state["stress"]
-        beta = state["beta"]
-        theta = state["theta"]
-        eps_eq = state["eps_eq"]
-        eps_eq_n = state_n["eps_eq"]
-        eta = stress - beta - theta
-        d_eps_eq = dlambda * np.sqrt(eta @ (self.P @ eta))
         C = self.elastic_stiffness(state)
-        f = self._calc_E_factor(eps_eq)
-        fb = -self.xi * (1 - self.Ea / self.E) * np.exp(-self.xi * (eps_eq))
-        deq_ds = 2 / 3 * dlambda * self.P @ eta / smooth_sqrt(2 / 3 * eta @ self.P @ eta) 
-        dC_deq = fb / f * C @ deq_ds
-        return - dlambda * C @ self.P - dlambda * np.outer(dC_deq, self.P @ eta)
+        return - dlambda * C @ self.P
 
     def calc_fe_fb(self, state, dlambda, state_n):
-        stress = state["stress"]
-        beta = state["beta"]
-        theta = state["theta"]
-        eps_eq = state["eps_eq"]
-        eps_eq_n = state_n["eps_eq"]
-        eta = stress - beta - theta
-        d_eps_eq = dlambda * np.sqrt(eta @ (self.P @ eta))
         C = self.elastic_stiffness(state)
-        f = self._calc_E_factor(eps_eq)
-        fb = -self.xi * (1 - self.Ea / self.E) * np.exp(-self.xi * (eps_eq))
-        deq_ds = 2 / 3 * dlambda * self.P @ eta / smooth_sqrt(2 / 3 * eta @ self.P @ eta) 
-        dC_deq = fb / f * C @ deq_ds
-        return - dlambda * C @ self.P - dlambda * np.outer(dC_deq, self.P @ eta)
+        return - dlambda * C @ self.P
 
     def calc_fe_fl(self, state, dlambda, state_n):
-        stress = state["stress"]
-        beta = state["beta"]
-        theta = state["theta"]
         eps_eq = state["eps_eq"]
-        eps_eq_n = state_n["eps_eq"]
-        eta = stress - beta - theta
-        d_eps_eq = dlambda * np.sqrt(eta @ (self.P @ eta))
+        eta = state["stress"] - state["beta"] - state["theta"]
         C = self.elastic_stiffness(state)
         f = self._calc_E_factor(eps_eq)
-        fb = -self.xi * (1 - self.Ea / self.E) * np.exp(-self.xi * (eps_eq))
-        deq_dl =smooth_sqrt(2 / 3 * eta @ self.P @ eta) 
-        dC_dl = fb / f * deq_dl * C
-        return C @ self.P @ eta + dlambda * dC_dl @ self.P @ eta
+        fb = -self.xi * (1 - self.Ea / self.E) * np.exp(-self.xi * eps_eq)
+        # deps_eq/dlambda = (2/3)Y after the substitution in update_state.
+        return (1.0 + dlambda * fb / f * 2.0 / 3.0 * self.Y) * (C @ self.P @ eta)
 
     def _C_k(self, state_n):
         """Kinematic hardening rate.
