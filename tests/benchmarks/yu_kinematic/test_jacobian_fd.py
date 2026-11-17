@@ -79,13 +79,27 @@ def _residual_full(model, x, state_n, stress_trial):
     return np.asarray(model.calc_residual(state_new, state_n, stress_trial, dlambda))
 
 
-def _fd_jacobian(residual_fn, x0, eps=1e-6):
-    n = len(x0)
-    J = np.zeros((len(residual_fn(x0)), n))
-    for j in range(n):
-        xp = x0.copy(); xp[j] += eps
-        xm = x0.copy(); xm[j] -= eps
-        J[:, j] = (residual_fn(xp) - residual_fn(xm)) / (2.0 * eps)
+def _fd_jacobian(residual_fn, x0, rel=1e-5):
+    """Central differences with a step scaled to each unknown block.
+
+    One absolute step cannot serve unknowns that differ by seven orders of
+    magnitude (σ, θ, β ~ 1e2 MPa; Δλ ~ 1e-5).  A fixed 1e-6 sits at the
+    round-off floor for σ (error ∝ 1/eps reached the 1e-6 TOL on one step of
+    the uniaxial cycle once NR convergence became stress-scaled, b0c3a12),
+    while 1e-5 is a ~30 % perturbation of a small Δλ (truncation broke the
+    multiaxial case).  Scaling the step by the block's magnitude keeps every
+    block at relative error ≲ 4e-8 across all three histories — 25× under
+    TOL — and the regression targets above (rel-err 0.73, 9, 2.6e-2) remain
+    unmissable.
+    """
+    steps = np.empty(len(x0))
+    for _, sl in _COL:
+        steps[sl] = rel * max(float(np.max(np.abs(x0[sl]))), 1e-12)
+    J = np.zeros((len(residual_fn(x0)), len(x0)))
+    for j, h in enumerate(steps):
+        xp = x0.copy(); xp[j] += h
+        xm = x0.copy(); xm[j] -= h
+        J[:, j] = (residual_fn(xp) - residual_fn(xm)) / (2.0 * h)
     return J
 
 
