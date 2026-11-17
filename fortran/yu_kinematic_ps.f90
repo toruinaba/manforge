@@ -422,50 +422,17 @@ end subroutine yu_ps_fy_fl
 
 
 ! =============================================================================
-! yu_ps_dc_deq  (internal helper, not f2py-callable)
+! R_stress row
 !
-! The dC/dsigma contribution shared by the R_stress blocks.  C depends on
-! eps_eq through the E-degradation factor, and eps_eq depends on sigma through
-! dlambda*sqrt(2/3*g), so d(R_sigma)/d(sigma) is NOT just I + dl*C@P.
+! The quadratic-form dlambda is rescaled to the norm-form eps_eq increment by
+! the constant (2/3)*Y -- exact on the yield surface, where sqrt(2/3*g) =
+! (2/3)*Y -- instead of the state-dependent sqrt(2/3 * eta^T P eta).  eps_eq
+! therefore does not depend on sigma, theta or beta, so C(eps_eq) contributes
+! nothing to d(R_stress)/d(sigma, theta, beta) and the blocks reduce to the
+! constant-P form.  Mirrors YUKinematicPS.calc_fe_* (same substitution as
+! k_eff; see the Python update_state docstring).
 !
-!   fb      = -xi_param*(1 - Ea/E)*exp(-xi_param*eps_eq)
-!   f       = E-degradation factor
-!   deq_ds  = 2/3*dl*P@eta / sqrt(2/3 * eta^T P eta)
-!   dC_deq  = fb/f * C @ deq_ds
-! =============================================================================
-subroutine yu_ps_dc_deq(E, Ea, xi_param, eps_eq, C, eta, dlambda, dC_deq, Peta)
-    implicit none
-    double precision, intent(in)  :: E, Ea, xi_param, eps_eq, C(3,3), eta(3), dlambda
-    double precision, intent(out) :: dC_deq(3), Peta(3)
-
-    double precision :: fb, f, etaPeta, sq, deq_ds(3)
-    integer :: ii, jj
-
-    fb = -xi_param * (1.0d0 - Ea / E) * exp(-xi_param * eps_eq)
-    f  = 1.0d0 - (1.0d0 - Ea / E) * (1.0d0 - exp(-xi_param * eps_eq))
-
-    call yu_ps_pmul(eta, Peta)
-    call yu_ps_dev_inner(eta, eta, etaPeta)
-    call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * etaPeta, sq)
-
-    do ii = 1, 3
-        deq_ds(ii) = 2.0d0 / 3.0d0 * dlambda * Peta(ii) / sq
-    end do
-    do ii = 1, 3
-        dC_deq(ii) = 0.0d0
-        do jj = 1, 3
-            dC_deq(ii) = dC_deq(ii) + C(ii,jj) * deq_ds(jj)
-        end do
-        dC_deq(ii) = fb / f * dC_deq(ii)
-    end do
-
-end subroutine yu_ps_dc_deq
-
-
-! =============================================================================
-! yu_ps_fe_fs
-!
-! d(R_stress)/d(sigma) = I + dl*C@P + dl*outer(dC_deq, P@eta)
+! yu_ps_fe_fs:  d(R_stress)/d(sigma) = I + dl*C@P
 ! =============================================================================
 subroutine yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
     implicit none
@@ -473,28 +440,19 @@ subroutine yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda
     double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
     double precision, intent(out) :: jmat(3,3)
 
-    double precision :: C(3,3), P(3,3), CP(3,3), eta(3), dC_deq(3), Peta(3)
+    double precision :: C(3,3), P(3,3)
     integer :: ii, jj, kk
 
     call yu_ps_elastic_stiffness(E, nu, eps_eq, Ea, xi_param, C)
     call yu_ps_pmat(P)
-    do ii = 1, 3
-        eta(ii) = stress(ii) - theta(ii) - beta(ii)
-    end do
-    call yu_ps_dc_deq(E, Ea, xi_param, eps_eq, C, eta, dlambda, dC_deq, Peta)
 
     do jj = 1, 3
         do ii = 1, 3
-            CP(ii,jj) = 0.0d0
+            jmat(ii,jj) = 0.0d0
             do kk = 1, 3
-                CP(ii,jj) = CP(ii,jj) + C(ii,kk) * P(kk,jj)
+                jmat(ii,jj) = jmat(ii,jj) + C(ii,kk) * P(kk,jj)
             end do
-        end do
-    end do
-
-    do jj = 1, 3
-        do ii = 1, 3
-            jmat(ii,jj) = dlambda * CP(ii,jj) + dlambda * dC_deq(ii) * Peta(jj)
+            jmat(ii,jj) = dlambda * jmat(ii,jj)
         end do
         jmat(jj,jj) = jmat(jj,jj) + 1.0d0
     end do
@@ -505,7 +463,7 @@ end subroutine yu_ps_fe_fs
 ! =============================================================================
 ! yu_ps_fe_ft / yu_ps_fe_fb
 !
-! d(R_stress)/d(theta) = d/d(beta) = -dl*C@P - dl*outer(dC_deq, P@eta)
+! d(R_stress)/d(theta) = d/d(beta) = -dl*C@P
 ! =============================================================================
 subroutine yu_ps_fe_ft(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jmat)
     implicit none
@@ -543,18 +501,19 @@ end subroutine yu_ps_fe_fb
 ! =============================================================================
 ! yu_ps_fe_fl
 !
-! d(R_stress)/d(dlambda) = C@P@eta + dl*dC_dl@P@eta, where
-!   deq_dl = sqrt(2/3 * eta^T P eta)
-!   dC_dl  = fb/f * deq_dl * C
+! d(R_stress)/d(dlambda) = (1 + dl * fb/f * deq_dl) * C@P@eta, with
+!   deq_dl = d(eps_eq)/d(dlambda) = (2/3)*Y   (constant -- see block header)
+!   fb     = -xi_param*(1 - Ea/E)*exp(-xi_param*eps_eq),  f = E-degradation factor
+! Y is an argument (unlike the other fe_* blocks) because deq_dl needs it.
 ! =============================================================================
-subroutine yu_ps_fe_fl(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jvec)
+subroutine yu_ps_fe_fl(E, nu, Y, Ea, xi_param, eps_eq, stress, theta, beta, dlambda, jvec)
     implicit none
-    double precision, intent(in)  :: E, nu, Ea, xi_param, eps_eq
+    double precision, intent(in)  :: E, nu, Y, Ea, xi_param, eps_eq
     double precision, intent(in)  :: stress(3), theta(3), beta(3), dlambda
     double precision, intent(out) :: jvec(3)
 
     double precision :: C(3,3), eta(3), Peta(3), CPeta(3)
-    double precision :: fb, f, etaPeta, deq_dl, scale
+    double precision :: fb, f, scale
     integer :: ii, jj
 
     call yu_ps_elastic_stiffness(E, nu, eps_eq, Ea, xi_param, C)
@@ -571,11 +530,7 @@ subroutine yu_ps_fe_fl(E, nu, Ea, xi_param, eps_eq, stress, theta, beta, dlambda
 
     fb = -xi_param * (1.0d0 - Ea / E) * exp(-xi_param * eps_eq)
     f  = 1.0d0 - (1.0d0 - Ea / E) * (1.0d0 - exp(-xi_param * eps_eq))
-    call yu_ps_dev_inner(eta, eta, etaPeta)
-    call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * etaPeta, deq_dl)
-
-    ! dC_dl = fb/f * deq_dl * C, so dl*dC_dl@P@eta = dl*(fb/f*deq_dl)*C@P@eta
-    scale = 1.0d0 + dlambda * fb / f * deq_dl
+    scale = 1.0d0 + dlambda * fb / f * (2.0d0 / 3.0d0 * Y)
     do ii = 1, 3
         jvec(ii) = scale * CPeta(ii)
     end do
@@ -829,7 +784,7 @@ subroutine yu_ps_calc_jacobian(E, nu, Y, B_bnd, C_1, C_2, Rsat, k, b_kin, h, Ea,
     call yu_ps_fe_fs(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_s)
     call yu_ps_fe_ft(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_t)
     call yu_ps_fe_fb(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_b)
-    call yu_ps_fe_fl(E, nu, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_l)
+    call yu_ps_fe_fl(E, nu, Y, Ea, xi_param, eps_eq_new, stress_new, theta_new, beta_new, dlambda, Rs_l)
 
     call yu_ps_ft_fs(B_bnd, Y, C_1, C_2, R_new, theta_max_n, dlambda, Rt_s)
     call yu_ps_ft_ft(B_bnd, Y, C_1, C_2, R_new, theta_new, theta_max_n, dlambda, Rt_t)
@@ -1161,7 +1116,7 @@ subroutine yu_kinematic_ps( &
     double precision :: xi_trial(3), f_trial, xiPxi
     double precision :: r_vec(10), jac(10,10), dx(10,1)
     double precision :: dlambda, r_norm
-    double precision :: eta(3), g, delta_eps_eq, s_fac
+    double precision :: delta_eps_eq, s_fac
     double precision :: d_beta(3), g_xi(3), stag_norm, g_stag, g_flag
     ! delta_rstag / delta_Rbnd, not delta_r / delta_R: Fortran is
     ! case-insensitive, so the Python names for the stagnation radius and the
@@ -1272,14 +1227,13 @@ subroutine yu_kinematic_ps( &
 
         ! ---- explicit state updates (stagnation surface) -------------------
         do ii = 1, 3
-            eta(ii)    = stress_new(ii) - theta_new(ii) - beta_new(ii)
             d_beta(ii) = beta_new(ii) - beta_n(ii)
             g_xi(ii)   = beta_new(ii) - q_n(ii)
         end do
 
-        call yu_ps_dev_inner(eta, eta, g)
-        call yu_ps_smooth_sqrt(2.0d0 / 3.0d0 * g, delta_eps_eq)
-        delta_eps_eq = dlambda * delta_eps_eq
+        ! Norm-form eps_eq increment via the on-surface constant (2/3)*Y
+        ! (see the R_stress block header) -- keeps eps_eq free of sigma.
+        delta_eps_eq = dlambda * 2.0d0 / 3.0d0 * Y
 
         s_fac = 1.0d0 / (1.0d0 + 2.0d0 / 3.0d0 * k * Y * dlambda)
 

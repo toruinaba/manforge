@@ -149,9 +149,32 @@ class TestJacobianBlocks:
     def test_fe_blocks(self, plastic_state, fortran_mod, name, py_method):
         m, state, state_n, dlambda = plastic_state
         py = getattr(m, py_method)(state, dlambda, state_n)
+        # fe_fl alone needs Y: d(eps_eq)/d(dlambda) = (2/3)Y.
+        material = (m.E, m.nu, m.Y) if name == "yu_ps_fe_fl" else (m.E, m.nu)
         f = fortran_mod.call(
-            name, m.E, m.nu, m.Ea, m.xi, float(state["eps_eq"]),
+            name, *material, m.Ea, m.xi, float(state["eps_eq"]),
             state["stress"], state["theta"], state["beta"], dlambda,
+        )
+        np.testing.assert_allclose(py, f, rtol=1e-11, atol=1e-11)
+
+    @pytest.mark.parametrize("name,py_method", [
+        ("yu_ps_fe_fs", "calc_fe_fs"),
+        ("yu_ps_fe_fl", "calc_fe_fl"),
+    ])
+    def test_fe_blocks_off_yield_surface(self, plastic_state, fortran_mod, name, py_method):
+        """NR iterates are off the surface, where √(2/3·ξᵀPξ) ≠ (2/3)Y.
+
+        On the converged state the old (√-based) and new ((2/3)Y) eps_eq
+        rescaling agree, so the test above cannot tell them apart in fe_fl.
+        Perturbing σ off the surface does.
+        """
+        m, state, state_n, dlambda = plastic_state
+        off = {**state, "stress": np.asarray(state["stress"]) * 1.05}
+        py = getattr(m, py_method)(off, dlambda, state_n)
+        material = (m.E, m.nu, m.Y) if name == "yu_ps_fe_fl" else (m.E, m.nu)
+        f = fortran_mod.call(
+            name, *material, m.Ea, m.xi, float(off["eps_eq"]),
+            off["stress"], off["theta"], off["beta"], dlambda,
         )
         np.testing.assert_allclose(py, f, rtol=1e-11, atol=1e-11)
 
