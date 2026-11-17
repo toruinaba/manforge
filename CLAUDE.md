@@ -31,7 +31,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Three-layer design
 
-1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。特殊フック(`elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。
+1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。特殊フック(`elastic_predictor` / `elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。
 2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。NR 経路(スカラー/ベクトル)は宣言から自動選択。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
 3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`)、`fitting/`(`fit_params` + `ParameterSpace` / `FitTarget` / `Observation` / metrics)、`verification/`(`JacobianChecker` / `TangentChecker` / `CrosscheckStrainDriver` 等)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation` / `ParamMeta`。Web 依存ゼロ、plain I/O、非収束は値で返す)。
 

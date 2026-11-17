@@ -1524,3 +1524,137 @@ class TestTangentIncrementDependence:
         np.testing.assert_allclose(
             np.asarray(r.ddsdde), np.asarray(r_ref.ddsdde), rtol=1e-8, atol=1e-6
         )
+
+
+# ===========================================================================
+# elastic_predictor: model-defined (non-linear) elastic trial state
+# ===========================================================================
+
+from tests.fixtures.predictor_models import (  # noqa: E402
+    BilinearPlastic1D, BilinearPlasticTrialResidual1D,
+)
+from manforge.models.j2_isotropic import J2Isotropic1D  # noqa: E402
+from manforge.simulation.integrator import SubSteppingIntegrator  # noqa: E402
+from manforge.core.state import StateResidual  # noqa: E402
+
+_BL = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
+
+
+def _run_1d(integ, strains):
+    model_state = integ.initial_state()
+    stress, out, eps = np.zeros(1), [], 0.0
+    for e in strains:
+        r = integ.stress_update(np.array([e - eps]), stress, model_state)
+        stress, model_state, eps = np.asarray(r.stress), r.state, e
+        out.append(r)
+    return out
+
+
+class TestElasticPredictor:
+    def test_default_predictor_path_unchanged(self):
+        """No override: elastic ddsdde is C_n itself and trial is σ_n + C_n Δε."""
+        model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+        integ = PythonNumericalIntegrator(model)
+        deps = np.array([1e-4, 0, 0, 0, 0, 0])
+        r = integ.stress_update(deps, np.zeros(6), model.initial_state())
+        C = model.elastic_stiffness(model.initial_state())
+        assert not r.is_plastic
+        np.testing.assert_array_equal(np.asarray(r.ddsdde), np.asarray(C))
+        np.testing.assert_array_equal(np.asarray(r.stress), np.asarray(C @ deps))
+        np.testing.assert_array_equal(
+            np.asarray(integ.trial_stress(deps, np.zeros(6), model.initial_state())),
+            np.asarray(C @ deps),
+        )
+
+    def test_elastic_step_crossing_sign_uses_predictor(self):
+        """σ̃: +100 → −100 inside one elastic step; σ = k_c·(−100), not linear in C_n."""
+        m = BilinearPlastic1D(**_BL)
+        integ = PythonNumericalIntegrator(m)
+        e1 = 100.0 / m.E
+        r1, r2 = _run_1d(integ, [e1, -e1])
+        assert not r1.is_plastic and not r2.is_plastic
+        assert float(r1.stress[0]) == pytest.approx(m.k_t * 100.0)
+        assert float(r2.stress[0]) == pytest.approx(m.k_c * -100.0)
+        # The implicit effective stress advanced on the elastic step.
+        assert float(r2.state["stress_eff"][0]) == pytest.approx(-100.0)
+
+    @pytest.mark.parametrize("sign,k", [(1.0, "k_t"), (-1.0, "k_c")])
+    def test_elastic_tangent_is_predictor_derivative(self, sign, k):
+        m = BilinearPlastic1D(**_BL)
+        integ = PythonNumericalIntegrator(m)
+        state = {**m.initial_state(), "stress_eff": np.array([sign * 50.0]),
+                 "stress": np.asarray(m.nominal(np.array([sign * 50.0])))}
+        deps = np.array([sign * 1e-5])
+        r = integ.stress_update(deps, state["stress"], state)
+        assert not r.is_plastic
+        assert float(np.asarray(r.ddsdde)[0, 0]) == pytest.approx(getattr(m, k) * m.E)
+        res = check_tangent(integ, state["stress"], state, deps, eps=1e-9)
+        assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
+
+    @pytest.mark.parametrize("cls", [BilinearPlastic1D, BilinearPlasticTrialResidual1D])
+    @pytest.mark.parametrize("sign", [1.0, -1.0])
+    def test_plastic_tangent_through_predictor_matches_fd(self, cls, sign):
+        m = cls(**_BL)
+        integ = PythonNumericalIntegrator(m)
+        strains = sign * np.linspace(0.0, 1e-2, 11)[1:]
+        out = _run_1d(integ, strains)
+        prev = out[-2]
+        deps = np.array([strains[-1] - strains[-2]])
+        assert out[-1].is_plastic
+        res = check_tangent(integ, np.asarray(prev.stress), prev.state, deps, eps=1e-8)
+        assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
+
+    def test_cyclic_history_matches_effective_j2_reference(self):
+        """σ̃, ep follow undamaged J2; σ = 𝒩(σ̃) through loading, reversal, reloading."""
+        m = BilinearPlastic1D(**_BL)
+        ref = J2Isotropic1D(**_BL)
+        strains = np.concatenate([np.linspace(0, 4e-3, 9)[1:], np.linspace(4e-3, -4e-3, 17)[1:],
+                                  np.linspace(-4e-3, 2e-3, 13)[1:]])
+        out = _run_1d(PythonNumericalIntegrator(m), strains)
+        out_ref = _run_1d(PythonNumericalIntegrator(ref), strains)
+        assert any(r.is_plastic for r in out) and any(not r.is_plastic for r in out)
+        for r, rr in zip(out, out_ref):
+            s_eff = np.asarray(rr.stress)
+            np.testing.assert_allclose(np.asarray(r.state["stress_eff"]), s_eff, atol=1e-8)
+            np.testing.assert_allclose(float(r.state["ep"]), float(rr.state["ep"]), atol=1e-12)
+            np.testing.assert_allclose(np.asarray(r.stress), np.asarray(m.nominal(s_eff)),
+                                       atol=1e-8)
+
+    def test_default_check_tests_full_trial_state(self):
+        """f is evaluated on σ̃_trial, not on the step-n σ̃.
+
+        σ̃: 0 → 200 (elastic) → 300 MPa.  Testing the stale σ̃_n = 200 < σ_y0
+        would wrongly call the second step elastic.
+        """
+        m = BilinearPlastic1D(**_BL)
+        out = _run_1d(PythonNumericalIntegrator(m), [200.0 / m.E, 300.0 / m.E])
+        assert not out[0].is_plastic
+        assert out[1].is_plastic
+
+    def test_substepping_reports_predictor_trial(self):
+        m = BilinearPlastic1D(**_BL)
+        sub = SubSteppingIntegrator(PythonNumericalIntegrator(m))
+        e1 = 100.0 / m.E
+        r1 = sub.stress_update(np.array([e1]), np.zeros(1), m.initial_state())
+        r2 = sub.stress_update(np.array([-2 * e1]), np.asarray(r1.stress), r1.state)
+        assert float(np.asarray(r2.stress_trial)[0]) == pytest.approx(m.k_c * -100.0)
+
+    def test_predictor_returning_residual_raises(self):
+        class _Bad(BilinearPlastic1D):
+            def elastic_predictor(self, state_n, *, strain_inc):
+                return [self.stress(state_n["stress"])]  # implicit field → residual
+
+        m = _Bad(**_BL)
+        with pytest.raises(TypeError, match=r"\.update\(value\)"):
+            PythonNumericalIntegrator(m).stress_update(np.array([1e-5]), np.zeros(1),
+                                                       m.initial_state())
+
+    def test_predictor_without_stress_raises(self):
+        class _NoStress(BilinearPlastic1D):
+            def elastic_predictor(self, state_n, *, strain_inc):
+                return [self.stress_eff.update(state_n["stress_eff"])]
+
+        m = _NoStress(**_BL)
+        with pytest.raises(ValueError, match="trial stress"):
+            PythonNumericalIntegrator(m).stress_update(np.array([1e-5]), np.zeros(1),
+                                                       m.initial_state())

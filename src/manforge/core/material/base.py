@@ -404,6 +404,66 @@ class MaterialModel(ABC):
             "Models with implicit states must implement state_residual()."
         )
 
+    def elastic_predictor(
+        self,
+        state_n: "State | StateDict",
+        *,
+        strain_inc: "FloatArray",
+    ) -> list[StateUpdate]:
+        """Elastic trial state: where the increment lands if it stays elastic.
+
+        The default is the linear predictor ``σ_trial = σ_n + C(state_n) Δε``
+        with every internal variable frozen.  Override when the elastic
+        response is not linear in Δε, or when internal variables other than σ
+        move elastically.  The motivating case is unilateral damage
+        (crack closure): with ``σ = (1−D) σ̃₊ + (1−hD) σ̃₋`` the elastic law is
+        piecewise linear, and an increment whose principal stress changes sign
+        cannot be represented by any constant ``C_n``.  The natural predictor
+        is then written in effective space::
+
+            def elastic_predictor(self, state_n, *, strain_inc):
+                s_eff = state_n["stress_eff"] + self.C0 @ strain_inc
+                return [self.stress.update(self.nominal(s_eff, state_n["D"])),
+                        self.stress_eff.update(s_eff)]
+
+        The returned trial state is used everywhere the framework needs the
+        elastic predictor:
+
+        - **elastic step** — it *is* the converged state (merged over
+          ``state_n``; :meth:`elastic_update_state` is applied on top), and
+          the elastic tangent is ``∂σ_trial/∂Δε`` by autodiff of this method;
+        - **branch** — when :meth:`elastic_check` is not overridden, the
+          framework tests ``yield_function(trial state) ≤ 0``; an override is
+          called as before, with ``stress_trial`` only;
+        - **plastic step** — ``stress_trial`` handed to ``state_residual`` /
+          ``update_state`` is this σ_trial, implicit unknowns start their NR
+          from the trial values returned here, and the consistent tangent
+          differentiates through this method.
+
+        :meth:`elastic_update_state` stays the separate hook for explicit
+        fields that move only on elastic steps (the subloading ratio R).  The
+        two differ in *when* they apply: the predictor is the constant of every
+        step, plastic or not; ``elastic_update_state`` runs only once the step
+        is known to be elastic.
+
+        Parameters
+        ----------
+        state_n : State or dict
+            State at the beginning of the increment (``state_n["stress"]`` is σ_n).
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε (engineering shear).
+
+        Returns
+        -------
+        list[StateUpdate]
+            Must contain the stress.  Use ``self.<field>.update(value)`` — it
+            produces a value for implicit fields too, where calling the field
+            would produce a residual.  Must be autograd-traceable in
+            ``strain_inc``.
+        """
+        C_n = self.elastic_stiffness(state_n)
+        return [StateUpdate(name="stress", value=state_n["stress"] + C_n @ strain_inc)]
+
     def elastic_check(
         self,
         state_n: "State | StateDict",
@@ -418,6 +478,14 @@ class MaterialModel(ABC):
         interior of the surface written in :meth:`yield_function` — so classical
         plasticity models override nothing and keep ``yield_function`` as the
         single source of truth.
+
+        When :meth:`elastic_predictor` is overridden and this method is not,
+        the framework evaluates ``yield_function`` on the *full* trial state
+        (including any non-stress fields the predictor returned) instead of
+        calling this method — the default below only sees σ_trial and would
+        test a stale step-n value of, e.g., an implicit effective stress.  An
+        override of this method is always called as-is; it must then derive
+        whatever trial quantities it needs from ``state_n`` and ``strain_inc``.
 
         Subloading-surface models are the motivating case for overriding.  Put
         the subloading surface ``‖s‖ − R·F`` in :meth:`yield_function` and the Δλ

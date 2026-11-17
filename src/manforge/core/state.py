@@ -196,6 +196,23 @@ class StateField:
             return StateResidual(name=self.name, value=value)
         return StateUpdate(name=self.name, value=value)
 
+    def update(self, value: FloatArray | float) -> "StateUpdate":
+        """Wrap *value* as a :class:`StateUpdate` regardless of the field's kind.
+
+        Calling the field picks the wrapper from its kind, which is right
+        inside ``state_residual`` / ``update_state``.  Hooks that assign
+        *values* to implicit fields — :meth:`MaterialModel.elastic_predictor`
+        returning σ_trial for an ``Implicit`` stress, or an elastic trial of an
+        implicit effective stress — use this instead, because calling an
+        implicit field would produce a residual.
+        """
+        if not self.name:
+            raise RuntimeError(
+                "StateField.update used before the field was declared as a class "
+                "attribute (name not set via __set_name__)."
+            )
+        return StateUpdate(name=self.name, value=value)
+
     def resolve_shape(self, ntens: int) -> tuple[int, ...]:
         """Return the concrete shape with NTENS/SCALAR substituted."""
         if self.shape is NTENS:

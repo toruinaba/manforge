@@ -153,6 +153,12 @@ class SubSteppingIntegrator:
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
     ) -> "StressVec | None":
         """σ_trial of the *undivided* increment — what the caller asked about."""
+        if hasattr(self._integrator, "trial_stress"):
+            # Python integrators honour a model's (possibly non-linear)
+            # elastic_predictor; σ_n + C_n Δε would misreport it.
+            return np.asarray(
+                self._integrator.trial_stress(strain_inc, stress_n, state_n), dtype=float
+            )
         if not hasattr(self, "elastic_stiffness"):
             return None
         C_n = np.asarray(self.elastic_stiffness(state_n), dtype=float)

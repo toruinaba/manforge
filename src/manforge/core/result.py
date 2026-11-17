@@ -78,14 +78,16 @@ class StressUpdateResult:
         can dominate the step cost.  The materialised array is cached, so
         repeated access costs nothing extra.
     stress_trial : anp.ndarray, shape (ntens,)
-        Elastic trial stress σ_trial = σ_n + C Δε.
+        Elastic trial stress from the model's ``elastic_predictor``
+        (σ_n + C Δε unless the model overrides it).
     is_plastic : bool or None
         True if the step activated plasticity.  ``None`` when the information
         is not available (e.g. results produced by :class:`FortranIntegrator`
         where the UMAT does not expose a plasticity flag).
     _state_n : dict
-        Internal state at step n (stored for the ``state`` convenience
-        property on elastic steps).  Not part of the public API.
+        On elastic steps, the converged internal state minus σ: step-n values
+        with the predictor's trial fields and ``elastic_update_state`` merged
+        in (read by the ``state`` property).  Not part of the public API.
     n_substeps : int
         Number of substeps the increment was divided into.  ``1`` means the
         increment was integrated in one pass — the only value any integrator
