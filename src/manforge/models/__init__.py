@@ -4,6 +4,10 @@ from manforge.models.j2_damage import (
     J2IsotropicDamageCrackClosure, J2IsotropicDamageCrackClosure3D,
     J2IsotropicDamageCrackClosurePS, J2IsotropicDamageCrackClosure1D,
 )
+from manforge.models.j2_damage_unilateral import (
+    J2IsotropicDamageUnilateral, J2IsotropicDamageUnilateral3D,
+    J2IsotropicDamageUnilateralPS, J2IsotropicDamageUnilateral1D,
+)
 from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D
 from manforge.models.ow_kinematic import OWKinematic, OWKinematic3D, OWKinematicPS, OWKinematic1D
 from manforge.models.yu_kinematic import YUKinematic, YUKinematic3D, YUKinematicPS, YUKinematic1D
@@ -13,6 +17,8 @@ __all__ = [
     "J2IsotropicDamage", "J2IsotropicDamage3D", "J2IsotropicDamagePS", "J2IsotropicDamage1D",
     "J2IsotropicDamageCrackClosure", "J2IsotropicDamageCrackClosure3D",
     "J2IsotropicDamageCrackClosurePS", "J2IsotropicDamageCrackClosure1D",
+    "J2IsotropicDamageUnilateral", "J2IsotropicDamageUnilateral3D",
+    "J2IsotropicDamageUnilateralPS", "J2IsotropicDamageUnilateral1D",
     "AFKinematic", "AFKinematic3D", "AFKinematicPS", "AFKinematic1D",
     "OWKinematic", "OWKinematic3D", "OWKinematicPS", "OWKinematic1D",
     "YUKinematic", "YUKinematic3D", "YUKinematicPS", "YUKinematic1D",

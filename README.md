@@ -130,6 +130,7 @@ from manforge.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,    # J2 等方硬化
     J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,  # J2 + Lemaitre 損傷 (弱連成)
     J2IsotropicDamageCrackClosure3D, ...,           # 同上 + 主値分解による引張/圧縮分離 (Y のみ)
+    J2IsotropicDamageUnilateral3D, ...,             # 同上 + 応力も分解 (Lemaitre 準片側, 圧縮で剛性回復)
     AFKinematic3D, AFKinematicPS, AFKinematic1D,    # Armstrong-Frederick
     OWKinematic3D, OWKinematicPS, OWKinematic1D,    # Ohno-Wang
 )
