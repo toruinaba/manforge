@@ -29,7 +29,7 @@ from manforge.simulation.integrator import (
     PythonAnalyticalIntegrator,
 )
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import check_tangent
+from manforge.verification.tangent import TangentChecker
 from manforge.verification import (
     CaseResult,
     ComparisonResult,
@@ -150,10 +150,8 @@ class TestAugmentedResidual:
     @pytest.mark.slow
     def test_augmented_fd_tangent_virgin_3d(self, implicit_model, deps_vec):
         state0 = implicit_model.initial_state()
-        result = check_tangent(
-            PythonIntegrator(implicit_model),
-            anp.zeros(6), state0, anp.array(deps_vec),
-        )
+        result = TangentChecker(PythonIntegrator(implicit_model)).check(
+            anp.zeros(6), state0, anp.array(deps_vec))
         assert result.passed, (
             f"FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
         )
@@ -166,9 +164,8 @@ class TestAugmentedResidual:
             anp.array(deps1), anp.zeros(6), state0
         )
         deps2 = np.zeros(6); deps2[0] = 1e-3
-        result = check_tangent(
-            PythonIntegrator(implicit_model), _r1.stress, _r1.state, anp.array(deps2)
-        )
+        result = TangentChecker(PythonIntegrator(implicit_model)).check(
+            _r1.stress, _r1.state, anp.array(deps2))
         assert result.passed, f"Pre-stressed FD tangent failed: {result.max_rel_err:.3e}"
 
     # -----------------------------------------------------------------------
@@ -186,7 +183,8 @@ class TestAugmentedResidual:
     def test_augmented_fd_tangent_plane_stress(self, implicit_ps_model):
         state0 = implicit_ps_model.initial_state()
         deps = anp.array([2e-3, 0.0, 0.0])
-        result = check_tangent(PythonIntegrator(implicit_ps_model), anp.zeros(3), state0, deps)
+        result = TangentChecker(PythonIntegrator(implicit_ps_model)).check(
+            anp.zeros(3), state0, deps)
         assert result.passed, f"PS FD tangent failed: {result.max_rel_err:.3e}"
 
     @pytest.mark.slow
@@ -253,7 +251,7 @@ class TestAugmentedResidual:
         model = _AFKinematicImplicitPE()
         state0 = model.initial_state()
         deps = anp.array([2e-3, 0.0, 0.0, 0.0])
-        result = check_tangent(PythonIntegrator(model), anp.zeros(4), state0, deps)
+        result = TangentChecker(PythonIntegrator(model)).check(anp.zeros(4), state0, deps)
         assert result.passed, f"PE FD tangent failed: {result.max_rel_err:.3e}"
 
     def test_augmented_matches_reduced_plane_strain(self):
@@ -418,9 +416,8 @@ class TestPartialImplicit:
     ])
     def test_partial_implicit_fd_tangent(self, partial_model, deps_vec):
         state0 = partial_model.initial_state()
-        result = check_tangent(
-            PythonIntegrator(partial_model), anp.zeros(6), state0, anp.array(deps_vec),
-        )
+        result = TangentChecker(PythonIntegrator(partial_model)).check(
+            anp.zeros(6), state0, anp.array(deps_vec))
         assert result.passed, f"FD tangent check failed: {result.max_rel_err:.3e}"
 
     @pytest.mark.slow
@@ -429,9 +426,8 @@ class TestPartialImplicit:
     ])
     def test_partial_implicit_stress_fd_tangent(self, partial_stress_model, deps_vec):
         state0 = partial_stress_model.initial_state()
-        result = check_tangent(
-            PythonIntegrator(partial_stress_model), anp.zeros(6), state0, anp.array(deps_vec),
-        )
+        result = TangentChecker(PythonIntegrator(partial_stress_model)).check(
+            anp.zeros(6), state0, anp.array(deps_vec))
         assert result.passed, f"FD tangent check failed (implicit stress): {result.max_rel_err:.3e}"
 
     # -----------------------------------------------------------------------
@@ -1311,9 +1307,8 @@ class TestElasticCheck:
         prev = steps[plastic_idx[-1] - 1]
         deps = np.zeros(6)
         deps[0] = 1.6e-3 / 8
-        res = check_tangent(
-            PythonNumericalIntegrator(model), prev.stress, prev.state, deps, tol=1e-4
-        )
+        res = TangentChecker(PythonNumericalIntegrator(model), tol=1e-4).check(
+            prev.stress, prev.state, deps)
         assert res.passed, f"max rel err = {res.max_rel_error:.3e}"
 
 
@@ -1485,7 +1480,7 @@ class TestTangentIncrementDependence:
         """Any row scaling of the σ residual must give the same exact tangent."""
         integ, stress, state = self._advance(cls(), 15)
         assert float(state["D"]) > 0.1
-        res = check_tangent(integ, stress, state, self._DIR, eps=1e-8)
+        res = TangentChecker(integ, eps=1e-8).check(stress, state, self._DIR)
         assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
     def test_damage_matches_undamaged_reference(self):
@@ -1588,7 +1583,7 @@ class TestElasticPredictor:
         r = integ.stress_update(deps, state["stress"], state)
         assert not r.is_plastic
         assert float(np.asarray(r.ddsdde)[0, 0]) == pytest.approx(getattr(m, k) * m.E)
-        res = check_tangent(integ, state["stress"], state, deps, eps=1e-9)
+        res = TangentChecker(integ, eps=1e-9).check(state["stress"], state, deps)
         assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
     @pytest.mark.parametrize("cls", [BilinearPlastic1D, BilinearPlasticTrialResidual1D])
@@ -1601,7 +1596,7 @@ class TestElasticPredictor:
         prev = out[-2]
         deps = np.array([strains[-1] - strains[-2]])
         assert out[-1].is_plastic
-        res = check_tangent(integ, np.asarray(prev.stress), prev.state, deps, eps=1e-8)
+        res = TangentChecker(integ, eps=1e-8).check(np.asarray(prev.stress), prev.state, deps)
         assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
     def test_cyclic_history_matches_effective_j2_reference(self):

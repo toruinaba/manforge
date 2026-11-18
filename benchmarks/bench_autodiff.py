@@ -3,7 +3,7 @@
 3 scenarios:
   1. driver_step   – StrainDriver, J2Isotropic3D, N=40 steps
   2. vector_nr     – OWKinematic3D, 200 small-increment steps (implicit_state_names)
-  3. fd_tangent    – check_tangent for J2Isotropic3D (1 + 12 stress_update calls)
+  3. fd_tangent    – TangentChecker for J2Isotropic3D (1 + 12 stress_update calls)
 
 Run:
     uv run python benchmarks/bench_autodiff.py
@@ -108,7 +108,7 @@ def _make_fd_tangent():
     import numpy as np
     from manforge.models.j2_isotropic import J2Isotropic3D
     from manforge.simulation.integrator import PythonIntegrator
-    from manforge.verification.tangent import check_tangent
+    from manforge.verification.tangent import TangentChecker
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     integrator = PythonIntegrator(model)
@@ -124,7 +124,7 @@ def _make_fd_tangent():
     deps2[0] = 5e-4
 
     def run():
-        check_tangent(integrator, stress1, state1, deps2)
+        TangentChecker(integrator).check(stress1, state1, deps2)
 
     return run
 

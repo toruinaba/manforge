@@ -11,7 +11,7 @@ from manforge.models import (
     J2IsotropicDamageUnilateral1D,
 )
 from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.verification.tangent import check_tangent
+from manforge.verification.tangent import TangentChecker
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0, S=0.5, s=1.0, p_D=0.01)
 DIRS = {6: [1.0, -0.5, -0.5, 0.6, 0.0, 0.3], 3: [1.0, 0.3, 0.4], 1: [1.0]}
@@ -84,7 +84,7 @@ def test_plastic_tangent_matches_fd(cls, direction, sign):
     # σ reaches ~1e3 MPa on the volumetric path, so FD round-off on the
     # near-zero entries is ~1e-12 MPa / eps; an offset of 1 MPa (vs entries
     # ~1e5) keeps the relative test meaningful for the large ones.
-    res = check_tangent(integ, s, st, d, eps=1e-6, denom_offset=1.0)
+    res = TangentChecker(integ, eps=1e-6, denom_offset=1.0).check(s, st, d)
     assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
 
@@ -106,7 +106,7 @@ def test_elastic_tangent_symmetric_and_matches_fd():
     mf = np.asarray(m.dimension.mandel_factors_np)
     Km = np.diag(mf) @ K @ np.diag(mf)
     np.testing.assert_allclose(Km, Km.T, atol=1e-12 * np.max(np.abs(Km)))
-    res = check_tangent(integ, st["stress"], st, deps, eps=1e-9)
+    res = TangentChecker(integ, eps=1e-9).check(st["stress"], st, deps)
     assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
 

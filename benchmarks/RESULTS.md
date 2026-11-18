@@ -14,7 +14,7 @@ Warmup: 1 run.  Measurement: median of 5 runs.
 |---|---:|---:|---:|
 | driver_step — J2Isotropic3D, N=40 steps | 0.418 | 0.005 | **83×** |
 | augmented_nr — OWKinematic3D, 200 steps | 267.8 | 18.4 | **15×** |
-| fd_tangent — J2Isotropic3D check_tangent | 0.082 | 0.002 | **44×** |
+| fd_tangent — J2Isotropic3D TangentChecker | 0.082 | 0.002 | **44×** |
 
 ## Interpretation
 

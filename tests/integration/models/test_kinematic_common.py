@@ -22,7 +22,7 @@ from manforge.core.dimension import PLANE_STRAIN
 from manforge.simulation.driver import StrainDriver, MixedDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import check_tangent
+from manforge.verification.tangent import TangentChecker
 
 
 _FACTORIES_3D = {
@@ -119,7 +119,8 @@ def test_yield_consistency_plastic(km_model, km_state0, deps_vec):
 @pytest.mark.parametrize("deps_vec", _DEPS_VEC_LIST)
 def test_tangent_fd_plastic_virgin(km_model, km_state0, deps_vec):
     """AD consistent tangent must match FD for kinematic hardening models."""
-    result = check_tangent(PythonIntegrator(km_model), anp.zeros(6), km_state0, anp.array(deps_vec))
+    result = TangentChecker(PythonIntegrator(km_model)).check(
+        anp.zeros(6), km_state0, anp.array(deps_vec))
     assert result.passed, (
         f"FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}\n"
         f"AD tangent:\n{np.array(result.ddsdde_ad)}\n"
@@ -130,7 +131,7 @@ def test_tangent_fd_plastic_virgin(km_model, km_state0, deps_vec):
 def test_tangent_fd_elastic(km_model, km_state0):
     """Elastic step: FD and AD tangents agree (both equal C)."""
     deps = anp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = check_tangent(PythonIntegrator(km_model), anp.zeros(6), km_state0, deps)
+    result = TangentChecker(PythonIntegrator(km_model)).check(anp.zeros(6), km_state0, deps)
     assert result.passed, f"Elastic FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -140,7 +141,7 @@ def test_tangent_fd_prestressed(km_model, km_state0):
     deps1 = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
     _r1 = PythonIntegrator(km_model).stress_update( deps1, anp.zeros(6), km_state0)
     deps2 = (lambda _a: (_a.__setitem__(0, 1e-3), _a)[1])(np.zeros(6))
-    result = check_tangent(PythonIntegrator(km_model), _r1.stress, _r1.state, deps2)
+    result = TangentChecker(PythonIntegrator(km_model)).check(_r1.stress, _r1.state, deps2)
     assert result.passed, f"Pre-stressed FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -197,7 +198,8 @@ def test_gamma0_fd_tangent(model_type):
     """FD tangent must pass for the linear kinematic limit (gamma=0)."""
     model = _FACTORIES_GAMMA0[model_type]()
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(6))
-    result = check_tangent(PythonIntegrator(model), anp.zeros(6), model.initial_state(), deps)
+    result = TangentChecker(PythonIntegrator(model)).check(
+        anp.zeros(6), model.initial_state(), deps)
     assert result.passed, f"{model_type} gamma=0 FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -270,7 +272,8 @@ def test_plane_strain_fd_tangent(model_type):
     """FD tangent must pass for PLANE_STRAIN."""
     model = _FACTORIES_PE[model_type]()
     deps = (lambda _a: (_a.__setitem__(0, 3e-3), _a)[1])(np.zeros(4))
-    result = check_tangent(PythonIntegrator(model), anp.zeros(4), model.initial_state(), deps)
+    result = TangentChecker(PythonIntegrator(model)).check(
+        anp.zeros(4), model.initial_state(), deps)
     assert result.passed, f"{model_type} PLANE_STRAIN FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -310,7 +313,8 @@ def test_plane_stress_fd_tangent(model_type):
     """FD tangent must pass for PLANE_STRESS."""
     model = _FACTORIES_PS[model_type]()
     deps = _DEPS_PS[model_type]
-    result = check_tangent(PythonIntegrator(model), anp.zeros(3), model.initial_state(), deps)
+    result = TangentChecker(PythonIntegrator(model)).check(
+        anp.zeros(3), model.initial_state(), deps)
     assert result.passed, f"{model_type} PLANE_STRESS FD tangent failed: {result.max_rel_err:.3e}"
 
 
@@ -342,7 +346,8 @@ def test_1d_fd_tangent(model_type):
     """FD tangent must pass for 1D model."""
     model = _FACTORIES_1D[model_type]()
     deps = anp.array([5e-3])
-    result = check_tangent(PythonIntegrator(model), anp.zeros(1), model.initial_state(), deps)
+    result = TangentChecker(PythonIntegrator(model)).check(
+        anp.zeros(1), model.initial_state(), deps)
     assert result.passed, f"{model_type} 1D FD tangent failed: {result.max_rel_err:.3e}"
 
 

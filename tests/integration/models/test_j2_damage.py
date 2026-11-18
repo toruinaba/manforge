@@ -8,7 +8,7 @@ from manforge.models import J2IsotropicDamage3D, J2IsotropicDamagePS, J2Isotropi
 from manforge.simulation.driver import StressDriver
 from manforge.simulation.integrator import PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import check_tangent
+from manforge.verification.tangent import TangentChecker
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 DP = dict(S=0.5, s=1.0, p_D=0.01)
@@ -33,7 +33,7 @@ def test_plastic_tangent_matches_fd_with_active_damage(cls):
     deps = np.array(DIRS[m.ntens]) * 2e-3
     integ, stress, state = _advance(m, deps, 20)
     assert float(state["D"]) > 0.01
-    res = check_tangent(integ, stress, state, deps, eps=1e-8)
+    res = TangentChecker(integ, eps=1e-8).check(stress, state, deps)
     assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
 
@@ -95,7 +95,7 @@ def test_crack_closure_tangent_matches_fd(cls, direction, sign):
     deps = sign * np.array(direction) * 2e-3
     integ, stress, state = _advance(m, deps, 20)
     assert float(state["D"]) > 1e-3
-    res = check_tangent(integ, stress, state, deps, eps=1e-8)
+    res = TangentChecker(integ, eps=1e-8).check(stress, state, deps)
     assert res.passed, f"max rel err = {res.max_rel_err:.3e}"
 
 
