@@ -113,7 +113,10 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 
 **増分の自動分割** — `SubSteppingIntegrator(integrator, max_substeps=16)` は非収束を検知して同じ増分を 2 → 4 → 8 分割で再試行する。opt-in のラッパで、収束する増分では結果・反復数・接線が一切変わらない。詳細は `simulation/integrator/substepping.py` の docstring。
 
-**非収束を値として受け取る** — 既定では `RuntimeError`。`PythonIntegrator(model, raise_on_nonconverged=False)` にすると driver が `DriverStep.converged=False` の step を yield して停止し、呼び出し側が部分履歴を使って判断できる。
+**非収束を値として受け取る** — 既定では `RuntimeError`。スイッチは integrator の `raise_on_nonconverged` 1 つだけで、driver は自分の外側 NR (`StressDriver` / `MixedDriver`) の失敗にも同じ設定を使う。`PythonIntegrator(model, raise_on_nonconverged=False)` にすると:
+
+- `iter_run` は `DriverStep.converged=False` の step を yield して停止する。
+- `run` は完了した step だけを返し、`result.converged=False` / `result.failed_step` で知らせる。失敗した step は非収束イテレートなので `result.stress` などの配列には入らない。
 
 **フィッティング中の非収束はペナルティ** — 探索空間には解の存在しないパラメータ値が普通に含まれるため、`fit_params` は非収束の評価を例外にせず有限の大ペナルティとして扱い、最適化を続行する (§ 4.3)。
 

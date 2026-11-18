@@ -97,6 +97,20 @@ def test_failed_evaluation_returns_penalty(model, target, space):
     assert obj(space.x0) == FAILURE_PENALTY
 
 
+def test_nonconverged_value_is_penalised_like_a_raise(model, target, space):
+    """Non-convergence reported as a value scores the same as one that raises."""
+    from manforge.simulation.integrator import PythonNumericalIntegrator
+
+    def reporting(integrator):
+        return StrainDriver(PythonNumericalIntegrator(
+            integrator._model, max_iter=0, raise_on_nonconverged=False))
+
+    failures = FailureLog()
+    obj = build_objective(model, reporting, [target], space, failures)
+    assert obj(space.x0) == FAILURE_PENALTY
+    assert "did not converge at step" in failures.first_message
+
+
 def test_failure_penalty_is_finite():
     """inf would poison L-BFGS-B's finite-difference gradient with nan."""
     assert math.isfinite(FAILURE_PENALTY)

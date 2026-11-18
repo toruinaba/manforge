@@ -1,6 +1,9 @@
 """StressIntegrator protocol and adapter implementations.
 
-Five adapters implement the :class:`StressIntegrator` protocol:
+:class:`StressIntegrator` is a ``typing.Protocol`` — the contract drivers
+check at construction (``dimension``, ``ntens``, ``raise_on_nonconverged``,
+``initial_state``, ``elastic_tangent``, ``stress_update``).  Five adapters
+fulfil it:
 
 :class:`PythonIntegrator`
     Wraps a :class:`~manforge.core.material.MaterialModel` and uses the
