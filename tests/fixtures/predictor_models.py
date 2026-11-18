@@ -52,7 +52,7 @@ class BilinearPlastic1D(MaterialModel):
     def state_residual(self, new, dlambda, inc):
         C0 = self.isotropic_stiffness()
         s_eff = new["stress_eff"]
-        R_eff = s_eff - inc.state_n["stress_eff"] - C0 @ inc.strain_inc \
+        R_eff = s_eff - inc.trial["stress_eff"] \
             + dlambda * (C0 @ self.flow(new).strain_like)
         R_sig = new["stress"] - self.nominal(s_eff)
         return [self.stress(R_sig), self.stress_eff(R_eff)]

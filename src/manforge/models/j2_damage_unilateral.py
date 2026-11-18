@@ -32,7 +32,7 @@ Unknowns and residuals
 
     R_σ  = σ̃ − C0 : ∂ψ*/∂σ(σ, D_{n+1})            (genuinely coupled: implicit)
     R_Δλ = f(σ̃, ep) = σ̃_vm − (σ_y0 + H ep)
-    R_σ̃ = σ̃ − σ̃_n − C0 Δε + Δλ C0 ñ(σ̃)          (undamaged J2)
+    R_σ̃ = σ̃ − σ̃_trial + Δλ C0 ñ(σ̃)             (undamaged J2)
     R_D  = E · [D − D_n − (Y(σ, D)/S)^s Δp_D]
 
 ε_e and Y are both taken from ψ* by autodiff, so the potential is the single
@@ -230,12 +230,13 @@ class J2IsotropicDamageUnilateral(MaterialModel):
         return [self.ep(inc.state_n["ep"] + dlambda)]
 
     def state_residual(self, new, dlambda, inc):
-        state_n, strain_inc = inc.state_n, inc.strain_inc
+        state_n = inc.state_n
         C0 = self.undamaged_stiffness()
         sigma, s_eff, D_1 = new["stress"], new["stress_eff"], new["D"]
 
         R_stress = s_eff - C0 @ self.elastic_strain(sigma, D_1)
-        R_eff = (s_eff - state_n["stress_eff"] - C0 @ strain_inc
+        # σ̃_trial is the predictor's own value, not re-derived from Δε here.
+        R_eff = (s_eff - inc.trial["stress_eff"]
                  + dlambda * (C0 @ self.flow(new).strain_like))
         dp_D = (smooth_macaulay(new["ep"] - self.p_D)
                 - smooth_macaulay(state_n["ep"] - self.p_D))
