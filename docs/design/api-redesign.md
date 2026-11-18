@@ -151,6 +151,20 @@ def elastic_check(self, step):
 - **スイッチは integrator の `raise_on_nonconverged` だけにする。** driver は自分の外側 NR の失敗にも同じ設定を使う。`iter_run(raise_on_nonconverged=...)` は廃止する。
 - **`StressIntegrator` を `typing.Protocol` にする。** `stress_update` と弾性接線の取得を必須にし、`hasattr` による分岐と `types.MethodType` による動的 bind をやめる。弾性接線を持たない Fortran UMAT は、ゼロひずみ増分の呼び出しで代用する実装を integrator 側に持つ。
 
+段 1 で実装した契約は次のとおり。
+
+| メンバ | 内容 |
+|---|---|
+| `dimension` / `ntens` | 次元 |
+| `raise_on_nonconverged` | 非収束の唯一のスイッチ。driver も読む |
+| `initial_state()` | 初期状態 |
+| `elastic_tangent(stress_n, state_n)` | Δε = 0 での弾性接線。driver の初期推定に使う |
+| `stress_update(strain_inc, stress_n, state_n)` | UMAT 1 回分 |
+
+- integrator から `elastic_stiffness` は無くした。Python の integrator の `elastic_tangent` は、段 1 の時点ではモデルの `elastic_stiffness(state_n)` を返す。予測子の微分に切り替えるのは段 2(4.4)である。
+- `trial_stress` は契約に含めない。Python の integrator だけが持つ。`SubSteppingIntegrator` は、包んだ integrator がこれを持たないとき `stress_trial=None` を返す。Fortran UMAT の結果が `stress_trial=None` であることに合わせた。段 2 で結果が文脈を持つようになれば、この分岐は不要になる。
+- fitting は、`driver.run` が `converged=False` を返したとき `RuntimeError` にする。非収束を値で返す integrator を `driver_factory` が使っても、ペナルティとして扱われる。
+
 ### 4.8 手導出ブロックの宣言(API の細部は段 3 で確定)
 
 手導出したヤコビアンのブロックを、モデル上で名前付きで宣言する。
@@ -202,7 +216,7 @@ class ChabocheKinematic3D(ChabocheKinematic):
 - **`nr_jacobian`**: 既定値を層の間で揃え、型を `Literal` にする。
 - **`tol`**: 意味ごとに名前を分ける(NR の収束、driver の外側 NR、検査の合否)。
 - **状態履歴の要求**: `collect_state={"ep": FieldType.STRAIN}` と `include_fields=["ep"]` を、名前の列に統一する。
-- **残骸の削除**: `mandel_factors_jnp` / `identity_jnp`、`autodiff/operators.py`、`autodiff/backend.check_float64`、`utils/tensor.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。
+- **残骸の削除**(段 1 で実施): `mandel_factors_jnp` / `identity_jnp`、`manforge.autodiff` パッケージ、`utils/tensor.py`、`utils/voigt.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。当初は `autodiff` のうち `operators.py` と `backend.check_float64` だけを挙げていたが、それを除くと使う側が残らないためパッケージごと削除した。`utils/voigt.py` も同じ理由で参照が無くなったので削除した。
 
 ## 5. 移行計画
 各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。
@@ -210,7 +224,7 @@ class ChabocheKinematic3D(ChabocheKinematic):
 | 段 | 内容 | internal への影響 |
 |---|---|---|
 | 0 | タグ `v0.1.0`、internal のテスト修正 | 完了 |
-| 1 | 残骸の削除、非収束スイッチの一本化、`DriverResult.converged`、`StressIntegrator` の Protocol 化 | なし(未使用) |
+| 1 | 残骸の削除(#103)、非収束スイッチの一本化、`DriverResult.converged`、`StressIntegrator` の Protocol 化 | なし(未使用)。internal のテストは変更前後で同じ結果 |
 | 2 | ステップ文脈、フック署名、`elastic_tangent`、`elastic_update_state` の廃止、結果が文脈を持つ | フック 29 定義の書き換え |
 | 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU を 1 次元ぶん試験移行 |
 | 4 | パラメータ宣言と `dimension` | 次元別コンストラクタ 23 個の削除 |
