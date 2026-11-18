@@ -57,9 +57,17 @@ def build_residual(
     strain increment ``strain_inc`` are forwarded as keyword arguments to both
     methods.
 
+    ``residual_fn`` also accepts keyword overrides ``stress_trial=`` and
+    ``strain_inc=`` that replace the values bound here.  The consistent
+    tangent uses them to differentiate R with respect to the load increment
+    (through both σ_trial and Δε), so user residuals may depend on either in
+    any row and with any coefficient — the tangent does not assume the
+    ``R_σ = σ − σ_trial + …`` form.  The NR loop and JacobianChecker call
+    ``residual_fn(x)`` and are unaffected.
+
     Returns
     -------
-    residual_fn : callable(x) -> array of size layout.n_unknown
+    residual_fn : callable(x, *, stress_trial=None, strain_inc=None) -> array of size layout.n_unknown
         Autograd-differentiable residual function.
     layout : ResidualLayout
         Layout descriptor (pack/unpack/slice helpers).
@@ -67,8 +75,8 @@ def build_residual(
     from manforge.core.material import MaterialModel as _MaterialModel
     layout = ResidualLayout.from_model(model)
     model_name = type(model).__name__
-    stress_trial_arr = anp.array(stress_trial)
-    strain_inc_arr = anp.array(strain_inc) if strain_inc is not None else None
+    stress_trial_bound = anp.array(stress_trial)
+    strain_inc_bound = anp.array(strain_inc) if strain_inc is not None else None
     user_has_state_residual = (type(model).state_residual is not _MaterialModel.state_residual)
 
     if layout.is_stress_implicit and not user_has_state_residual:
@@ -96,7 +104,9 @@ def build_residual(
                 out[item.name] = item.value
         return out, r_dl
 
-    def residual_fn(x):
+    def residual_fn(x, *, stress_trial=None, strain_inc=None):
+        stress_trial_arr = (stress_trial_bound if stress_trial is None else stress_trial)
+        strain_inc_arr = (strain_inc_bound if strain_inc is None else strain_inc)
         sigma, dlambda, q_imp = layout.unpack(x)
         first = not validated["done"]
 

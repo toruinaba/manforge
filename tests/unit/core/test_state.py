@@ -589,3 +589,21 @@ def test_dlambda_not_in_state_fields():
     assert "dlambda" not in model.implicit_state_names
 
 
+
+
+# ---------------------------------------------------------------------------
+# StateField.update — value wrapper independent of the field's kind
+# ---------------------------------------------------------------------------
+
+def test_state_field_update_returns_state_update_for_both_kinds():
+    from manforge.core.state import Explicit, Implicit, StateResidual, StateUpdate
+
+    class _Holder:
+        imp = Implicit(shape=())
+        exp = Explicit(shape=())
+
+    assert isinstance(_Holder.imp(1.0), StateResidual)
+    for field in (_Holder.imp, _Holder.exp):
+        item = field.update(2.0)
+        assert isinstance(item, StateUpdate)
+        assert item.name == field.name and item.value == 2.0
