@@ -43,8 +43,12 @@ def test_ow_3d_parent_vs_subclass_state_residual(rng):
     state_n = {"stress": stress, "alpha": alpha, "ep": 0.01}
     stress_trial = stress + 10.0
     dlambda = 0.005
-    res_p = parent.state_residual(state_new, dlambda, make_increment(parent, state_n, stress_trial=stress_trial))
-    res_c = child.state_residual(state_new, dlambda, make_increment(child, state_n, stress_trial=stress_trial))
+    res_p = parent.state_residual(
+        state_new, dlambda,
+        make_increment(parent, state_n, stress_trial=stress_trial))
+    res_c = child.state_residual(
+        state_new, dlambda,
+        make_increment(child, state_n, stress_trial=stress_trial))
     for rp, rc in zip(res_p, res_c):
         np.testing.assert_allclose(rp.value, rc.value)
 

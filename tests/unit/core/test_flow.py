@@ -215,7 +215,9 @@ def test_unwrapped_flow_in_update_state_raises():
     state_n = m.make_state(stress=np.zeros(6), alpha=np.zeros(6), ep=0.0)
     state_new = m.make_state(stress=SIG_3D, alpha=np.zeros(6), ep=0.0)
     with pytest.raises(TypeError, match="must return a FlowVector"):
-        m.update_state(state_new, anp.array(1e-3), make_increment(m, state_n, stress_trial=state_n["stress"]))
+        m.update_state(
+            state_new, anp.array(1e-3),
+            make_increment(m, state_n, stress_trial=state_n["stress"]))
 
 
 def test_valid_override_is_not_double_wrapped():

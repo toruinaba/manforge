@@ -229,16 +229,24 @@ def test_state_residual_is_covariant_with_3d(theta_max, seed):
     args_3d = (model_3d.make_state(**_to_3d_state(state_ps)),
                model_3d.make_state(**_to_3d_state(state_n_ps)))
 
-    res_ps = _named(model_ps.state_residual(args_ps[0], dlambda_ps, make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
-    res_3d = _named(model_3d.state_residual(args_3d[0], dlambda_3d, make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
+    res_ps = _named(model_ps.state_residual(
+        args_ps[0], dlambda_ps,
+        make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
+    res_3d = _named(model_3d.state_residual(
+        args_3d[0], dlambda_3d,
+        make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
     for key in ("theta", "beta"):
         np.testing.assert_allclose(
             _to_3d_deviator(res_ps[key]), res_3d[key],
             rtol=1e-10, atol=1e-12, err_msg=f"R_{key} is not M-covariant",
         )
 
-    up_ps = _named(model_ps.update_state(args_ps[0], dlambda_ps, make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
-    up_3d = _named(model_3d.update_state(args_3d[0], dlambda_3d, make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
+    up_ps = _named(model_ps.update_state(
+        args_ps[0], dlambda_ps,
+        make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
+    up_3d = _named(model_3d.update_state(
+        args_3d[0], dlambda_3d,
+        make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
     np.testing.assert_allclose(
         _to_3d_deviator(up_ps["q"]), up_3d["q"], rtol=1e-10, atol=1e-12
     )

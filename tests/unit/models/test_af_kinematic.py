@@ -35,8 +35,12 @@ def test_af_3d_parent_vs_subclass_update_state(rng):
     state_new = {"stress": stress, "alpha": alpha, "ep": 0.01}
     state_n = {"stress": stress, "alpha": alpha, "ep": 0.01}
     dlambda = 0.005
-    res_p = parent.update_state(state_new, dlambda, make_increment(parent, state_n, stress_trial=state_n["stress"]))
-    res_c = child.update_state(state_new, dlambda, make_increment(child, state_n, stress_trial=state_n["stress"]))
+    res_p = parent.update_state(
+        state_new, dlambda,
+        make_increment(parent, state_n, stress_trial=state_n["stress"]))
+    res_c = child.update_state(
+        state_new, dlambda,
+        make_increment(child, state_n, stress_trial=state_n["stress"]))
     # alpha and ep updates
     for rp, rc in zip(res_p, res_c):
         np.testing.assert_allclose(rp.value, rc.value)

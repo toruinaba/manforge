@@ -63,7 +63,9 @@ def test_damage_residual_below_threshold_is_zero(rng):
     sig = 300.0 * rng.standard_normal(6)
     st_n = {"stress": sig, "ep": 0.002, "D": 0.0}
     st_1 = {"stress": sig, "ep": 0.005, "D": 0.0}
-    items = {i.name: i.value for i in m.state_residual(st_1, 0.003, make_increment(m, st_n, stress_trial=sig))}
+    items = {i.name: i.value for i in m.state_residual(
+        st_1, 0.003,
+        make_increment(m, st_n, stress_trial=sig))}
     assert abs(float(items["D"])) < 1e-12
 
 
