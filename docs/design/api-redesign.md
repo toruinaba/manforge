@@ -41,111 +41,108 @@ C のうち、全ひずみから閉形式で決まるもの(κ = max(κ_n, ε_eq
 
 ## 4. 設計
 
-### 4.1 ステップ文脈(名前は未決事項 1)
+### 4.1 ステップ文脈 `Increment`
 
-1 ステップの入力をまとめたオブジェクトを、全フックに渡す。
+1 ステップの入力をまとめたオブジェクトを、予測子以外の全フックに渡す。フックの引数名は `inc` とする。
 
 ```python
 @dataclass(frozen=True)
-class StepContext:
+class Increment:
     state_n: State          # ステップ開始時の状態。state_n["stress"] は σ_n
     strain_inc: FloatArray  # Δε(engineering shear)
     trial: State            # 試行状態。elastic_predictor の結果を state_n に重ねたもの
 ```
 
-- フックの引数名は `step` とする。
 - `trial` は全フィールドを持つ。予測子が返さなかったフィールドは `state_n` の値である。
+- `state_n["stress"]` は、`stress_update` に渡された σ_n である。呼び出し側の dict に入っていた値ではない。
 - 将来 `DTIME` や温度が必要になったら、ここにフィールドを足す。既存モデルのフック署名は変わらない。
-- 整合接線の計算では、フレームワークが Δε を摂動した `StepContext` を作り直して残差に渡す。試行状態の全フィールドが予測子を通して摂動される。
+- 整合接線の計算では、フレームワークが Δε を摂動した `Increment` を作り直して残差に渡す。試行状態の全フィールドが予測子を通して摂動される。
 
 ### 4.2 フック一覧
 
-| 現在 | 再設計後 |
+| `v0.1.0` | 再設計後 |
 |---|---|
 | `yield_function(state)` | 変更なし |
 | `flow(state)` | 変更なし |
-| `elastic_predictor(state_n, *, strain_inc)` | 変更なし(文脈を作る側なので `step` は受け取らない) |
-| — | `elastic_tangent(step)`(新設、4.4) |
-| `elastic_check(state_n, *, stress_trial, strain_inc=None)` | `elastic_check(step)` |
-| `elastic_update_state(state_n, *, stress_trial, strain_inc=None)` | 廃止(4.3) |
-| `update_state(dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None)` | `update_state(new, dlambda, step)` |
-| `state_residual(state_new, dlambda, state_n, *, stress_trial, strain_inc=None)` | `state_residual(new, dlambda, step)` |
-| `default_stress_residual(state_new, dlambda, stress_trial)` | `default_stress_residual(new, dlambda, step)` |
-| `user_defined_return_mapping(stress_trial, C, state_n)` | `user_defined_return_mapping(step)` |
-| `user_defined_tangent(stress, state, dlambda, C, state_n, *, stress_trial=None, strain_inc=None)` | `user_defined_tangent(new, dlambda, step)` |
+| `elastic_stiffness(state=None)` | `elastic_stiffness(state)`(4.4) |
+| `elastic_predictor(state_n, *, strain_inc)` | 変更なし(`Increment` を作る側なので受け取らない) |
+| — | `elastic_tangent(inc)`(新設、4.4) |
+| `elastic_check(state_n, *, stress_trial, strain_inc=None)` | `elastic_check(inc)` |
+| `elastic_update_state(state_n, *, stress_trial, strain_inc=None)` | `elastic_update_state(inc)`(4.3) |
+| `update_state(dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None)` | `update_state(new, dlambda, inc)` |
+| `state_residual(state_new, dlambda, state_n, *, stress_trial, strain_inc=None)` | `state_residual(new, dlambda, inc)` |
+| `user_defined_return_mapping(stress_trial, C, state_n)` | `user_defined_return_mapping(inc)` |
+| `user_defined_tangent(stress, state, dlambda, C, state_n, *, stress_trial=None, strain_inc=None)` | `user_defined_tangent(new, dlambda, inc)` |
 
-- 引数順は `(new, dlambda, step)` に統一する。全モデルの署名が変わるので、順序の統一に追加の費用はない。
-- `C` 引数は廃止する。状態依存剛性では「どの時点の C か」が曖昧で、モデルは `self.elastic_stiffness(...)` を自分で呼べる。
-- `update_state` に渡る `new` の explicit フィールドは、従来どおり `state_n` の値である。試行値ではない。試行値は `step.trial` から読む。
-
-片側損傷の残差は、σ̃_trial を Δε から組み直す必要がなくなる。
-
-```python
-def state_residual(self, new, dlambda, step):
-    C0 = self.undamaged_stiffness()
-    R_eff = (new["stress_eff"] - step.trial["stress_eff"]
-             + dlambda * (C0 @ self.flow(new).strain_like))
-    ...
-```
+- 引数順は `(new, dlambda, inc)` に統一した。
+- `C` 引数は廃止した。状態依存剛性では「どの時点の C か」が曖昧で、モデルは `self.elastic_stiffness(...)` を自分で呼べる。
+- `update_state` に渡る `new` の explicit フィールドは、`state_n` の値である。試行値ではない。
+- **引数リストはクラス定義時に検査する。** フックは位置引数で呼ばれるので、古い署名のモデルは例外にならず、引数がずれたまま動いてしまう。上の表のうち署名が変わったフックについて、引数名が違えば `TypeError` にする。
+- **`default_stress_residual(new, dlambda, stress_trial)` は σ_trial を受け取る形のまま**にした。当初は `inc` を渡す形を考えていたが、これはフックではなく補助関数で、Fortran に対応する手書きの残差(`calc_residual`)は σ_trial しか持たない。必要なものだけを受け取る形のほうが両方から呼べる。`None` は受け付けない。
 
 ### 4.3 弾性ステップ
+
 1 ステップの流れは次のとおり。
 
 1. `elastic_predictor` が試行状態を作る。
-2. `elastic_check(step)` が分岐を決める。既定は `yield_function(step.trial) <= 0`。
-3. 弾性なら `step.trial` がそのまま収束状態になる。
+2. `elastic_check(inc)` が分岐を決める。既定は `yield_function(inc.trial) <= 0`。
+3. 弾性なら `inc.trial` が収束状態になる。その上に `elastic_update_state(inc)` の更新を重ねる。
 4. 塑性なら、陰的未知数は試行値から NR を始める。
 
-`elastic_update_state` は廃止し、予測子に統合する。B 型の量は試行状態のフィールドとして返す。
+既定の分岐が試行状態全体を見るので、integrator の特例(`v0.1.0` の `integrator/base.py:437`)は無くなった。
 
-```python
-def elastic_predictor(self, state_n, *, strain_inc):
-    sig = state_n["stress"] + self.elastic_stiffness(state_n) @ strain_inc
-    return [self.stress.update(sig), self.R.update(self.normal_yield_ratio(state_n, sig))]
+**`elastic_update_state` は残す。** 当初は予測子に統合する方針だったが、実装中に次の 2 点が分かり、撤回した。
 
-def elastic_check(self, step):
-    R_hat = step.trial["R"]
-    return bool(R_hat <= self.R_e) or bool(R_hat <= step.state_n["R"])
-```
+- **既定の分岐判定が意味を失う。** 追従変数(subloading の R)を試行状態に載せると、`yield_function(試行状態)` が恒等的に 0 になる。`elastic_check` を override し忘れたモデルは、黙って常に弾性になる。`v0.1.0` では同じモデルが初回から塑性と判定されていた(テスト `_NoHook` で確認)。
+- **追従変数しか持たないモデルまで弾性接線が自動微分になる。** 予測子を override することになるので、`elastic_tangent` を 1 行書かない限り、手書きの `elastic_stiffness` が使われなくなる。
 
-- 既定の分岐が試行状態全体を見るので、integrator の特例(`integrator/base.py:437`)は不要になる。
-- 統合の等価性は、テスト内の subloading fixture で確認した。載荷・除荷・再載荷・反転にせん断を加えた 38 ステップで、応力・R・接線・分岐・反復数が完全一致した。manforge-internal の `ExtendedSubloading` はパラメータとテストが無く未確認である。
-- この統合は B 型であることが前提である。弾性則が R に依存する拡張をすると C 型になり、成り立たない。
+役割は次のように分かれる。
+
+| フック | いつ効くか | 何を返すか |
+|---|---|---|
+| `elastic_predictor` | 毎ステップ。分岐判定と塑性 NR の出発点になる | 弾性則(σ と、弾性的に動く陰的未知数の試行値) |
+| `elastic_update_state` | 弾性と判定された後だけ | 応力に追従する explicit 状態 |
+
+`elastic_update_state` の更新は応力に戻らない前提である(B 型)。弾性ステップの更新が応力を変える発展則(C 型)は扱わない。
 
 ### 4.4 弾性の定義と弾性接線
 
-弾性の定義は予測子に一本化する。`elastic_stiffness` は線形弾性のときの簡易記法と位置づける。
+- **`elastic_stiffness(state)` は状態を必須にした。** `None` で「無損傷の剛性」を表す用法をやめた。
+- **`isotropic_stiffness()` を追加した。** `self.E` と `self.nu` からモデルの次元の等方剛性を作る。`elastic_stiffness` の既定はこれを返す。剛性が状態で変わるモデルは `(1 − D) * self.isotropic_stiffness()` のように掛けて書く。λ、μ の手計算は不要になる。
+- **弾性の定義は予測子である。** `elastic_stiffness` は線形弾性のときの簡易記法で、予測子を override したモデルでは参照剛性にとどまる。
 
-弾性接線には手書きスロットを設ける。現状は予測子を override すると自動微分の値しか得られず、手書きの弾性接線を置く場所がない(`user_defined_tangent` は塑性ステップでしか呼ばれない)。
+弾性接線には手書きスロット `elastic_tangent(inc)` を設けた。`v0.1.0` では、予測子を override すると自動微分の値しか得られず、手書きの弾性接線を置く場所がなかった(`user_defined_tangent` は塑性ステップでしか呼ばれない)。
 
 | integrator | 予測子が既定 | 予測子を override |
 |---|---|---|
 | `PythonNumericalIntegrator` | `elastic_stiffness(state_n)` | 予測子の自動微分 |
-| `PythonAnalyticalIntegrator` | `elastic_stiffness(state_n)` | `elastic_tangent(step)`。未実装ならエラー |
-| `PythonIntegrator` | `elastic_stiffness(state_n)` | `elastic_tangent(step)` があれば使い、なければ自動微分 |
+| `PythonAnalyticalIntegrator` | `elastic_stiffness(state_n)` | `elastic_tangent(inc)`。未実装ならエラー |
+| `PythonIntegrator` | `elastic_stiffness(state_n)` | `elastic_tangent(inc)` があれば使い、なければ自動微分 |
 
-- σ の予測が線形なモデル(subloading 型)の `elastic_tangent` は、`elastic_stiffness(step.state_n)` を返す 1 行になる。
-- driver の初期推定は、integrator が返す弾性接線から取る。モデルの `elastic_stiffness` を直接読まない。
-- `elastic_stiffness(state=None)` の `None` は廃止する。無損傷剛性が要るモデルは、別名のヘルパで取る。
+driver の初期推定は、integrator の `elastic_tangent(stress_n, state_n)` から取る(4.7)。Python の integrator では、これはまだモデルの `elastic_stiffness(state_n)` を返す。予測子を override したモデルでは参照剛性だが、初期推定にしか使わないので、外側の反復は正しい応答に収束する。
 
 ### 4.5 手書き経路
-`user_defined_return_mapping(step)` は試行状態の全フィールドと Δε を受け取る。これで、予測子を override したモデルでも閉形式や手書き NR が書ける。
 
-この再設計で、UMAT の構成要素すべてに手書きスロットが揃う。
+`user_defined_return_mapping(inc)` は試行状態の全フィールドと Δε を受け取る。これで、予測子を override したモデルでも閉形式や手書き NR が書ける。`State` は読み取り専用なので、手書き NR の作業用 dict は `dict(inc.state_n)` で作る。
+
+UMAT の構成要素すべてに手書きスロットが揃う。
 
 | UMAT の要素 | 手書きスロット | 照合相手 |
 |---|---|---|
 | 試行状態 | `elastic_predictor` | 次元間突合、Fortran |
 | 分岐 | `elastic_check` | 同上 |
-| 弾性接線 | `elastic_tangent` | 予測子の自動微分 |
+| 弾性ステップの追従変数 | `elastic_update_state` | 同上 |
+| 弾性接線 | `elastic_stiffness` / `elastic_tangent` | 予測子の自動微分 |
 | 残差・ヤコビアンのブロック | 手導出ブロックの宣言(4.8) | `JacobianBlocks.part` |
 | NR ループ | `user_defined_return_mapping` | 数値 NR |
 | 塑性接線 | `user_defined_tangent` | 陰関数微分 |
 
 ### 4.6 結果オブジェクト
-- **`StressUpdateResult` はステップ文脈を持つ。** 現在の `_state_n` と `stress_trial` を `step` に置き換える。ヤコビアンの内省が `state_n` や `strain_inc` の持ち回りなしで済み、別の残差で計算する取り違えが起きなくなる。
-- **`FortranIntegrator` の結果**は `state_n` と `strain_inc` だけを持ち、`trial` は持たない。
-- **`DriverResult` に `converged` と `failed_step` を持たせる。** 非収束ステップの結果は配列に入れない。service の `SimulationOutput` と同じ意味になる。
+
+- **`StressUpdateResult` は `increment` を持つ。** `v0.1.0` の `_state_n` と `stress_trial` フィールドを置き換えた。`stress_trial` はプロパティとして残る。ヤコビアンの内省は `JacobianChecker(model).compute(result)` だけで済み、`state_n` や `strain_inc` を別に渡して別の残差で計算する取り違えが起きない。
+- **`FortranIntegrator` の結果は `increment=None` である。** UMAT は試行状態を報告しない。`JacobianChecker.compare(python_result, fortran_result)` は、Python 側の結果の `increment` で両方の点を評価する。
+- **integrator の契約に `increment(strain_inc, stress_n, state_n)` を加えた。** `SubSteppingIntegrator` が、分割前の増分の `Increment` を結果に載せるために使う。Fortran は `None` を返す。段 1 で残っていた `trial_stress` の有無による分岐は無くなった。
+- **`DriverResult` に `converged` と `failed_step` を持たせる。** 非収束ステップの結果は配列に入れない(段 1 で実施)。
 
 ### 4.7 非収束と integrator の契約
 - **スイッチは integrator の `raise_on_nonconverged` だけにする。** driver は自分の外側 NR の失敗にも同じ設定を使う。`iter_run(raise_on_nonconverged=...)` は廃止する。
@@ -159,10 +156,11 @@ def elastic_check(self, step):
 | `raise_on_nonconverged` | 非収束の唯一のスイッチ。driver も読む |
 | `initial_state()` | 初期状態 |
 | `elastic_tangent(stress_n, state_n)` | Δε = 0 での弾性接線。driver の初期推定に使う |
+| `increment(strain_inc, stress_n, state_n)` | そのステップの `Increment`(段 2 で追加)。Fortran は `None` |
 | `stress_update(strain_inc, stress_n, state_n)` | UMAT 1 回分 |
 
 - integrator から `elastic_stiffness` は無くした。Python の integrator の `elastic_tangent` は、段 1 の時点ではモデルの `elastic_stiffness(state_n)` を返す。予測子の微分に切り替えるのは段 2(4.4)である。
-- `trial_stress` は契約に含めない。Python の integrator だけが持つ。`SubSteppingIntegrator` は、包んだ integrator がこれを持たないとき `stress_trial=None` を返す。Fortran UMAT の結果が `stress_trial=None` であることに合わせた。段 2 で結果が文脈を持つようになれば、この分岐は不要になる。
+- 段 1 の時点では `trial_stress` を契約に含めず、`SubSteppingIntegrator` がその有無で分岐していた。段 2 で `increment(strain_inc, stress_n, state_n)` を契約に加え、この分岐は無くなった(4.6)。Fortran を包んだとき `stress_trial=None` になる挙動は同じである。
 - fitting は、`driver.run` が `converged=False` を返したとき `RuntimeError` にする。非収束を値で返す integrator を `driver_factory` が使っても、ペナルティとして扱われる。
 
 ### 4.8 手導出ブロックの宣言(API の細部は段 3 で確定)
@@ -171,7 +169,7 @@ def elastic_check(self, step):
 
 ```python
 @hand_block("theta", "stress")        # ∂R_θ/∂σ
-def dRt_ds(self, new, dlambda, step): ...
+def dRt_ds(self, new, dlambda, inc): ...
 ```
 
 - **名前**: 行は残差の行名、列は未知数名で、`JacobianBlocks.part[row][col]` と同じである。クラス定義時にレイアウトと照合し、存在しない名前はその場でエラーにする。
@@ -225,21 +223,21 @@ class ChabocheKinematic3D(ChabocheKinematic):
 |---|---|---|
 | 0 | タグ `v0.1.0`、internal のテスト修正 | 完了 |
 | 1 | 残骸の削除(#103)、非収束スイッチの一本化、`DriverResult.converged`、`StressIntegrator` の Protocol 化 | なし(未使用)。internal のテストは変更前後で同じ結果 |
-| 2 | ステップ文脈、フック署名、`elastic_tangent`、`elastic_update_state` の廃止、結果が文脈を持つ | フック 29 定義の書き換え |
+| 2 | `Increment`、フック署名、`elastic_tangent`、`isotropic_stiffness`、結果が `increment` を持つ | フック 29 定義の書き換え、剛性の override 4 つを削除 |
 | 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU を 1 次元ぶん試験移行 |
 | 4 | パラメータ宣言と `dimension` | 次元別コンストラクタ 23 個の削除 |
 | 5 | 入口と命名の整理 | なし(fitting 未使用) |
 | 6 | ドキュメント基盤、公開範囲の絞り込み | import の書き換え |
 
 - **段 2 が最大である。** フック定義は manforge のモデルに 20、manforge のテスト内モデルに約 65、manforge-internal に 29 ある。
-- **段 2 の合格条件は数値の完全一致とする。** 署名の変更だけなので、既存モデルの結果は変わらないはずである。`v0.1.0` で代表的な履歴の結果を保存し、変更後とビット単位で比べる。
-- **段 3 は段 2 の後に行う。** 手導出ブロックの署名が `step` を使うためである。
+- **段 2 の合格条件は数値の完全一致とする。** 署名の変更だけなので、既存モデルの結果は変わらないはずである。`v0.1.0` で代表的な履歴の結果を保存し、変更後とビット単位で比べる。実施結果: 公開モデル 66 ケース、manforge-internal の全モデル 57 ケース(応力・ひずみ・全状態量・接線・反復数)が完全一致した。段 1 も同じ方法で `v0.1.0` と完全一致することを確認した。
+- **段 3 は段 2 の後に行う。** 手導出ブロックの署名が `inc` を使うためである。
 - **段 4 は順序を入れ替えられる。** 段 2 より先に行えば、書き換えるコンストラクタが減る。
 
 ## 6. 未決事項
 
-1. **文脈オブジェクトの名前。** `StepContext` は driver の `DriverStep` と紛らわしい。`Increment` などの候補がある。
-2. **無損傷剛性の取り方。** `elastic_stiffness(None)` をやめた後のヘルパの名前と置き場所。
+1. ~~文脈オブジェクトの名前~~ → `Increment`、引数名 `inc` に決定(4.1)。
+2. ~~無損傷剛性の取り方~~ → `isotropic_stiffness()` に決定(4.4)。
 3. **パラメータの既定値。** `ContinuousYUKinematic` は `H=0.0` などの既定値を持つ。`ParamMeta.default` は入力フォーム用の値で意味が違う。宣言方法を決める必要がある。
 4. **派生属性の初期化。** YU の PS 版が持つ `P` / `T` のように、パラメータから導く属性をどこで作るか。
 5. **次元を固定するクラスの判定。** `J2Isotropic3D` の閉形式解は 3D と平面ひずみでしか成り立たない。別の次元を渡したときに拒否する規則が要る。

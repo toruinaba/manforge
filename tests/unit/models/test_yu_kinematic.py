@@ -5,6 +5,7 @@ import pytest
 import numpy.testing as npt
 from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
+from manforge.verification import make_increment
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,
@@ -143,7 +144,7 @@ def test_update_state_rn_zero_returns_mu_zero():
     model = YUKinematic3D(**PARAMS)
     state_n, state_new = _make_mu_rn_zero_state(model)
     # Should complete without raising
-    result = model.update_state(0.001, state_new, state_n)
+    result = model.update_state(state_new, 0.001, make_increment(model, state_n, stress_trial=state_n["stress"]))
     assert result is not None
 
 
@@ -244,7 +245,7 @@ def test_state_residual_returns_three_fields():
     state_n["stress"] = np.array([400.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     state_new = dict(state_n)
     stress_trial = state_n["stress"].copy()
-    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    results = model.state_residual(state_new, 0.0, make_increment(model, state_n, stress_trial=stress_trial))
     names = {r.name for r in results}
     assert names == {"stress", "theta", "beta"}
 
@@ -254,7 +255,7 @@ def test_state_residual_stress_shape():
     state_n = model.initial_state()
     state_new = dict(state_n)
     stress_trial = np.zeros(6)
-    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    results = model.state_residual(state_new, 0.0, make_increment(model, state_n, stress_trial=stress_trial))
     stress_res = next(r for r in results if r.name == "stress")
     assert stress_res.value.shape == (6,)
 
@@ -267,7 +268,7 @@ def test_state_residual_stress_is_zero_at_elastic_predictor():
     state_new = dict(state_n)
     # stress_trial equals state_new['stress'] → default_stress_residual = stress - trial + 0 = 0
     stress_trial = state_n["stress"].copy()
-    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    results = model.state_residual(state_new, 0.0, make_increment(model, state_n, stress_trial=stress_trial))
     stress_res = next(r for r in results if r.name == "stress")
     npt.assert_allclose(stress_res.value, np.zeros(6), atol=1e-12)
 
@@ -282,7 +283,7 @@ def test_state_residual_shape_subclasses(cls, ntens):
     state_n = model.initial_state()
     state_new = dict(state_n)
     stress_trial = np.zeros(ntens)
-    results = model.state_residual(state_new, 0.0, state_n, stress_trial=stress_trial)
+    results = model.state_residual(state_new, 0.0, make_increment(model, state_n, stress_trial=stress_trial))
     names = {r.name for r in results}
     assert names == {"stress", "theta", "beta"}
     for r in results:
@@ -292,7 +293,7 @@ def test_state_residual_shape_subclasses(cls, ntens):
 # ---------------------------------------------------------------------------
 
 def _update_state_result_dict(model, dlambda, state_new, state_n):
-    results = model.update_state(dlambda, state_new, state_n)
+    results = model.update_state(state_new, dlambda, make_increment(model, state_n, stress_trial=state_n["stress"]))
     return {r.name: r.value for r in results}
 
 
@@ -324,7 +325,7 @@ def test_update_state_returns_five_fields():
     """update_state must return exactly 5 explicit fields."""
     model = YUKinematic3D(**PARAMS)
     state_n, state_new = _make_plastic_state(model)
-    results = model.update_state(0.001, state_new, state_n)
+    results = model.update_state(state_new, 0.001, make_increment(model, state_n, stress_trial=state_n["stress"]))
     names = {r.name for r in results}
     assert names == {"R", "q", "r", "eps_eq", "theta_max"}
 

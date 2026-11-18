@@ -25,6 +25,7 @@ from manforge.simulation.integrator import (
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.simulation.driver import StrainDriver
 from manforge.verification.tangent import TangentChecker
+from manforge.verification import make_increment
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +110,7 @@ class TestElasticRegime:
 
     def test_elastic_stress_equals_C_deps(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
         state0 = model.initial_state()
 
@@ -118,7 +119,7 @@ class TestElasticRegime:
 
     def test_elastic_tangent_equals_C(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
         r = PythonIntegrator(model).stress_update(deps, anp.zeros(6), model.initial_state())
@@ -134,7 +135,7 @@ class TestElasticRegime:
 
     def test_elastic_multiaxial(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         deps = anp.array([5e-6, 3e-6, -2e-6, 1e-6, 0.0, 0.0])
 
         r = PythonIntegrator(model).stress_update(deps, anp.zeros(6), model.initial_state())
@@ -143,7 +144,7 @@ class TestElasticRegime:
 
     def test_elastic_from_prestress(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         stress_n = anp.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
 
@@ -212,7 +213,7 @@ class TestPlasticRegimeFormula:
 
     def test_plastic_tangent_differs_from_C(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         deps = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
 
         r = PythonIntegrator(model).stress_update(deps, anp.zeros(6), model.initial_state())
@@ -246,9 +247,10 @@ class TestAnalyticalPath:
 
     def test_dlambda_positive_for_plastic(self):
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         deps = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-        rm = model.user_defined_return_mapping(C @ deps, C, model.initial_state())
+        rm = model.user_defined_return_mapping(
+            make_increment(model, model.initial_state(), stress_trial=C @ deps))
         assert float(rm.dlambda) > 0.0
 
     def test_analytical_raises_for_model_without_hooks(self):
@@ -263,7 +265,7 @@ class TestAnalyticalPath:
                 self.nu = 0.3
                 self.sigma_y0 = 250.0
 
-            def elastic_stiffness(self, state=None):
+            def elastic_stiffness(self, state):
                 mu = self.E / (2.0 * (1.0 + self.nu))
                 lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
                 return self.isotropic_C(lam, mu)
@@ -271,7 +273,7 @@ class TestAnalyticalPath:
             def yield_function(self, state):
                 return self.vonmises(state["stress"]) - self.sigma_y0
 
-            def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+            def update_state(self, new, dlambda, inc):
                 return []
 
         with pytest.raises(NotImplementedError):

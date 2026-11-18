@@ -36,6 +36,7 @@ from manforge.verification import (
     CrosscheckStrainDriver,
     generate_strain_history,
 )
+from manforge.verification import make_increment
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )
@@ -202,7 +203,7 @@ class TestAugmentedResidual:
 
     def test_augmented_elastic_step_3d(self, implicit_model):
         state0 = implicit_model.initial_state()
-        C = implicit_model.elastic_stiffness()
+        C = implicit_model.elastic_stiffness(implicit_model.initial_state())
         deps = anp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
         _r = PythonIntegrator(implicit_model).stress_update(deps, anp.zeros(6), state0)
         np.testing.assert_allclose(np.array(_r.stress), np.array(C @ deps), rtol=1e-10)
@@ -278,17 +279,17 @@ class _AFAlphaImplicit(AFKinematic3D):
 
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        xi = state_new["stress"] - alpha_n
+    def state_residual(self, new, dlambda, inc):
+        alpha_n = inc.state_n["alpha"]
+        xi = new["stress"] - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
         s_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
+        R_alpha = new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         return [self.alpha(R_alpha)]
 
 
@@ -298,18 +299,18 @@ class _AFAlphaImplicitStress(AFKinematic3D):
     stress = Implicit(shape=NTENS, doc="Cauchy stress (implicit override)")
     alpha = Implicit(shape=NTENS, doc="backstress (implicit override)")
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        xi = state_new["stress"] - alpha_n
+    def state_residual(self, new, dlambda, inc):
+        alpha_n = inc.state_n["alpha"]
+        xi = new["stress"] - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
         s_hat = s_xi / vm_safe
         scale = 1.0 + self.gamma * dlambda
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
+        R_alpha = new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
         return [self.stress(R_stress), self.alpha(R_alpha)]
 
 
@@ -602,17 +603,17 @@ class _J2ScalarWithDlambdaOverride(MaterialModel):
         super().__init__()
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        return [self.dlambda(self.yield_function(state_new))]
+    def state_residual(self, new, dlambda, inc):
+        return [self.dlambda(self.yield_function(new))]
 
 
 class _J2ScalarDefault(MaterialModel):
@@ -625,14 +626,14 @@ class _J2ScalarDefault(MaterialModel):
         super().__init__()
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
 
 class _KinematicWithDlambdaOverride(MaterialModel):
@@ -645,22 +646,22 @@ class _KinematicWithDlambdaOverride(MaterialModel):
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
         self.H_k = H_k; self.c = c
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
         return self.vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         from manforge.core.state import _state_with_stress
         n = autograd.grad(
-            lambda s: self.yield_function(_state_with_stress(state_new, s))
-        )(state_new["stress"])
-        xi_new = state_new["stress"] - state_new["alpha"]
+            lambda s: self.yield_function(_state_with_stress(new, s))
+        )(new["stress"])
+        xi_new = new["stress"] - new["alpha"]
         f_new = self.vonmises(xi_new) - self.sigma_y0
-        R_alpha = (state_new["alpha"] - state_n["alpha"]
-                   - dlambda * (self.H_k * n - 0.0 * state_n["alpha"]))
+        R_alpha = (new["alpha"] - inc.state_n["alpha"]
+                   - dlambda * (self.H_k * n - 0.0 * inc.state_n["alpha"]))
         R_dl = f_new - self.c * dlambda
         return [self.alpha(R_alpha), self.dlambda(R_dl)]
 
@@ -674,20 +675,20 @@ class _KinematicDefault(MaterialModel):
         super().__init__()
         self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H_k = H_k
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]
         return self.vonmises(xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         from manforge.core.state import _state_with_stress
         n = autograd.grad(
-            lambda s: self.yield_function(_state_with_stress(state_new, s))
-        )(state_new["stress"])
-        R_alpha = (state_new["alpha"] - state_n["alpha"]
-                   - dlambda * (self.H_k * n - 0.0 * state_n["alpha"]))
+            lambda s: self.yield_function(_state_with_stress(new, s))
+        )(new["stress"])
+        R_alpha = (new["alpha"] - inc.state_n["alpha"]
+                   - dlambda * (self.H_k * n - 0.0 * inc.state_n["alpha"]))
         return [self.alpha(R_alpha)]
 
 
@@ -783,28 +784,28 @@ class TestSolverNonconverged:
     def j2(self):
         return J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
-    def _plastic_trial(self, j2):
-        state_n = j2.initial_state()
+    def _plastic_increment(self, j2):
+        """An increment whose trial stress is far outside the yield surface."""
         stress_trial = anp.array([500.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-        return stress_trial, state_n
+        return make_increment(j2, j2.initial_state(), stress_trial=stress_trial)
 
     def test_default_raises(self, j2):
-        st, s_n = self._plastic_trial(j2)
+        inc = self._plastic_increment(j2)
         with pytest.raises(RuntimeError, match="did not converge"):
-            PythonNumericalIntegrator(j2, max_iter=0).return_mapping(st, s_n)
+            PythonNumericalIntegrator(j2, max_iter=0).return_mapping(inc)
 
     def test_false_returns_nonconverged_result(self, j2):
-        st, s_n = self._plastic_trial(j2)
+        inc = self._plastic_increment(j2)
         result = PythonNumericalIntegrator(
             j2, max_iter=0, raise_on_nonconverged=False
-        ).return_mapping(st, s_n)
+        ).return_mapping(inc)
         assert result.converged is False
         assert result.n_iterations == 0
         assert isinstance(result.residual_history, list)
 
     def test_converged_case_has_flag_true(self, j2):
-        st, s_n = self._plastic_trial(j2)
-        result = PythonNumericalIntegrator(j2).return_mapping(st, s_n)
+        inc = self._plastic_increment(j2)
+        result = PythonNumericalIntegrator(j2).return_mapping(inc)
         assert result.converged is True
 
     def test_stress_update_elastic_always_converged(self, j2):
@@ -962,7 +963,7 @@ class _Subloading(MaterialModel):
         self.E = E
         self.nu = nu
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
@@ -972,15 +973,16 @@ class _Subloading(MaterialModel):
         d = self.dev(state["stress"])
         return self.stress_flow(1.5 * d / self.dimension.vonmises_norm(d))
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
+        state_n = inc.state_n
         U = -_U0 * anp.log(anp.clip(state_n["R"], 1e-10, 1.0 - 1e-14))
         return [self.R(state_n["R"] + U * dlambda), self.ep(state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        return [self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))]
+    def state_residual(self, new, dlambda, inc):
+        return [self.stress(self.default_stress_residual(new, dlambda, inc.trial["stress"]))]
 
-    def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
-        return [self.R(self.vonmises(stress_trial) / _F0)]
+    def elastic_update_state(self, inc):
+        return [self.R(self.vonmises(inc.trial["stress"]) / _F0)]
 
 
 class TestElasticUpdateState:
@@ -989,9 +991,33 @@ class TestElasticUpdateState:
         return _Subloading(E=_E, nu=_NU)
 
     def test_default_hook_returns_empty(self):
-        assert J2Isotropic3D(E=_E, nu=_NU, sigma_y0=250.0, H=1000.0).elastic_update_state(
-            {}, stress_trial=anp.zeros(6)
-        ) == []
+        j2 = J2Isotropic3D(E=_E, nu=_NU, sigma_y0=250.0, H=1000.0)
+        inc = make_increment(j2, j2.initial_state(), stress_trial=anp.zeros(6))
+        assert j2.elastic_update_state(inc) == []
+
+    def test_old_signature_is_rejected_when_the_class_is_created(self):
+        """A hook written for another argument list must fail loudly."""
+        with pytest.raises(TypeError, match=r"elastic_update_state must take \(inc\)"):
+            class _Stale(_Subloading):
+                def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+                    return [self.R(0.5)]
+
+    def test_follower_is_not_part_of_the_trial_state(self, model):
+        """R moves after the branch: the trial state still carries R_n."""
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        state_n = model.initial_state()
+        r = PythonNumericalIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
+        assert r.is_plastic is False
+        assert float(r.increment.trial["R"]) == float(state_n["R"])
+        assert float(r.state["R"]) != float(state_n["R"])
+
+    def test_elastic_tangent_stays_the_hand_written_stiffness(self, model):
+        """A follower leaves the predictor alone, so no autodiff is involved."""
+        deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        state_n = model.initial_state()
+        r = PythonNumericalIntegrator(model).stress_update(deps, anp.zeros(6), state_n)
+        np.testing.assert_array_equal(
+            np.asarray(r.ddsdde), np.asarray(model.elastic_stiffness(state_n)))
 
     def test_r_tracks_geometry_on_initial_elastic_loading(self, model):
         deps = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -1038,12 +1064,11 @@ class TestElasticUpdateState:
 
     def test_hook_rejects_field_of_another_model(self, model):
         """A subset is fine, but a name outside the model's explicit fields is not."""
-        other = _Subloading(E=_E, nu=_NU)
         stray = Explicit(shape=())
         object.__setattr__(stray, "name", "not_a_field")
 
         class _Bad(_Subloading):
-            def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+            def elastic_update_state(self, inc):
                 return [self.R(0.5), stray(1.0)]
 
         bad = _Bad(E=_E, nu=_NU)
@@ -1056,7 +1081,7 @@ class TestElasticUpdateState:
     def test_hook_rejects_implicit_field(self, model):
         """``stress`` is Implicit, so ``self.stress(...)`` yields a StateResidual."""
         class _Bad(_Subloading):
-            def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
+            def elastic_update_state(self, inc):
                 return [self.R(0.5), self.stress(anp.zeros(6))]
 
         bad = _Bad(E=_E, nu=_NU)
@@ -1098,27 +1123,27 @@ class _SubloadingNatural(MaterialModel):
         self.E = E
         self.nu = nu
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - state["R"] * _F0
 
-    def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
-        R_hat = float(self.vonmises(stress_trial)) / _F0
-        return R_hat <= _RE or R_hat <= float(state_n["R"])
+    def elastic_check(self, inc):
+        R_hat = float(self.vonmises(inc.trial["stress"])) / _F0
+        return R_hat <= _RE or R_hat <= float(inc.state_n["R"])
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        R_n = anp.clip(state_n["R"], 1e-12, 1.0 - 1e-12)
+    def update_state(self, new, dlambda, inc):
+        R_n = anp.clip(inc.state_n["R"], 1e-12, 1.0 - 1e-12)
         U = -_U0 * anp.log(R_n)  # U(1) = 0, so R saturates at the normal-yield surface
         return [self.R(R_n + U * dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         # σ row only — the Δλ row is left to the framework default, i.e. f = 0.
-        return [self.stress(self.default_stress_residual(state_new, dlambda, stress_trial))]
+        return [self.stress(self.default_stress_residual(new, dlambda, inc.trial["stress"]))]
 
-    def elastic_update_state(self, state_n, *, stress_trial, strain_inc=None):
-        return [self.R(self.vonmises(stress_trial) / _F0)]
+    def elastic_update_state(self, inc):
+        return [self.R(self.vonmises(inc.trial["stress"]) / _F0)]
 
 
 class TestElasticCheck:
@@ -1145,7 +1170,7 @@ class TestElasticCheck:
         state_n = m.initial_state()
         for scale, expected in [(0.5, True), (1.5, False)]:
             stress_trial = anp.array([250.0 * scale, 0.0, 0.0, 0.0, 0.0, 0.0])
-            assert m.elastic_check(state_n, stress_trial=stress_trial) is expected
+            assert m.elastic_check(make_increment(m, state_n, stress_trial=stress_trial)) is expected
 
     def test_plasticity_starts_at_the_elastic_limit(self, model):
         """Onset lands on R̂ = R_e, which the yield-function sign cannot locate.
@@ -1161,7 +1186,7 @@ class TestElasticCheck:
         # Uniaxial *strain* loading, so σ_vm per unit ε comes from the stiffness.
         e1 = np.zeros(6)
         e1[0] = 1.0
-        vm_per_eps = float(model.vonmises(model.elastic_stiffness() @ e1))
+        vm_per_eps = float(model.vonmises(model.elastic_stiffness(model.initial_state()) @ e1))
         eps_elastic_limit = _RE * _F0 / vm_per_eps
         assert eps[first] > eps_elastic_limit
         assert eps[first - 1] <= eps_elastic_limit
@@ -1205,8 +1230,8 @@ class TestElasticCheck:
         checked too.
         """
         class _LimitOnly(_SubloadingNatural):
-            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
-                return float(self.vonmises(stress_trial)) / _F0 <= _RE
+            def elastic_check(self, inc):
+                return float(self.vonmises(inc.trial["stress"])) / _F0 <= _RE
 
         class _NoHook(_SubloadingNatural):
             elastic_check = MaterialModel.elastic_check
@@ -1270,7 +1295,7 @@ class TestElasticCheck:
     def test_non_bool_return_is_rejected(self, model):
         """A smoothed indicator would silently make every step plastic-ish."""
         class _Bad(_SubloadingNatural):
-            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
+            def elastic_check(self, inc):
                 return anp.array(1.0)
 
         bad = _Bad(E=_E, nu=_NU)
@@ -1284,17 +1309,17 @@ class TestElasticCheck:
         seen = {}
 
         class _Recording(_SubloadingNatural):
-            def elastic_check(self, state_n, *, stress_trial, strain_inc=None):
-                seen["stress_n"] = np.array(state_n["stress"])
-                seen["strain_inc"] = np.array(strain_inc)
-                return super().elastic_check(
-                    state_n, stress_trial=stress_trial, strain_inc=strain_inc
-                )
+            def elastic_check(self, inc):
+                seen["stress_n"] = np.array(inc.state_n["stress"])
+                seen["strain_inc"] = np.array(inc.strain_inc)
+                return super().elastic_check(inc)
 
         m = _Recording(E=_E, nu=_NU)
         stress_n = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         deps = np.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
-        state_n = {**m.initial_state(), "stress": stress_n}
+        # σ_n is the stress handed to stress_update — deliberately not the one
+        # in the state dict, which a caller may not have kept in step.
+        state_n = m.initial_state()
         PythonNumericalIntegrator(m).stress_update(deps, stress_n, state_n)
         assert seen["stress_n"] == pytest.approx(stress_n)
         assert seen["strain_inc"] == pytest.approx(deps)
@@ -1399,7 +1424,7 @@ class _WeakDamageBase(MaterialModel):
         lam = self.E * self.nu / ((1 + self.nu) * (1 - 2 * self.nu))
         return self.isotropic_C(lam, mu)
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         d = 0.0 if state is None else state["D"]
         return (1.0 - d) * self.C0()
 
@@ -1407,8 +1432,8 @@ class _WeakDamageBase(MaterialModel):
         s_eff = state["stress"] / (1.0 - state["D"])
         return self.vonmises(s_eff) - (self.sigma_y0 + self.H * state["ep"])
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        ep = state_n["ep"] + dlambda
+    def update_state(self, new, dlambda, inc):
+        ep = inc.state_n["ep"] + dlambda
         return [self.ep(ep), self.D(_dmg_D(ep))]
 
     def n_eff(self, state):
@@ -1421,10 +1446,10 @@ class _WeakDamageScaled(_WeakDamageBase):
 
     stress = Implicit(shape=NTENS)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        Dn, D1 = state_n["D"], state_new["D"]
-        R = ((1 - Dn) / (1 - D1)) * state_new["stress"] - stress_trial \
-            + dlambda * (1 - Dn) * (self.C0() @ self.n_eff(state_new))
+    def state_residual(self, new, dlambda, inc):
+        Dn, D1 = inc.state_n["D"], new["D"]
+        R = ((1 - Dn) / (1 - D1)) * new["stress"] - inc.trial["stress"] \
+            + dlambda * (1 - Dn) * (self.C0() @ self.n_eff(new))
         return [self.stress(R)]
 
 
@@ -1433,10 +1458,10 @@ class _WeakDamageUnscaled(_WeakDamageBase):
 
     stress = Implicit(shape=NTENS)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        Dn, D1 = state_n["D"], state_new["D"]
-        R = state_new["stress"] - ((1 - D1) / (1 - Dn)) * stress_trial \
-            + dlambda * (1 - D1) * (self.C0() @ self.n_eff(state_new))
+    def state_residual(self, new, dlambda, inc):
+        Dn, D1 = inc.state_n["D"], new["D"]
+        R = new["stress"] - ((1 - D1) / (1 - Dn)) * inc.trial["stress"] \
+            + dlambda * (1 - D1) * (self.C0() @ self.n_eff(new))
         return [self.stress(R)]
 
 
@@ -1454,13 +1479,13 @@ class _J2StrainIncResidual(MaterialModel):
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        C = self.elastic_stiffness(state_new)
-        n = self.flow(state_new).strain_like
-        R = state_new["stress"] - state_n["stress"] - C @ (strain_inc - dlambda * n)
+    def state_residual(self, new, dlambda, inc):
+        C = self.elastic_stiffness(new)
+        n = self.flow(new).strain_like
+        R = new["stress"] - inc.state_n["stress"] - C @ (inc.strain_inc - dlambda * n)
         return [self.stress(R)]
 
 
@@ -1557,7 +1582,7 @@ class TestElasticPredictor:
         np.testing.assert_array_equal(np.asarray(r.ddsdde), np.asarray(C))
         np.testing.assert_array_equal(np.asarray(r.stress), np.asarray(C @ deps))
         np.testing.assert_array_equal(
-            np.asarray(integ.trial_stress(deps, np.zeros(6), model.initial_state())),
+            np.asarray(integ.increment(deps, np.zeros(6), model.initial_state()).trial["stress"]),
             np.asarray(C @ deps),
         )
 
@@ -1653,3 +1678,83 @@ class TestElasticPredictor:
         with pytest.raises(ValueError, match="trial stress"):
             PythonNumericalIntegrator(m).stress_update(np.array([1e-5]), np.zeros(1),
                                                        m.initial_state())
+
+
+class _BilinearWithElasticTangent(BilinearPlastic1D):
+    """Bilinear elasticity with its elastic tangent written out by hand.
+
+    σ = k_t ⟨σ̃⟩₊ + k_c ⟨σ̃⟩₋ and σ̃_trial = σ̃_n + E Δε, so
+    dσ_trial/dΔε = k E with k chosen by the sign of σ̃_trial.
+    """
+
+    def elastic_tangent(self, inc):
+        k = self.k_t if float(inc.trial["stress_eff"][0]) > 0.0 else self.k_c
+        return k * self.isotropic_stiffness()
+
+
+class TestElasticTangentHook:
+    """The elastic tangent of a non-linear predictor: hand-written vs autodiff.
+
+    Autodiff alone is enough to run, but a UMAT needs the expression itself.
+    The hook is where it is written down, and the numerical integrator — which
+    always differentiates the predictor — is what it is checked against.
+    """
+
+    @staticmethod
+    def _elastic_step(integ, model, eps):
+        # σ̃ = E·eps stays below σ_y0, so the step is elastic on either branch.
+        return integ.stress_update(np.array([eps]), np.zeros(1), model.initial_state())
+
+    @pytest.mark.parametrize("eps", [100.0 / 200000.0, -100.0 / 200000.0],
+                             ids=["tension", "compression"])
+    def test_hand_written_tangent_matches_autodiff(self, eps):
+        m = _BilinearWithElasticTangent(**_BL)
+        r_ad = self._elastic_step(PythonNumericalIntegrator(m), m, eps)
+        r_hand = self._elastic_step(PythonAnalyticalIntegrator(m), m, eps)
+        assert not r_ad.is_plastic and not r_hand.is_plastic
+        np.testing.assert_allclose(
+            np.asarray(r_hand.ddsdde), np.asarray(r_ad.ddsdde), rtol=1e-12)
+        k = m.k_t if eps > 0 else m.k_c
+        np.testing.assert_allclose(np.asarray(r_hand.ddsdde), [[k * m.E]], rtol=1e-12)
+
+    def test_analytical_requires_the_hook(self):
+        """Without it the only tangent is autodiff — not something to port."""
+        m = BilinearPlastic1D(**_BL)
+        with pytest.raises(NotImplementedError, match="elastic_tangent"):
+            self._elastic_step(PythonAnalyticalIntegrator(m), m, 100.0 / m.E)
+
+    def test_numerical_ignores_the_hook(self):
+        """The reference side must not be the thing under test."""
+        class _Wrong(_BilinearWithElasticTangent):
+            def elastic_tangent(self, inc):
+                return 2.0 * super().elastic_tangent(inc)
+
+        m = _Wrong(**_BL)
+        eps = 100.0 / m.E
+        r = self._elastic_step(PythonNumericalIntegrator(m), m, eps)
+        np.testing.assert_allclose(np.asarray(r.ddsdde), [[m.k_t * m.E]], rtol=1e-12)
+
+    def test_auto_prefers_the_hook_and_falls_back_to_autodiff(self):
+        eps = 100.0 / 200000.0
+        with_hook = _BilinearWithElasticTangent(**_BL)
+        r = self._elastic_step(PythonIntegrator(with_hook), with_hook, eps)
+        # Eager: stored as an array, not as a thunk that would differentiate.
+        assert not callable(object.__getattribute__(r, "ddsdde"))
+
+        without = BilinearPlastic1D(**_BL)
+        r2 = self._elastic_step(PythonIntegrator(without), without, eps)
+        assert callable(object.__getattribute__(r2, "ddsdde"))
+        np.testing.assert_allclose(np.asarray(r2.ddsdde), np.asarray(r.ddsdde), rtol=1e-12)
+
+    def test_default_predictor_does_not_consult_the_hook(self):
+        """With the linear predictor the tangent is elastic_stiffness(state_n)."""
+        class _Hooked(J2Isotropic3D):
+            def elastic_tangent(self, inc):
+                raise AssertionError("not consulted for the default predictor")
+
+        m = _Hooked(E=_E, nu=_NU, sigma_y0=250.0, H=1000.0)
+        deps = np.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
+        for cls in (PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator):
+            r = cls(m).stress_update(deps, np.zeros(6), m.initial_state())
+            np.testing.assert_array_equal(
+                np.asarray(r.ddsdde), np.asarray(m.elastic_stiffness(m.initial_state())))

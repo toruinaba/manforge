@@ -483,7 +483,7 @@ def test_explicit_state_without_update_state_raises():
             param_names = []
             ep = Explicit(shape=())
 
-            def elastic_stiffness(self, state=None):
+            def elastic_stiffness(self, state):
                 pass
 
             def yield_function(self, state):
@@ -498,7 +498,7 @@ def test_implicit_state_without_state_residual_raises():
             param_names = []
             alpha = Implicit(shape=NTENS)
 
-            def elastic_stiffness(self, state=None):
+            def elastic_stiffness(self, state):
                 pass
 
             def yield_function(self, state):
@@ -514,17 +514,17 @@ def test_mixed_implicit_explicit_requires_both_methods():
         alpha = Implicit(shape=NTENS)
         ep = Explicit(shape=())
 
-        def elastic_stiffness(self, state=None):
+        def elastic_stiffness(self, state):
             pass
 
         def yield_function(self, state):
             pass
 
-        def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-            return [self.ep(state_n["ep"] + dlambda)]
+        def update_state(self, new, dlambda, inc):
+            return [self.ep(inc.state_n["ep"] + dlambda)]
 
-        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-            return [self.alpha(state_new["alpha"] - state_n["alpha"])]
+        def state_residual(self, new, dlambda, inc):
+            return [self.alpha(new["alpha"] - inc.state_n["alpha"])]
 
     assert OK.implicit_state_names == ["alpha"]
 
@@ -537,13 +537,13 @@ def test_all_implicit_states_no_update_state_needed():
         alpha = Implicit(shape=NTENS)
         ep = Implicit(shape=())
 
-        def elastic_stiffness(self, state=None):
+        def elastic_stiffness(self, state):
             pass
 
         def yield_function(self, state):
             pass
 
-        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        def state_residual(self, new, dlambda, inc):
             return [self.alpha(anp.array(0.0)), self.ep(anp.array(0.0))]
 
     assert set(OKImplicit.implicit_state_names) == {"alpha", "ep"}
@@ -554,7 +554,7 @@ def test_no_state_fields_no_methods_needed():
     class OKStateless(MaterialModel):
         param_names = []
 
-        def elastic_stiffness(self, state=None):
+        def elastic_stiffness(self, state):
             pass
 
         def yield_function(self, state):
@@ -752,3 +752,97 @@ def test_strain_norm_conjugate_to_vonmises():
     plastic_dissipation = sigma_y * e11
     vm_times_enorm = float(m.vonmises(stress)) * float(m.strain_norm(eps_p))
     np.testing.assert_allclose(vm_times_enorm, plastic_dissipation, rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Hook signatures are checked when the class is created
+# ---------------------------------------------------------------------------
+
+class _GuardBase(MaterialModel):
+    param_names = ["E", "nu"]
+
+    def __init__(self):
+        super().__init__()
+        self.E, self.nu = 210000.0, 0.3
+
+    def yield_function(self, state):
+        return self.vonmises(state["stress"]) - 250.0
+
+
+@pytest.mark.parametrize("hook, old_params, expected", [
+    ("update_state", "self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None",
+     "new, dlambda, inc"),
+    ("state_residual", "self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None",
+     "new, dlambda, inc"),
+    ("elastic_check", "self, state_n, *, stress_trial, strain_inc=None", "inc"),
+    ("elastic_update_state", "self, state_n, *, stress_trial, strain_inc=None", "inc"),
+    ("user_defined_return_mapping", "self, stress_trial, C, state_n", "inc"),
+    ("user_defined_tangent", "self, stress, state, dlambda, C, state_n", "new, dlambda, inc"),
+])
+def test_hook_with_another_argument_list_is_rejected(hook, old_params, expected):
+    """Called positionally, a stale hook would get its arguments in the wrong slots."""
+    namespace = {}
+    exec(f"def {hook}({old_params}):\n    return None\n", namespace)
+    with pytest.raises(TypeError, match=rf"{hook} must take \({expected}\)"):
+        type("_Stale", (_GuardBase,), {hook: namespace[hook]})
+
+
+def test_hook_check_covers_abstract_intermediates():
+    """A mixin without yield_function is checked too."""
+    def update_state(self, dlambda, state_new, state_n):
+        return []
+
+    with pytest.raises(TypeError, match="update_state must take"):
+        type("_Mixin", (MaterialModel,), {"update_state": update_state})
+
+
+def test_current_signatures_are_accepted():
+    class _Fine(_GuardBase):
+        def elastic_check(self, inc):
+            return True
+
+        def user_defined_tangent(self, new, dlambda, inc):
+            return None
+
+    assert _Fine().ntens == 6
+
+
+# ---------------------------------------------------------------------------
+# isotropic_stiffness / elastic_stiffness
+# ---------------------------------------------------------------------------
+
+def test_isotropic_stiffness_is_built_from_E_and_nu(model):
+    E, nu = model.E, model.nu
+    mu = E / (2.0 * (1.0 + nu))
+    lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    np.testing.assert_array_equal(
+        np.asarray(model.isotropic_stiffness()), np.asarray(model.isotropic_C(lam, mu)))
+
+
+def test_default_elastic_stiffness_is_the_isotropic_stiffness(model):
+    state = model.initial_state()
+    assert model.elastic_stiffness(state) is model.isotropic_stiffness()
+
+
+def test_elastic_stiffness_requires_a_state(model):
+    """No state-less call: there is no default that would stand for 'undamaged'."""
+    with pytest.raises(TypeError):
+        model.elastic_stiffness()
+
+
+def test_isotropic_stiffness_follows_reassigned_parameters(model):
+    C_before = np.asarray(model.isotropic_stiffness()).copy()
+    model.E = 2.0 * model.E
+    np.testing.assert_allclose(np.asarray(model.isotropic_stiffness()), 2.0 * C_before)
+
+
+def test_isotropic_stiffness_needs_E_and_nu():
+    m = _Stub3D()
+    with pytest.raises(NotImplementedError, match="E and"):
+        m.isotropic_stiffness()
+
+
+def test_default_elastic_tangent_hook_is_none(model):
+    from manforge.verification import make_increment
+    inc = make_increment(model, model.initial_state(), stress_trial=np.zeros(6))
+    assert model.elastic_tangent(inc) is None

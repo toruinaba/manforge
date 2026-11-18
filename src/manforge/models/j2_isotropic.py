@@ -25,11 +25,11 @@ dε_p = Δλ · n,  n = df/dσ = (3/2) s / σ_vm  (unit normal in Mandel sense)
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel, ParamMeta
-from manforge.core.state import Explicit, SCALAR, State, StateUpdate, StateResidual
+from manforge.core.state import Explicit, Increment, SCALAR, State, StateUpdate, StateResidual
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.core.result import ReturnMappingResult
 from manforge.core.material import verified_against_fortran
-from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
+from manforge._typing import Scalar as ScalarType, Stiffness, StateDict
 
 
 class J2Isotropic(MaterialModel):
@@ -79,11 +79,10 @@ class J2Isotropic(MaterialModel):
         return self.vonmises(state["stress"]) - sigma_y
 
     def update_state(
-        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
-        *, stress_trial: "StressVec | None" = None, strain_inc=None,
+        self, new: "State | StateDict", dlambda: ScalarType, inc: Increment,
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (von Mises associative flow)."""
-        return [self.ep(state_n["ep"] + dlambda)]
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
 
 class J2Isotropic3D(J2Isotropic):
@@ -120,16 +119,14 @@ class J2Isotropic3D(J2Isotropic):
         "j2_isotropic_3d_elastic_stiffness",
         test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
     )
-    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
+    def elastic_stiffness(self, state: "State | StateDict") -> Stiffness:
         return super().elastic_stiffness(state)
 
     # ------------------------------------------------------------------
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_return_mapping(
-        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
-    ) -> ReturnMappingResult:
+    def user_defined_return_mapping(self, inc: Increment) -> ReturnMappingResult:
         """J2 radial return — closed-form plastic correction.
 
         Notes
@@ -139,18 +136,15 @@ class J2Isotropic3D(J2Isotropic):
         so the radial return reduces to a single scalar equation in Δλ.
         This identity holds when ``ndi == ndi_phys`` (SOLID_3D, PLANE_STRAIN).
 
-        Parameters
-        ----------
-        stress_trial : anp.ndarray, shape (ntens,)
-        C : anp.ndarray, shape (ntens, ntens)
-        state_n : dict with key ``ep``
+        Reads σ_trial from ``inc.trial["stress"]`` and ``ep`` from ``inc.state_n``.
 
         Returns
         -------
         ReturnMappingResult
         """
         mu = self.E / (2.0 * (1.0 + self.nu))
-        ep_n = state_n["ep"]
+        stress_trial = inc.trial["stress"]
+        ep_n = inc.state_n["ep"]
 
         sigma_y = self.sigma_y0 + self.H * ep_n
         s_trial = self.dev(stress_trial)
@@ -172,44 +166,29 @@ class J2Isotropic3D(J2Isotropic):
         )
 
     def user_defined_tangent(
-        self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
-        C: Stiffness, state_n: StateDict,
-        *, stress_trial: "StressVec | None" = None, strain_inc: "FloatArray | None" = None,
+        self, new: "State | StateDict", dlambda: ScalarType, inc: Increment,
     ) -> Stiffness:
         """J2 algorithmic consistent tangent — closed-form (de Souza Neto).
 
             D^ep = I_vol C + θ I_dev C − β (s_trial ⊗ s_trial)
 
         where θ = 1 − 3μΔλ/σ_vm_trial and β = 9μ²σ_y / ((3μ+H) σ_vm_trial³).
-
-        Parameters
-        ----------
-        stress : anp.ndarray, shape (ntens,)
-        state : dict  (unused; ep taken from state_n)
-        dlambda : anp.ndarray, scalar
-        C : anp.ndarray, shape (ntens, ntens)
-        state_n : dict with key ``ep``
-        stress_trial : anp.ndarray, shape (ntens,), optional
-            Elastic trial stress σ_trial.  When provided, s_trial is read
-            directly from it; otherwise reconstructed from the converged stress.
+        ``s_trial`` is the deviator of ``inc.trial["stress"]``, ``ep`` is read
+        from ``inc.state_n``, and C is the elastic stiffness at ``inc.state_n``.
 
         Returns
         -------
         anp.ndarray, shape (ntens, ntens)
         """
         mu = self.E / (2.0 * (1.0 + self.nu))
-        ep_n = state_n["ep"]
+        C = self.elastic_stiffness(inc.state_n)
+        ep_n = inc.state_n["ep"]
 
         sigma_y = self.sigma_y0 + self.H * ep_n
         sigma_vm_trial = sigma_y + (3.0 * mu + self.H) * dlambda
         theta = 1.0 - 3.0 * mu * dlambda / sigma_vm_trial
 
-        if stress_trial is not None:
-            s_trial = self.dev(stress_trial)
-        else:
-            # Fallback: reconstruct via the J2 radial-return identity
-            # dev(σ_new) = θ · s_trial
-            s_trial = self.dev(stress) / theta
+        s_trial = self.dev(inc.trial["stress"])
 
         beta = 9.0 * mu ** 2 * sigma_y / ((3.0 * mu + self.H) * sigma_vm_trial ** 3)
 
@@ -274,9 +253,7 @@ class J2Isotropic1D(J2Isotropic):
     # Analytical solver hooks
     # ------------------------------------------------------------------
 
-    def user_defined_return_mapping(
-        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
-    ) -> ReturnMappingResult:
+    def user_defined_return_mapping(self, inc: Increment) -> ReturnMappingResult:
         """1D J2 radial return — closed-form, 3D-analogous form.
 
         Notes
@@ -293,18 +270,15 @@ class J2Isotropic1D(J2Isotropic):
         the 3D formula with ``s_trial`` and ``vonmises`` in place of
         raw ``abs`` and ``sign``.
 
-        Parameters
-        ----------
-        stress_trial : anp.ndarray, shape (1,)
-        C : anp.ndarray, shape (1, 1)
-        state_n : dict with key ``ep``
+        Reads σ_trial from ``inc.trial["stress"]`` and ``ep`` from ``inc.state_n``.
 
         Returns
         -------
         ReturnMappingResult
         """
-        E = C[0, 0]
-        ep_n = state_n["ep"]
+        E = self.elastic_stiffness(inc.state_n)[0, 0]
+        stress_trial = inc.trial["stress"]
+        ep_n = inc.state_n["ep"]
         sigma_y = self.sigma_y0 + self.H * ep_n
         s_trial = self.dev(stress_trial)
         sigma_vm_trial = self.vonmises(stress_trial)
@@ -326,9 +300,7 @@ class J2Isotropic1D(J2Isotropic):
         )
 
     def user_defined_tangent(
-        self, stress: StressVec, state: "State | StateDict", dlambda: ScalarType,
-        C: Stiffness, state_n: StateDict,
-        *, stress_trial: "StressVec | None" = None, strain_inc: "FloatArray | None" = None,
+        self, new: "State | StateDict", dlambda: ScalarType, inc: Increment,
     ) -> Stiffness:
         """1D consistent elastoplastic tangent for linear isotropic hardening.
 
@@ -336,5 +308,5 @@ class J2Isotropic1D(J2Isotropic):
         tangent reduces exactly to ``D^ep = E·H/(E+H)`` independently of the
         current plastic strain or step size. Returns a (1, 1) ndarray.
         """
-        E = C[0, 0]
+        E = self.elastic_stiffness(inc.state_n)[0, 0]
         return anp.array([[E * self.H / (E + self.H)]])

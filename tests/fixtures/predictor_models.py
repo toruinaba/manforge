@@ -42,19 +42,19 @@ class BilinearPlastic1D(MaterialModel):
         return self.strain_flow(autograd.grad(self.vonmises)(state["stress_eff"]))
 
     def elastic_predictor(self, state_n, *, strain_inc):
-        C0 = super().elastic_stiffness(None)
+        C0 = self.isotropic_stiffness()
         s_eff = state_n["stress_eff"] + C0 @ strain_inc
         return [self.stress.update(self.nominal(s_eff)), self.stress_eff.update(s_eff)]
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        C0 = super().elastic_stiffness(None)
-        s_eff = state_new["stress_eff"]
-        R_eff = s_eff - state_n["stress_eff"] - C0 @ strain_inc \
-            + dlambda * (C0 @ self.flow(state_new).strain_like)
-        R_sig = state_new["stress"] - self.nominal(s_eff)
+    def state_residual(self, new, dlambda, inc):
+        C0 = self.isotropic_stiffness()
+        s_eff = new["stress_eff"]
+        R_eff = s_eff - inc.state_n["stress_eff"] - C0 @ inc.strain_inc \
+            + dlambda * (C0 @ self.flow(new).strain_like)
+        R_sig = new["stress"] - self.nominal(s_eff)
         return [self.stress(R_sig), self.stress_eff(R_eff)]
 
 
@@ -67,12 +67,11 @@ class BilinearPlasticTrialResidual1D(BilinearPlastic1D):
     right (linearising σ_trial with C_n = E would be off by the factor k).
     """
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        C0 = super(BilinearPlastic1D, self).elastic_stiffness(None)
-        items = super().state_residual(state_new, dlambda, state_n,
-                                       stress_trial=stress_trial, strain_inc=strain_inc)
+    def state_residual(self, new, dlambda, inc):
+        C0 = self.isotropic_stiffness()
+        items = super().state_residual(new, dlambda, inc)
         R_eff = [i for i in items if i.name == "stress_eff"][0].value
-        s_trial_eff = state_n["stress_eff"] + C0 @ strain_inc
-        R_sig = (state_new["stress"] - stress_trial
-                 - self.nominal(state_new["stress_eff"]) + self.nominal(s_trial_eff))
+        s_trial_eff = inc.state_n["stress_eff"] + C0 @ inc.strain_inc
+        R_sig = (new["stress"] - inc.trial["stress"]
+                 - self.nominal(new["stress_eff"]) + self.nominal(s_trial_eff))
         return [self.stress(R_sig), self.stress_eff(R_eff)]

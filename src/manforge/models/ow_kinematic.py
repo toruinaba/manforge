@@ -107,18 +107,18 @@ class OWKinematic(MaterialModel):
         s_xi = self.dev(state["stress"]) - state["alpha"]
         return self.vonmises_norm(s_xi) - self.sigma_y0
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_new = state_new["alpha"]
+    def state_residual(self, new, dlambda, inc):
+        alpha_new = new["alpha"]
         # α is stress-like, so the evolution law takes the physical-shear flow.
-        n_hat = self.flow(state_new).stress_like
+        n_hat = self.flow(new).stress_like
         a_norm = self.vonmises_norm(alpha_new)
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
         R_alpha = (
-            alpha_new - state_n["alpha"]
+            alpha_new - inc.state_n["alpha"]
             - (2.0 / 3.0) * self.C_k * dlambda * n_hat
             + self.gamma * dlambda * a_norm * alpha_new
         )
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 

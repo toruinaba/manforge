@@ -86,9 +86,8 @@ class TestDescribe:
             def yield_function(self, state):
                 return abs(state["stress"][0]) - self.sigma_y0
 
-            def update_state(self, dlambda, state_new, state_n, *,
-                             stress_trial=None, strain_inc=None):
-                return [self.ep(state_n["ep"] + dlambda)]
+            def update_state(self, new, dlambda, inc):
+                return [self.ep(inc.state_n["ep"] + dlambda)]
 
         reg = ModelRegistry()
         reg.register("bare", Bare)

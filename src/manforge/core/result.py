@@ -13,12 +13,18 @@ Terminology
     Corresponds to what ABAQUS calls from a UMAT subroutine.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import autograd.numpy as anp
 
 from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
+
+if TYPE_CHECKING:
+    from manforge.core.state import Increment
 
 
 @dataclass
@@ -62,8 +68,8 @@ class ReturnMappingResult:
 class StressUpdateResult:
     """Result of a complete stress update (constitutive integration) step.
 
-    Wraps :class:`ReturnMappingResult` and adds the consistent tangent,
-    trial stress, and plasticity flag.
+    Wraps :class:`ReturnMappingResult` and adds the consistent tangent, the
+    plasticity flag, and the increment the step was computed for.
 
     Attributes
     ----------
@@ -77,17 +83,18 @@ class StressUpdateResult:
         never consumes the tangent and its computation (autodiff Jacobian)
         can dominate the step cost.  The materialised array is cached, so
         repeated access costs nothing extra.
-    stress_trial : anp.ndarray, shape (ntens,)
-        Elastic trial stress from the model's ``elastic_predictor``
-        (σ_n + C Δε unless the model overrides it).
     is_plastic : bool or None
         True if the step activated plasticity.  ``None`` when the information
         is not available (e.g. results produced by :class:`FortranIntegrator`
         where the UMAT does not expose a plasticity flag).
-    _state_n : dict
-        On elastic steps, the converged internal state minus σ: step-n values
-        with the predictor's trial fields and ``elastic_update_state`` merged
-        in (read by the ``state`` property).  Not part of the public API.
+    increment : Increment or None
+        The step this result answers: the state at its beginning, Δε, and the
+        elastic trial state (:class:`~manforge.core.state.Increment`).  Kept so
+        the result can be inspected later — the residual Jacobian at the
+        converged point is a function of all three — without the caller
+        carrying them alongside.  ``None`` for a result that has no
+        model-side increment: a Fortran UMAT is a closed target and reports no
+        trial state.
     n_substeps : int
         Number of substeps the increment was divided into.  ``1`` means the
         increment was integrated in one pass — the only value any integrator
@@ -99,10 +106,12 @@ class StressUpdateResult:
     return_mapping: "ReturnMappingResult | None"
     # repr=False: repr must not trigger the lazy tangent computation.
     ddsdde: "Stiffness | Callable[[], Stiffness]" = field(repr=False)
-    stress_trial: "StressVec | None"
     is_plastic: "bool | None"
-    _state_n: StateDict = field(repr=False)
+    increment: "Increment | None" = field(repr=False)
     n_substeps: int = 1
+    # Fields the model's elastic_update_state moved on an elastic step, laid
+    # over the trial state by the ``state`` property.  Not part of the public API.
+    _elastic_updates: StateDict = field(default_factory=dict, repr=False)
 
     def __getattribute__(self, name: str):
         value = object.__getattribute__(self, name)
@@ -110,6 +119,13 @@ class StressUpdateResult:
             value = value()
             object.__setattr__(self, "ddsdde", value)
         return value
+
+    @property
+    def stress_trial(self) -> "StressVec | None":
+        """Elastic trial stress σ_trial (``None`` without an increment)."""
+        if self.increment is None:
+            return None
+        return self.increment.trial["stress"]
 
     @property
     def stress(self) -> StressVec:
@@ -122,12 +138,14 @@ class StressUpdateResult:
     def state(self) -> StateDict:
         """Converged internal state at step n+1.
 
-        On elastic steps the internal variables are unchanged from step n, but
-        ``"stress"`` advances to σ_trial — otherwise it would lag a step behind
-        :attr:`stress` and behind the ``stress_n`` the driver carries forward.
+        On an elastic step this is the trial state — σ advances to σ_trial, and
+        every field the model's ``elastic_predictor`` moved takes its trial
+        value — with the model's ``elastic_update_state`` applied on top.  A
+        fresh dict on every access.
         """
         if self.return_mapping is None:
-            return {**self._state_n, "stress": self.stress_trial}
+            assert self.increment is not None, "an elastic result always carries its increment"
+            return {**self.increment.trial.as_dict(), **self._elastic_updates}
         return self.return_mapping.state
 
     @property
@@ -139,14 +157,14 @@ class StressUpdateResult:
 
     @property
     def n_iterations(self) -> int:
-        """Newton updates performed (0 for elastic or user_defined steps)."""
+        """Newton updates performed (0 for elastic steps)."""
         if self.return_mapping is None:
             return 0
         return self.return_mapping.n_iterations
 
     @property
     def residual_history(self) -> list[float]:
-        """Residual norms from the framework NR solver (empty for elastic / user_defined)."""
+        """Residual norms of the return mapping (empty for elastic steps)."""
         if self.return_mapping is None:
             return []
         return self.return_mapping.residual_history

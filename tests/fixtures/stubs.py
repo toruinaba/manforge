@@ -15,13 +15,13 @@ class _Stub3D(MaterialModel):
     def __init__(self, dimension=SOLID_3D):
         super().__init__(dimension=dimension)
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         raise NotImplementedError
 
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
         raise NotImplementedError
 
 
@@ -32,13 +32,13 @@ class _StubPS(MaterialModel):
     def __init__(self, dimension=PLANE_STRESS):
         super().__init__(dimension=dimension)
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         raise NotImplementedError
 
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
         raise NotImplementedError
 
 
@@ -49,13 +49,13 @@ class _Stub1D(MaterialModel):
     def __init__(self, dimension=UNIAXIAL_1D):
         super().__init__(dimension=dimension)
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         raise NotImplementedError
 
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
         raise NotImplementedError
 
 
@@ -68,11 +68,11 @@ class _StubWithParams(MaterialModel):
         self.a = a
         self.b = b
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         raise NotImplementedError
 
     def yield_function(self, state):
         raise NotImplementedError
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
         raise NotImplementedError

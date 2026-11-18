@@ -181,7 +181,7 @@ class J2IsotropicDamageUnilateral(MaterialModel):
     # ------------------------------------------------------------------
 
     def undamaged_stiffness(self):
-        return super().elastic_stiffness(None)
+        return self.isotropic_stiffness()
 
     def complementary_energy(self, stress, D):
         """ρψ*(σ, D) — Lemaitre's quasi-unilateral complementary energy."""
@@ -210,10 +210,9 @@ class J2IsotropicDamageUnilateral(MaterialModel):
     # MaterialModel interface
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         """Reference stiffness (1−D) C0 — not the elastic tangent (see module doc)."""
-        C0 = self.undamaged_stiffness()
-        return C0 if state is None else (1.0 - state["D"]) * C0
+        return (1.0 - state["D"]) * self.undamaged_stiffness()
 
     def yield_function(self, state):
         return self.vonmises(state["stress_eff"]) - (self.sigma_y0 + self.H * state["ep"])
@@ -227,17 +226,18 @@ class J2IsotropicDamageUnilateral(MaterialModel):
         sigma = self.nominal_from_effective(s_eff, state_n["D"])
         return [self.stress.update(sigma), self.stress_eff.update(s_eff)]
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
+        state_n, strain_inc = inc.state_n, inc.strain_inc
         C0 = self.undamaged_stiffness()
-        sigma, s_eff, D_1 = state_new["stress"], state_new["stress_eff"], state_new["D"]
+        sigma, s_eff, D_1 = new["stress"], new["stress_eff"], new["D"]
 
         R_stress = s_eff - C0 @ self.elastic_strain(sigma, D_1)
         R_eff = (s_eff - state_n["stress_eff"] - C0 @ strain_inc
-                 + dlambda * (C0 @ self.flow(state_new).strain_like))
-        dp_D = (smooth_macaulay(state_new["ep"] - self.p_D)
+                 + dlambda * (C0 @ self.flow(new).strain_like))
+        dp_D = (smooth_macaulay(new["ep"] - self.p_D)
                 - smooth_macaulay(state_n["ep"] - self.p_D))
         Y = self.energy_release_rate(sigma, D_1)
         # E-scaled into stress units: the NR tolerance is stress-scaled.

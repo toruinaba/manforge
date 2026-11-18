@@ -28,18 +28,18 @@ class _AFKinematicImplicit3D(AFKinematic3D):
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        stress = state_new["stress"]
+    def state_residual(self, new, dlambda, inc):
+        alpha_n = inc.state_n["alpha"]
+        stress = new["stress"]
         xi = stress - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
         s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
+        R_alpha = new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
@@ -50,18 +50,18 @@ class _AFKinematicImplicitPS(AFKinematicPS):
     alpha = Implicit(shape=NTENS, doc="backstress tensor (implicit override)")
     ep = Implicit(shape=(), doc="equivalent plastic strain (implicit override)")
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        stress = state_new["stress"]
+    def state_residual(self, new, dlambda, inc):
+        alpha_n = inc.state_n["alpha"]
+        stress = new["stress"]
         xi = stress - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
         s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
+        R_alpha = new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
@@ -76,16 +76,16 @@ class _AFKinematicImplicitPE(AFKinematic):
         super().__init__(dimension=PLANE_STRAIN,
                          E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        alpha_n = state_n["alpha"]
-        stress = state_new["stress"]
+    def state_residual(self, new, dlambda, inc):
+        alpha_n = inc.state_n["alpha"]
+        stress = new["stress"]
         xi = stress - alpha_n
         s_xi = self.dev(xi)
         vm_safe = self.vonmises(xi)
         s_hat = s_xi / vm_safe
 
         scale = 1.0 + self.gamma * dlambda
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
-        R_alpha = state_new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
+        R_alpha = new["alpha"] * scale - alpha_n - self.C_k * dlambda * s_hat
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]

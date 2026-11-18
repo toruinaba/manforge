@@ -53,7 +53,7 @@ def test_yield_and_flow_live_in_effective_space(rng):
 
 def test_damaged_stiffness_scales_c0():
     m = J2IsotropicDamage3D(**P, **DP)
-    C0 = np.asarray(m.elastic_stiffness(None))
+    C0 = np.asarray(m.undamaged_stiffness())
     np.testing.assert_allclose(np.asarray(m.elastic_stiffness({"D": 0.25})), 0.75 * C0)
 
 
@@ -63,8 +63,7 @@ def test_damage_residual_below_threshold_is_zero(rng):
     sig = 300.0 * rng.standard_normal(6)
     st_n = {"stress": sig, "ep": 0.002, "D": 0.0}
     st_1 = {"stress": sig, "ep": 0.005, "D": 0.0}
-    items = {i.name: i.value for i in m.state_residual(
-        st_1, 0.003, st_n, stress_trial=sig)}
+    items = {i.name: i.value for i in m.state_residual(st_1, 0.003, make_increment(m, st_n, stress_trial=sig))}
     assert abs(float(items["D"])) < 1e-12
 
 
@@ -83,6 +82,7 @@ from manforge.models import (  # noqa: E402
     J2IsotropicDamageCrackClosure3D, J2IsotropicDamageCrackClosurePS,
     J2IsotropicDamageCrackClosure1D,
 )
+from manforge.verification import make_increment
 
 CC_PAIRS = [
     (J2IsotropicDamageCrackClosure3D, J2IsotropicDamage3D),

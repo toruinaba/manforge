@@ -10,11 +10,50 @@ estimate_yield_strain
 generate_strain_history
     Generate a default tension-unload-compression strain history for
     multi-step comparison.
+make_increment
+    Assemble an Increment by hand, to call a model's hooks at a chosen point.
 """
 
 import numpy as np
 
+from manforge.core.state import Increment, State
 from manforge.simulation.types import FieldHistory
+
+
+def make_increment(model, state_n, *, stress_trial, strain_inc=None) -> Increment:
+    """Assemble an :class:`~manforge.core.state.Increment` by hand.
+
+    For calling a model's hooks directly — ``state_residual``,
+    ``update_state``, ``elastic_check`` — at a point no integrator produced.
+    In a real step the integrator builds the increment
+    (``integrator.increment(strain_inc, stress_n, state_n)``) and the result
+    carries it (``result.increment``); prefer those when a step exists.
+
+    The trial state is ``state_n`` with σ replaced by ``stress_trial``, which
+    is what the default (linear) elastic predictor produces: only the stress
+    moves.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    state_n : State or dict
+        State at the beginning of the increment.
+    stress_trial : array, shape (ntens,), keyword-only
+        Elastic trial stress.
+    strain_inc : array, shape (ntens,), optional
+        Strain increment.  Zero when omitted — for hooks that do not read it.
+        It is not derived from ``stress_trial``, so pass it whenever the hook
+        under test does.
+    """
+    data_n = dict(state_n.items())
+    fields = tuple(model.state_names)
+    if strain_inc is None:
+        strain_inc = np.zeros(model.ntens)
+    return Increment(
+        state_n=State(data_n, fields),
+        strain_inc=strain_inc,
+        trial=State({**data_n, "stress": stress_trial}, fields),
+    )
 
 
 def estimate_yield_strain(model) -> float:

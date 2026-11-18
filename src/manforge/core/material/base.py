@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
 import autograd.numpy as anp
 
 from manforge.core.state import (
-    StateField, State, DlambdaField, DlambdaResidual, FlowVector,
+    StateField, State, Increment, DlambdaField, DlambdaResidual, FlowVector,
     StateResidual, StateUpdate,
     collect_state_fields, _make, NTENS, DLAMBDA_FIELD,
 )
@@ -48,6 +49,39 @@ def _wrap_flow_return_check(cls) -> None:
     cls.flow = checked
 
 
+# Hooks the framework calls positionally.  A model written against another
+# argument list would not fail loudly: ``update_state(dlambda, state_new, ...)``
+# called as ``update_state(new, dlambda, inc)`` just receives its arguments in
+# the wrong slots.  The parameter names are therefore checked when the class is
+# created.
+_HOOK_PARAMS: dict[str, tuple[str, ...]] = {
+    "elastic_predictor": ("state_n", "strain_inc"),
+    "elastic_tangent": ("inc",),
+    "elastic_check": ("inc",),
+    "elastic_update_state": ("inc",),
+    "update_state": ("new", "dlambda", "inc"),
+    "state_residual": ("new", "dlambda", "inc"),
+    "user_defined_return_mapping": ("inc",),
+    "user_defined_tangent": ("new", "dlambda", "inc"),
+}
+
+
+def _check_hook_signatures(cls) -> None:
+    """Reject hooks defined on *cls* with another argument list."""
+    for name, expected in _HOOK_PARAMS.items():
+        fn = cls.__dict__.get(name)
+        if fn is None:
+            continue
+        got = tuple(inspect.signature(fn).parameters)[1:]   # drop self
+        if got != expected:
+            raise TypeError(
+                f"{cls.__name__}.{name} must take ({', '.join(expected)}), "
+                f"got ({', '.join(got)}).  The state at the start of the step, "
+                "the strain increment and the trial state are read from the "
+                "Increment: inc.state_n, inc.strain_inc, inc.trial."
+            )
+
+
 class MaterialModel(ABC):
     """Abstract base class for constitutive material models.
 
@@ -68,28 +102,40 @@ class MaterialModel(ABC):
 
     σ (stress) is always a state field.  If not declared explicitly,
     ``__init_subclass__`` auto-attaches it as ``Explicit(shape=NTENS)``.
-    Declare ``stress = Implicit(shape=NTENS)`` to include σ as an NR unknown
-    (replaces the removed ``implicit_stress = True`` flag).
+    Declare ``stress = Implicit(shape=NTENS)`` to include σ as an NR unknown.
 
     User methods receive a ``State`` dict-wrapper for all state arguments.
     Access state variables with bracket notation: ``state["stress"]``.
-    The ``stress`` argument has been removed from ``yield_function``,
-    ``update_state``, and ``state_residual``.
+
+    One stress update, and the hook behind each stage
+    -------------------------------------------------
+    1. **Trial state** — :meth:`elastic_predictor`.  Default: linear,
+       ``σ_trial = σ_n + C(state_n) Δε``, every other field frozen.
+    2. **Branch** — :meth:`elastic_check`.  Default: ``f(trial) ≤ 0``.
+    3. **Elastic step** — the trial state is the converged state, with
+       :meth:`elastic_update_state` applied on top for variables that follow
+       σ; the tangent is :meth:`elastic_tangent`.
+    4. **Plastic step** — the residual system in ``x = [σ, Δλ, implicit
+       states]``, written through :meth:`update_state` (explicit states) and
+       :meth:`state_residual` (implicit states), with :meth:`yield_function`
+       as the Δλ row and :meth:`flow` as the direction; or
+       :meth:`user_defined_return_mapping` in its place.  The tangent comes by
+       implicit differentiation, or from :meth:`user_defined_tangent`.
+
+    Every hook after the predictor receives the same
+    :class:`~manforge.core.state.Increment` (``inc.state_n``,
+    ``inc.strain_inc``, ``inc.trial``).
 
     Required methods depend on which states are explicit vs implicit:
 
-    - ``update_state(dlambda, state_new, state_n, *, stress_trial, strain_inc)`` — required when any
-      non-stress state is explicit; returns only the explicit-state keys.
-    - ``state_residual(state_new, dlambda, state_n, *, stress_trial, strain_inc)`` — required
-      when any state is implicit; returns only the implicit-state keys.
+    - ``update_state(new, dlambda, inc)`` — required when any non-stress state
+      is explicit; returns only the explicit-state keys.
+    - ``state_residual(new, dlambda, inc)`` — required when any state is
+      implicit; returns only the implicit-state keys.
 
     The framework auto-injects the associative stress default
-    (``σ ← σ_trial − Δλ·C·∂f/∂σ`` or ``R_stress = σ − σ_trial + Δλ·C·∂f/∂σ``)
-    when the user does not return ``stress`` from ``update_state`` /
-    ``state_residual``.
-
-    ``hardening_type`` and ``implicit_stress`` are no longer used and raise
-    ``TypeError`` with migration hints if declared.
+    (``R_stress = σ − σ_trial + Δλ·C·∂f/∂σ``) when stress is not declared
+    ``Implicit``.
 
     Attributes
     ----------
@@ -139,6 +185,9 @@ class MaterialModel(ABC):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        # Checked for every subclass, abstract intermediates included: a hook
+        # with a stale argument list is wrong wherever in the hierarchy it sits.
+        _check_hook_signatures(cls)
         # Skip intermediate abstract classes that have not yet implemented yield_function.
         if cls.yield_function is MaterialModel.yield_function:
             return
@@ -201,7 +250,6 @@ class MaterialModel(ABC):
         all_states = set(cls.state_names)
         # Explicit states excluding "stress" (stress default is handled by framework).
         explicit_non_stress = (all_states - implicit) - {"stress"}
-        implicit_non_stress = implicit - {"stress"}
         needs_update = bool(explicit_non_stress)
         needs_residual = bool(implicit)
         if needs_update and cls.update_state is MaterialModel.update_state:
@@ -223,40 +271,32 @@ class MaterialModel(ABC):
         return self.dimension.ntens
 
     # ------------------------------------------------------------------
-    # Abstract interface — must be implemented by subclasses
+    # Elasticity
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
-        """Return the elastic stiffness tensor in Voigt notation.
+    def isotropic_stiffness(self) -> Stiffness:
+        """Isotropic elastic stiffness of this model's dimension, from ``E`` and ``nu``.
 
-        Default implementation derives λ, μ from ``self.E`` and ``self.nu``
-        and delegates to ``self.isotropic_C`` (polymorphically dispatched to
-        the stress-state subclass).  Override to implement state-dependent
-        stiffness (e.g. damage plasticity) or for parameter-less models.
+        The building block for :meth:`elastic_stiffness`.  A model whose
+        stiffness changes with the state scales it::
 
-        Parameters
-        ----------
-        state : dict or None
-            Current internal state.  Ignored by the default isotropic
-            implementation; damage/YU models use it to scale E.
+            def elastic_stiffness(self, state):          # damage
+                return (1.0 - state["D"]) * self.isotropic_stiffness()
 
         Returns
         -------
         anp.ndarray, shape (ntens, ntens)
-            Elastic stiffness C (σ = C : ε, engineering shear convention).
+            C with ``σ = C : ε`` (engineering shear convention).
         """
         if not (hasattr(self, "E") and hasattr(self, "nu")):
             raise NotImplementedError(
-                f"{type(self).__name__}.elastic_stiffness: default implementation "
-                "requires self.E and self.nu — override for anisotropic or "
-                "parameter-less models."
+                f"{type(self).__name__}.isotropic_stiffness requires self.E and "
+                "self.nu — override elastic_stiffness for a model without them."
             )
-        # This default ignores `state`, so C is a constant of the instance —
-        # but it is evaluated inside every residual call (and every autodiff
-        # trace of it) via default_stress_residual.  Cache keyed on (E, nu) so
-        # the matrix assembly happens once; the key guards against parameters
-        # being reassigned after construction.  State-dependent stiffness
-        # (damage, YU) overrides this method and is unaffected.
+        # A constant of the instance, but evaluated inside every residual call
+        # (and every autodiff trace of it) via default_stress_residual.  Cache
+        # keyed on (E, nu) so the matrix assembly happens once; the key guards
+        # against parameters being reassigned after construction.
         key = (self.E, self.nu)
         cached = getattr(self, "_elastic_C_cache", None)
         if cached is not None and cached[0] == key:
@@ -266,6 +306,121 @@ class MaterialModel(ABC):
         C = self.isotropic_C(lam, mu)
         self._elastic_C_cache = (key, C)
         return C
+
+    def elastic_stiffness(self, state: "State | StateDict") -> Stiffness:
+        """Elastic stiffness at ``state``, in Voigt notation.
+
+        The shorthand for a *linear* elastic law: the default
+        :meth:`elastic_predictor` is ``σ_trial = σ_n + elastic_stiffness(state_n) Δε``,
+        and :meth:`default_stress_residual` uses it for the plastic corrector.
+        The default here is :meth:`isotropic_stiffness`, independent of the
+        state.  Override for a stiffness that follows the state (damage, a
+        Young's modulus that degrades with plastic strain).
+
+        A model whose elastic law is not linear in Δε overrides
+        :meth:`elastic_predictor` instead; this method is then only a
+        reference stiffness for the hooks that still ask for one.
+
+        Parameters
+        ----------
+        state : State or dict
+            The state the stiffness is evaluated at.
+
+        Returns
+        -------
+        anp.ndarray, shape (ntens, ntens)
+            Elastic stiffness C (σ = C : ε, engineering shear convention).
+        """
+        return self.isotropic_stiffness()
+
+    def elastic_predictor(
+        self,
+        state_n: "State | StateDict",
+        *,
+        strain_inc: "FloatArray",
+    ) -> list[StateUpdate]:
+        """Elastic trial state: where the increment lands if it stays elastic.
+
+        The default is the linear predictor ``σ_trial = σ_n + C(state_n) Δε``
+        with every internal variable frozen.  Override when the elastic
+        response is not linear in Δε, or when internal variables other than σ
+        (e.g. an Implicit effective stress) move elastically.  The motivating
+        case is unilateral damage (crack closure): with
+        ``σ = (1−D) σ̃₊ + (1−hD) σ̃₋`` the elastic law is piecewise linear, and
+        an increment whose principal stress changes sign cannot be represented
+        by any constant ``C_n``.  The natural predictor is then written in
+        effective space::
+
+            def elastic_predictor(self, state_n, *, strain_inc):
+                s_eff = state_n["stress_eff"] + self.C0 @ strain_inc
+                return [self.stress.update(self.nominal(s_eff, state_n["D"])),
+                        self.stress_eff.update(s_eff)]
+
+        The returned trial state becomes ``inc.trial`` and is used everywhere
+        the framework needs the elastic predictor:
+
+        - **branch** — :meth:`elastic_check` reads it;
+        - **elastic step** — it *is* the converged state
+          (:meth:`elastic_update_state` is applied on top), and the tangent is
+          :meth:`elastic_tangent`;
+        - **plastic step** — implicit unknowns start their NR from the trial
+          values, ``update_state`` / ``state_residual`` read ``inc.trial``, and
+          the consistent tangent differentiates through this method.
+
+        :meth:`elastic_update_state` stays the separate hook for explicit
+        fields that follow σ only once a step is known to be elastic (the
+        subloading ratio R).  The two differ in *when* they apply: the trial
+        state is the constant of every step, plastic or not, and takes part in
+        the branch; ``elastic_update_state`` runs after it.  Returning such a
+        follower from here instead would put it on the trial state, where
+        ``yield_function(trial)`` vanishes identically and the default branch
+        test can no longer tell loading from unloading.
+
+        Parameters
+        ----------
+        state_n : State or dict
+            State at the beginning of the increment (``state_n["stress"]`` is σ_n).
+        strain_inc : anp.ndarray, shape (ntens,), keyword-only
+            Strain increment Δε (engineering shear).
+
+        Returns
+        -------
+        list[StateUpdate]
+            Must contain the stress.  Use ``self.<field>.update(value)`` — it
+            produces a value for implicit fields too, where calling the field
+            would produce a residual.  Must be autograd-traceable in
+            ``strain_inc``.
+        """
+        C_n = self.elastic_stiffness(state_n)
+        return [StateUpdate(name="stress", value=state_n["stress"] + C_n @ strain_inc)]
+
+    def elastic_tangent(self, inc: Increment) -> "Stiffness | None":
+        """Hand-written elastic tangent ``dσ_trial/dΔε`` (optional).
+
+        Only consulted for a model that overrides :meth:`elastic_predictor`.
+        With the default predictor the elastic tangent is
+        ``elastic_stiffness(inc.state_n)``, which is already a hand-written
+        expression.
+
+        A non-linear predictor's tangent is otherwise obtained by autodiff
+        only.  That is enough to run, but a UMAT needs the expression itself,
+        and this is where it is written down and checked:
+        ``PythonAnalyticalIntegrator`` requires it, ``PythonNumericalIntegrator``
+        always differentiates the predictor, and comparing the two verifies the
+        derivation.
+
+        Returns
+        -------
+        None
+            No hand-written tangent; the framework differentiates the predictor.
+        anp.ndarray, shape (ntens, ntens)
+            dσ_trial/dΔε at this increment.
+        """
+        return None
+
+    # ------------------------------------------------------------------
+    # Abstract interface — must be implemented by subclasses
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def yield_function(
@@ -294,41 +449,32 @@ class MaterialModel(ABC):
 
     def update_state(
         self,
+        new: "State | StateDict",
         dlambda: Scalar,
-        state_new: "State | StateDict",
-        state_n: "State | StateDict",
-        *,
-        stress_trial: "StressVec | None" = None,
-        strain_inc: "FloatArray | None" = None,
+        inc: Increment,
     ) -> list[StateUpdate | StateResidual]:
         """Return updated non-stress explicit state variables after a plastic increment.
 
-        Closed-form (explicit) update rule: given (Δλ, state_new, state_n),
-        returns the explicit **non-stress** state keys as a list of
-        :class:`StateUpdate`.  Required when any non-stress state is explicit.
+        Closed-form (explicit) update rule: given (new, Δλ, inc), returns the
+        explicit **non-stress** state keys as a list of :class:`StateUpdate`.
+        Required when any non-stress state is explicit.
 
         Do **not** return ``stress`` from this method — the framework handles
         the stress update via the NR residual system.
 
         Parameters
         ----------
+        new : State or dict
+            Current NR iterate.  ``new["stress"]`` = σ_k (current σ NR iterate);
+            ``new[implicit_key]`` = current implicit iterate.  Explicit
+            non-stress keys carry their ``inc.state_n`` values at the time this
+            method is called (not yet updated, and not the trial values).
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ ≥ 0.
-        state_new : State or dict
-            Current NR iterate.  ``state_new["stress"]`` = σ_k (current σ NR iterate);
-            ``state_new[implicit_key]`` = current implicit iterate.  Explicit
-            non-stress keys carry ``state_n`` values at the time this method is
-            called (not yet updated).
-        state_n : State or dict
-            State at the beginning of the increment.
-        stress_trial : anp.ndarray, shape (ntens,), keyword-only
-            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this when the
-            closed-form update depends on the trial stress (e.g. elastic-strain
-            tracking via Δε_e = C⁻¹(σ_trial − σ_n) − Δλ n̂).
-        strain_inc : anp.ndarray, shape (ntens,), keyword-only
-            Strain increment Δε for the current load step.  Use this when the
-            update depends on the total strain increment (e.g. elastic/plastic
-            strain decomposition).
+        inc : Increment
+            The step: ``inc.state_n`` (state at the beginning of the
+            increment), ``inc.strain_inc`` (Δε), ``inc.trial`` (the elastic
+            trial state — ``inc.trial["stress"]`` is σ_trial).
 
         Returns
         -------
@@ -348,44 +494,37 @@ class MaterialModel(ABC):
 
     def state_residual(
         self,
-        state_new: "State | StateDict",
+        new: "State | StateDict",
         dlambda: Scalar,
-        state_n: "State | StateDict",
-        *,
-        stress_trial: "StressVec",
-        strain_inc: "FloatArray | None" = None,
+        inc: Increment,
     ) -> list[StateResidual | DlambdaResidual]:
         """Residual of the implicit state evolution equations.
 
-        Defines R_h(state_new, Δλ, state_n) = 0 for state variables listed in
+        Defines R_h(new, Δλ, inc) = 0 for state variables listed in
         :attr:`implicit_state_names`.  When stress is declared ``Implicit``,
         return ``self.stress(R_stress)`` in the list as well.
 
         Parameters
         ----------
-        state_new : State or dict
-            Current NR iterate at step n+1.  ``state_new["stress"]`` = σ_k
-            (current σ NR iterate); ``state_new[implicit_key]`` = current
-            implicit iterate; ``state_new[explicit_key]`` = updated value
+        new : State or dict
+            Current NR iterate at step n+1.  ``new["stress"]`` = σ_k
+            (current σ NR iterate); ``new[implicit_key]`` = current
+            implicit iterate; ``new[explicit_key]`` = updated value
             already returned by ``update_state`` for this iteration.
         dlambda : anp.ndarray, scalar
             Plastic multiplier increment Δλ.
-        state_n : State or dict
-            State at the beginning of the increment.
-        stress_trial : anp.ndarray, shape (ntens,), keyword-only
-            Fixed elastic predictor σ_trial = σ_n + C Δε.  Use this when you
-            need the fixed trial stress for the associative residual formula::
+        inc : Increment
+            The step: ``inc.state_n``, ``inc.strain_inc``, ``inc.trial``.
+            ``inc.trial["stress"]`` is the fixed elastic predictor σ_trial for
+            the associative residual formula::
 
-                R_stress = σ − stress_trial + Δλ·C·∂f/∂σ
+                R_stress = σ − σ_trial + Δλ·C·∂f/∂σ
 
-            Call :meth:`default_stress_residual` which accepts ``stress_trial``
-            directly, or use this kwarg to compute R_stress manually.
-        strain_inc : anp.ndarray, shape (ntens,), keyword-only
-            Strain increment Δε for the current load step.
+            which :meth:`default_stress_residual` computes from it.
 
         Notes
         -----
-        ``stress_trial`` and ``strain_inc`` may enter any residual row with any
+        ``inc.trial`` and ``inc.strain_inc`` may enter any residual row with any
         coefficient.  The autodiff consistent tangent differentiates the
         residual with respect to the load increment through both, so it does
         not require the ``R_σ = σ − σ_trial + …`` form — e.g. a weakly coupled
@@ -404,88 +543,14 @@ class MaterialModel(ABC):
             "Models with implicit states must implement state_residual()."
         )
 
-    def elastic_predictor(
-        self,
-        state_n: "State | StateDict",
-        *,
-        strain_inc: "FloatArray",
-    ) -> list[StateUpdate]:
-        """Elastic trial state: where the increment lands if it stays elastic.
-
-        The default is the linear predictor ``σ_trial = σ_n + C(state_n) Δε``
-        with every internal variable frozen.  Override when the elastic
-        response is not linear in Δε, or when internal variables other than σ
-        move elastically.  The motivating case is unilateral damage
-        (crack closure): with ``σ = (1−D) σ̃₊ + (1−hD) σ̃₋`` the elastic law is
-        piecewise linear, and an increment whose principal stress changes sign
-        cannot be represented by any constant ``C_n``.  The natural predictor
-        is then written in effective space::
-
-            def elastic_predictor(self, state_n, *, strain_inc):
-                s_eff = state_n["stress_eff"] + self.C0 @ strain_inc
-                return [self.stress.update(self.nominal(s_eff, state_n["D"])),
-                        self.stress_eff.update(s_eff)]
-
-        The returned trial state is used everywhere the framework needs the
-        elastic predictor:
-
-        - **elastic step** — it *is* the converged state (merged over
-          ``state_n``; :meth:`elastic_update_state` is applied on top), and
-          the elastic tangent is ``∂σ_trial/∂Δε`` by autodiff of this method;
-        - **branch** — when :meth:`elastic_check` is not overridden, the
-          framework tests ``yield_function(trial state) ≤ 0``; an override is
-          called as before, with ``stress_trial`` only;
-        - **plastic step** — ``stress_trial`` handed to ``state_residual`` /
-          ``update_state`` is this σ_trial, implicit unknowns start their NR
-          from the trial values returned here, and the consistent tangent
-          differentiates through this method.
-
-        :meth:`elastic_update_state` stays the separate hook for explicit
-        fields that move only on elastic steps (the subloading ratio R).  The
-        two differ in *when* they apply: the predictor is the constant of every
-        step, plastic or not; ``elastic_update_state`` runs only once the step
-        is known to be elastic.
-
-        Parameters
-        ----------
-        state_n : State or dict
-            State at the beginning of the increment (``state_n["stress"]`` is σ_n).
-        strain_inc : anp.ndarray, shape (ntens,), keyword-only
-            Strain increment Δε (engineering shear).
-
-        Returns
-        -------
-        list[StateUpdate]
-            Must contain the stress.  Use ``self.<field>.update(value)`` — it
-            produces a value for implicit fields too, where calling the field
-            would produce a residual.  Must be autograd-traceable in
-            ``strain_inc``.
-        """
-        C_n = self.elastic_stiffness(state_n)
-        return [StateUpdate(name="stress", value=state_n["stress"] + C_n @ strain_inc)]
-
-    def elastic_check(
-        self,
-        state_n: "State | StateDict",
-        *,
-        stress_trial: "StressVec",
-        strain_inc: "FloatArray | None" = None,
-    ) -> bool:
+    def elastic_check(self, inc: Increment) -> bool:
         """Return ``True`` when the increment stays elastic (no return mapping).
 
         This is the elastic/plastic branch.  The default is the classical test
-        ``f(σ_trial) ≤ 0``, which is correct whenever the elastic domain *is* the
-        interior of the surface written in :meth:`yield_function` — so classical
-        plasticity models override nothing and keep ``yield_function`` as the
-        single source of truth.
-
-        When :meth:`elastic_predictor` is overridden and this method is not,
-        the framework evaluates ``yield_function`` on the *full* trial state
-        (including any non-stress fields the predictor returned) instead of
-        calling this method — the default below only sees σ_trial and would
-        test a stale step-n value of, e.g., an implicit effective stress.  An
-        override of this method is always called as-is; it must then derive
-        whatever trial quantities it needs from ``state_n`` and ``strain_inc``.
+        ``f(trial) ≤ 0`` on the whole trial state, which is correct whenever the
+        elastic domain *is* the interior of the surface written in
+        :meth:`yield_function` — so classical plasticity models override nothing
+        and keep ``yield_function`` as the single source of truth.
 
         Subloading-surface models are the motivating case for overriding.  Put
         the subloading surface ``‖s‖ − R·F`` in :meth:`yield_function` and the Δλ
@@ -503,9 +568,14 @@ class MaterialModel(ABC):
         function, and folding it into :meth:`yield_function` would destroy the
         gradient :meth:`flow` depends on.
 
-        Unlike :meth:`yield_function`, this hook receives ``strain_inc`` and the
-        full step-n state, so direction tests of the form ``n : Δε > 0`` are
-        expressible here.
+        Written against the increment::
+
+            def elastic_check(self, inc):
+                R_hat = self.normal_yield_ratio(inc.state_n, inc.trial["stress"])
+                return bool(R_hat <= self.R_e) or bool(R_hat <= inc.state_n["R"])
+
+        Unlike :meth:`yield_function`, this hook sees the step-n state and Δε as
+        well, so direction tests of the form ``n : Δε > 0`` are expressible here.
 
         The return value must be a plain ``bool`` — it selects a code path and is
         never differentiated, so a smoothed indicator is neither needed nor
@@ -513,62 +583,57 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        state_n : State or dict
-            State at the beginning of the increment.  ``state_n["stress"]`` is
-            σ_n, *not* the trial stress.
-        stress_trial : anp.ndarray, shape (ntens,), keyword-only
-            Elastic predictor σ_trial = σ_n + C Δε.
-        strain_inc : anp.ndarray, shape (ntens,), keyword-only
-            Strain increment Δε for the current load step.
+        inc : Increment
+            The step: ``inc.trial`` (elastic trial state), ``inc.state_n``,
+            ``inc.strain_inc``.
 
         Returns
         -------
         bool
-            ``True`` → elastic step (state advances via
+            ``True`` → elastic step (the state advances to ``inc.trial``, then
             :meth:`elastic_update_state`); ``False`` → run the return mapping.
         """
-        from manforge.core.state import _state_with_stress
-        state_trial = _state_with_stress(state_n, stress_trial)
-        return bool(self.yield_function(state_trial) <= 0.0)
+        return bool(self.yield_function(inc.trial) <= 0.0)
 
-    def elastic_update_state(
-        self,
-        state_n: "State | StateDict",
-        *,
-        stress_trial: "StressVec",
-        strain_inc: "FloatArray | None" = None,
-    ) -> list[StateUpdate]:
+    def elastic_update_state(self, inc: Increment) -> list[StateUpdate]:
         """Return explicit state variables that track σ even without plastic flow.
 
         Called on every step :meth:`elastic_check` sends down the elastic path —
         the initial elastic loading, unloading after yield, and the elastic
         portion of a reload alike.  Δλ is zero for all of them, so any evolution
         law proportional to Δλ contributes nothing and the update is algebraic in
-        ``stress_trial``.
+        the trial stress.
 
         The subloading-surface normal yield ratio R is the motivating case: the
-        subloading surface passes through the current stress by construction, so
-        R follows σ down during unloading even though no plastic flow occurs.
+        subloading surface passes through the current stress by construction,
+        so R follows σ down during unloading even though no plastic flow occurs.
         Freezing R here would make the next loading step compare against a stale
-        R_n and start plastic flow at the wrong point.
+        R_n and start plastic flow at the wrong point::
+
+            def elastic_update_state(self, inc):
+                return [self.R(self.normal_yield_ratio(inc.state_n, inc.trial["stress"]))]
 
         This is a separate hook rather than ``update_state(dlambda=0)`` because
         Δλ cannot serve as the discriminator: the plastic NR path also starts
-        from Δλ = 0, so a model could not tell the two situations apart.
+        from Δλ = 0, so a model could not tell the two situations apart.  It is
+        also separate from :meth:`elastic_predictor`: the value is the result
+        of an elastic step, not part of the trial state the branch is decided
+        on.
+
+        The update must not feed back into the stress: σ_{n+1} = σ_trial is
+        already fixed, and the elastic tangent does not see this hook.  A
+        variable whose elastic-step change alters the stress (damage driven by
+        elastic energy, creep) needs a solve on the elastic branch, which the
+        framework does not provide.
 
         Return only the fields that need to move — omitted explicit fields keep
-        their ``state_n`` values.  The default returns an empty list, leaving
-        every internal variable frozen on elastic steps.
+        their trial values.  The default returns an empty list.
 
         Parameters
         ----------
-        state_n : State or dict
-            State at the beginning of the increment.
-        stress_trial : anp.ndarray, shape (ntens,), keyword-only
-            Elastic predictor σ_trial = σ_n + C Δε.  This *is* the converged
-            stress for an elastic step, so write the algebraic update against it.
-        strain_inc : anp.ndarray, shape (ntens,), keyword-only
-            Strain increment Δε for the current load step.
+        inc : Increment
+            The step.  ``inc.trial["stress"]`` *is* the converged stress of an
+            elastic step, so write the algebraic update against it.
 
         Returns
         -------
@@ -659,18 +724,23 @@ class MaterialModel(ABC):
 
     def default_stress_residual(
         self,
-        state_new: "State | StateDict",
+        new: "State | StateDict",
         dlambda: Scalar,
-        stress_trial: "StressVec | None",
+        stress_trial: StressVec,
     ) -> StressVec:
         """Default R_stress = σ − σ_trial + Δλ·C·n, with n from :meth:`flow`.
 
         Call this from :meth:`state_residual`::
 
-            def state_residual(self, state_new, dlambda, state_n, *, stress_trial):
-                R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+            def state_residual(self, new, dlambda, inc):
+                R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
                 R_alpha = ...
                 return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+
+        This is a helper, not a hook, so it takes the one thing it reads —
+        σ_trial — rather than the whole increment.  A hand-written residual that
+        mirrors a Fortran routine only has σ_trial to hand and calls it the
+        same way.
 
         For non-associative flow (plastic potential g ≠ f), override
         :meth:`flow` rather than reimplementing this residual — the algebra here
@@ -678,24 +748,21 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        state_new : State or dict
-            Proposed state at step n+1 (NR iterate); ``state_new["stress"]``
-            is the current σ NR unknown.
+        new : State or dict
+            Proposed state at step n+1 (NR iterate); ``new["stress"]`` is the
+            current σ NR unknown.
         dlambda : scalar
             Plastic multiplier increment Δλ.
         stress_trial : anp.ndarray, shape (ntens,)
-            Fixed elastic predictor σ_trial = σ_n + C Δε.
+            Fixed elastic predictor σ_trial (``inc.trial["stress"]``).
 
         Returns
         -------
         anp.ndarray, shape (ntens,)
         """
-        if stress_trial is None:
-            raise ValueError("default_stress_residual: stress_trial is required")
-        stress = state_new["stress"]
-        C = self.elastic_stiffness(state_new)
-        n = self.flow(state_new)
-        return stress - stress_trial + dlambda * (C @ n.strain_like)
+        C = self.elastic_stiffness(new)
+        n = self.flow(new)
+        return new["stress"] - stress_trial + dlambda * (C @ n.strain_like)
 
     def vonmises(self, stress: StressVec) -> Scalar:
         """Von Mises equivalent stress; delegates to :meth:`StressDimension.vonmises`."""
@@ -714,7 +781,11 @@ class MaterialModel(ABC):
         return self.dimension.dev(stress)
 
     def isotropic_C(self, lam: float, mu: float) -> "Stiffness":
-        """Isotropic elastic stiffness; delegates to :meth:`StressDimension.isotropic_C`."""
+        """Isotropic elastic stiffness from Lamé constants; delegates to :meth:`StressDimension.isotropic_C`.
+
+        :meth:`isotropic_stiffness` is the same matrix built from the model's
+        own ``E`` and ``nu``.
+        """
         return self.dimension.isotropic_C(lam, mu)
 
     def I_vol(self) -> "Stiffness":
@@ -741,12 +812,11 @@ class MaterialModel(ABC):
         """Equivalent strain ε_eq = √(2/3 ε:ε); delegates to :meth:`StressDimension.strain_norm`."""
         return self.dimension.strain_norm(strain)
 
-    def user_defined_return_mapping(
-        self,
-        stress_trial: StressVec,
-        C: Stiffness,
-        state_n: StateDict,
-    ) -> "ReturnMappingResult | None":
+    # ------------------------------------------------------------------
+    # Hand-written solver hooks
+    # ------------------------------------------------------------------
+
+    def user_defined_return_mapping(self, inc: Increment) -> "ReturnMappingResult | None":
         """User-supplied return mapping (optional).
 
         Override to provide a model-specific plastic correction algorithm.
@@ -757,12 +827,12 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        stress_trial : anp.ndarray, shape (ntens,)
-            Elastic trial stress σ_trial = σ_n + C Δε.
-        C : anp.ndarray, shape (ntens, ntens)
-            Elastic stiffness tensor (already computed by the caller).
-        state_n : dict
-            Internal state at the beginning of the increment.
+        inc : Increment
+            The step.  ``inc.trial`` is the elastic trial state
+            (``inc.trial["stress"]`` is σ_trial, and any other field the
+            predictor moved is there too), ``inc.state_n`` the state at the
+            beginning of the increment, ``inc.strain_inc`` is Δε.  ``State`` is
+            read-only; start a working copy with ``dict(inc.state_n)``.
 
         Returns
         -------
@@ -779,14 +849,9 @@ class MaterialModel(ABC):
 
     def user_defined_tangent(
         self,
-        stress: StressVec,
-        state: "State | StateDict",
+        new: "State | StateDict",
         dlambda: Scalar,
-        C: Stiffness,
-        state_n: StateDict,
-        *,
-        stress_trial: "StressVec | None" = None,
-        strain_inc: "FloatArray | None" = None,
+        inc: Increment,
     ) -> "Stiffness | None":
         """User-supplied consistent tangent (optional).
 
@@ -797,23 +862,13 @@ class MaterialModel(ABC):
 
         Parameters
         ----------
-        stress : anp.ndarray, shape (ntens,)
-            Converged stress σ_{n+1}.
-        state : dict
-            Converged internal state at step n+1.
+        new : State or dict
+            Converged state at step n+1; ``new["stress"]`` is σ_{n+1}.
         dlambda : anp.ndarray, scalar
             Converged plastic multiplier increment Δλ.
-        C : anp.ndarray, shape (ntens, ntens)
-            Elastic stiffness tensor (already computed by the caller).
-        state_n : dict
-            Internal state at the beginning of the increment.
-        stress_trial : anp.ndarray, shape (ntens,), optional
-            Elastic trial stress σ_trial = σ_n + C Δε.  Forwarded from
-            ``stress_update``; use this instead of reconstructing σ_trial
-            from the converged stress to ensure autograd traceability.
-        strain_inc : anp.ndarray, shape (ntens,), optional
-            Strain increment Δε (engineering-shear convention, matching the
-            ABAQUS DSTRAN interface).  Forwarded from ``stress_update``.
+        inc : Increment
+            The step: ``inc.trial`` (elastic trial state), ``inc.state_n``,
+            ``inc.strain_inc`` (Δε, engineering shear — the ABAQUS DSTRAN).
 
         Returns
         -------

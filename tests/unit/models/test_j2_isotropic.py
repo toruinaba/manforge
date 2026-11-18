@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from manforge.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
+from manforge.verification import make_increment
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
@@ -31,8 +32,8 @@ def test_j2_3d_parent_vs_subclass_update_state(rng):
     stress = rng.standard_normal(6)
     state = {"stress": stress, "ep": 0.01}
     dlambda = 0.005
-    res_p = parent.update_state(dlambda, state, state)
-    res_c = child.update_state(dlambda, state, state)
+    res_p = parent.update_state(state, dlambda, make_increment(parent, state, stress_trial=state["stress"]))
+    res_c = child.update_state(state, dlambda, make_increment(child, state, stress_trial=state["stress"]))
     np.testing.assert_allclose(res_p[0].value, res_c[0].value)
 
 
@@ -50,8 +51,8 @@ def test_j2_ps_parent_vs_subclass_update_state(rng):
     stress = rng.standard_normal(3)
     state = {"stress": stress, "ep": 0.01}
     dlambda = 0.005
-    res_p = parent.update_state(dlambda, state, state)
-    res_c = child.update_state(dlambda, state, state)
+    res_p = parent.update_state(state, dlambda, make_increment(parent, state, stress_trial=state["stress"]))
+    res_c = child.update_state(state, dlambda, make_increment(child, state, stress_trial=state["stress"]))
     np.testing.assert_allclose(res_p[0].value, res_c[0].value)
 
 
@@ -69,8 +70,8 @@ def test_j2_1d_parent_vs_subclass_update_state(rng):
     stress = rng.standard_normal(1)
     state = {"stress": stress, "ep": 0.01}
     dlambda = 0.005
-    res_p = parent.update_state(dlambda, state, state)
-    res_c = child.update_state(dlambda, state, state)
+    res_p = parent.update_state(state, dlambda, make_increment(parent, state, stress_trial=state["stress"]))
+    res_c = child.update_state(state, dlambda, make_increment(child, state, stress_trial=state["stress"]))
     np.testing.assert_allclose(res_p[0].value, res_c[0].value)
 
 

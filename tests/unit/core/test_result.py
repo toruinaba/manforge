@@ -40,7 +40,7 @@ def test_plastic_step_fields(model, initial_state):
 
 
 def test_stress_trial_is_elastic_prediction(model, initial_state):
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     deps = anp.array([3e-3, 0, 0, 0, 0, 0])
     result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), initial_state)
     expected_trial = anp.zeros(6) + C @ deps
@@ -114,9 +114,7 @@ def test_lazy_tangent_matches_eager_value(model, initial_state):
     integ = PythonNumericalIntegrator(model)
     deps = anp.array([3e-3, 0, 0, 0, 0, 0])
     result = integ.stress_update(deps, anp.zeros(6), initial_state)
-    direct = integ._consistent_tangent(
-        result.return_mapping, anp.zeros(6), initial_state, deps, result.stress_trial
-    )
+    direct = integ._consistent_tangent(result.return_mapping, result.increment)
     np.testing.assert_allclose(np.asarray(result.ddsdde), np.asarray(direct), rtol=1e-12)
 
 
@@ -134,3 +132,28 @@ def test_elastic_step_state_stress_matches_next_step_input(model, initial_state)
         )
         stress_n = result.stress
         state_n = result.state
+
+
+def test_result_carries_its_increment(model, initial_state):
+    """state_n, Δε and the trial state travel with the result."""
+    integrator = PythonIntegrator(model)
+    stress_n = anp.array([50.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for deps in (anp.array([1e-5, 0, 0, 0, 0, 0]), anp.array([3e-3, 0, 0, 0, 0, 0])):
+        r = integrator.stress_update(deps, stress_n, initial_state)
+        inc = r.increment
+        np.testing.assert_array_equal(np.asarray(inc.strain_inc), np.asarray(deps))
+        np.testing.assert_array_equal(np.asarray(inc.state_n["stress"]), np.asarray(stress_n))
+        np.testing.assert_array_equal(np.asarray(inc.state_n["ep"]), np.asarray(initial_state["ep"]))
+        assert r.stress_trial is inc.trial["stress"]
+        expected_trial = stress_n + model.elastic_stiffness(initial_state) @ deps
+        np.testing.assert_allclose(np.asarray(inc.trial["stress"]), np.asarray(expected_trial))
+
+
+def test_elastic_state_is_a_fresh_dict(model, initial_state):
+    """Mutating a returned state must not reach the result or the increment."""
+    r = PythonIntegrator(model).stress_update(
+        anp.array([1e-5, 0, 0, 0, 0, 0]), anp.zeros(6), initial_state)
+    state = r.state
+    state["ep"] = anp.array(123.0)
+    assert float(r.state["ep"]) == 0.0
+    assert float(r.increment.trial["ep"]) == 0.0

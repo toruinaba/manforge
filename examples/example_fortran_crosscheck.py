@@ -82,7 +82,7 @@ assert result.passed
 checker = JacobianChecker(model)
 for cr in cc.iter_run(load):
     if not cr.passed:
-        cmp = checker.compare(cr.result_a, cr.result_b, cr.state_n)
+        cmp = checker.compare(cr.result_a, cr.result_b)
         print(f"  step failed — block comparison:\n{cmp.blocks}")
         break
 else:

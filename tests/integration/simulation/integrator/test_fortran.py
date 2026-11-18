@@ -76,6 +76,15 @@ class TestContract:
         )
         assert isinstance(_without_hook(_FakeUmat(), model), StressIntegrator)
 
+    def test_reports_no_increment(self, model):
+        """A UMAT is a closed target: no trial state, so no increment."""
+        integrator = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
+        deps = np.full(6, 1e-6)
+        assert integrator.increment(deps, np.zeros(6), model.initial_state()) is None
+        r = integrator.stress_update(deps, np.zeros(6), model.initial_state())
+        assert r.increment is None
+        assert r.stress_trial is None
+
     def test_raise_on_nonconverged_defaults_to_true(self, model):
         assert FortranIntegrator.from_model(
             _FakeUmat(), "j2", model
@@ -116,7 +125,7 @@ class TestElasticTangent:
         class _WithStiffnessSub(_FakeUmat):
             def call(self, name, *args):
                 if name == "j2_C":
-                    return 2.0 * np.asarray(model.elastic_stiffness(None))
+                    return 2.0 * np.asarray(model.isotropic_stiffness())
                 return super().call(name, *args)
 
         integrator = FortranIntegrator.from_model(
@@ -124,7 +133,7 @@ class TestElasticTangent:
         )
         np.testing.assert_allclose(
             integrator.elastic_tangent(np.zeros(6), model.initial_state()),
-            2.0 * np.asarray(model.elastic_stiffness(None)),
+            2.0 * np.asarray(model.isotropic_stiffness()),
         )
 
 

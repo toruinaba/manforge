@@ -96,7 +96,7 @@ for g in run_g:
     if g.result.is_plastic:
         print(f"check {i}")
         yu_checker = YUChecker(model3d, g.result)
-        jac = JacobianChecker(model3d).compute(g.result, g.result._state_n)
+        jac = JacobianChecker(model3d).compute(g.result)
         assert_res = yu_checker.check_all(jac)
         i += 1
         # ddsdde = g.result.ddsdde

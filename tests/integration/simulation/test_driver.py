@@ -486,7 +486,7 @@ class TestIntegratorContract:
             def stress_update(self, strain_inc, stress_n, state_n):
                 raise AssertionError("not called")
 
-        with pytest.raises(TypeError, match="raise_on_nonconverged, elastic_tangent"):
+        with pytest.raises(TypeError, match="raise_on_nonconverged, increment, elastic_tangent"):
             StressDriver(_OnlyStressUpdate())
 
     @pytest.mark.parametrize("cls", [
@@ -526,7 +526,7 @@ class TestStressDriver:
 
         result = StressDriver(PythonNumericalIntegrator(model_3d)).run(stress_load(stress_history))
 
-        C = np.array(model_3d.elastic_stiffness())
+        C = np.array(model_3d.elastic_stiffness(model_3d.initial_state()))
         S = np.linalg.inv(C)
 
         for i in range(N):
