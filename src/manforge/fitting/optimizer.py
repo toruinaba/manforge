@@ -188,7 +188,7 @@ def fit_params(
         Extra options forwarded verbatim to scipy, overriding the above.
     nr_jacobian : {"exact", "broyden"}
         NR Jacobian strategy for the integrator each evaluation constructs —
-        see :class:`~manforge.simulation.integrator._PythonIntegratorBase`.
+        see :class:`~manforge.simulation.integrator.PythonIntegrator`.
         ``"broyden"`` is several times faster per evaluation on models
         without hand-derived solvers (measured ~4× on YU) and a fit pays
         that cost at every evaluation; the converged stresses agree with
