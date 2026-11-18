@@ -283,6 +283,16 @@ class FitTarget:
             initial_stress=self.initial_stress,
             initial_state=dict(self.initial_state) if self.initial_state else None,
         )
+        if not result.converged:
+            # Only reachable when the driver_factory wraps the integrator in
+            # one that reports non-convergence as a value.  A truncated history
+            # cannot be scored; raise the same error a raising integrator
+            # would, so the objective penalises it instead of comparing curves
+            # of different lengths.
+            raise RuntimeError(
+                f"target {self.label!r}: the run did not converge at step "
+                f"{result.failed_step}"
+            )
         return sum(obs.residual(result) for obs in self.observations)
 
 

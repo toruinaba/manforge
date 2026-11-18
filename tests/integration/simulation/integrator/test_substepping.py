@@ -144,27 +144,24 @@ class TestDelegation:
     def test_initial_state(self, inner, wrapped):
         assert wrapped.initial_state().keys() == inner.initial_state().keys()
 
-    def test_elastic_stiffness(self, inner, wrapped):
+    def test_elastic_tangent(self, inner, wrapped):
         state = inner.initial_state()
+        stress = np.zeros(6)
         np.testing.assert_allclose(
-            np.asarray(wrapped.elastic_stiffness(state)),
-            np.asarray(inner.elastic_stiffness(state)),
+            np.asarray(wrapped.elastic_tangent(stress, state)),
+            np.asarray(inner.elastic_tangent(stress, state)),
         )
 
-    def test_absent_elastic_stiffness_is_not_faked(self):
-        """StressDriver probes with hasattr, so the wrapper must not add one."""
+    def test_raise_on_nonconverged_is_the_wrappers_own(self, inner):
+        """Drivers read the switch off the integrator they were handed."""
+        assert SubSteppingIntegrator(inner).raise_on_nonconverged is True
+        assert SubSteppingIntegrator(
+            inner, raise_on_nonconverged=False
+        ).raise_on_nonconverged is False
 
-        class _NoStiffness:
-            dimension = J2Isotropic3D(**PARAMS).dimension
-            ntens = 6
-
-            def initial_state(self):
-                return {}
-
-            def stress_update(self, strain_inc, stress_n, state_n):
-                raise AssertionError("not called")
-
-        assert not hasattr(SubSteppingIntegrator(_NoStiffness()), "elastic_stiffness")
+    def test_fulfils_the_integrator_contract(self, wrapped):
+        from manforge.simulation.integrator import StressIntegrator
+        assert isinstance(wrapped, StressIntegrator)
 
     def test_rejects_max_substeps_below_one(self, inner):
         with pytest.raises(ValueError, match="max_substeps"):
@@ -423,15 +420,18 @@ class TestExhaustion:
         ).stress_update(_plastic_deps(), stress_n, state_n)
         assert np.all(np.isfinite(np.asarray(r.ddsdde)))
 
-    def test_exhaustion_without_stiffness_hook_returns_flag(self, hopeless):
-        """The non-raising fallback must not require elastic_stiffness.
+    def test_exhaustion_over_an_integrator_without_trial_stress(self, hopeless):
+        """Wrapping an integrator that cannot report a trial stress.
 
-        FortranIntegrator without a stiffness hook has no elastic_stiffness
-        attribute; the fallback used to call it unconditionally and died with
-        AttributeError instead of returning converged=False.
+        This is the shape of a FortranIntegrator without a stiffness hook: its
+        elastic tangent is a zero-increment probe of ``stress_update``, and it
+        has no ``trial_stress``.  The non-raising fallback must still return
+        converged=False with a usable tangent, and must not invent a trial.
         """
 
-        class _NoStiffness:
+        class _ProbeOnly:
+            raise_on_nonconverged = False
+
             def __init__(self, inner):
                 self._inner = inner
                 self.dimension = inner.dimension
@@ -440,16 +440,21 @@ class TestExhaustion:
             def initial_state(self):
                 return self._inner.initial_state()
 
+            def elastic_tangent(self, stress_n, state_n):
+                probe = self.stress_update(np.zeros(self.ntens), stress_n, state_n)
+                return np.asarray(probe.ddsdde)
+
             def stress_update(self, deps, stress_n, state_n):
                 return self._inner.stress_update(deps, stress_n, state_n)
 
         wrapped = SubSteppingIntegrator(
-            _NoStiffness(hopeless), max_substeps=2, raise_on_nonconverged=False
+            _ProbeOnly(hopeless), max_substeps=2, raise_on_nonconverged=False
         )
         stress_n, state_n = _zero_start(hopeless)
         r = wrapped.stress_update(_plastic_deps(), stress_n, state_n)
         assert r.converged is False
-        assert r.stress_trial is None  # no stiffness hook, no big trial
+        assert r.stress_trial is None  # nothing to report it, so none is made up
+        assert np.all(np.isfinite(np.asarray(r.ddsdde)))
 
     def test_linalgerror_triggers_subdivision(self):
         """A singular NR Jacobian at a large increment is recoverable by

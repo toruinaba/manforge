@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 import autograd
 import autograd.numpy as anp
 import numpy as np
@@ -16,31 +18,45 @@ from manforge._typing import FloatArray, Stiffness, StressVec, StateDict
 # Protocol
 # ---------------------------------------------------------------------------
 
-class StressIntegrator:
-    """Minimal interface required by Driver for any constitutive implementation.
+@runtime_checkable
+class StressIntegrator(Protocol):
+    """Contract every constitutive integrator fulfils for the drivers.
 
-    This is a duck-typed structural interface rather than an ABC — any object
-    that provides the four methods/attributes below will work.  Use
-    :class:`PythonIntegrator` or :class:`FortranIntegrator` as ready-made
-    adapters.
+    Structural: an integrator does not inherit from this class, it only has to
+    provide every member below.  Drivers check it with ``isinstance`` at
+    construction, so a missing member fails there rather than deep inside a
+    run.  :class:`PythonIntegrator`, :class:`FortranIntegrator` and
+    :class:`SubSteppingIntegrator` are the ready-made implementations.
+
+    ``raise_on_nonconverged`` is the single switch for non-convergence.  It
+    governs the integrator's own return mapping, and the drivers apply the same
+    setting to their outer Newton-Raphson loop: ``True`` raises
+    ``RuntimeError``, ``False`` reports ``converged=False`` as a value.
     """
 
-    dimension: StressDimension
+    @property
+    def dimension(self) -> StressDimension: ...
 
     @property
-    def ntens(self) -> int:
-        return self.dimension.ntens
+    def ntens(self) -> int: ...
 
-    def initial_state(self) -> StateDict:
-        raise NotImplementedError
+    @property
+    def raise_on_nonconverged(self) -> bool: ...
 
-    def elastic_stiffness(self) -> Stiffness:
-        raise NotImplementedError
+    def initial_state(self) -> StateDict: ...
+
+    def elastic_tangent(self, stress_n: StressVec, state_n: StateDict) -> Stiffness:
+        """Elastic tangent dσ/dΔε at Δε = 0 from the given state.
+
+        Stress- and mixed-controlled drivers start their outer iteration from
+        it.  Every integrator must supply one; an implementation without a
+        closed form evaluates ``stress_update`` at a zero increment.
+        """
+        ...
 
     def stress_update(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
-    ) -> StressUpdateResult:
-        raise NotImplementedError
+    ) -> StressUpdateResult: ...
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +110,22 @@ class _PythonIntegratorBase:
     def ntens(self) -> int:
         return self._model.ntens
 
+    @property
+    def raise_on_nonconverged(self) -> bool:
+        return self._raise_on_nonconverged
+
     def initial_state(self) -> StateDict:
         return self._model.initial_state()
 
-    def elastic_stiffness(self, state: "StateDict | None" = None) -> Stiffness:
-        return self._model.elastic_stiffness(state)
+    def elastic_tangent(self, stress_n: StressVec, state_n: StateDict) -> Stiffness:
+        """The model's ``elastic_stiffness`` at ``state_n``.
+
+        For a model that overrides ``elastic_predictor`` this is its reference
+        stiffness rather than the derivative of the predictor.  The drivers
+        only use it as a starting guess, so the outer iteration still
+        converges on the true response.
+        """
+        return self._model.elastic_stiffness(state_n)
 
     def _try_user_return_mapping(
         self, stress_trial: StressVec, C: Stiffness, state_n: StateDict

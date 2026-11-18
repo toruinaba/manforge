@@ -363,3 +363,33 @@ def test_target_length_mismatch_message_suggests_pcm(strain_load):
             load=strain_load,
             observations=[Observation(values=np.zeros(3), component=0)],
         )
+
+
+# ---------------------------------------------------------------------------
+# Non-converged runs
+# ---------------------------------------------------------------------------
+
+def test_nonconverged_run_is_raised_not_scored(model, strain_load):
+    """A run reported as non-converged must not have its partial history scored.
+
+    A driver_factory may wrap the integrator in one that reports
+    non-convergence as a value.  ``driver.run`` then returns only the completed
+    steps; comparing that against the full experimental curve would be a
+    shape error at best.  It is raised as the same RuntimeError a raising
+    integrator produces, which the objective turns into the failure penalty.
+    """
+    from manforge.simulation.integrator import PythonNumericalIntegrator
+
+    def reporting(_integrator):
+        # max_iter=0: the first plastic step cannot converge.
+        return StrainDriver(PythonNumericalIntegrator(
+            model, max_iter=0, raise_on_nonconverged=False))
+
+    target = FitTarget(
+        load=strain_load,
+        observations=[Observation(values=np.zeros(10), component=0)],
+        driver_factory=reporting,
+        name="reporting",
+    )
+    with pytest.raises(RuntimeError, match="'reporting'.*did not converge at step"):
+        target.residual(PythonIntegrator(model), None)

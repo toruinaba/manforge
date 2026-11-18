@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import types
-
 import numpy as np
 
 from manforge.core.dimension import StressDimension
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
-from manforge._typing import StressVec, StateDict
+from manforge._typing import Stiffness, StressVec, StateDict
 
 
 class SubSteppingIntegrator:
@@ -44,6 +42,7 @@ class SubSteppingIntegrator:
     raise_on_nonconverged : bool, optional
         Behaviour once ``max_substeps`` has been exhausted (default ``True``):
         raise ``RuntimeError``, or return a result with ``converged=False``.
+        Drivers read this same setting for their outer Newton-Raphson loop.
 
     Notes
     -----
@@ -65,15 +64,6 @@ class SubSteppingIntegrator:
         self._max_substeps = max_substeps
         self._raise_on_nonconverged = raise_on_nonconverged
 
-        # Mirror the wrapped integrator's surface: FortranIntegrator only has
-        # elastic_stiffness when a stiffness hook was supplied, and StressDriver
-        # probes for it with hasattr.
-        if hasattr(integrator, "elastic_stiffness"):
-            self.elastic_stiffness = types.MethodType(
-                lambda self_, state=None: self_._integrator.elastic_stiffness(state),
-                self,
-            )
-
     @property
     def dimension(self) -> StressDimension:
         return self._integrator.dimension
@@ -82,8 +72,15 @@ class SubSteppingIntegrator:
     def ntens(self) -> int:
         return self._integrator.ntens
 
+    @property
+    def raise_on_nonconverged(self) -> bool:
+        return self._raise_on_nonconverged
+
     def initial_state(self) -> StateDict:
         return self._integrator.initial_state()
+
+    def elastic_tangent(self, stress_n: StressVec, state_n: StateDict) -> Stiffness:
+        return self._integrator.elastic_tangent(stress_n, state_n)
 
     def _attempt(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict, m: int
@@ -152,17 +149,19 @@ class SubSteppingIntegrator:
     def _big_trial(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
     ) -> "StressVec | None":
-        """σ_trial of the *undivided* increment — what the caller asked about."""
-        if hasattr(self._integrator, "trial_stress"):
-            # Python integrators honour a model's (possibly non-linear)
-            # elastic_predictor; σ_n + C_n Δε would misreport it.
-            return np.asarray(
-                self._integrator.trial_stress(strain_inc, stress_n, state_n), dtype=float
-            )
-        if not hasattr(self, "elastic_stiffness"):
+        """σ_trial of the *undivided* increment — what the caller asked about.
+
+        ``None`` when the wrapped integrator cannot report a trial stress.
+        ``trial_stress`` is not part of the :class:`StressIntegrator` contract:
+        Python integrators have it and honour a model's (possibly non-linear)
+        ``elastic_predictor``, while a Fortran UMAT is a closed target whose
+        results carry ``stress_trial=None`` — reconstructing one here as
+        σ_n + C Δε would contradict that.
+        """
+        trial_stress = getattr(self._integrator, "trial_stress", None)
+        if trial_stress is None:
             return None
-        C_n = np.asarray(self.elastic_stiffness(state_n), dtype=float)
-        return np.asarray(stress_n, dtype=float) + C_n @ np.asarray(strain_inc, dtype=float)
+        return np.asarray(trial_stress(strain_inc, stress_n, state_n), dtype=float)
 
     def stress_update(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
@@ -193,17 +192,12 @@ class SubSteppingIntegrator:
             residual_history=[],
             converged=False,
         )
-        # elastic_stiffness exists only when the wrapped integrator has one
-        # (mirrored in __init__); without it there is no meaningful tangent
-        # for a failed step, so fall back to identity as a typed placeholder.
-        ddsdde = (
-            self.elastic_stiffness(state_n)
-            if hasattr(self, "elastic_stiffness")
-            else np.eye(self.ntens)
-        )
+        # A failed step has no consistent tangent.  The elastic one keeps
+        # ddsdde finite and invertible for a driver that reads it before it
+        # looks at `converged`; lazy, since most callers never do.
         return StressUpdateResult(
             return_mapping=rm,
-            ddsdde=ddsdde,
+            ddsdde=lambda: self.elastic_tangent(stress_n, state_n),
             stress_trial=self._big_trial(strain_inc, stress_n, state_n),
             is_plastic=None,
             _state_n=state_n,

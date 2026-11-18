@@ -239,9 +239,7 @@ class TestStressDriverIterRun:
         sigma[:, 0] = np.linspace(300.0, 500.0, 5)
         load = FieldHistory(FieldType.STRESS, "Stress", sigma)
         driver = StressDriver(integrator, max_iter=1)
-        steps = []
-        for step in driver.iter_run(load, raise_on_nonconverged=False):
-            steps.append(step)
+        steps = list(driver.iter_run(load))
         assert len(steps) == 1
         assert steps[0].converged is False
         assert steps[0].residual_inf > driver.tol
@@ -289,11 +287,9 @@ class TestStressDriverIterRun:
         load = FieldHistory(FieldType.STRESS, "Stress", sigma)
         driver = StressDriver(integrator)
 
-        with pytest.raises(RuntimeError, match="NR did not converge"):
-            list(driver.iter_run(load))
-
-        steps = list(driver.iter_run(load, raise_on_nonconverged=False))
+        steps = list(driver.iter_run(load))
         assert steps[-1].converged is False
+        assert all(s.converged for s in steps[:-1])
 
 
 # ===========================================================================
@@ -397,6 +393,116 @@ class TestStressDriverStepResults:
         load = _uniaxial_stress_load(model, n_steps=10)
         result = StressDriver(PythonNumericalIntegrator(model)).run(load)
         assert result.stress.shape == (10, model.ntens)
+
+
+# ===========================================================================
+# Non-convergence: one switch (the integrator's), reported by run() as a value
+# ===========================================================================
+
+class TestRunReportsNonConvergence:
+    """``run`` must not hand back a non-converged iterate as if it were a step."""
+
+    def test_strain_driver_converged_run(self, model):
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(_strain_load())
+        assert result.converged is True
+        assert result.failed_step is None
+
+    def test_strain_driver_excludes_the_failed_step(self, model):
+        # max_iter=0: the first plastic step cannot converge.
+        integrator = PythonNumericalIntegrator(
+            model, max_iter=0, raise_on_nonconverged=False
+        )
+        load = _strain_load(n_steps=10, max_strain=5e-3)
+        result = StrainDriver(integrator).run(load)
+
+        assert result.converged is False
+        assert 0 < result.failed_step < 10
+        # Every row is a completed step: the failed one is left out.
+        assert len(result.step_results) == result.failed_step
+        assert result.stress.shape == (result.failed_step, model.ntens)
+        assert result.strain.shape == (result.failed_step, model.ntens)
+        assert all(r.converged for r in result.step_results)
+
+    def test_strain_driver_raises_with_default_integrator(self, model):
+        integrator = PythonNumericalIntegrator(model, max_iter=0)
+        with pytest.raises(RuntimeError):
+            StrainDriver(integrator).run(_strain_load(n_steps=10, max_strain=5e-3))
+
+    def test_stress_driver_follows_the_integrator_switch(self, model):
+        """The outer NR has no switch of its own — it reads the integrator's."""
+        sigma = np.zeros((5, model.ntens))
+        sigma[:, 0] = np.linspace(300.0, 500.0, 5)  # past yield (250)
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+
+        raising = StressDriver(PythonNumericalIntegrator(model), max_iter=1)
+        with pytest.raises(RuntimeError, match="NR did not converge"):
+            raising.run(load)
+
+        reporting = StressDriver(
+            PythonNumericalIntegrator(model, raise_on_nonconverged=False), max_iter=1
+        )
+        result = reporting.run(load)
+        assert result.converged is False
+        assert result.failed_step == 0
+        assert result.step_results == []
+        assert result.stress.shape == (0, model.ntens)
+        assert result.strain.shape == (0, model.ntens)
+
+    def test_mixed_driver_follows_the_integrator_switch(self, model_3d):
+        eps = np.linspace(0, 3.0 * model_3d.sigma_y0 / model_3d.E, 3).reshape(-1, 1)
+        load = strain_load(eps)
+        integrator = PythonNumericalIntegrator(model_3d, raise_on_nonconverged=False)
+        result = MixedDriver(integrator, prescribed_strain_idx=[0], max_iter=1).run(load)
+
+        assert result.converged is False
+        assert result.failed_step is not None
+        assert len(result.step_results) == result.failed_step
+
+    def test_collect_state_with_no_completed_step(self, model):
+        sigma = np.zeros((3, model.ntens))
+        sigma[:, 0] = np.linspace(300.0, 500.0, 3)
+        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
+        result = StressDriver(integrator, max_iter=1).run(
+            load, collect_state={"ep": FieldType.STRAIN}
+        )
+        assert result.failed_step == 0
+        assert len(result.fields["ep"].data) == 0
+
+
+class TestIntegratorContract:
+    def test_bare_model_is_rejected(self, model):
+        with pytest.raises(TypeError, match="PythonIntegrator"):
+            StrainDriver(model)
+
+    def test_incomplete_integrator_names_what_is_missing(self, model):
+        class _OnlyStressUpdate:
+            dimension = model.dimension
+            ntens = model.ntens
+
+            def initial_state(self):
+                return {}
+
+            def stress_update(self, strain_inc, stress_n, state_n):
+                raise AssertionError("not called")
+
+        with pytest.raises(TypeError, match="raise_on_nonconverged, elastic_tangent"):
+            StressDriver(_OnlyStressUpdate())
+
+    @pytest.mark.parametrize("cls", [
+        PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
+    ])
+    def test_python_integrators_fulfil_it(self, model, cls):
+        from manforge.simulation.integrator import StressIntegrator
+        assert isinstance(cls(model), StressIntegrator)
+
+    def test_python_elastic_tangent_is_the_model_stiffness(self, model):
+        integrator = PythonNumericalIntegrator(model)
+        state = model.initial_state()
+        np.testing.assert_array_equal(
+            np.asarray(integrator.elastic_tangent(np.zeros(model.ntens), state)),
+            np.asarray(model.elastic_stiffness(state)),
+        )
 
 
 def test_driver_result_is_dataclass(model):
@@ -765,20 +871,22 @@ class TestMixedDriver:
         with pytest.raises(RuntimeError, match="NR did not converge"):
             driver.run(load)
 
-    def test_raise_on_nonconverged_false_yields_and_stops(self, model_3d, integ_3d):
+    def test_nonraising_integrator_yields_and_stops(self, model_3d):
         sigma_y0 = model_3d.sigma_y0
         E = model_3d.E
         N = 3
         eps_hist = np.linspace(0, 3.0 * sigma_y0 / E, N).reshape(-1, 1)
         load = strain_load(eps_hist)
 
-        driver = MixedDriver(integ_3d, prescribed_strain_idx=[0], max_iter=1)
-        steps = list(driver.iter_run(load, raise_on_nonconverged=False))
+        integrator = PythonNumericalIntegrator(model_3d, raise_on_nonconverged=False)
+        driver = MixedDriver(integrator, prescribed_strain_idx=[0], max_iter=1)
+        steps = list(driver.iter_run(load))
 
         assert len(steps) >= 1
         non_converged = [s for s in steps if not s.converged]
         assert len(non_converged) == 1
         assert non_converged[0].i < N
+        assert steps[-1] is non_converged[0], "driver must stop at the failed step"
 
     def test_initial_stress_zero_increment_preserves_prestress(self, model_3d, integ_3d):
         prestress = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])

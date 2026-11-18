@@ -22,6 +22,13 @@ Conventions
   (numerical Newton-Raphson), or
   :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`
   (analytical / user-defined) before passing to a driver.
+- Non-convergence has one switch, the integrator's ``raise_on_nonconverged``.
+  With ``True`` (the default) a failed step raises ``RuntimeError``, whether
+  the integrator's return mapping or a driver's own Newton-Raphson loop
+  failed.  With ``False`` :meth:`DriverBase.iter_run` yields that step with
+  ``converged=False`` and stops, and :meth:`DriverBase.run` returns the
+  completed steps with ``converged=False`` / ``failed_step`` set.  A
+  non-converged iterate is never carried into the next step.
 """
 
 from __future__ import annotations
@@ -31,17 +38,26 @@ from collections.abc import Iterator
 
 import numpy as np
 
+from manforge.simulation.integrator.base import StressIntegrator
 from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
 from manforge._typing import StateDict, StressVec
 
+_INTEGRATOR_MEMBERS = (
+    "dimension", "ntens", "raise_on_nonconverged",
+    "initial_state", "elastic_tangent", "stress_update",
+)
+
 
 def _check_integrator(obj: object) -> None:
-    """Raise TypeError when obj is not a StressIntegrator."""
-    if not (hasattr(obj, "stress_update") and callable(obj.stress_update)):
-        raise TypeError(
-            f"Driver expects a StressIntegrator, got {type(obj).__name__!r}.  "
-            "Wrap a bare MaterialModel with PythonIntegrator(model) first."
-        )
+    """Raise TypeError when obj does not fulfil the StressIntegrator contract."""
+    if isinstance(obj, StressIntegrator):
+        return
+    missing = [name for name in _INTEGRATOR_MEMBERS if not hasattr(obj, name)]
+    raise TypeError(
+        f"Driver expects a StressIntegrator, got {type(obj).__name__!r} "
+        f"(missing: {', '.join(missing)}).  "
+        "Wrap a bare MaterialModel with PythonIntegrator(model) first."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +77,7 @@ class DriverBase(ABC):
         :class:`~manforge.simulation.integrator.FortranIntegrator`.
     """
 
-    def __init__(self, integrator: object) -> None:
+    def __init__(self, integrator: StressIntegrator) -> None:
         _check_integrator(integrator)
         self.integrator = integrator
 
@@ -131,10 +147,36 @@ class DriverBase(ABC):
         Returns
         -------
         DriverResult
+            Every completed step.  With an integrator whose
+            ``raise_on_nonconverged`` is ``False``, a run that stops early has
+            ``converged=False`` and ``failed_step`` set, and the failed step is
+            left out of the histories.
+
+        Raises
+        ------
+        RuntimeError
+            A step did not converge and the integrator's
+            ``raise_on_nonconverged`` is ``True`` (the default).
         """
+        return self._collect(
+            self.iter_run(load, initial_stress=initial_stress, initial_state=initial_state),
+            collect_state,
+        )
+
+    def _collect(
+        self,
+        steps: Iterator[DriverStep],
+        collect_state: dict[str, FieldType] | None,
+    ) -> DriverResult:
+        """Gather the completed steps of an ``iter_run`` into a DriverResult."""
         step_results = []
         strain_rows = []
-        for step in self.iter_run(load, initial_stress=initial_stress, initial_state=initial_state):
+        failed_step: int | None = None
+        for step in steps:
+            if not step.converged:
+                # Its result is a non-converged iterate, not a solution.
+                failed_step = step.i
+                break
             step_results.append(step.result)
             strain_rows.append(step.strain)
         strain_out = (
@@ -146,6 +188,8 @@ class DriverBase(ABC):
             step_results=step_results,
             strain=strain_out,
             collect_state=collect_state,
+            converged=failed_step is None,
+            failed_step=failed_step,
         )
 
 
@@ -219,10 +263,10 @@ class StrainDriver(DriverBase):
                 strain_cum = np.array(data[i])
 
             rm = integrator.stress_update(strain_inc, stress_n, state_n)
-            # Reachable only when the integrator was built with
-            # raise_on_nonconverged=False: rm.state is then a non-converged NR
-            # iterate, so advancing with it would silently corrupt every
-            # subsequent step.  Report and stop, like StressDriver does.
+            # Reachable only when the integrator's raise_on_nonconverged is
+            # False: rm.state is then a non-converged NR iterate, so advancing
+            # with it would silently corrupt every subsequent step.  Report
+            # and stop, like StressDriver does.
             if not rm.converged:
                 yield DriverStep(
                     i=i, strain=strain_cum.copy(), result=rm, converged=False
@@ -263,7 +307,7 @@ class StressDriver(DriverBase):
     """
 
     def __init__(
-        self, integrator: object, *, max_iter: int = 20, tol: float = 1e-8,
+        self, integrator: StressIntegrator, *, max_iter: int = 20, tol: float = 1e-8,
         rtol: float = 1e-10,
     ) -> None:
         super().__init__(integrator)
@@ -275,7 +319,6 @@ class StressDriver(DriverBase):
         self,
         load: FieldHistory,
         *,
-        raise_on_nonconverged: bool = True,
         initial_stress: "StressVec | None" = None,
         initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
@@ -287,11 +330,6 @@ class StressDriver(DriverBase):
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
             tensor (Voigt) at each step.
-        raise_on_nonconverged : bool, optional
-            If ``True`` (default), raise :exc:`RuntimeError` when Newton-Raphson
-            does not converge.  If ``False``, yield a :class:`DriverStep` with
-            ``converged=False`` instead; internal state is *not* advanced for
-            that step, so the caller should ``break`` immediately.
         initial_stress : array-like or None, optional
             Stress tensor at the start of the loading history.  If ``None``
             (default), the initial stress is zero.  Note: ``strain`` in the
@@ -306,11 +344,15 @@ class StressDriver(DriverBase):
         ------
         DriverStep
             Includes ``n_outer_iter`` and ``residual_inf`` for NR diagnostics.
+            A step whose Newton-Raphson did not converge is yielded with
+            ``converged=False`` and ends the iteration — but only when the
+            integrator's ``raise_on_nonconverged`` is ``False``.
 
         Raises
         ------
         RuntimeError
-            If NR does not converge and ``raise_on_nonconverged=True``.
+            If NR does not converge and the integrator's
+            ``raise_on_nonconverged`` is ``True`` (the default).
         """
         if load.type != FieldType.STRESS:
             raise ValueError(
@@ -329,13 +371,8 @@ class StressDriver(DriverBase):
         for i in range(stress_history.shape[0]):
             sigma_target = np.array(stress_history[i])
             step_tol = self.tol + self.rtol * float(np.max(np.abs(sigma_target)))
-            if hasattr(integrator, "elastic_stiffness"):
-                C = integrator.elastic_stiffness(state_n)
-                S = np.linalg.inv(np.array(C))
-            else:
-                rm0 = integrator.stress_update(np.zeros(ntens), stress_n, state_n)
-                S = np.linalg.inv(np.array(rm0.ddsdde))
-            deps = S @ (sigma_target - stress_n)
+            S = np.linalg.inv(np.array(integrator.elastic_tangent(stress_n, state_n)))
+            deps = np.asarray(S @ (sigma_target - stress_n), dtype=np.float64)
 
             converged = False
             residual = np.full(ntens, np.inf)
@@ -343,8 +380,8 @@ class StressDriver(DriverBase):
             k = 0
             for k in range(self.max_iter):
                 rm = integrator.stress_update(deps, stress_n, state_n)
-                # Inner return mapping failed (integrator built with
-                # raise_on_nonconverged=False): rm.stress is a non-converged
+                # Inner return mapping failed (the integrator's
+                # raise_on_nonconverged is False): rm.stress is a non-converged
                 # iterate, so the outer residual and tangent computed from it
                 # would be garbage — and could even pass the tolerance check.
                 if not rm.converged:
@@ -359,7 +396,7 @@ class StressDriver(DriverBase):
             residual_inf = float(np.max(np.abs(residual)))
 
             if not converged:
-                if raise_on_nonconverged:
+                if integrator.raise_on_nonconverged:
                     raise RuntimeError(
                         f"StressDriver: NR did not converge at step {i} "
                         f"(||residual||_inf = {residual_inf:.3e}, "
@@ -386,56 +423,6 @@ class StressDriver(DriverBase):
                 n_outer_iter=k + 1,
                 residual_inf=residual_inf,
             )
-
-    def run(
-        self,
-        load: FieldHistory,
-        *,
-        collect_state: dict[str, FieldType] | None = None,
-        initial_stress: "StressVec | None" = None,
-        initial_state: "StateDict | None" = None,
-    ) -> DriverResult:
-        """Run the stress-controlled loading history.
-
-        Parameters
-        ----------
-        load : FieldHistory
-            Must have ``type = FieldType.STRESS`` and
-            ``load.data`` shape ``(N, ntens)`` — cumulative target stress
-            tensor (Voigt) at each step.
-        collect_state : dict[str, FieldType] or None, optional
-            State variables to include in the result.
-        initial_stress : array-like or None, optional
-            Stress tensor at the start of the loading history (default zero).
-        initial_state : dict or None, optional
-            State dict at the start of the loading history (default integrator initial state).
-
-        Returns
-        -------
-        DriverResult
-
-        Raises
-        ------
-        RuntimeError
-            If Newton-Raphson does not converge within ``max_iter`` iterations
-            at any step.
-        """
-        step_results = []
-        strain_rows = []
-        for step in self.iter_run(load, raise_on_nonconverged=True,
-                                  initial_stress=initial_stress, initial_state=initial_state):
-            step_results.append(step.result)
-            strain_rows.append(step.strain)
-        strain_out = (
-            np.stack(strain_rows)
-            if strain_rows
-            else np.zeros((0, self.integrator.ntens))
-        )
-        return DriverResult(
-            step_results=step_results,
-            strain=strain_out,
-            collect_state=collect_state,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +503,7 @@ class MixedDriver(DriverBase):
 
     def __init__(
         self,
-        integrator,
+        integrator: StressIntegrator,
         *,
         prescribed_strain_idx,
         prescribed_stress_idx=None,
@@ -560,7 +547,6 @@ class MixedDriver(DriverBase):
         load: FieldHistory,
         *,
         prescribed_stress_history=None,
-        raise_on_nonconverged: bool = True,
         initial_stress: "StressVec | None" = None,
         initial_state: "StateDict | None" = None,
     ) -> Iterator[DriverStep]:
@@ -575,10 +561,6 @@ class MixedDriver(DriverBase):
         prescribed_stress_history : array-like of shape (N, len(prescribed_stress_idx)) or None
             Target stress values for the F components at each step.  If ``None``
             (default), all F components are held at zero.
-        raise_on_nonconverged : bool, optional
-            If ``True`` (default), raise :exc:`RuntimeError` when inner NR does
-            not converge.  If ``False``, yield a :class:`DriverStep` with
-            ``converged=False`` and immediately stop iteration.
         initial_stress : array-like or None, optional
             Full stress tensor (ntens,) at the start of the history.
         initial_state : dict or None, optional
@@ -588,6 +570,15 @@ class MixedDriver(DriverBase):
         ------
         DriverStep
             Includes ``n_outer_iter`` and ``residual_inf`` for NR diagnostics.
+            A step whose Newton-Raphson did not converge is yielded with
+            ``converged=False`` and ends the iteration — but only when the
+            integrator's ``raise_on_nonconverged`` is ``False``.
+
+        Raises
+        ------
+        RuntimeError
+            If NR does not converge and the integrator's
+            ``raise_on_nonconverged`` is ``True`` (the default).
         """
         integrator = self.integrator
         ntens = integrator.ntens
@@ -646,12 +637,8 @@ class MixedDriver(DriverBase):
                 sigma_F_target = sigF_hist[i]
                 step_tol = self.tol + self.rtol * float(np.max(np.abs(sigma_F_target)))
 
-                # Initial estimate: solve C0[F,F] @ deps[F] = rhs from elastic stiffness
-                if hasattr(integrator, "elastic_stiffness"):
-                    C0 = np.array(integrator.elastic_stiffness(state_n))
-                else:
-                    rm0 = integrator.stress_update(np.zeros(ntens), stress_n, state_n)
-                    C0 = np.array(rm0.ddsdde)
+                # Initial estimate: solve C0[F,F] @ deps[F] = rhs from the elastic tangent
+                C0 = np.array(integrator.elastic_tangent(stress_n, state_n))
                 C0_FF = C0[np.ix_(F, F)]
                 C0_FP = C0[np.ix_(F, P)]
                 rhs0 = (sigma_F_target - stress_n[F]) - C0_FP @ deps[P]
@@ -677,7 +664,7 @@ class MixedDriver(DriverBase):
                 residual_inf = float(np.max(np.abs(residual_F)))
 
             if not converged:
-                if raise_on_nonconverged:
+                if integrator.raise_on_nonconverged:
                     raise RuntimeError(
                         f"MixedDriver: NR did not converge at step {i} "
                         f"(||residual_F||_inf = {residual_inf:.3e}, "
@@ -733,31 +720,20 @@ class MixedDriver(DriverBase):
         Returns
         -------
         DriverResult
+            See :meth:`DriverBase.run` for ``converged`` / ``failed_step``.
 
         Raises
         ------
         RuntimeError
-            If inner NR does not converge within ``max_iter`` iterations at
-            any step.
+            A step did not converge and the integrator's
+            ``raise_on_nonconverged`` is ``True`` (the default).
         """
-        step_results = []
-        strain_rows = []
-        for step in self.iter_run(
-            load,
-            prescribed_stress_history=prescribed_stress_history,
-            raise_on_nonconverged=True,
-            initial_stress=initial_stress,
-            initial_state=initial_state,
-        ):
-            step_results.append(step.result)
-            strain_rows.append(step.strain)
-        strain_out = (
-            np.stack(strain_rows)
-            if strain_rows
-            else np.zeros((0, self.integrator.ntens))
-        )
-        return DriverResult(
-            step_results=step_results,
-            strain=strain_out,
-            collect_state=collect_state,
+        return self._collect(
+            self.iter_run(
+                load,
+                prescribed_stress_history=prescribed_stress_history,
+                initial_stress=initial_stress,
+                initial_state=initial_state,
+            ),
+            collect_state,
         )

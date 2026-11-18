@@ -131,6 +131,8 @@ def run_simulation(
     else:
         raise ValueError(f"load must be 1-D or 2-D, got shape {data.shape}")
 
+    # raise_on_nonconverged=False is the one switch: it makes both the return
+    # mapping and the driver's outer NR report non-convergence as a value.
     integrator = PythonIntegrator(
         model, nr_jacobian=nr_jacobian, raise_on_nonconverged=False
     )
@@ -144,7 +146,7 @@ def run_simulation(
         driver = StressDriver(integrator)
         stress_data = data if data.ndim == 2 else data.reshape(-1, 1)
         history = FieldHistory(FieldType.STRESS, "Stress", stress_data)
-        step_iter = driver.iter_run(history, raise_on_nonconverged=False)
+        step_iter = driver.iter_run(history)
     else:
         raise ValueError(f"control must be 'strain' or 'stress', got {control!r}")
 

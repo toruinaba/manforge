@@ -334,18 +334,29 @@ class DriverResult:
     ----------
     step_results : list
         Per-step :class:`~manforge.core.result.StressUpdateResult`
-        objects, one per increment.  Provides access to converged stress,
-        state, tangent (ddsdde), dlambda, stress_trial, and is_plastic for every step.
+        objects, one per *completed* increment.  Provides access to converged
+        stress, state, tangent (ddsdde), dlambda, stress_trial, and is_plastic
+        for every step.
     strain : np.ndarray, shape (N, ntens)
-        Cumulative strain history computed by the driver.
+        Cumulative strain history computed by the driver, over the completed
+        steps.
     collect_state : dict[str, FieldType] or None
-        State-variable fields requested at driver construction time.
+        State-variable fields requested in the ``run`` call.
+    converged : bool
+        ``False`` when the run stopped early on a step that did not converge.
+        Reachable only with an integrator whose ``raise_on_nonconverged`` is
+        ``False``; with the default the run raises instead.
+    failed_step : int or None
+        0-based index of the step that failed (``None`` when ``converged``).
+        That step is *not* in ``step_results`` / ``strain`` / ``stress`` — its
+        result is a non-converged iterate, not a solution — so every row of
+        the arrays is a completed step and ``N == failed_step``.
 
     Examples
     --------
     Access common outputs::
 
-        result = driver.run(model, load)
+        result = driver.run(load)
         result.stress          # np.ndarray (N, ntens)
         result.strain          # np.ndarray (N, ntens)
 
@@ -363,10 +374,14 @@ class DriverResult:
     step_results: list
     strain: np.ndarray
     collect_state: dict[str, FieldType] | None = None
+    converged: bool = True
+    failed_step: int | None = None
 
     @property
     def stress(self) -> np.ndarray:
         """Stress history, shape ``(N, ntens)``."""
+        if not self.step_results:
+            return np.zeros((0, self.strain.shape[-1]))
         return np.array([np.asarray(r.stress) for r in self.step_results])
 
     @property
@@ -378,8 +393,11 @@ class DriverResult:
         }
         if self.collect_state:
             for k, ft in self.collect_state.items():
-                data = np.stack(
-                    [np.asarray(r.state[k]) for r in self.step_results]
+                # No completed step (the first one failed): np.stack rejects an
+                # empty list, and the field's shape is unknown without a state.
+                data = (
+                    np.stack([np.asarray(r.state[k]) for r in self.step_results])
+                    if self.step_results else np.zeros((0,))
                 )
                 out[k] = FieldHistory(ft, k, data)
         return out
@@ -398,15 +416,16 @@ class DriverStep:
     result : StressUpdateResult
         Full stress-update result: stress, state, ddsdde, dlambda, is_plastic, etc.
     converged : bool
-        NR convergence flag.  For :class:`~manforge.simulation.driver.StrainDriver`
-        this is the integrator's return-mapping flag — ``False`` is reachable
-        only with an integrator built with ``raise_on_nonconverged=False``, and
-        the driver stops after yielding that step.  For
+        NR convergence flag.  ``False`` is reachable only with an integrator
+        whose ``raise_on_nonconverged`` is ``False`` — otherwise the failure
+        raises — and the driver stops after yielding that step.  For
+        :class:`~manforge.simulation.driver.StrainDriver` this is the
+        integrator's return-mapping flag.  For
         :class:`~manforge.simulation.driver.StressDriver` and
         :class:`~manforge.simulation.driver.MixedDriver` it additionally
-        covers whether the outer / inner Newton-Raphson loop converged within
-        ``max_iter``; a non-converged inner return mapping fails the outer
-        loop immediately rather than feeding it a garbage iterate.
+        covers whether the driver's own Newton-Raphson loop converged within
+        ``max_iter``; a non-converged return mapping fails that loop
+        immediately rather than feeding it a garbage iterate.
     n_outer_iter : int
         Number of NR iterations taken.  ``1`` for
         :class:`~manforge.simulation.driver.StrainDriver`; the outer-loop count
@@ -420,14 +439,14 @@ class DriverStep:
     --------
     Break on the first plastic step::
 
-        for step in driver.iter_run(model, load):
+        for step in driver.iter_run(load):
             if step.result.is_plastic:
                 print(f"Plasticity onset at step {step.i}")
                 break
 
     Inspect NR convergence diagnostics (StressDriver / MixedDriver)::
 
-        for step in driver.iter_run(model, load):
+        for step in driver.iter_run(load):
             print(step.i, step.n_outer_iter, step.residual_inf)
     """
 

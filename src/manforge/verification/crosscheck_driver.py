@@ -71,6 +71,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     from manforge.core.result import StressUpdateResult
+    from manforge.simulation.integrator import StressIntegrator
     from manforge._typing import FloatArray, StateDict
 
 from manforge.simulation.driver import StrainDriver, StressDriver
@@ -147,8 +148,8 @@ class _CrosscheckDriverBase(Comparator):
 
     def __init__(
         self,
-        integrator_a: object,
-        integrator_b: object,
+        integrator_a: StressIntegrator,
+        integrator_b: StressIntegrator,
         *,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
@@ -160,7 +161,7 @@ class _CrosscheckDriverBase(Comparator):
         self.tangent_tol = tangent_tol
         self.state_tol = state_tol
 
-    def _make_driver(self, integrator: object) -> StrainDriver | StressDriver:
+    def _make_driver(self, integrator: StressIntegrator) -> StrainDriver | StressDriver:
         raise NotImplementedError
 
     def _iter_driver(self, driver: StrainDriver | StressDriver, load: FieldHistory, **kwargs):  # type: ignore[return]
@@ -342,16 +343,19 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         result = cc.run(stress_load)
         assert result.passed
 
-        for cr in cc.iter_run(stress_load, raise_on_nonconverged=False):
+        for cr in cc.iter_run(stress_load):
             print(f"step {cr.index}: stress_err={cr.stress_rel_err:.2e}")
+
+    Non-convergence follows each integrator's own ``raise_on_nonconverged``,
+    exactly as in :class:`~manforge.simulation.StressDriver`.
     """
 
     _expected_field_type = FieldType.STRESS
 
     def __init__(
         self,
-        integrator_a: object,
-        integrator_b: object,
+        integrator_a: StressIntegrator,
+        integrator_b: StressIntegrator,
         *,
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
@@ -378,37 +382,3 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
 
     def _iter_driver(self, driver, load, **kwargs):
         return driver.iter_run(load, **kwargs)
-
-    def iter_run(
-        self,
-        load: FieldHistory,
-        *,
-        raise_on_nonconverged: bool = True,
-        initial_stress: FloatArray | None = None,
-        initial_state: StateDict | None = None,
-    ) -> Iterator[CrosscheckCaseResult]:
-        """Yield per-step crosscheck results.
-
-        Parameters
-        ----------
-        load : FieldHistory
-            Stress-controlled loading history (``load.type`` must be
-            ``FieldType.STRESS``).
-        raise_on_nonconverged : bool, optional
-            Forwarded to :meth:`~manforge.simulation.StressDriver.iter_run`
-            (default ``True``).
-        initial_stress : array-like or None, optional
-            Stress tensor at the start of the loading history (default zero).
-        initial_state : dict or None, optional
-            State dict at the start of the loading history (default integrator initial state).
-
-        Yields
-        ------
-        CrosscheckCaseResult
-        """
-        yield from super().iter_run(
-            load,
-            raise_on_nonconverged=raise_on_nonconverged,
-            initial_stress=initial_stress,
-            initial_state=initial_state,
-        )
