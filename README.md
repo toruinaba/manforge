@@ -152,6 +152,27 @@ from manforge.core.dimension import PLANE_STRAIN
 model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 ```
 
+#### 損傷モデル (有効断面低下)
+
+3 段階の J2 + Lemaitre 延性損傷。いずれも**弱連成** — 塑性は有効応力空間に閉じて D を見ないので、有効応力 σ̃ と ep は損傷なし J2 と一致し、D は公称応力 σ との写像と剛性にだけ効く。D は塑性増分でのみ進む (ΔD = (Y/S)^s·Δp、p > p_D)。
+
+| クラス | 引張/圧縮の扱い | 状態変数 |
+|---|---|---|
+| `J2IsotropicDamage*` | 分けない: σ = (1−D)σ̃ | `stress`, `ep`, `D` |
+| `J2IsotropicDamageCrackClosure*` | 駆動力 Y のみ主値で分解 (圧縮は h 倍) | 同上 |
+| `J2IsotropicDamageUnilateral*` | 応力も分解: 引張 (1−D)E / 圧縮 (1−hD)E で剛性回復 | `stress`, `stress_eff` (σ̃), `ep`, `D` |
+
+```python
+from manforge.models import J2IsotropicDamageUnilateral3D
+model = J2IsotropicDamageUnilateral3D(
+    E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_500.0,
+    S=0.5, s=1.0, p_D=0.0,   # Lemaitre: 損傷強度 [MPa], 指数, 閾値 (相当塑性ひずみ)
+    h=0.2,                   # crack-closure 係数 (CrackClosure / Unilateral のみ)
+)
+```
+
+`Unilateral` は Lemaitre の準片側補エネルギー ψ*(σ, D) を唯一の定義とし、ε_e = ∂ψ*/∂σ・Y = ∂ψ*/∂D を autodiff で導く (弾性接線は対称)。注意: 臨界損傷 D_c・要素削除は無く D → 1 で特異になる。主値 0 での規約 (§ 5.5) は暫定値。挙動の図は `examples/example_j2_damage*.py`。
+
 ### 4.2 シミュレーション実行
 
 ```python
@@ -321,6 +342,8 @@ class MyImplicitModel(MaterialModel):
 
 参照実装: `src/manforge/models/ow_kinematic.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
 
+`stress_trial` / `strain_inc` は**どの残差行にどの係数で入れてもよい** — consistent tangent は dR/dΔε を両者を通して autodiff するので、`R_σ = σ − σ_trial + …` の形を仮定しない。同じ根を持つ残差なら行のスケールを変えても接線は同一 (例: 損傷の `(1−D_n)/(1−D_{n+1})·σ − σ_trial + …`)。
+
 ### 5.3 flow のオーバーライド — 非関連流れ・手導出
 
 デフォルトの流れ方向は関連流れ (`∂f/∂σ` を autodiff)。塑性ポテンシャル g ≠ f や手導出式を使う場合は `flow` を override する (**`default_stress_residual` は触らない** — 残差の代数は不変)。返り値は計算した規約を `strain_flow` / `stress_flow` で名指しする:
@@ -340,11 +363,37 @@ def flow(self, state):                       # engineering shear で導出済み
 
 既定の弾性判定は `yield_function(state_trial) <= 0`。**弾性域が降伏関数の内部と一致しないモデル** (subloading-surface 系が典型: 分岐が 2 条件の論理和になり、1 つの滑らかな関数のゼロ等値面で書けない) のみ `elastic_check(state_n, *, stress_trial, strain_inc=None) -> bool` を override する。弾性ステップでも動く状態量 (応力に追従する正規降伏比など) は `elastic_update_state` に書く。古典的塑性では両方ともデフォルトで正しい。詳細な設計理由は `core/material/base.py` の docstring。
 
-### 5.5 user_defined フック — 閉形式ソルバ
+### 5.5 非線形な弾性 — elastic_predictor と主値分解
+
+既定の弾性予測子は線形 `σ_trial = σ_n + C(state_n)·Δε`。片側損傷のように**弾性則が区分線形** (主値の符号で剛性が変わる) なモデルや、σ 以外の状態量 (例: Implicit の有効応力) が弾性的に動くモデルは `elastic_predictor` を override して試行状態をモデル側で定義する:
+
+```python
+def elastic_predictor(self, state_n, *, strain_inc):
+    s_eff = state_n["stress_eff"] + self.undamaged_stiffness() @ strain_inc  # 有効空間
+    sigma = self.nominal_from_effective(s_eff, state_n["D"])      # 非線形写像
+    return [self.stress.update(sigma), self.stress_eff.update(s_eff)]
+```
+
+- stress は必須。値は `self.<field>.update(value)` で包む (Implicit 場を `self.<field>(value)` と呼ぶと残差扱いになるため)。
+- フレームワークはこれを弾性ステップの解・弾性接線 (autodiff)・弾性判定 (`elastic_check` 未 override 時は試行状態全体で `yield_function`)・塑性 NR の初期値と接線のすべてに使う。微分可能 (autograd で追跡可能) に書くこと。
+- `elastic_update_state` (§ 5.4) とは別物: 予測子は毎ステップの定数、`elastic_update_state` は弾性と判定された後の更新。
+- override しなければ従来と数値もビット単位で同一。
+
+主値に依存する量は `manforge.utils.spectral` を使う (`anp.linalg.eigh` の微分は主値が重なる単軸・平面応力・純せん断で NaN になるため):
+
+```python
+from manforge.utils.spectral import positive_part, negative_part, positive_part_sq
+sig_pos = positive_part(sigma, self.dimension)        # σ₊ = Σ⟨σ_i⟩ n_i⊗n_i, 接線 P₊ も厳密
+energy  = positive_part_sq(sigma, self.dimension)     # Σ⟨σ_i⟩₊² (Hessian = 2P₊)
+```
+
+主値 0 では折れ点を平滑化せず、規約 H(0) = c (`DEFAULT_HEAVISIDE_AT_ZERO = 1/2`、**暫定** — UMAT 側の規約に合わせて確定) で扱う。全関数が `c=` で上書き可能。設計理由は `utils/spectral.py` の docstring、参照実装は `src/manforge/models/j2_damage_unilateral.py`。
+
+### 5.6 user_defined フック — 閉形式ソルバ
 
 閉形式の return mapping が存在する場合は `user_defined_return_mapping(self, stress_trial, C, state_n)` を実装すると `PythonIntegrator` が自動使用する (`None` を返すと汎用 NR にフォールバック)。consistent tangent の閉形式は `user_defined_tangent`。`J2Isotropic3D` が両フックの参照実装。
 
-### 5.6 検証ワークフロー
+### 5.7 検証ワークフロー
 
 新しいモデルを実装するときの推奨手順:
 
@@ -380,7 +429,7 @@ print(cr.passed, cr.max_stress_rel_err)
 
 通しの実例: `examples/example_custom_model_workflow.py`
 
-### 5.7 Fortran UMAT クロス検証
+### 5.8 Fortran UMAT クロス検証
 
 **Build → Load → Integrate → Crosscheck**:
 
