@@ -70,20 +70,10 @@ class StressDimension:
         """Convert a physical-shear (stress-like) Voigt vector to engineering shear."""
         return v * self.eng_to_phys_strain_factors_np
 
-    # backward-compat alias
-    @property
-    def mandel_factors_jnp(self) -> np.ndarray:
-        return self.mandel_factors_np
-
     @property
     def identity_np(self) -> np.ndarray:
         """Voigt identity vector [1,...,1, 0,...,0], shape (ntens,)."""
         return np.array([1.0] * self.ndi + [0.0] * self.nshr)
-
-    # backward-compat alias
-    @property
-    def identity_jnp(self) -> np.ndarray:
-        return self.identity_np
 
     # ------------------------------------------------------------------
     # Operator interface — overridden by derived classes
