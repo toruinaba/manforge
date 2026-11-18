@@ -620,12 +620,17 @@ def test_inner_product_pure_shear_doubled():
     np.testing.assert_allclose(float(m.inner_product(v, v)), 2.0, atol=1e-12)
 
 
-def test_inner_product_agrees_with_to_mandel():
-    from manforge.utils.voigt import to_mandel
+def test_inner_product_agrees_with_tensor_contraction():
+    """inner_product equals A:B on the full symmetric 3×3 tensors."""
+    def tensor(v):  # physical-shear Voigt [11, 22, 33, 12, 13, 23]
+        return np.array([[v[0], v[3], v[4]],
+                         [v[3], v[1], v[5]],
+                         [v[4], v[5], v[2]]])
+
     m = _model3d()
     a = anp.array([100.0, 50.0, -30.0, 10.0, 5.0, 2.0])
     b = anp.array([20.0, -10.0, 15.0, 3.0, 1.0, 4.0])
-    expected = float(anp.dot(to_mandel(a), to_mandel(b)))
+    expected = float(np.sum(tensor(a) * tensor(b)))
     np.testing.assert_allclose(float(m.inner_product(a, b)), expected, atol=1e-12)
 
 

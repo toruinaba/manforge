@@ -13,7 +13,6 @@ from manforge.core.dimension import (
     UNIAXIAL_1D,
     StressDimension,
 )
-from manforge.utils.voigt import from_mandel, to_mandel
 
 _sqrt2 = math.sqrt(2.0)
 
@@ -83,28 +82,18 @@ def test_identity_1d():
 
 
 # ---------------------------------------------------------------------------
-# to_mandel / from_mandel
+# mandel_factors_np
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("ss", ALL_SS)
-def test_mandel_roundtrip(ss):
-    """from_mandel(to_mandel(v)) == v for any stress state."""
-    v = anp.ones(ss.ntens)
-    np.testing.assert_allclose(from_mandel(to_mandel(v, ss), ss), v, atol=1e-12)
+def test_mandel_factors_np_3d():
+    expected = np.array([1.0, 1.0, 1.0, _sqrt2, _sqrt2, _sqrt2])
+    np.testing.assert_allclose(SOLID_3D.mandel_factors_np, expected, atol=1e-14)
 
 
-def test_to_mandel_3d_default():
-    """to_mandel with no ss arg uses the 6-component convention."""
-    v = anp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    expected = anp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2, 5.0 * _sqrt2, 6.0 * _sqrt2])
-    np.testing.assert_allclose(to_mandel(v), expected, atol=1e-12)
-
-
-def test_to_mandel_plane_strain():
-    v = anp.array([1.0, 2.0, 3.0, 4.0])
-    expected = anp.array([1.0, 2.0, 3.0, 4.0 * _sqrt2])
-    np.testing.assert_allclose(to_mandel(v, PLANE_STRAIN), expected, atol=1e-12)
+def test_mandel_factors_np_plane_strain():
+    expected = np.array([1.0, 1.0, 1.0, _sqrt2])
+    np.testing.assert_allclose(PLANE_STRAIN.mandel_factors_np, expected, atol=1e-14)
 
 
 # ---------------------------------------------------------------------------
