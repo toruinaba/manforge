@@ -1,6 +1,6 @@
 """Smoke tests for verification/tangent.py TangentCheckResult dataclass.
 
-TODO: cover TangentCheckResult fields, check_tangent result structure.
+TODO: cover TangentCheckResult fields.
 """
 
 import importlib
@@ -13,6 +13,6 @@ def test_tangent_module_importable():
     assert mod is not None
 
 
-def test_check_tangent_importable():
-    from manforge.verification.tangent import check_tangent
-    assert callable(check_tangent)
+def test_tangent_checker_importable():
+    from manforge.verification.tangent import TangentChecker
+    assert callable(TangentChecker)

@@ -78,8 +78,8 @@ def _case_passed(
 class CaseResult:
     """Per-case comparison result (base form).
 
-    Subclasses add raw output fields (e.g. ``py_stress`` / ``f_stress``,
-    ``result_a`` / ``result_b``) via dataclass inheritance.
+    Subclasses add raw output fields (e.g. ``result_a`` / ``result_b``) via
+    dataclass inheritance.
     """
 
     index: int

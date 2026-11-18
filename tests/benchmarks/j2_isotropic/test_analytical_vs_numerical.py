@@ -24,7 +24,7 @@ from manforge.simulation.integrator import (
 )
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge.simulation.driver import StrainDriver
-from manforge.verification.tangent import check_tangent
+from manforge.verification.tangent import TangentChecker
 
 
 # ---------------------------------------------------------------------------
@@ -289,23 +289,15 @@ class TestAnalyticalPath:
     def test_analytical_fd_tangent_plastic(self, deps_vec):
         """Analytical closed-form tangent passes FD verification."""
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        result = check_tangent(
-            PythonAnalyticalIntegrator(model),
-            anp.zeros(6),
-            model.initial_state(),
-            anp.array(deps_vec),
-        )
+        result = TangentChecker(PythonAnalyticalIntegrator(model)).check(
+            anp.zeros(6), model.initial_state(), anp.array(deps_vec))
         assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
     def test_analytical_fd_tangent_elastic(self):
         """Elastic step: analytical tangent passes FD check."""
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        result = check_tangent(
-            PythonAnalyticalIntegrator(model),
-            anp.zeros(6),
-            model.initial_state(),
-            anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        )
+        result = TangentChecker(PythonAnalyticalIntegrator(model)).check(
+            anp.zeros(6), model.initial_state(), anp.array([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0]))
         assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
     @pytest.mark.parametrize("deps_vec,description", [
@@ -316,12 +308,8 @@ class TestAnalyticalPath:
     def test_numerical_fd_tangent(self, deps_vec, description):
         """Numerical NR tangent passes FD verification."""
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
-        result = check_tangent(
-            PythonNumericalIntegrator(model),
-            anp.zeros(6),
-            model.initial_state(),
-            anp.array(deps_vec),
-        )
+        result = TangentChecker(PythonNumericalIntegrator(model)).check(
+            anp.zeros(6), model.initial_state(), anp.array(deps_vec))
         assert result.passed, (
             f"[{description}] FD tangent check failed: max_rel_err = {result.max_rel_err:.3e}"
         )

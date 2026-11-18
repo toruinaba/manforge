@@ -42,7 +42,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 - **応力系**(σ, s, 背応力 α など): **physical shear** — テンソル成分そのもの
 - **ひずみ系**(ε, ε_p, Δε): **engineering shear**(γ12 = 2ε12)— ABAQUS `DSTRAN`・弾性剛性 `σ = C:ε`・driver 入力すべて
 
-ノルムや等価量の計算では Mandel スケーリング(剪断 ×√2)を内部適用。ヘルパーは `utils/voigt.py`、次元ごとの演算子(`dev` / `vonmises` / `inner_product` / `strain_norm` 等)は `core/dimension.py` の `StressDimension` に集約され `MaterialModel` がデリゲートする。
+ノルムや等価量の計算では Mandel スケーリング(剪断 ×√2)を内部適用。Mandel 係数と次元ごとの演算子(`dev` / `vonmises` / `inner_product` / `strain_norm` 等)は `core/dimension.py` の `StressDimension` に集約され `MaterialModel` がデリゲートする。
 
 ### FlowVector(横断契約)
 

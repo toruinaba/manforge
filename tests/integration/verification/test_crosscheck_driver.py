@@ -47,7 +47,7 @@ class TestCrosscheckTrajectory:
         result = cc.run(load)
 
         plastic_cases = [cr for cr in result.cases
-                         if cr.py_dlambda is not None and cr.py_dlambda > 0]
+                         if float(cr.result_a.dlambda) > 0]
         assert len(plastic_cases) > 0
         assert any(cr.a_n_iterations >= 1 for cr in plastic_cases)
 

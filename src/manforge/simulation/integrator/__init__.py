@@ -26,10 +26,7 @@ Five adapters implement the :class:`StressIntegrator` protocol:
 Submodules: :mod:`base`, :mod:`python`, :mod:`fortran`, :mod:`substepping`.
 """
 
-from manforge.simulation.integrator.base import (
-    StressIntegrator,
-    _PythonIntegratorBase,
-)
+from manforge.simulation.integrator.base import StressIntegrator
 from manforge.simulation.integrator.python import (
     PythonIntegrator,
     PythonNumericalIntegrator,
@@ -41,7 +38,6 @@ from manforge.simulation.integrator.substepping import SubSteppingIntegrator
 
 __all__ = [
     "StressIntegrator",
-    "_PythonIntegratorBase",
     "PythonIntegrator",
     "PythonNumericalIntegrator",
     "PythonAnalyticalIntegrator",

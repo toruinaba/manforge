@@ -4,7 +4,7 @@ Demonstrates:
 - Defining a J2Isotropic1D model with constructor parameters
 - Building a cyclic strain history with FieldHistory.cyclic_strain
 - Running a cyclic strain history with StrainDriver (hysteresis loop)
-- Verifying the consistent tangent with check_tangent
+- Verifying the consistent tangent with TangentChecker
 - Plotting the stress-strain hysteresis loop (saved as PNG)
 
 Usage

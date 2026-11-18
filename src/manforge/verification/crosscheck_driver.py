@@ -93,8 +93,8 @@ from manforge.verification.comparator_base import (
 class CrosscheckCaseResult(CaseResult):
     """Per-case / per-step result from a crosscheck harness.
 
-    Extends :class:`~manforge.verification.CaseResult` with raw Python- and
-    Fortran-side outputs for inspection.
+    Extends :class:`~manforge.verification.CaseResult` with the raw results of
+    both integrators for inspection (``result_a.stress``, ``result_b.ddsdde``, ...).
 
     Attributes
     ----------
@@ -110,13 +110,6 @@ class CrosscheckCaseResult(CaseResult):
         :meth:`~manforge.verification.JacobianChecker.compare`.
     """
 
-    py_stress: np.ndarray | None = None
-    py_state: StateDict | None = None
-    py_ddsdde: np.ndarray | None = None
-    py_dlambda: float | None = None
-    f_stress: np.ndarray | None = None
-    f_state: StateDict | None = None
-    f_ddsdde: np.ndarray | None = None
     result_a: StressUpdateResult | None = None
     result_b: StressUpdateResult | None = None
     state_n: StateDict | None = None
@@ -222,21 +215,20 @@ class _CrosscheckDriverBase(Comparator):
             ra = sa.result
             rb = sb.result
 
-            py_stress  = np.asarray(ra.stress,  dtype=np.float64)
-            py_state   = {k: np.asarray(v) for k, v in ra.state.items()}
-            py_ddsdde  = np.asarray(ra.ddsdde,  dtype=np.float64)
-            py_dlambda = float(ra.dlambda) if ra.dlambda is not None else float("nan")
+            stress_a = np.asarray(ra.stress, dtype=np.float64)
+            state_a = {k: np.asarray(v) for k, v in ra.state.items()}
+            ddsdde_a = np.asarray(ra.ddsdde, dtype=np.float64)
 
-            f_stress = np.asarray(rb.stress, dtype=np.float64)
-            f_state  = {k: np.asarray(v) for k, v in rb.state.items()}
+            stress_b = np.asarray(rb.stress, dtype=np.float64)
+            state_b = {k: np.asarray(v) for k, v in rb.state.items()}
 
-            f_ddsdde = (
+            ddsdde_b = (
                 np.asarray(rb.ddsdde, dtype=np.float64) if rb.ddsdde is not None else None
             )
-            t_err = _tangent_rel_err(py_ddsdde, f_ddsdde)
+            t_err = _tangent_rel_err(ddsdde_a, ddsdde_b)
 
-            s_err  = _stress_rel_err(f_stress, py_stress)
-            st_err = _state_rel_err(f_state, py_state)
+            s_err  = _stress_rel_err(stress_b, stress_a)
+            st_err = _state_rel_err(state_b, state_a)
             ok     = _case_passed(s_err, st_err, t_err, self.stress_tol, self.state_tol, self.tangent_tol)
 
             current_state_n = step_state_n
@@ -244,13 +236,6 @@ class _CrosscheckDriverBase(Comparator):
 
             yield CrosscheckCaseResult(
                 index=sa.i,
-                py_stress=py_stress,
-                py_state=py_state,
-                py_ddsdde=py_ddsdde,
-                py_dlambda=py_dlambda,
-                f_stress=f_stress,
-                f_state=f_state,
-                f_ddsdde=f_ddsdde,
                 result_a=ra,
                 result_b=rb,
                 state_n=current_state_n,
