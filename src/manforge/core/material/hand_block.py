@@ -128,10 +128,9 @@ def collect_hand_blocks(cls: type) -> dict[tuple[str, str], str]:
         for name, obj in klass.__dict__.items():
             record = getattr(obj, "__hand_block__", None)
             if isinstance(record, HandBlock):
+                # A later override without the decorator leaves this entry in
+                # place: it is still the same block, by name.
                 by_name[name] = record
-            elif name in by_name and callable(obj):
-                # Overridden without the decorator: still the same block.
-                pass
 
     blocks: dict[tuple[str, str], str] = {}
     for name, record in by_name.items():

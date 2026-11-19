@@ -22,7 +22,6 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
-from manforge.core.material.hand_block import hand_block_record
 from manforge.core.state import Increment, State
 from manforge.simulation._layout import ResidualLayout
 from manforge.simulation._residual import build_residual
@@ -223,5 +222,4 @@ __all__ = [
     "residual_jacobian",
     "hand_jacobian_blocks",
     "hand_jacobian",
-    "hand_block_record",
 ]
