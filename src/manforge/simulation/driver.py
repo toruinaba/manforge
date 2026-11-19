@@ -118,7 +118,6 @@ class DriverBase(ABC):
         self,
         load: FieldHistory,
         *,
-        collect_state: dict[str, FieldType] | None = None,
         initial_stress: "StressVec | None" = None,
         initial_state: "StateDict | None" = None,
     ) -> DriverResult:
@@ -129,14 +128,6 @@ class DriverBase(ABC):
         load : FieldHistory
             Loading history.  The ``type`` and shape of ``load.data`` must
             match the driver's expectations (see subclass documentation).
-        collect_state : dict[str, FieldType] or None, optional
-            Explicitly request state-variable histories to be included in the
-            result.  Keys are model state keys (e.g. ``"ep"``); values specify
-            the :class:`~manforge.simulation.types.FieldType` to assign to the
-            resulting :class:`~manforge.simulation.types.FieldHistory`.
-
-            If ``None`` (default), no state variables are collected and
-            ``DriverResult.fields`` contains only ``"Stress"`` and ``"Strain"``.
         initial_stress : array-like or None, optional
             Stress tensor at the start of the loading history.  If ``None``
             (default), the initial stress is zero.
@@ -147,7 +138,9 @@ class DriverBase(ABC):
         Returns
         -------
         DriverResult
-            Every completed step.  With an integrator whose
+            Every completed step.  State-variable histories need no request:
+            read any of them afterwards with ``result.history("ep")``.  With
+            an integrator whose
             ``raise_on_nonconverged`` is ``False``, a run that stops early has
             ``converged=False`` and ``failed_step`` set, and the failed step is
             left out of the histories.
@@ -160,14 +153,9 @@ class DriverBase(ABC):
         """
         return self._collect(
             self.iter_run(load, initial_stress=initial_stress, initial_state=initial_state),
-            collect_state,
         )
 
-    def _collect(
-        self,
-        steps: Iterator[DriverStep],
-        collect_state: dict[str, FieldType] | None,
-    ) -> DriverResult:
+    def _collect(self, steps: Iterator[DriverStep]) -> DriverResult:
         """Gather the completed steps of an ``iter_run`` into a DriverResult."""
         step_results = []
         strain_rows = []
@@ -187,7 +175,6 @@ class DriverBase(ABC):
         return DriverResult(
             step_results=step_results,
             strain=strain_out,
-            collect_state=collect_state,
             converged=failed_step is None,
             failed_step=failed_step,
         )
@@ -697,7 +684,6 @@ class MixedDriver(DriverBase):
         load: FieldHistory,
         *,
         prescribed_stress_history=None,
-        collect_state: dict[str, FieldType] | None = None,
         initial_stress: "StressVec | None" = None,
         initial_state: "StateDict | None" = None,
     ) -> DriverResult:
@@ -710,8 +696,6 @@ class MixedDriver(DriverBase):
             ``(N, len(prescribed_strain_idx))``.
         prescribed_stress_history : array-like of shape (N, len(prescribed_stress_idx)) or None
             Target stress for the F components.  Defaults to zero.
-        collect_state : dict[str, FieldType] or None, optional
-            State variables to include in the result.
         initial_stress : array-like or None, optional
             Stress tensor at the start (default zero).
         initial_state : dict or None, optional
@@ -735,5 +719,4 @@ class MixedDriver(DriverBase):
                 initial_stress=initial_stress,
                 initial_state=initial_state,
             ),
-            collect_state,
         )

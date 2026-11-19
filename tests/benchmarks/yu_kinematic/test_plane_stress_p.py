@@ -278,22 +278,15 @@ _NON_PROPORTIONAL = [
     np.array([1.2e-2, -6e-3, -8e-3]),
 ]
 
-_COLLECT = {
-    "theta": FieldType.STRESS, "beta": FieldType.STRESS, "q": FieldType.STRESS,
-    "R": FieldType.STRESS, "r": FieldType.STRESS, "theta_max": FieldType.STRESS,
-    "eps_eq": FieldType.STRAIN,
-}
-
-
 def _run_ps_and_3d(history):
     """PS under full in-plane strain control vs 3D with σ33 = σ13 = σ23 = 0."""
     res_ps = StrainDriver(
         PythonNumericalIntegrator(YUKinematicPS(**PARAMS))
-    ).run(history, collect_state=_COLLECT)
+    ).run(history)
     res_3d = MixedDriver(
         PythonNumericalIntegrator(YUKinematic3D(**PARAMS)),
         prescribed_strain_idx=[0, 1, 3],
-    ).run(history, collect_state=_COLLECT)
+    ).run(history)
     return res_ps, res_3d
 
 
@@ -313,7 +306,7 @@ def test_multiaxial_state_matches_3d(waypoints, n_per_segment):
 
     assert any(r.is_plastic for r in res_ps.step_results), "no plastic step"
     # θ̄ starts at 0 and ends past B − Y = 75, so both C_k branches are covered.
-    assert res_ps.fields["theta_max"].data.max() > PARAMS["B"] - PARAMS["Y"]
+    assert res_ps.history("theta_max").max() > PARAMS["B"] - PARAMS["Y"]
     np.testing.assert_allclose(res_3d.stress[:, 2], 0.0, atol=1e-8)
     for col, idx_3d in enumerate([0, 1, 3]):
         np.testing.assert_allclose(
@@ -321,14 +314,14 @@ def test_multiaxial_state_matches_3d(waypoints, n_per_segment):
         )
 
     for key in ("theta", "beta", "q"):
-        mapped = np.array([_to_3d_deviator(row) for row in res_ps.fields[key].data])
+        mapped = np.array([_to_3d_deviator(row) for row in res_ps.history(key)])
         np.testing.assert_allclose(
-            mapped, res_3d.fields[key].data, rtol=1e-8, atol=1e-8,
+            mapped, res_3d.history(key), rtol=1e-8, atol=1e-8,
             err_msg=f"{key} diverges from the 3D model under M",
         )
     for key in ("R", "r", "eps_eq", "theta_max"):
         np.testing.assert_allclose(
-            res_ps.fields[key].data, res_3d.fields[key].data, rtol=1e-8, atol=1e-10,
+            res_ps.history(key), res_3d.history(key), rtol=1e-8, atol=1e-10,
             err_msg=key,
         )
 

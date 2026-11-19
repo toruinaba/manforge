@@ -6,7 +6,7 @@ import pytest
 from manforge.fitting.target import (
     FitTarget,
     Observation,
-    coerce_targets,
+    check_targets,
     _extract_field,
 )
 from manforge.simulation.driver import StrainDriver
@@ -41,8 +41,8 @@ def test_extract_stress_and_strain(driver_result):
     assert stress.shape == strain.shape == (10, 6)
 
 
-def test_extract_state_key_without_collect_state(driver_result):
-    """State keys are read off step_results, so collect_state is not needed."""
+def test_extract_state_key_needs_no_request(driver_result):
+    """State keys come from DriverResult.history, so nothing is requested up front."""
     ep = _extract_field(driver_result, "ep")
     assert ep.shape == (10,)
 
@@ -189,52 +189,74 @@ def test_normalisation_keeps_long_curve_from_dominating(model, driver_factory):
 
 
 # ---------------------------------------------------------------------------
-# coerce_targets
+# FitTarget.stress_strain — the one-curve constructor
 # ---------------------------------------------------------------------------
 
-def test_coerce_exp_data_dict():
-    exp = {"strain": np.linspace(0.0, 5e-3, 10), "stress": np.zeros(10)}
-    targets = coerce_targets(exp)
-    assert len(targets) == 1
-    obs = targets[0].observations[0]
+def test_stress_strain_builds_a_strain_driven_target():
+    target = FitTarget.stress_strain(np.linspace(0.0, 5e-3, 10), np.zeros(10))
+    assert target.load.type is FieldType.STRAIN
+    assert len(target.observations) == 1
+    obs = target.observations[0]
     assert obs.field == "Stress"
     assert obs.component == 0  # 1-D stress → compare σ11 only
 
 
-def test_coerce_exp_data_2d_stress_compares_all_components():
-    exp = {"strain": np.linspace(0.0, 5e-3, 10), "stress": np.zeros((10, 6))}
-    assert coerce_targets(exp)[0].observations[0].component is None
+def test_stress_strain_2d_stress_compares_all_components():
+    target = FitTarget.stress_strain(np.zeros((10, 6)), np.zeros((10, 6)))
+    assert target.observations[0].component is None
 
 
-def test_coerce_exp_data_missing_key():
-    with pytest.raises(ValueError, match=r"missing required key\(s\) \['stress'\]"):
-        coerce_targets({"strain": np.zeros(10)})
+def test_stress_strain_forwards_weights_name_and_driver():
+    weights = np.ones(10)
+    target = FitTarget.stress_strain(
+        np.linspace(0.0, 5e-3, 10), np.zeros(10),
+        weights=weights, name="tension", driver_factory=StrainDriver,
+    )
+    assert target.observations[0].weights is weights
+    assert target.label == "tension"
+    assert target.driver_factory is StrainDriver
 
 
-def test_coerce_single_target(strain_load):
+def test_stress_strain_checks_lengths_like_any_target():
+    with pytest.raises(ValueError, match="8 data points but the loading history has 10"):
+        FitTarget.stress_strain(np.linspace(0.0, 5e-3, 10), np.zeros(8))
+
+
+# ---------------------------------------------------------------------------
+# check_targets — the targets argument has one form
+# ---------------------------------------------------------------------------
+
+def test_check_targets_accepts_a_sequence(strain_load):
     target = FitTarget(
         load=strain_load,
         observations=[Observation(values=np.zeros(10), component=0)],
     )
-    assert coerce_targets(target) == [target]
+    assert check_targets([target, target]) == [target, target]
+    assert check_targets((target,)) == [target]
 
 
-def test_coerce_sequence_of_targets(strain_load):
+def test_check_targets_rejects_a_bare_target(strain_load):
     target = FitTarget(
         load=strain_load,
         observations=[Observation(values=np.zeros(10), component=0)],
     )
-    assert coerce_targets([target, target]) == [target, target]
+    with pytest.raises(TypeError, match="wrap the single target in a list"):
+        check_targets(target)
 
 
-def test_coerce_empty_sequence_rejected():
+def test_check_targets_points_the_old_dict_form_at_the_constructor():
+    with pytest.raises(TypeError, match=r"FitTarget\.stress_strain"):
+        check_targets({"strain": np.zeros(10), "stress": np.zeros(10)})
+
+
+def test_check_targets_rejects_empty_sequence():
     with pytest.raises(ValueError, match="no fitting targets"):
-        coerce_targets([])
+        check_targets([])
 
 
-def test_coerce_rejects_non_target_sequence():
+def test_check_targets_rejects_non_target_sequence():
     with pytest.raises(TypeError, match="expected FitTarget"):
-        coerce_targets(["not a target"])
+        check_targets(["not a target"])
 
 
 # ---------------------------------------------------------------------------

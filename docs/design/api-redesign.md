@@ -244,10 +244,13 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - **`param_names` の誤りが 1 件見つかった。** `ChabocheKinematicMulti` と `TeranishiKinematic` で、カンマが抜けて `"gamma3" "Qinf1"` が 1 つの名前になり、`C3` も抜けていた。コンストラクタが別に引数を持っていたので構築はでき、`model.params` を読むまで分からなかった。宣言が 1 箇所になったので、今後は構築時に分かる。
 
 ### 4.11 入口と命名の整理
-- **`fit_params`**: `fit_params(model, targets, space, *, driver_factory=...)` の 1 形式にする。dict の省略形は明示的なコンストラクタに移す。
-- **`nr_jacobian`**: 既定値を層の間で揃え、型を `Literal` にする。
-- **`tol`**: 意味ごとに名前を分ける(NR の収束、driver の外側 NR、検査の合否)。
-- **状態履歴の要求**: `collect_state={"ep": FieldType.STRAIN}` と `include_fields=["ep"]` を、名前の列に統一する。
+段 5 で実施した。
+
+- **`fit_params`**: `fit_params(model, targets, space, *, driver_factory=...)` の 1 形式にした。`targets` は `FitTarget` の列、`space` は `ParameterSpace` だけを受け取る。dict の省略形は明示的なコンストラクタに移した(実験カーブ 1 本は `FitTarget.stress_strain(strain, stress)`、パラメータは `ParameterSpace(free=, fixed=)`)。`coerce_targets`、`ParameterSpace.coerce`、`ExpData`、`FitConfig` は削除した。旧形式を渡すと、移行先を示す `TypeError` になる。
+- **モデルの再構築**: `MaterialModel.with_params(**params)` を追加した。浅いコピーを作ってパラメータだけ差し替えるので、次元も、パラメータではない設定(`J2IsotropicDamageUnilateral` の `c`)も引き継がれ、`__init__` の形に依存しない。fitting はこれを使う。段 4 までは `type(model)(dimension=..., **params)` で作り直していて、設定が黙って既定値に戻っていた。導出値をインスタンスにキャッシュするモデルではコピーに古い値が残るので、導出値は `property` に書く、という 4.10 の規則が前提になる。
+- **`nr_jacobian`**: 既定値を全層で `"exact"` に揃え、型を `Literal["exact", "broyden"]`(`_typing.NRJacobian`)にした。`service.run_simulation` の既定が `"broyden"` から変わるので、速度を優先する配備側は明示する必要がある。
+- **`tol`**: 1 つの対象が 1 つの意味しか持たない所は `tol` のままにした(integrator と driver は自分の NR、`fit_params` は最適化器)。checker の合否は `tol` に揃えた(`JacobianChecker` と `check_bindings` の `rtol` を改名。`check_hand_blocks(tol=None)` は checker の `tol` を既定に使う)。2 つの意味が同居していた `CrosscheckStressDriver` だけ、driver に渡す分を `driver_tol` / `driver_rtol` / `driver_max_iter` に改名した。全層を役割名(`nr_tol`、`outer_tol` など)にする案は採らなかった。
+- **状態履歴**: 要求そのものをなくした。`DriverResult` は全ステップの結果を持っているので、`result.history("ep")` で任意の状態量を後から取れる。`collect_state` 引数と `DriverResult.fields` は削除した(`FieldType` の指定を読む側は無かった)。fitting も同じ経路を使う。`service.run_simulation` の `include_fields` は、返す出力に何を入れるかの指定なので残した。当初の案は「名前の列に統一」だったが、要求と読み出しの 2 段階が残るので、こちらにした。
 - **残骸の削除**(段 1 で実施): `mandel_factors_jnp` / `identity_jnp`、`manforge.autodiff` パッケージ、`utils/tensor.py`、`utils/voigt.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。当初は `autodiff` のうち `operators.py` と `backend.check_float64` だけを挙げていたが、それを除くと使う側が残らないためパッケージごと削除した。`utils/voigt.py` も同じ理由で参照が無くなったので削除した。
 
 ## 5. 移行計画
@@ -260,7 +263,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 | 2 | `Increment`、フック署名、`elastic_tangent`、`isotropic_stiffness`、結果が `increment` を持つ | フック 29 定義の書き換え、剛性の override 4 つを削除 |
 | 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU の 3 次元と `YUKinematicPS` に宣言を付け、テストの対応表を削除 |
 | 4 | パラメータ宣言と `dimension` | コンストラクタ 32 個の削除、既定値に頼っていた呼び出しの明示、`param_names` の誤り 1 件の修正 |
-| 5 | 入口と命名の整理 | なし(fitting 未使用) |
+| 5 | 入口と命名の整理 | 例 1 本の `collect_state` を `history` に置き換え。`run_simulation` の既定が `"exact"` になる |
 | 6 | ドキュメント基盤、公開範囲の絞り込み | import の書き換え |
 
 - **段 2 が最大である。** フック定義は manforge のモデルに 20、manforge のテスト内モデルに約 65、manforge-internal に 29 ある。

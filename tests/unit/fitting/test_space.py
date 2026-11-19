@@ -71,22 +71,3 @@ def test_duplicate_name_across_groups_rejected():
 def test_empty_free_rejected():
     with pytest.raises(ValueError, match="at least one free variable"):
         ParameterSpace(free={})
-
-
-def test_coerce_dict_form():
-    space = ParameterSpace.coerce(
-        {"sigma_y0": (220.0, (50.0, 600.0))}, {"E": 210_000.0}
-    )
-    assert space.free_names == ("sigma_y0",)
-    assert space.fixed == {"E": 210_000.0}
-
-
-def test_coerce_passes_through_parameter_space():
-    original = ParameterSpace(free={"Y": (200.0, None)})
-    assert ParameterSpace.coerce(original) is original
-
-
-def test_coerce_rejects_fixed_params_with_parameter_space():
-    space = ParameterSpace(free={"Y": (200.0, None)}, fixed={"E": 1.0})
-    with pytest.raises(ValueError, match="fixed_params cannot be combined"):
-        ParameterSpace.coerce(space, {"nu": 0.3})

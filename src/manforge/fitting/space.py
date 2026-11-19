@@ -9,7 +9,7 @@ bounds ``(1.0, ...)`` instead of an inequality constraint.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -18,7 +18,6 @@ from typing_extensions import TypeAlias
 from manforge._typing import FloatArray
 
 Bound: TypeAlias = tuple[float | None, float | None] | None
-FitConfig: TypeAlias = "dict[str, tuple[float, Bound]]"
 DerivedFn: TypeAlias = Callable[[dict[str, float]], float]
 
 
@@ -59,7 +58,7 @@ class ParameterSpace:
         )
     """
 
-    free: FitConfig
+    free: dict[str, tuple[float, Bound]]
     fixed: dict[str, float] = field(default_factory=dict)
     derived: dict[str, DerivedFn] = field(default_factory=dict)
 
@@ -76,22 +75,6 @@ class ParameterSpace:
                         f"{seen[name]!r} and {group!r}"
                     )
                 seen[name] = group
-
-    @classmethod
-    def coerce(
-        cls,
-        fit_config: "ParameterSpace | FitConfig",
-        fixed_params: Mapping[str, float] | None = None,
-    ) -> "ParameterSpace":
-        """Accept either a :class:`ParameterSpace` or the plain dict form."""
-        if isinstance(fit_config, ParameterSpace):
-            if fixed_params:
-                raise ValueError(
-                    "fixed_params cannot be combined with a ParameterSpace — "
-                    "declare the constants in ParameterSpace(fixed=...)"
-                )
-            return fit_config
-        return cls(free=dict(fit_config), fixed=dict(fixed_params or {}))
 
     @property
     def free_names(self) -> tuple[str, ...]:

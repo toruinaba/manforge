@@ -333,39 +333,26 @@ class TestStrainDriverStepResults:
         result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
         assert result.stress.shape == (10, model.ntens)
 
-    def test_fields_dict_contains_stress_and_strain(self, model):
-        load = _uniaxial_strain_load(n_steps=10)
-        result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
-        fields = result.fields
-        assert "Stress" in fields
-        assert "Strain" in fields
-
-    def test_collect_state_via_fields(self, model):
+    def test_history_needs_no_request(self, model):
         load = _uniaxial_strain_load(n_steps=10, max_strain=5e-3)
-        result = StrainDriver(PythonNumericalIntegrator(model)).run(
-            load, collect_state={"ep": FieldType.STRAIN}
-        )
-        ep_history = result.fields["ep"].data
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
+        ep_history = result.history("ep")
         assert ep_history.shape == (10,)
         assert ep_history[-1] > 0.0
 
-    def test_collect_state_matches_step_results(self, model):
+    def test_history_matches_step_results(self, model):
         load = _uniaxial_strain_load(n_steps=10, max_strain=5e-3)
-        result = StrainDriver(PythonNumericalIntegrator(model)).run(
-            load, collect_state={"ep": FieldType.STRAIN}
-        )
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
         ep_from_steps = np.array([float(rm.state["ep"]) for rm in result.step_results])
-        np.testing.assert_allclose(result.fields["ep"].data, ep_from_steps, rtol=1e-12)
+        np.testing.assert_allclose(result.history("ep"), ep_from_steps, rtol=1e-12)
 
-    def test_collect_state_stress_matches_stress_property(self, model):
-        """result.fields["stress"] reads state["stress"]; must not lag on elastic steps."""
+    def test_history_of_stress_matches_stress_property(self, model):
+        """history("stress") reads state["stress"]; must not lag on elastic steps."""
         load = _uniaxial_strain_load(n_steps=10, max_strain=5e-3)
-        result = StrainDriver(PythonNumericalIntegrator(model)).run(
-            load, collect_state={"stress": FieldType.STRESS}
-        )
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
         assert not result.step_results[0].is_plastic, "expected elastic steps in this range"
         np.testing.assert_allclose(
-            np.array(result.fields["stress"].data), np.array(result.stress), rtol=1e-14
+            np.array(result.history("stress")), np.array(result.stress), rtol=1e-14
         )
 
     def test_step_n_minus_1_state_is_previous_step(self, model):
@@ -458,16 +445,14 @@ class TestRunReportsNonConvergence:
         assert result.failed_step is not None
         assert len(result.step_results) == result.failed_step
 
-    def test_collect_state_with_no_completed_step(self, model):
+    def test_history_with_no_completed_step(self, model):
         sigma = np.zeros((3, model.ntens))
         sigma[:, 0] = np.linspace(300.0, 500.0, 3)
         load = FieldHistory(FieldType.STRESS, "Stress", sigma)
         integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
-        result = StressDriver(integrator, max_iter=1).run(
-            load, collect_state={"ep": FieldType.STRAIN}
-        )
+        result = StressDriver(integrator, max_iter=1).run(load)
         assert result.failed_step == 0
-        assert len(result.fields["ep"].data) == 0
+        assert len(result.history("ep")) == 0
 
 
 class TestIntegratorContract:
@@ -584,33 +569,29 @@ class TestStressDriver:
         assert result.stress.shape == (N, 6)
         assert result.strain.shape == (N, 6)
 
-    def test_state_not_collected_by_default(self, model_3d):
+    def test_history_of_an_unknown_state_names_the_available_ones(self, model_3d):
         stress_history = np.zeros((5, 6))
         stress_history[:, 0] = np.linspace(0, 200.0, 5)
 
         result = StressDriver(PythonNumericalIntegrator(model_3d)).run(stress_load(stress_history))
 
-        assert set(result.fields.keys()) == {"Stress", "Strain"}
+        with pytest.raises(KeyError, match=r"'alpha' is not a state variable.*'ep'"):
+            result.history("alpha")
 
-    def test_state_ep_collected_when_requested(self, model_3d):
+    def test_stress_driver_state_history(self, model_3d):
         sigma_y0 = model_3d.sigma_y0
         N = 20
         stress_history = np.zeros((N, 6))
         stress_history[:, 0] = np.linspace(0.0, 1.5 * sigma_y0, N)
 
-        result = StressDriver(PythonNumericalIntegrator(model_3d)).run(
-            stress_load(stress_history),
-            collect_state={"ep": FieldType.STRAIN},
-        )
+        result = StressDriver(PythonNumericalIntegrator(model_3d)).run(stress_load(stress_history))
 
-        assert "ep" in result.fields
-        ep = result.fields["ep"].data
+        ep = result.history("ep")
         assert ep.shape == (N,)
-        assert result.fields["ep"].type == FieldType.STRAIN
         assert np.all(ep >= 0.0)
         assert ep[-1] > 0.0, "ep should be positive after plastic loading"
 
-    def test_strain_driver_collect_state(self, model_3d):
+    def test_strain_driver_state_history(self, model_3d):
         sigma_y0 = model_3d.sigma_y0
         E = model_3d.E
         N = 20
@@ -619,12 +600,10 @@ class TestStressDriver:
 
         result = StrainDriver(PythonNumericalIntegrator(model_3d)).run(
             FieldHistory(FieldType.STRAIN, "Strain", strain_history),
-            collect_state={"ep": FieldType.STRAIN},
         )
 
-        assert "ep" in result.fields
-        assert result.fields["ep"].data.shape == (N,)
-        assert result.fields["ep"].data[-1] > 0.0
+        assert result.history("ep").shape == (N,)
+        assert result.history("ep")[-1] > 0.0
 
     def test_consistency_with_strain_driver_1d(self, model_1d):
         sigma_y0 = model_1d.sigma_y0
@@ -817,17 +796,12 @@ class TestMixedDriver:
 
         eps_hist = np.linspace(0, eps_max, N)
         load_mixed = strain_load(eps_hist.reshape(-1, 1))
-        res_3d = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(
-            load_mixed, collect_state={"ep": FieldType.STRAIN}
-        )
+        res_3d = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(load_mixed)
 
-        res_1d = StrainDriver(integ_1d).run(
-            FieldHistory(FieldType.STRAIN, "Strain", eps_hist),
-            collect_state={"ep": FieldType.STRAIN},
-        )
+        res_1d = StrainDriver(integ_1d).run(FieldHistory(FieldType.STRAIN, "Strain", eps_hist))
 
         np.testing.assert_allclose(res_3d.stress[:, 0], res_1d.stress[:, 0], rtol=1e-4)
-        np.testing.assert_allclose(res_3d.fields["ep"].data, res_1d.fields["ep"].data, rtol=1e-4)
+        np.testing.assert_allclose(res_3d.history("ep"), res_1d.history("ep"), rtol=1e-4)
 
     def test_biaxial_constant_lateral_stress(self, model_3d, integ_3d):
         sigma_y0 = model_3d.sigma_y0
@@ -923,16 +897,13 @@ class TestMixedDriver:
             np.array(result.step_results[0].stress_trial), prestress, atol=1e-12,
         )
 
-    def test_collect_state_ep(self, model_3d, integ_3d):
+    def test_mixed_driver_state_history(self, model_3d, integ_3d):
         sigma_y0 = model_3d.sigma_y0
         E = model_3d.E
         N = 20
         load = strain_load(np.linspace(0, 3.0 * sigma_y0 / E, N).reshape(-1, 1))
-        result = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(
-            load, collect_state={"ep": FieldType.STRAIN}
-        )
-        assert "ep" in result.fields
-        ep = result.fields["ep"].data
+        result = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(load)
+        ep = result.history("ep")
         assert ep.shape == (N,)
         assert ep[-1] > 0.0
 

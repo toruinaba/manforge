@@ -39,7 +39,7 @@ class TestCompareJacobiansJ2:
             np.array([3e-3] + [0.0] * (model.ntens - 1)),
             np.zeros(model.ntens), state0,
         )
-        out = JacobianChecker(model, rtol=1e-8).compare(r_ad, r_an_ud)
+        out = JacobianChecker(model, tol=1e-8).compare(r_ad, r_an_ud)
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
         )
@@ -171,6 +171,17 @@ class TestCheckHandBlocks:
         }
         assert "8/16 derived" in report.summary()
         assert "not derived: [stress][stress]" in report.summary()
+
+    def test_the_checkers_tol_is_the_default_and_can_be_overridden(self):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        m = OWWithHandBlocks(**OW_PARAMS)
+        results = self._results(m)
+        strict = JacobianChecker(m, tol=1e-30)
+        report = strict.check_hand_blocks(results)
+        assert not report.passed                      # round-off exceeds 1e-30
+        assert {b.tol for b in report.blocks.values()} == {1e-30}
+        assert strict.check_hand_blocks(results, tol=1e-8).passed
 
     def test_a_wrong_block_is_found_by_name(self):
         """One sign error among eight blocks: named, not just 'the Jacobian is off'."""

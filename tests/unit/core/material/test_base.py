@@ -680,6 +680,47 @@ def test_param_names_must_be_declared():
 
 
 # ---------------------------------------------------------------------------
+# with_params: the same model with other parameter values
+# ---------------------------------------------------------------------------
+
+def test_with_params_replaces_only_the_named_parameters():
+    m = _StubWithParams(a=1.0, b=2.0)
+    n = m.with_params(b=5.0)
+    assert n.params == {"a": 1.0, "b": 5.0}
+    assert type(n) is _StubWithParams
+    assert m.params == {"a": 1.0, "b": 2.0}      # the original is untouched
+
+
+def test_with_params_keeps_the_dimension_of_an_open_class():
+    m = _Stub3D(dimension=PLANE_STRAIN)
+    assert m.with_params().dimension is PLANE_STRAIN
+
+
+def test_with_params_keeps_non_parameter_settings():
+    """What rebuilding through the constructor would lose."""
+    m = J2IsotropicDamageUnilateral3D(c=0.25, **_DMG, p_D=0.0, h=0.2)
+    n = m.with_params(S=0.8)
+    assert n.c == 0.25
+    assert n.S == 0.8
+    assert n.E == m.E
+
+
+def test_with_params_rejects_names_that_are_not_parameters():
+    m = J2IsotropicDamageUnilateral3D(**_DMG, p_D=0.0, h=0.2)
+    with pytest.raises(TypeError, match=r"with_params: unexpected \['c'\]"):
+        m.with_params(c=0.25)          # a setting, not a parameter
+    with pytest.raises(TypeError, match=r"unexpected \['sigma_y'\]"):
+        m.with_params(sigma_y=300.0)   # misspelt
+
+
+def test_with_params_stiffness_follows_the_new_parameters(model):
+    C0 = model.isotropic_stiffness()            # fills the original's cache
+    stiffer = model.with_params(E=2.0 * model.E)
+    np.testing.assert_allclose(stiffer.isotropic_stiffness(), 2.0 * C0)
+    np.testing.assert_allclose(model.isotropic_stiffness(), C0)
+
+
+# ---------------------------------------------------------------------------
 # Constructor: dimension — open unless a class body fixes it
 # ---------------------------------------------------------------------------
 

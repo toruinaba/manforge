@@ -32,12 +32,12 @@ def driver_factory():
 
 
 @pytest.fixture
-def synthetic_data(model, driver_factory):
-    """Uniaxial strain history and synthetic stress response (σ11 only)."""
+def synthetic_target(model, driver_factory):
+    """One target: a uniaxial strain history and the model's own σ11 response."""
     strain = np.linspace(0.0, 5e-3, 40)
     load = FieldHistory(FieldType.STRAIN, "Strain", strain)
     result = driver_factory(PythonIntegrator(model)).run(load)
-    return {"strain": strain, "stress": result.stress[:, 0]}
+    return FitTarget.stress_strain(strain, result.stress[:, 0])
 
 
 # ---------------------------------------------------------------------------
@@ -47,33 +47,37 @@ def synthetic_data(model, driver_factory):
 @pytest.mark.parametrize(
     "method", ["L-BFGS-B", "Nelder-Mead", "differential_evolution"]
 )
-def test_max_iter_bounds_work(model, driver_factory, synthetic_data, method):
+def test_max_iter_bounds_work(model, driver_factory, synthetic_target, method):
     """max_iter caps the optimiser for every method."""
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, method=method, max_iter=1)
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, method=method, max_iter=1)
 
     assert result.n_iter > 0
     assert set(result.params) == {"E", "nu", "sigma_y0", "H"}
 
 
-def test_options_override_max_iter(model, driver_factory, synthetic_data):
+def test_options_override_max_iter(model, driver_factory, synthetic_target):
     """options= wins over the max_iter keyword."""
-    fit_config = {"sigma_y0": (220.0, (50.0, 600.0))}
-    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+    space = ParameterSpace(
+        free={"sigma_y0": (220.0, (50.0, 600.0))},
+        fixed={"E": model.E, "nu": model.nu, "H": model.H},
+    )
 
-    capped = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, max_iter=50, options={"maxiter": 1})
+    capped = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, max_iter=50, options={"maxiter": 1})
 
     assert len(capped.history) <= 1
 
 
-def test_derived_param_reaches_model(model, driver_factory, synthetic_data):
+def test_derived_param_reaches_model(model, driver_factory, synthetic_target):
     """A derived parameter is reconstructed and passed to the model.
 
     ``H`` is optimised as a multiple of ``sigma_y0`` — the helper variable
@@ -85,8 +89,8 @@ def test_derived_param_reaches_model(model, driver_factory, synthetic_data):
         derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
     )
 
-    result = fit_params(model, driver_factory, synthetic_data, space,
-                        max_iter=1)
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, max_iter=1)
 
     assert result.params["H"] == pytest.approx(
         result.params["sigma_y0"] * result.params["H_ratio"]
@@ -94,7 +98,7 @@ def test_derived_param_reaches_model(model, driver_factory, synthetic_data):
     assert "H_ratio" in result.history[0]
 
 
-def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_data):
+def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_target):
     """A ratio bounded below by 1 keeps H >= sigma_y0 at every iterate."""
     space = ParameterSpace(
         free={"sigma_y0": (220.0, (50.0, 600.0)), "H_ratio": (2.0, (1.0, 20.0))},
@@ -102,8 +106,8 @@ def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_data):
         derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
     )
 
-    result = fit_params(model, driver_factory, synthetic_data, space,
-                        max_iter=3)
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, max_iter=3)
 
     for iterate in [*result.history, result.params]:
         values = space.resolve([iterate["sigma_y0"], iterate["H_ratio"]])
@@ -131,14 +135,16 @@ def test_multiple_strain_targets_recover_params(model, driver_factory):
         _strain_target(model, 3e-3, name="small"),
         _strain_target(model, 8e-3, name="large"),
     ]
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, targets, fit_config,
-                        fixed_params=fixed, max_iter=60)
+    result = fit_params(model, targets, space,
+                        driver_factory=driver_factory, max_iter=60)
 
     assert result.residual < 1e-3
     assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
@@ -158,11 +164,13 @@ def test_stress_driven_target(model):
         driver_factory=lambda i: StressDriver(i),
         name="ratchetting",
     )
-    fit_config = {"sigma_y0": (240.0, (50.0, 600.0))}
-    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+    space = ParameterSpace(
+        free={"sigma_y0": (240.0, (50.0, 600.0))},
+        fixed={"E": model.E, "nu": model.nu, "H": model.H},
+    )
 
-    result = fit_params(model, None, target, fit_config,
-                        fixed_params=fixed, max_iter=40)
+    result = fit_params(model, [target], space,
+                        max_iter=40)
 
     assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
 
@@ -185,11 +193,13 @@ def test_mixed_strain_and_stress_driven_targets(model, driver_factory):
             name="stress-controlled",
         ),
     ]
-    fit_config = {"sigma_y0": (230.0, (50.0, 600.0))}
-    fixed = {"E": model.E, "nu": model.nu, "H": model.H}
+    space = ParameterSpace(
+        free={"sigma_y0": (230.0, (50.0, 600.0))},
+        fixed={"E": model.E, "nu": model.nu, "H": model.H},
+    )
 
-    result = fit_params(model, driver_factory, targets, fit_config,
-                        fixed_params=fixed, max_iter=40)
+    result = fit_params(model, targets, space,
+                        driver_factory=driver_factory, max_iter=40)
 
     assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
 
@@ -208,14 +218,16 @@ def test_stress_and_state_observations_share_one_run(model, driver_factory):
             Observation(values=ep_computed, field="ep", weight=1e8, name="ep"),
         ],
     )
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, target, fit_config,
-                        fixed_params=fixed, max_iter=60)
+    result = fit_params(model, [target], space,
+                        driver_factory=driver_factory, max_iter=60)
 
     assert result.params["sigma_y0"] == pytest.approx(model.sigma_y0, rel=0.05)
     assert result.params["H"] == pytest.approx(model.H, rel=0.05)
@@ -226,16 +238,18 @@ def test_stress_and_state_observations_share_one_run(model, driver_factory):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_fit_result_structure(model, driver_factory, synthetic_data):
+def test_fit_result_structure(model, driver_factory, synthetic_target):
     """FitResult has all required fields with correct types."""
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, method="L-BFGS-B")
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, method="L-BFGS-B")
 
     assert isinstance(result, FitResult)
     assert isinstance(result.params, dict)
@@ -254,16 +268,18 @@ def test_fit_result_structure(model, driver_factory, synthetic_data):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_data):
+def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_target):
     """L-BFGS-B recovers sigma_y0 and H within 10% of true values."""
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, method="L-BFGS-B")
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, method="L-BFGS-B")
 
     assert result.residual < 1.0, f"Residual too large: {result.residual:.3e}"
     assert abs(result.params["sigma_y0"] - model.sigma_y0) / model.sigma_y0 < 0.1
@@ -275,16 +291,18 @@ def test_fit_uniaxial_synthetic(model, driver_factory, synthetic_data):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_fit_nelder_mead(model, driver_factory, synthetic_data):
+def test_fit_nelder_mead(model, driver_factory, synthetic_target):
     """Nelder-Mead also converges to true parameters."""
-    fit_config = {
-        "sigma_y0": (220.0, (None, None)),
-        "H":        (800.0, (None, None)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (None, None)),
+            "H":        (800.0, (None, None)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, method="Nelder-Mead")
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, method="Nelder-Mead")
 
     assert result.residual < 1.0
     assert abs(result.params["sigma_y0"] - model.sigma_y0) / model.sigma_y0 < 0.1
@@ -295,16 +313,18 @@ def test_fit_nelder_mead(model, driver_factory, synthetic_data):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_fit_history_populated(model, driver_factory, synthetic_data):
+def test_fit_history_populated(model, driver_factory, synthetic_target):
     """History list is non-empty after L-BFGS-B run."""
-    fit_config = {
-        "sigma_y0": (220.0, (50.0, 600.0)),
-        "H":        (800.0, (0.0, 5000.0)),
-    }
-    fixed = {"E": model.E, "nu": model.nu}
+    space = ParameterSpace(
+        free={
+            "sigma_y0": (220.0, (50.0, 600.0)),
+            "H":        (800.0, (0.0, 5000.0)),
+        },
+        fixed={"E": model.E, "nu": model.nu},
+    )
 
-    result = fit_params(model, driver_factory, synthetic_data, fit_config,
-                        fixed_params=fixed, method="L-BFGS-B")
+    result = fit_params(model, [synthetic_target], space,
+                        driver_factory=driver_factory, method="L-BFGS-B")
 
     assert len(result.history) > 0
     assert "sigma_y0" in result.history[0]

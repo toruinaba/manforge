@@ -10,10 +10,10 @@ two types correspond to the physical space of the quantity:
 Whether a quantity is a full tensor (shape ``(N, ntens)``) or a scalar
 (shape ``(N,)``) is conveyed by ``data.shape``, not by ``FieldType``.
 
-:class:`DriverResult` collects all output fields from a driver run.
-Its ``stress`` and ``strain`` properties provide shortcut access to the
-primary outputs; arbitrary fields (e.g. state variables) are accessible
-via ``result.fields["name"]``.
+:class:`DriverResult` holds every completed step of a driver run.  Its
+``stress`` and ``strain`` properties are the primary outputs; the history of
+any state variable is read with ``result.history("name")`` — nothing has to
+be requested before the run.
 """
 
 from __future__ import annotations
@@ -340,8 +340,6 @@ class DriverResult:
     strain : np.ndarray, shape (N, ntens)
         Cumulative strain history computed by the driver, over the completed
         steps.
-    collect_state : dict[str, FieldType] or None
-        State-variable fields requested in the ``run`` call.
     converged : bool
         ``False`` when the run stopped early on a step that did not converge.
         Reachable only with an integrator whose ``raise_on_nonconverged`` is
@@ -366,14 +364,14 @@ class DriverResult:
         rm.dlambda             # plastic multiplier at step 15
         rm.is_plastic          # whether step 15 was plastic
 
-    Access state-variable history via fields::
+    Access the history of any state variable::
 
-        result.fields["ep"].data   # np.ndarray (N,) — scalar, strain-space
+        result.history("ep")       # np.ndarray (N,)
+        result.history("alpha")    # np.ndarray (N, ntens)
     """
 
     step_results: list
     strain: np.ndarray
-    collect_state: dict[str, FieldType] | None = None
     converged: bool = True
     failed_step: int | None = None
 
@@ -384,23 +382,39 @@ class DriverResult:
             return np.zeros((0, self.strain.shape[-1]))
         return np.array([np.asarray(r.stress) for r in self.step_results])
 
-    @property
-    def fields(self) -> dict[str, FieldHistory]:
-        """All output fields constructed from step_results."""
-        out: dict[str, FieldHistory] = {
-            "Stress": FieldHistory(FieldType.STRESS, "Stress", self.stress),
-            "Strain": FieldHistory(FieldType.STRAIN, "Strain", self.strain),
-        }
-        if self.collect_state:
-            for k, ft in self.collect_state.items():
-                # No completed step (the first one failed): np.stack rejects an
-                # empty list, and the field's shape is unknown without a state.
-                data = (
-                    np.stack([np.asarray(r.state[k]) for r in self.step_results])
-                    if self.step_results else np.zeros((0,))
-                )
-                out[k] = FieldHistory(ft, k, data)
-        return out
+    def history(self, name: str) -> np.ndarray:
+        """History of one state variable over the completed steps.
+
+        Parameters
+        ----------
+        name : str
+            A model state key — ``"ep"``, ``"alpha"``, ... (``"stress"`` works
+            too and equals :attr:`stress`).
+
+        Returns
+        -------
+        np.ndarray
+            Shape ``(N,)`` for a scalar state, ``(N, ntens)`` for a tensor
+            one.  With no completed step (the first one failed) the shape of
+            the variable is unknown and the result is an empty ``(0,)`` array.
+
+        Raises
+        ------
+        KeyError
+            ``name`` is not a state key of the model; the message lists the
+            available ones.
+        """
+        if not self.step_results:
+            return np.zeros((0,))
+        try:
+            return np.stack(
+                [np.asarray(r.state[name], dtype=float) for r in self.step_results]
+            )
+        except KeyError:
+            raise KeyError(
+                f"{name!r} is not a state variable of this model; available: "
+                f"{sorted(self.step_results[0].state)}"
+            ) from None
 
 
 @dataclass
