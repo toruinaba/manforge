@@ -119,8 +119,10 @@ report = check_bindings(model, FortranModule("j2_isotropic_3d"), {
     "elastic_stiffness": ((model.initial_state(),), (model.E, model.nu)),
 })
 assert report.passed, report.summary()
+# bindings: 1 checked — all agree
+#   ok   elastic_stiffness ↔ j2_isotropic_3d_elastic_stiffness: 0.000e+00 (tol 1e-10)
 ```
 
-   `report.summary()` はメソッドごとに、対応するサブルーチン名と誤差を 1 行ずつ出す。対応づけたのに `cases` に入れなかったメソッドは `not checked` として一覧に出る。
+   対応づけたのに `cases` に入れなかったメソッドは `not checked` として一覧に出る。
 
 通しの実例: `examples/example_custom_model_workflow.py`
