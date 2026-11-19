@@ -16,27 +16,20 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.core.material import MaterialModel
-from manforge.core.state import Implicit, Explicit, NTENS
-from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, SOLID_3D
-from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.models.ow_kinematic import OWKinematic3D
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import (
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+from manforge.core import (
+    MaterialModel, Implicit, Explicit, NTENS, PLANE_STRAIN, PLANE_STRESS, SOLID_3D,
 )
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import TangentChecker
+from manforge.models import (
+    AFKinematic, AFKinematic3D, AFKinematicPS, J2Isotropic3D, OWKinematic3D,
+)
+from manforge.simulation import (
+    StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator, FieldHistory, FieldType,
+)
 from manforge.verification import (
-    CaseResult,
-    ComparisonResult,
-    CrosscheckStrainDriver,
-    generate_strain_history,
+    TangentChecker, CaseResult, ComparisonResult, CrosscheckStrainDriver,
+    generate_strain_history, make_increment,
 )
-from manforge.verification import make_increment
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )
@@ -906,7 +899,7 @@ class TestCaseResultBaseConverged:
         assert result.n_b_nonconverged == 0
 
     def test_base_run_counts_nonconverged_via_stub(self):
-        from manforge.verification.comparator_base import Comparator
+        from manforge.verification import Comparator
 
         class _Stub(Comparator):
             def iter_run(self):
@@ -1353,8 +1346,7 @@ class TestBroydenJacobian:
         )
 
     def test_multistep_history_matches(self):
-        from manforge.simulation.driver import StrainDriver
-        from manforge.simulation.types import FieldHistory
+        from manforge.simulation import StrainDriver, FieldHistory
 
         exact, broyden = self._integrators()
         load = FieldHistory.cyclic_strain(
@@ -1520,9 +1512,9 @@ class TestTangentIncrementDependence:
 from tests.fixtures.predictor_models import (  # noqa: E402
     BilinearPlastic1D, BilinearPlasticTrialResidual1D,
 )
-from manforge.models.j2_isotropic import J2Isotropic1D  # noqa: E402
-from manforge.simulation.integrator import SubSteppingIntegrator  # noqa: E402
-from manforge.core.state import StateResidual  # noqa: E402
+from manforge.models import J2Isotropic1D  # noqa: E402
+from manforge.simulation import SubSteppingIntegrator  # noqa: E402
+from manforge.core import StateResidual  # noqa: E402
 
 _J2_1D = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 _BL = dict(_J2_1D, k_t=0.6, k_c=0.95)

@@ -23,11 +23,10 @@ import numpy as np
 import numpy.testing as npt
 
 import manforge  # noqa: F401 — enables float64
-from manforge.core import Explicit, SCALAR
-from manforge.core.material import MaterialModel
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory
+from manforge.core import Explicit, SCALAR, MaterialModel
+from manforge.simulation import (
+    StrainDriver, PythonIntegrator, PythonNumericalIntegrator, FieldHistory,
+)
 from manforge.verification import JacobianChecker, TangentChecker
 
 # =========================================================================

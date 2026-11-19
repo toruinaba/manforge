@@ -4,11 +4,13 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.models import J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D
-from manforge.simulation.driver import StressDriver
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import TangentChecker
+from manforge.models import (
+    J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,
+)
+from manforge.simulation import (
+    StressDriver, PythonNumericalIntegrator, FieldHistory, FieldType,
+)
+from manforge.verification import TangentChecker
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 DP = dict(S=0.5, s=1.0, p_D=0.01)

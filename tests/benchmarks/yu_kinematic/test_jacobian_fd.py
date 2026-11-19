@@ -18,8 +18,8 @@ import pytest
 from copy import deepcopy
 
 from manforge.models import YUKinematic3D
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.utils.smooth import smooth_sqrt, smooth_heaviside, smooth_max
+from manforge.simulation import PythonNumericalIntegrator
+from manforge.utils import smooth_sqrt, smooth_heaviside, smooth_max
 
 from .conftest import PARAMS
 

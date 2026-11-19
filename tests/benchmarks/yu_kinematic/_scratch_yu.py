@@ -1,10 +1,10 @@
 import numpy as np
 import numpy.testing as npt
 
-from manforge.models.yu_kinematic import YUKinematic1D, YUKinematic3D
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.simulation.driver import MixedDriver, StrainDriver
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.models import YUKinematic1D, YUKinematic3D
+from manforge.simulation import (
+    PythonNumericalIntegrator, MixedDriver, StrainDriver, FieldHistory, FieldType,
+)
 from manforge.verification import JacobianChecker
 
 

@@ -14,15 +14,12 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.core.result import ReturnMappingResult
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import (
-    PythonAnalyticalIntegrator,
-    PythonNumericalIntegrator,
-    SubSteppingIntegrator,
+from manforge.core import ReturnMappingResult
+from manforge.models import J2Isotropic3D
+from manforge.simulation import (
+    StrainDriver, PythonAnalyticalIntegrator, PythonNumericalIntegrator,
+    SubSteppingIntegrator, FieldHistory, FieldType,
 )
-from manforge.simulation.types import FieldHistory, FieldType
 
 
 PARAMS = dict(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
@@ -160,7 +157,7 @@ class TestDelegation:
         ).raise_on_nonconverged is False
 
     def test_fulfils_the_integrator_contract(self, wrapped):
-        from manforge.simulation.integrator import StressIntegrator
+        from manforge.simulation import StressIntegrator
         assert isinstance(wrapped, StressIntegrator)
 
     def test_rejects_max_substeps_below_one(self, inner):
@@ -532,7 +529,7 @@ class TestTangentApproximation:
         double's Δλ limit is only satisfiable by subdividing those probes hard.
         A real model's admissible branch does not shrink with Δλ this way.
         """
-        from manforge.simulation.driver import StressDriver
+        from manforge.simulation import StressDriver
 
         integrator = SubSteppingIntegrator(
             PythonAnalyticalIntegrator(model), max_substeps=256

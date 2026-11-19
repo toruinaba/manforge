@@ -11,7 +11,7 @@ Absorbed from:
 
 import pytest
 
-from manforge.verification import FortranModule
+from manforge.simulation import FortranModule
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def test_elastic_stiffness_binding_registered():
         "j2_isotropic_3d",
         reason="j2_isotropic_3d not compiled -- run: uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
     )
-    from manforge.models.j2_isotropic import J2Isotropic3D
+    from manforge.models import J2Isotropic3D
     bindings = J2Isotropic3D._fortran_bindings
     assert "elastic_stiffness" in bindings
     assert bindings["elastic_stiffness"].subroutine == "j2_isotropic_3d_elastic_stiffness"

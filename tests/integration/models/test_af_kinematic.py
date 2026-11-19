@@ -9,8 +9,8 @@ Covers physics unique to the AF model:
 import pytest
 import autograd.numpy as anp
 
-from manforge.models.af_kinematic import AFKinematic3D, AFKinematicPS, AFKinematic1D
-from manforge.simulation.integrator import PythonIntegrator
+from manforge.models import AFKinematic3D, AFKinematicPS, AFKinematic1D
+from manforge.simulation import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------

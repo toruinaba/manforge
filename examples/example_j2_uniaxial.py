@@ -15,10 +15,8 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables JAX float64
-from manforge.models.j2_isotropic import J2Isotropic1D
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory
+from manforge.models import J2Isotropic1D
+from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory
 from manforge.verification import TangentChecker
 
 try:

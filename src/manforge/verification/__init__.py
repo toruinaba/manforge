@@ -1,4 +1,10 @@
-"""Verification utilities for constitutive model validation."""
+"""Verification utilities for constitutive model validation.
+
+Checks only.  What they check is declared elsewhere: ``hand_block`` and
+``verified_against_fortran`` on the model (:mod:`manforge.core`),
+``FortranModule`` and ``JacobianBlocks`` with the solver
+(:mod:`manforge.simulation`).
+"""
 
 from manforge.verification.comparator_base import (
     Comparator,
@@ -6,23 +12,16 @@ from manforge.verification.comparator_base import (
     ComparisonResult,
 )
 from manforge.verification.jacobian import (
-    JacobianBlocks,
     JacobianComparisonResult,
     JacobianChecker,
     HandBlockCheck,
     HandBlockReport,
 )
 from manforge.verification.tangent import TangentChecker, TangentCheckResult
-from manforge.simulation.integrator.fortran_module import FortranModule
 from manforge.verification.test_cases import (
     estimate_yield_strain,
     generate_strain_history,
     make_increment,
-)
-from manforge.core.material.fortran_binding import (
-    FortranBinding,
-    verified_against_fortran,
-    collect_bindings,
 )
 from manforge.verification.fortran_check import check_bindings
 from manforge.verification.crosscheck_driver import (
@@ -37,8 +36,7 @@ __all__ = [
     "Comparator",
     "CaseResult",
     "ComparisonResult",
-    # Jacobian block decomposition and comparison
-    "JacobianBlocks",
+    # Jacobian comparison and hand-block checks
     "JacobianComparisonResult",
     "JacobianChecker",
     "HandBlockCheck",
@@ -46,16 +44,11 @@ __all__ = [
     # Finite-difference tangent check
     "TangentChecker",
     "TangentCheckResult",
-    # Fortran interface
-    "FortranModule",
     # Test case generation
     "estimate_yield_strain",
     "generate_strain_history",
     "make_increment",
-    # Fortran binding registry
-    "FortranBinding",
-    "verified_against_fortran",
-    "collect_bindings",
+    # Fortran binding check
     "check_bindings",
     # Multi-step crosscheck harness
     "CrosscheckCaseResult",

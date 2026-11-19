@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from manforge.models import YUKinematic1D, YUKinematic3D
-from manforge.simulation.types import FieldHistory
+from manforge.simulation import FieldHistory
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,

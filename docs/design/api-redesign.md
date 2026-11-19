@@ -20,7 +20,7 @@
 2. **UMAT に入る量には必ず手書きスロットがあり、自動微分はそれを照合する参照側に立つ。** 自動微分だけで得られる量を成果物(Fortran UMAT)の前提にしない。
 3. **フックには引数を足し続けない。** ステップの文脈を 1 つのオブジェクトにして渡す。
 4. **設計の重点は「コアが現在表現できること全体」で決める。** manforge-internal での使用件数は移行コストの見積もりにだけ使う。
-5. **公開 import パスは当面いじらない。** 深いモジュールパス(`manforge.core.state` など)も公開扱いとする。絞り込みとモジュールの移動は別の機会に行う。
+5. **公開 import パスは当面いじらない。** 深いモジュールパス(`manforge.core.state` など)も公開扱いとする。絞り込みとモジュールの移動は別の機会に行う。→ 段 6a で、公開する import 元をパッケージ単位に決めた(4.12)。モジュールの移動はしていない。
 
 ## 3. コアが表現する範囲
 
@@ -253,6 +253,27 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - **状態履歴**: 要求そのものをなくした。`DriverResult` は全ステップの結果を持っているので、`result.history("ep")` で任意の状態量を後から取れる。`collect_state` 引数と `DriverResult.fields` は削除した(`FieldType` の指定を読む側は無かった)。fitting も同じ経路を使う。`service.run_simulation` の `include_fields` は、返す出力に何を入れるかの指定なので残した。当初の案は「名前の列に統一」だったが、要求と読み出しの 2 段階が残るので、こちらにした。
 - **残骸の削除**(段 1 で実施): `mandel_factors_jnp` / `identity_jnp`、`manforge.autodiff` パッケージ、`utils/tensor.py`、`utils/voigt.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。当初は `autodiff` のうち `operators.py` と `backend.check_float64` だけを挙げていたが、それを除くと使う側が残らないためパッケージごと削除した。`utils/voigt.py` も同じ理由で参照が無くなったので削除した。
 
+### 4.12 公開する import パスとドキュメント
+段 6 で決めた。段 6a(import パス)と段 6b(ドキュメント基盤)に分けて進める。
+
+**import パス(段 6a)**
+
+同じ名前が 2〜3 通りのパスから取れていた(`Implicit` は `manforge.core` と `manforge.core.state`、`FortranModule` は `manforge.simulation.integrator` と `manforge.verification`)。README、例、manforge-internal のあいだでも書き方が揃っていなかった。
+
+- **公開の import 元はパッケージ単位の 7 つとする。** `manforge.core` / `.models` / `.simulation` / `.fitting` / `.verification` / `.service` / `.utils`。
+- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `manforge.service` からも取れていたが、モデル上で宣言するものなので `manforge.core` だけにした。配備側(manforge-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `manforge.core` から取る。
+- **`manforge.core` はモデル定義に要るもの全部を持つ。** `MaterialModel`、`ParamMeta`、`hand_block`、`verified_against_fortran` を `core.material` から引き上げた。
+- **`manforge.verification` は検査だけを持つ。** 検査される側の宣言は、定義されている場所に置く。`FortranModule` と `JacobianBlocks` は `manforge.simulation`、`verified_against_fortran` と `FortranBinding` は `manforge.core`。`verification` からの再エクスポートは削除した(互換シムは置かない)。
+- **`manforge.utils` は smooth 近似と主値分解の関数を公開する。** これまで `__init__` は空で、`manforge.utils.smooth` から取るしかなかった。
+- **サブモジュールのパスは動き続けるが、文書には載せない。** モジュールの改名(`_state.py` など)で強制する案は採らなかった。約 30 モジュールの改名と、テスト配置の規約(`src` と 1:1)の見直しが要るためである。`src/` 内部の import と、非公開ヘルパを直接試すテストは、引き続きサブモジュールのパスを使う。
+- 規則は `tests/unit/test_public_api.py` で確認する(載せた名前が存在する、二重に載っていない、各パッケージが単独で import できる)。
+
+**ドキュメント(段 6b)**
+
+- **ツールは Sphinx + MyST。** docstring は英語の NumPy 形式で、`:class:` などの相互参照が約 290 箇所ある。autodoc + napoleon ならそのままリンクになる。ガイドは Markdown(MyST)で書く。
+- **ガイドは日本語、API リファレンスは英語。** 今ある資産(日本語の README、英語の docstring)をそのまま使う。
+- **まずローカルビルドのみ。** `make docs` で HTML を作れる状態までを範囲とし、警告をエラー扱いにしてリンク切れを検出する。公開先(GitHub Pages など)は内容を確認してから別途決める。
+
 ## 5. 移行計画
 各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。
 
@@ -264,7 +285,8 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 | 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU の 3 次元と `YUKinematicPS` に宣言を付け、テストの対応表を削除 |
 | 4 | パラメータ宣言と `dimension` | コンストラクタ 32 個の削除、既定値に頼っていた呼び出しの明示、`param_names` の誤り 1 件の修正 |
 | 5 | 入口と命名の整理 | 例 1 本の `collect_state` を `history` に置き換え。`run_simulation` の既定が `"exact"` になる |
-| 6 | ドキュメント基盤、公開範囲の絞り込み | import の書き換え |
+| 6a | 公開する import パスをパッケージ単位に揃える | import の書き換え |
+| 6b | ドキュメント基盤(Sphinx + MyST、README からガイドへ) | なし |
 
 - **段 2 が最大である。** フック定義は manforge のモデルに 20、manforge のテスト内モデルに約 65、manforge-internal に 29 ある。
 - **段 2 の合格条件は数値の完全一致とする。** 署名の変更だけなので、既存モデルの結果は変わらないはずである。`v0.1.0` で代表的な履歴の結果を保存し、変更後とビット単位で比べる。実施結果: 公開モデル 66 ケース、manforge-internal の全モデル 57 ケース(応力・ひずみ・全状態量・接線・反復数)が完全一致した。段 1 も同じ方法で `v0.1.0` と完全一致することを確認した。
@@ -280,7 +302,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 5. ~~次元を固定するクラスの判定~~ → クラス本体に `dimension` を書いたクラスとその子は固定、に決定(4.10)。
 6. **手導出の残差も宣言するか。** 現在の `calc_residual` は explicit 状態を凍結した形で、フレームワークの残差と構造が違う。
 7. **Crosscheck ドライバの扱い。** manforge-internal では使われていない。段 3 の試験移行の結果を見て、残すか形を変えるかを決める。
-8. **ドキュメントのツールと言語。** Sphinx + MyST を候補としているが未決定である。
+8. ~~ドキュメントのツールと言語~~ → Sphinx + MyST、ガイドは日本語で API リファレンスは英語、まずローカルビルドのみ、に決定(4.12)。
 
 ## 付録 A. 調査で確認した事実
 

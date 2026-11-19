@@ -4,16 +4,13 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.dimension import SOLID_3D, UNIAXIAL_1D
-from manforge.core.result import StressUpdateResult
-from manforge.models.j2_isotropic import J2Isotropic3D, J2Isotropic1D
-from manforge.simulation.driver import StrainDriver, StressDriver, MixedDriver
-from manforge.simulation.integrator import (
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+from manforge.core import SOLID_3D, UNIAXIAL_1D, StressUpdateResult
+from manforge.models import J2Isotropic3D, J2Isotropic1D
+from manforge.simulation import (
+    StrainDriver, StressDriver, MixedDriver, PythonIntegrator,
+    PythonNumericalIntegrator, PythonAnalyticalIntegrator, DriverResult, DriverStep,
+    FieldHistory, FieldType,
 )
-from manforge.simulation.types import DriverResult, DriverStep, FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------
@@ -478,7 +475,7 @@ class TestIntegratorContract:
         PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
     ])
     def test_python_integrators_fulfil_it(self, model, cls):
-        from manforge.simulation.integrator import StressIntegrator
+        from manforge.simulation import StressIntegrator
         assert isinstance(cls(model), StressIntegrator)
 
     def test_python_elastic_tangent_is_the_model_stiffness(self, model):

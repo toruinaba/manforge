@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 from manforge.models import AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
+from manforge.core import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
 from manforge.verification import make_increment
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)

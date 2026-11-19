@@ -16,13 +16,16 @@ import pytest
 import numpy as np
 import autograd.numpy as anp
 
-from manforge.models.af_kinematic import AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D
-from manforge.models.ow_kinematic import OWKinematic, OWKinematic3D, OWKinematicPS, OWKinematic1D
-from manforge.core.dimension import PLANE_STRAIN
-from manforge.simulation.driver import StrainDriver, MixedDriver
-from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import TangentChecker
+from manforge.models import (
+    AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D, OWKinematic,
+    OWKinematic3D, OWKinematicPS, OWKinematic1D,
+)
+from manforge.core import PLANE_STRAIN
+from manforge.simulation import (
+    StrainDriver, MixedDriver, PythonIntegrator, PythonNumericalIntegrator,
+    FieldHistory, FieldType,
+)
+from manforge.verification import TangentChecker
 
 
 _FACTORIES_3D = {

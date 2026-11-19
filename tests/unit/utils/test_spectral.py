@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS, SOLID_3D, UNIAXIAL_1D
-from manforge.utils.spectral import (
+from manforge.core import PLANE_STRAIN, PLANE_STRESS, SOLID_3D, UNIAXIAL_1D
+from manforge.utils import (
     macaulay_sq, neg_macaulay_sq, negative_part, negative_part_sq, positive_part,
     positive_part_sq, principal_values, spectral_trace, voigt_stress_to_tensor,
 )

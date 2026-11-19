@@ -16,9 +16,7 @@ Reference solution: run undamaged ``J2Isotropic1D`` on the same strain path
 import autograd
 import autograd.numpy as anp
 
-from manforge.core.dimension import UNIAXIAL_1D
-from manforge.core.material import MaterialModel
-from manforge.core.state import Explicit, Implicit, NTENS
+from manforge.core import UNIAXIAL_1D, MaterialModel, Explicit, Implicit, NTENS
 
 
 class BilinearPlastic1D(MaterialModel):

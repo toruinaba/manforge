@@ -3,12 +3,12 @@
 import numpy as np
 import pytest
 
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.simulation.jacobian import (
-    JacobianBlocks, hand_jacobian, hand_jacobian_blocks, residual_jacobian,
+from manforge.simulation import (
+    StrainDriver, PythonNumericalIntegrator, JacobianBlocks, FieldHistory, FieldType,
 )
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.jacobian import (
+    hand_jacobian, hand_jacobian_blocks, residual_jacobian,
+)
 from manforge.verification import JacobianChecker
 from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
@@ -89,7 +89,7 @@ def test_hand_jacobian_marks_where_each_block_came_from(model, plastic_result):
 
 
 def test_wrongly_sized_block_is_reported_by_name(plastic_result):
-    from manforge.core.material import hand_block
+    from manforge.core import hand_block
 
     class _Misshapen(OWWithHandBlocks):
         @hand_block("ep", "stress")

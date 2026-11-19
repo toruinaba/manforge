@@ -14,12 +14,12 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.material import MaterialModel
-from manforge.core.state import NTENS
-from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+from manforge.core import (
+    MaterialModel, NTENS, SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D,
+)
 from manforge.models import (
-    J2IsotropicDamage3D, J2IsotropicDamageCrackClosure3D, J2IsotropicDamageUnilateral3D,
+    J2Isotropic3D, J2IsotropicPS, J2Isotropic1D, J2IsotropicDamage3D,
+    J2IsotropicDamageCrackClosure3D, J2IsotropicDamageUnilateral3D,
 )
 from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
@@ -480,7 +480,7 @@ def test_1d_I_dev_projects_to_deviatoric():
 
 def test_explicit_state_without_update_state_raises():
     """Model with an Explicit field but no update_state must raise TypeError."""
-    from manforge.core.state import Explicit
+    from manforge.core import Explicit
     with pytest.raises(TypeError, match="update_state"):
         class Bad(MaterialModel):
             param_names = []
@@ -495,7 +495,7 @@ def test_explicit_state_without_update_state_raises():
 
 def test_implicit_state_without_state_residual_raises():
     """Model with an Implicit field but no state_residual must raise TypeError."""
-    from manforge.core.state import Implicit
+    from manforge.core import Implicit
     with pytest.raises(TypeError, match="state_residual"):
         class Bad(MaterialModel):
             param_names = []
@@ -511,7 +511,7 @@ def test_implicit_state_without_state_residual_raises():
 
 def test_mixed_implicit_explicit_requires_both_methods():
     """Partial implicit (some explicit, some implicit) requires both methods."""
-    from manforge.core.state import Implicit, Explicit
+    from manforge.core import Implicit, Explicit
     class OK(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
@@ -534,7 +534,7 @@ def test_mixed_implicit_explicit_requires_both_methods():
 
 def test_all_implicit_states_no_update_state_needed():
     """Model with all states implicit does not need update_state."""
-    from manforge.core.state import Implicit
+    from manforge.core import Implicit
     class OKImplicit(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
@@ -658,7 +658,7 @@ def test_non_parameter_setting_goes_through_an_init_override():
 ], ids=["duplicate", "bare-str", "non-str", "non-identifier",
         "state-field", "dimension", "method"])
 def test_param_names_are_validated_at_class_creation(names, match):
-    from manforge.core.state import Explicit, SCALAR
+    from manforge.core import Explicit, SCALAR
 
     with pytest.raises(TypeError, match=match):
         class _Bad(MaterialModel):

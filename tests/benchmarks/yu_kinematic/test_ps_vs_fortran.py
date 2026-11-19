@@ -25,10 +25,8 @@ pytest.importorskip(
 pytestmark = pytest.mark.fortran
 
 from manforge.models import YUKinematicPS
-from manforge.simulation.integrator import (
-    FortranModule,
-    PythonAnalyticalIntegrator,
-    PythonNumericalIntegrator,
+from manforge.simulation import (
+    FortranModule, PythonAnalyticalIntegrator, PythonNumericalIntegrator,
 )
 
 from .conftest import PARAMS

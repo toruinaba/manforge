@@ -7,8 +7,8 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.result import ReturnMappingResult, StressUpdateResult
-from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
+from manforge.core import ReturnMappingResult, StressUpdateResult
+from manforge.simulation import PythonIntegrator, PythonAnalyticalIntegrator
 
 
 def test_result_is_dataclass(model, initial_state):
@@ -83,7 +83,7 @@ def test_plastic_tangent_is_lazy_and_cached(model, initial_state, monkeypatch):
     Strain-controlled stepping never consumes the tangent, and its Jacobian
     costs as much as several NR iterations, so stress_update defers it.
     """
-    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation import PythonNumericalIntegrator
     from manforge.simulation.integrator.base import _PythonIntegratorBase
 
     calls = {"n": 0}
@@ -109,7 +109,7 @@ def test_plastic_tangent_is_lazy_and_cached(model, initial_state, monkeypatch):
 
 def test_lazy_tangent_matches_eager_value(model, initial_state):
     """Deferral must not change the tangent — compare against a direct call."""
-    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation import PythonNumericalIntegrator
 
     integ = PythonNumericalIntegrator(model)
     deps = anp.array([3e-3, 0, 0, 0, 0, 0])

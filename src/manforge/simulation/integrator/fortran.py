@@ -62,7 +62,7 @@ class FortranIntegrator:
     Parameters
     ----------
     fortran : FortranModule
-        f2py module wrapper (from :class:`~manforge.verification.FortranModule`).
+        f2py module wrapper (from :class:`~manforge.simulation.FortranModule`).
     subroutine : str
         Name of the f2py-callable core-logic subroutine.
     dimension : StressDimension, optional

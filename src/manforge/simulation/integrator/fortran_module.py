@@ -8,7 +8,7 @@ Usage
 -----
 ::
 
-    from manforge.simulation.integrator import FortranModule
+    from manforge.simulation import FortranModule
     import numpy as np
 
     fortran = FortranModule("j2_isotropic_3d")
@@ -26,7 +26,7 @@ Usage
 
 Compare results explicitly against the Python reference::
 
-    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation import PythonNumericalIntegrator
     import numpy as np
 
     integrator = PythonNumericalIntegrator(model)

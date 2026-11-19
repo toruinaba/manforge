@@ -29,11 +29,15 @@ There is no linter configured. No CI/CD workflows exist.
 
 manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Float64 is enabled globally in `src/manforge/__init__.py`.
 
+### Public import paths
+
+公開の import 元はパッケージ単位の 7 つ: `manforge.core`(モデル定義に要るもの全部 — `MaterialModel` / 状態宣言 / 次元 / `hand_block` / `verified_against_fortran` / 結果型)、`manforge.models`、`manforge.simulation`(integrator / driver / `FieldHistory` / `FortranModule` / `JacobianBlocks`)、`manforge.fitting`、`manforge.verification`(検査のみ)、`manforge.service`、`manforge.utils`。どの名前も 1 つのパッケージの `__all__` にだけ載せる(例外なし。`tests/unit/test_public_api.py` が確認する)。README・例・テスト・docstring の例はこの形で書く。サブモジュールのパス(`manforge.core.state` 等)は実装の置き場所で、`src/` 内部の import と、非公開ヘルパを直接試すテストだけが使う。
+
 ### Three-layer design
 
 1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。パラメータは `param_names` が唯一の宣言で、基底の `__init__` が同名のキーワード引数を受け取って属性に入れる(モデルは `__init__` を書かない。全パラメータ必須で既定値なし — UMAT の `PROPS` と同じ規則)。次元は、クラス本体に `dimension = X` と書いたクラスとその子は固定(別の `dimension=` は `TypeError`)、書かないクラスは構築時の `dimension=` で選ぶ。特殊フック(`elastic_predictor` / `elastic_tangent` / `elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。予測子以外のフックは 1 ステップの入力をまとめた `Increment`(`inc.state_n` / `inc.strain_inc` / `inc.trial`、`core/state.py`)を受け取る。フックは位置引数で呼ばれるので、引数リストが違うとクラス定義時に `TypeError`。
 2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。結果(`StressUpdateResult`)は自分の `Increment` を持つので、ヤコビアンの内省は `JacobianChecker(model).compute(result)` だけで済む。NR 経路(スカラー/ベクトル)は宣言から自動選択。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。既定は全層(integrator / fitting / service)で `"exact"`。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
-3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`。状態量の履歴は要求せず `DriverResult.history(name)` で取る)、`fitting/`(`fit_params(model, targets, space, *, driver_factory=...)` の 1 形式 + `ParameterSpace` / `FitTarget` / `Observation` / metrics。各評価のモデルは `model.with_params(...)`)、`verification/`(`JacobianChecker` / `TangentChecker` / `CrosscheckStrainDriver` 等)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation` / `ParamMeta`。Web 依存ゼロ、plain I/O、非収束は値で返す)。
+3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`。状態量の履歴は要求せず `DriverResult.history(name)` で取る)、`fitting/`(`fit_params(model, targets, space, *, driver_factory=...)` の 1 形式 + `ParameterSpace` / `FitTarget` / `Observation` / metrics。各評価のモデルは `model.with_params(...)`)、`verification/`(`JacobianChecker` / `TangentChecker` / `CrosscheckStrainDriver` 等)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation`。Web 依存ゼロ、plain I/O、非収束は値で返す)。
 
 ### Voigt convention(横断契約 — 全層が従う)
 

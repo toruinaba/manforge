@@ -166,7 +166,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(f"  import {module_name}")
     print()
     print("Or with FortranModule:")
-    print(f"  from manforge.verification import FortranModule")
+    print(f"  from manforge.simulation import FortranModule")
     print(f"  import sys; sys.path.insert(0, '{output_dir}')")
     print(f"  umat = FortranModule('{module_name}')")
 

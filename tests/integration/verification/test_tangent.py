@@ -14,13 +14,11 @@ import pytest
 import autograd
 import autograd.numpy as anp
 
-from manforge.core.state import Implicit, Explicit, NTENS, _state_with_stress
-from manforge.core.material import MaterialModel
-from manforge.core.dimension import SOLID_3D
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.models.ow_kinematic import OWKinematic3D
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.verification.tangent import TangentChecker
+from manforge.core import Implicit, Explicit, NTENS, MaterialModel, SOLID_3D
+from manforge.core.state import _state_with_stress
+from manforge.models import J2Isotropic3D, OWKinematic3D
+from manforge.simulation import PythonIntegrator
+from manforge.verification import TangentChecker
 
 
 _J2_PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
@@ -197,7 +195,7 @@ def test_custom_stress_residual_consistent_tangent(deps_vec):
 # Absorbed from tests/integration/test_verification.py (tangent part)
 # ===========================================================================
 
-from manforge.verification.tangent import TangentCheckResult  # noqa: E402
+from manforge.verification import TangentCheckResult  # noqa: E402
 
 
 def test_tangent_checker_elastic_passes(model):

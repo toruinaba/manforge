@@ -14,13 +14,14 @@ import pytest
 import autograd
 import autograd.numpy as anp
 
-from manforge.core.state import FlowVector, Explicit, NTENS, SCALAR, _state_with_stress
-from manforge.core.material import MaterialModel
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models import (
-    AFKinematic3D, AFKinematicPS, OWKinematic3D, J2Isotropic3D,
+from manforge.core import (
+    FlowVector, Explicit, NTENS, SCALAR, MaterialModel, SOLID_3D, PLANE_STRESS,
+    UNIAXIAL_1D,
 )
-from manforge.models.yu_kinematic import YUKinematic3D
+from manforge.core.state import _state_with_stress
+from manforge.models import (
+    AFKinematic3D, AFKinematicPS, OWKinematic3D, J2Isotropic3D, YUKinematic3D,
+)
 from manforge.verification import make_increment
 
 

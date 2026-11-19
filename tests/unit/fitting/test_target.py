@@ -3,15 +3,9 @@
 import numpy as np
 import pytest
 
-from manforge.fitting.target import (
-    FitTarget,
-    Observation,
-    check_targets,
-    _extract_field,
-)
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.fitting import FitTarget, Observation
+from manforge.fitting.target import check_targets, _extract_field
+from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 
 @pytest.fixture
@@ -400,7 +394,7 @@ def test_nonconverged_run_is_raised_not_scored(model, strain_load):
     shape error at best.  It is raised as the same RuntimeError a raising
     integrator produces, which the objective turns into the failure penalty.
     """
-    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation import PythonNumericalIntegrator
 
     def reporting(_integrator):
         # max_iter=0: the first plastic step cannot converge.

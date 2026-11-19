@@ -37,12 +37,10 @@ second by test_jacobian_fd_multiaxial.
 import numpy as np
 import pytest
 
-from manforge.simulation.integrator import (
-    PythonAnalyticalIntegrator,
-    PythonNumericalIntegrator,
+from manforge.simulation import (
+    PythonAnalyticalIntegrator, PythonNumericalIntegrator, MixedDriver, StrainDriver,
+    FieldHistory, FieldType,
 )
-from manforge.simulation.driver import MixedDriver, StrainDriver
-from manforge.simulation.types import FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------

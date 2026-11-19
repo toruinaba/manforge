@@ -17,10 +17,10 @@ Usage
 import numpy as np
 
 import manforge  # noqa: F401 — enables float64
-from manforge.models import J2IsotropicDamageCrackClosure1D, J2IsotropicDamageUnilateral1D
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory
+from manforge.models import (
+    J2IsotropicDamageCrackClosure1D, J2IsotropicDamageUnilateral1D,
+)
+from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
 from manforge.verification import TangentChecker
 
 try:

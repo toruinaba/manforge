@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 
 from manforge.models import J2Isotropic3D
-from manforge.simulation.integrator import (
+from manforge.simulation import (
     PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
 )
-from manforge.verification.jacobian import JacobianChecker, JacobianComparisonResult
+from manforge.verification import JacobianChecker, JacobianComparisonResult
 
 
 def _result(model, strain_scale):
@@ -144,8 +144,7 @@ class TestCheckHandBlocks:
     @staticmethod
     def _results(model, n=12):
         """A multiaxial history: direct and shear components together."""
-        from manforge.simulation.driver import StrainDriver
-        from manforge.simulation.types import FieldHistory, FieldType
+        from manforge.simulation import StrainDriver, FieldHistory, FieldType
 
         t = np.linspace(0.0, 1.0, n + 1)[1:]
         data = np.zeros((n, 6))
@@ -208,7 +207,7 @@ class TestCheckHandBlocks:
         assert "approx: deliberately off" in report.summary()
 
     def test_approximation_beyond_its_declared_size_fails(self):
-        from manforge.core.material import hand_block
+        from manforge.core import hand_block
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         class _TooFar(OWWithHandBlocks):

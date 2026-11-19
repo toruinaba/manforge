@@ -4,14 +4,13 @@ Absorbed from tests/unit/test_residual_name.py (layout part).
 """
 
 import pytest
-from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
-from manforge.core.material import MaterialModel
+from manforge.core import Implicit, Explicit, NTENS, SCALAR, MaterialModel
 from manforge.simulation._layout import ResidualLayout
 
 
 class TestResidualLayout:
     def _make_default_model(self):
-        from manforge.models.ow_kinematic import OWKinematic3D
+        from manforge.models import OWKinematic3D
         return OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=50000.0, gamma=300.0)
 
     def test_default_residual_names_equal_state_names(self):

@@ -4,8 +4,7 @@ These stubs let tests instantiate MaterialModel without providing
 a full material model implementation.
 """
 
-from manforge.core.material import MaterialModel
-from manforge.core.dimension import PLANE_STRESS, UNIAXIAL_1D
+from manforge.core import MaterialModel, PLANE_STRESS, UNIAXIAL_1D
 
 
 class _Stub3D(MaterialModel):

@@ -13,17 +13,11 @@ import autograd
 import autograd.numpy as anp
 
 import manforge  # enables float64
-from manforge.utils.smooth import (
-    smooth_sqrt,
-    smooth_abs,
-    smooth_norm,
-    smooth_macaulay,
-    smooth_direction,
-    smooth_heaviside,
-    smooth_min,
-    smooth_max,
-    _DEFAULT_EPS,
+from manforge.utils import (
+    smooth_sqrt, smooth_abs, smooth_norm, smooth_macaulay, smooth_direction,
+    smooth_heaviside, smooth_min, smooth_max,
 )
+from manforge.utils.smooth import _DEFAULT_EPS
 from manforge.verification import make_increment
 
 EPS = _DEFAULT_EPS
@@ -260,7 +254,7 @@ class TestAFPattern:
     def test_n_hat_finite_at_zero_xi(self):
         """When xi = 0 (stress = alpha), s_hat should be finite, not NaN."""
         import manforge
-        from manforge.models.af_kinematic import AFKinematic3D
+        from manforge.models import AFKinematic3D
 
         model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         xi = anp.zeros(6)
@@ -275,7 +269,7 @@ class TestAFPattern:
         Uses sum(alpha**2) as the scalar output to avoid the non-differentiable
         anp.linalg.norm(zeros) that would arise if alpha stays at zero.
         """
-        from manforge.models.af_kinematic import AFKinematic3D
+        from manforge.models import AFKinematic3D
 
         model = AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
         state0 = model.initial_state()

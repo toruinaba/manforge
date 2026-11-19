@@ -18,16 +18,13 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
-from manforge.models.j2_isotropic import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import (
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+from manforge.core import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+from manforge.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+from manforge.simulation import (
+    StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.tangent import TangentChecker
+from manforge.verification import TangentChecker
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +271,7 @@ def test_param_names_match_fortran_arg_order(model_fn, module_name, subroutine):
     Enforces the project convention that PROPS order == param_names order so that
     FortranIntegrator.from_model() can auto-generate param_fn safely.
     """
-    from manforge.verification import FortranModule
+    from manforge.simulation import FortranModule
     pytest.importorskip(
         module_name,
         reason=f"{module_name} not compiled -- run: uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
