@@ -1,95 +1,35 @@
-"""Jacobian block decomposition utilities for return-mapping residual systems."""
+"""Jacobian block inspection and comparison for return-mapping residual systems.
+
+:class:`JacobianChecker` is the working tool for deriving a Jacobian by hand:
+
+* :meth:`~JacobianChecker.compute` — the autodiff Jacobian of the framework
+  residual in named blocks, the reference a derivation is checked against;
+* :meth:`~JacobianChecker.hand` — the same matrix assembled from the blocks the
+  model declares with :func:`~manforge.core.material.hand_block`;
+* :meth:`~JacobianChecker.check_hand_blocks` — every declared block against the
+  reference over a whole history, with the worst deviation per block and the
+  list of blocks not derived yet.
+
+The matrices themselves come from :mod:`manforge.simulation.jacobian`.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterator
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 
-import autograd
-import autograd.numpy as anp
 import numpy as np
 
+from manforge.core.material.hand_block import hand_block_record
 from manforge.core.result import StressUpdateResult
 from manforge.core.state import Increment
-from manforge.simulation._residual import build_residual
-from manforge.simulation._layout import ResidualLayout
+from manforge.simulation.jacobian import (
+    JacobianBlocks,
+    hand_jacobian,
+    hand_jacobian_blocks,
+    residual_jacobian,
+)
 from manforge.verification.comparator_base import _array_rel_err
-from manforge._typing import FloatArray
-
-
-@dataclass
-class JacobianBlocks:
-    """Named blocks of the return-mapping residual Jacobian at the converged point.
-
-    The residual / unknown vector layout follows :class:`~manforge.simulation._layout.ResidualLayout`:
-    ``[σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]``.
-
-    Blocks are accessed via ``part[row_residual_name][col_state_name]``.
-    Row names are residual labels (``effective_residual_name`` from the field
-    declaration, or ``model.dlambda_residual_name`` for the Δλ row).  Column
-    names are state names (``"stress"``, ``"dlambda"``, and any implicit
-    non-stress keys).
-
-    **Block shape rule**::
-
-        part[row][col].shape == layout.slot_shape(row_state) + layout.slot_shape(col)
-
-    where ``row_state`` is the state name whose residual label equals ``row``
-    (``layout.residual_name_for(row_state) == row``).
-
-    Shape notation below mirrors the ``Implicit(shape=...)`` declaration:
-
-    - ``NTENS``  — resolves to ``(ntens,)`` at runtime
-    - ``SCALAR`` — resolves to ``()``  at runtime (0-d ndarray)
-
-    When ``residual_name`` is not set, row and column names are identical
-    (the default symmetric case):
-
-    - ``part["stress"]["stress"]``    — ∂R_σ / ∂σ,   shape ``(NTENS, NTENS)`` ≡ ``(ntens, ntens)``
-    - ``part["stress"]["dlambda"]``   — ∂R_σ / ∂Δλ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
-    - ``part["dlambda"]["stress"]``   — ∂R_Δλ / ∂σ,  shape ``(NTENS,)``       ≡ ``(ntens,)``
-    - ``part["dlambda"]["dlambda"]``  — ∂R_Δλ / ∂Δλ, shape ``SCALAR``         ≡ ``()``
-    - ``part["alpha"]["stress"]``     — ∂R_α / ∂σ,   ``(NTENS, NTENS)`` if α declared ``NTENS``
-    - ``part["ep"]["alpha"]``         — ∂R_ep / ∂α,  ``(NTENS,)`` if ep is ``SCALAR``, α is ``NTENS``
-
-    With opt-in residual names (e.g. ``Implicit(residual_name="R_alpha")``,
-    ``dlambda_residual_name="R_yield"``):
-
-    - ``part["R_alpha"]["stress"]``   — ∂R_α / ∂σ
-    - ``part["R_yield"]["stress"]``   — ∂R_Δλ / ∂σ
-
-    Attributes
-    ----------
-    layout : ResidualLayout
-        Layout descriptor used to compute this Jacobian.
-    part : dict[str, dict[str, ndarray]]
-        ``part[residual_row_name][state_col_name]`` → block array.
-    full : ndarray, shape (n_unknown, n_unknown)
-        Full Jacobian matrix.
-    """
-
-    layout: ResidualLayout
-    part: dict[str, dict[str, FloatArray]]
-    full: FloatArray
-
-    def row_names(self) -> tuple[str, ...]:
-        """Residual-row labels in canonical order."""
-        return self.layout.residual_names()
-
-    def col_names(self) -> tuple[str, ...]:
-        """State column names in canonical order: ``("stress", "dlambda", *implicit_keys)``."""
-        return ("stress", "dlambda", *self.layout.implicit_keys)
-
-    def iter_blocks(self) -> Iterator[tuple[str, anp.ndarray]]:
-        """Iterate over all blocks as ``("row::col", array)`` pairs.
-
-        Labels use the form ``"<residual_name>::<state_name>"``.
-        Useful for :meth:`JacobianChecker.compare`.
-        """
-        col_names = self.col_names()
-        for row in self.row_names():
-            for col in col_names:
-                yield f"{row}::{col}", np.asarray(self.part[row][col])
 
 
 @dataclass
@@ -109,6 +49,105 @@ class JacobianComparisonResult:
     passed: bool
     blocks: dict[str, float]
     max_rel_err: float
+
+
+@dataclass
+class HandBlockCheck:
+    """One declared hand block against the autodiff reference.
+
+    Attributes
+    ----------
+    row, col : str
+        The block ``∂R_row / ∂col``.
+    method : str
+        Name of the model method that computes it.
+    worst_err : float
+        Largest deviation over the checked points:
+        ``max|hand − ad| / max(max|ad|, 1)`` per point.
+    worst_at : int
+        Index, in the checked sequence, of the point where it occurred.
+    tol : float
+        What the block is held to: the declared ``approx`` for a deliberate
+        approximation, otherwise the tolerance of the check.
+    approx : bool
+        Whether the block is declared an approximation.
+    note : str
+        The declared reason for the approximation.
+    """
+
+    row: str
+    col: str
+    method: str
+    worst_err: float
+    worst_at: int
+    tol: float
+    approx: bool
+    note: str
+
+    @property
+    def passed(self) -> bool:
+        return self.worst_err <= self.tol
+
+
+@dataclass
+class HandBlockReport:
+    """Result of :meth:`JacobianChecker.check_hand_blocks`.
+
+    Attributes
+    ----------
+    blocks : dict[(row, col), HandBlockCheck]
+        Every block the model declares.
+    undeclared : list[(row, col)]
+        Blocks of the Jacobian with no hand derivation yet.
+    n_points : int
+        Number of plastic steps the blocks were evaluated at.
+    """
+
+    blocks: dict[tuple[str, str], HandBlockCheck]
+    undeclared: list[tuple[str, str]] = field(default_factory=list)
+    n_points: int = 0
+
+    @property
+    def passed(self) -> bool:
+        """Every declared block within its tolerance.  Says nothing about undeclared ones."""
+        return all(b.passed for b in self.blocks.values())
+
+    @property
+    def failed(self) -> list[HandBlockCheck]:
+        """Blocks outside their tolerance, worst first."""
+        bad = [b for b in self.blocks.values() if not b.passed]
+        return sorted(bad, key=lambda b: -b.worst_err)
+
+    @property
+    def n_declared(self) -> int:
+        return len(self.blocks)
+
+    @property
+    def n_total(self) -> int:
+        return len(self.blocks) + len(self.undeclared)
+
+    def summary(self) -> str:
+        """Multi-line text: coverage, then one line per declared block."""
+        lines = [
+            f"hand blocks: {self.n_declared}/{self.n_total} derived, "
+            f"checked at {self.n_points} plastic steps — "
+            + ("all within tolerance" if self.passed else f"{len(self.failed)} outside tolerance")
+        ]
+        for b in sorted(self.blocks.values(), key=lambda b: -b.worst_err):
+            mark = "ok  " if b.passed else "FAIL"
+            tail = f"  (approx: {b.note})" if b.approx else ""
+            lines.append(
+                f"  {mark} [{b.row}][{b.col}] {b.method}: "
+                f"{b.worst_err:.3e} (tol {b.tol:.0e}, worst at point {b.worst_at}){tail}"
+            )
+        if self.undeclared:
+            lines.append(
+                "  not derived: " + ", ".join(f"[{r}][{c}]" for r, c in self.undeclared)
+            )
+        return "\n".join(lines)
+
+    def __str__(self) -> str:
+        return self.summary()
 
 
 class JacobianChecker:
@@ -137,24 +176,34 @@ class JacobianChecker:
         jac = JacobianChecker(model).compute(result)
         print(jac.part["dlambda"]["stress"])
 
-        # Manual crosscheck after a failed step
-        cmp = checker.compare(result_a, result_b)
-        if not cmp.passed:
-            print(cmp.blocks)
+        # Every hand-derived block against autodiff, over a history
+        report = JacobianChecker(model).check_hand_blocks(driver.run(load).step_results)
+        assert report.passed, report.summary()
     """
 
     def __init__(self, model, *, rtol: float = 1e-8):
         self.model = model
         self.rtol = rtol
 
+    @staticmethod
+    def _increment(result: StressUpdateResult) -> Increment:
+        if result.increment is None:
+            raise ValueError(
+                "this result carries no increment (it comes from an integrator "
+                "that reports no trial state, such as FortranIntegrator), so "
+                "the residual it would be evaluated on is not known.  Use "
+                "compare(python_result, this_result)."
+            )
+        return result.increment
+
     def compute(self, result: StressUpdateResult) -> JacobianBlocks:
-        """Residual Jacobian at the converged point of ``result``, in named blocks.
+        """Autodiff Jacobian at the converged point of ``result``, in named blocks.
 
         Parameters
         ----------
         result : StressUpdateResult
             Result of a stress update by a Python integrator.  On an elastic
-            step the point is ``(σ_trial, Δλ = 0, trial state)``.
+            step the point is ``(σ_trial, Δλ = 0, elastic state)``.
 
         Returns
         -------
@@ -167,39 +216,89 @@ class JacobianChecker:
             :meth:`compare` to evaluate at such a point with the increment of
             a Python result of the same step.
         """
-        if result.increment is None:
+        return residual_jacobian(self.model, result, self._increment(result))
+
+    def hand(self, result: StressUpdateResult) -> JacobianBlocks:
+        """The Jacobian at ``result`` with the model's hand-derived blocks in place.
+
+        Every block declared with :func:`~manforge.core.material.hand_block` is
+        taken from its method; the rest come from autodiff, so a derivation in
+        progress still gives a complete matrix.  ``.source[row][col]`` says
+        which is which.
+        """
+        return hand_jacobian(self.model, result, self._increment(result))
+
+    def check_hand_blocks(
+        self, results: Iterable[StressUpdateResult], *, tol: float = 1e-8,
+    ) -> HandBlockReport:
+        """Check every declared hand block against autodiff, over many steps.
+
+        Errors are collected across all blocks and all steps rather than
+        stopping at the first mismatch — a single wrong block otherwise hides
+        behind whichever one happens to fail first.
+
+        The history matters as much as the check.  A transposed outer product
+        or a ×2 shear-convention error is invisible under uniaxial or
+        pure-shear loading; drive direct and shear components together.
+
+        Parameters
+        ----------
+        results : iterable of StressUpdateResult
+            Typically ``driver.run(load).step_results``.  Only plastic steps
+            are used; the rest are skipped.
+        tol : float, default 1e-8
+            Tolerance for blocks meant to be exact.  A block declared with
+            ``approx=`` is held to that value instead.
+
+        Returns
+        -------
+        HandBlockReport
+            ``report.passed``, and ``report.summary()`` for the per-block table.
+
+        Raises
+        ------
+        ValueError
+            If the model declares no hand block, or ``results`` holds no
+            plastic step — either way nothing would have been checked.
+        """
+        model = self.model
+        declared = type(model)._hand_blocks
+        if not declared:
             raise ValueError(
-                "this result carries no increment (it comes from an integrator "
-                "that reports no trial state, such as FortranIntegrator), so "
-                "the residual it would be evaluated on is not known.  Use "
-                "compare(python_result, this_result)."
+                f"{type(model).__name__} declares no hand-derived block "
+                "(decorate the methods with manforge.core.material.hand_block)"
             )
-        return self._at(result, result.increment)
+        worst: dict[tuple[str, str], tuple[float, int]] = {}
+        rows: tuple[str, ...] = ()
+        cols: tuple[str, ...] = ()
+        n_points = 0
+        for i, result in enumerate(results):
+            if result.is_plastic is not True:
+                continue
+            inc = self._increment(result)
+            reference = residual_jacobian(model, result, inc)
+            rows, cols = reference.row_names(), reference.col_names()
+            hand = hand_jacobian_blocks(model, result.state, result.dlambda, inc)
+            n_points += 1
+            for key, got in hand.items():
+                ref = np.asarray(reference.part[key[0]][key[1]], dtype=float)
+                err = float(np.max(np.abs(got - ref))) / max(float(np.max(np.abs(ref))), 1.0)
+                if key not in worst or err > worst[key][0]:
+                    worst[key] = (err, i)
+        if n_points == 0:
+            raise ValueError("no plastic step in results — no hand block was evaluated")
 
-    def _at(self, result: StressUpdateResult, inc: Increment) -> JacobianBlocks:
-        """Jacobian of the residual of ``inc`` at the converged point of ``result``."""
-        residual_fn, layout = build_residual(self.model, inc)
-
-        state = result.state
-        q_imp = {k: state[k] for k in layout.implicit_keys}
-        x_conv = layout.pack(result.stress, result.dlambda, q_imp)  # type: ignore[arg-type]
-
-        J = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[arg-type]
-
-        col_names = ("stress", "dlambda", *layout.implicit_keys)
-        part: dict[str, dict[str, FloatArray]] = {}
-        for row_state in col_names:
-            row = layout.residual_name_for(row_state)
-            sl_row = layout.slot_slice(row_state)
-            shp_row = layout.slot_shape(row_state)
-            part[row] = {}
-            for col in col_names:
-                sl_col = layout.slot_slice(col)
-                shp_col = layout.slot_shape(col)
-                block = J[sl_row, sl_col]
-                part[row][col] = block.reshape(shp_row + shp_col)
-
-        return JacobianBlocks(layout=layout, part=part, full=J)
+        checks = {}
+        for key, name in declared.items():
+            record = hand_block_record(type(model), name)
+            err, at = worst[key]
+            checks[key] = HandBlockCheck(
+                row=key[0], col=key[1], method=name, worst_err=err, worst_at=at,
+                tol=tol if record.approx is None else record.approx,
+                approx=record.approx is not None, note=record.note,
+            )
+        undeclared = [(r, c) for r in rows for c in cols if (r, c) not in declared]
+        return HandBlockReport(blocks=checks, undeclared=undeclared, n_points=n_points)
 
     def compare(
         self,
@@ -211,7 +310,8 @@ class JacobianChecker:
         Both are evaluated on the residual of ``result_a``'s increment, so
         ``result_b`` may come from an integrator that reports none (Fortran).
         A difference localises *where* two solutions of the same step disagree;
-        it does not compare a hand-derived Jacobian with the autodiff one.
+        it does not compare a hand-derived Jacobian with the autodiff one — that
+        is :meth:`check_hand_blocks`.
 
         Parameters
         ----------
@@ -229,8 +329,8 @@ class JacobianChecker:
                 "result_a must come from a Python integrator: its increment "
                 "defines the residual both points are evaluated on"
             )
-        jac_a = self._at(result_a, result_a.increment)
-        jac_b = self._at(result_b, result_a.increment)
+        jac_a = residual_jacobian(self.model, result_a, result_a.increment)
+        jac_b = residual_jacobian(self.model, result_b, result_a.increment)
 
         block_errs: dict[str, float] = {}
         blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}

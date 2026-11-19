@@ -134,3 +134,100 @@ class TestIncrementComesFromTheResult:
         assert out.passed and out.max_rel_err == 0.0
         with pytest.raises(ValueError, match="result_a must come from a Python integrator"):
             JacobianChecker(model).compare(no_increment, result)
+
+
+# ---------------------------------------------------------------------------
+# Hand-derived blocks against the autodiff reference
+# ---------------------------------------------------------------------------
+
+class TestCheckHandBlocks:
+    @staticmethod
+    def _results(model, n=12):
+        """A multiaxial history: direct and shear components together."""
+        from manforge.simulation.driver import StrainDriver
+        from manforge.simulation.types import FieldHistory, FieldType
+
+        t = np.linspace(0.0, 1.0, n + 1)[1:]
+        data = np.zeros((n, 6))
+        data[:, 0] = 4e-3 * t
+        data[:, 3] = 6e-3 * np.sin(np.pi * t)
+        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        return StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
+
+    def test_exact_blocks_pass_and_the_rest_are_listed(self):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        m = OWWithHandBlocks(**OW_PARAMS)
+        results = self._results(m)
+        report = JacobianChecker(m).check_hand_blocks(results)
+
+        assert report.passed, report.summary()
+        assert report.n_declared == 8 and report.n_total == 16
+        assert report.n_points == sum(bool(r.is_plastic) for r in results) > 0
+        # The σ and α rows are not derived in this fixture.
+        assert set(report.undeclared) == {
+            (row, col) for row in ("stress", "alpha")
+            for col in ("stress", "dlambda", "alpha", "ep")
+        }
+        assert "8/16 derived" in report.summary()
+        assert "not derived: [stress][stress]" in report.summary()
+
+    def test_a_wrong_block_is_found_by_name(self):
+        """One sign error among eight blocks: named, not just 'the Jacobian is off'."""
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithWrongBlock
+
+        m = OWWithWrongBlock(**OW_PARAMS)
+        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+
+        assert not report.passed
+        assert [(b.row, b.col, b.method) for b in report.failed] == [("ep", "dlambda", "dRep_dl")]
+        assert report.failed[0].worst_err == pytest.approx(2.0)     # +1 against −1
+        assert "FAIL [ep][dlambda] dRep_dl" in report.summary()
+
+    def test_declared_approximation_is_held_to_its_own_tolerance(self):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithApproxBlock
+
+        m = OWWithApproxBlock(**OW_PARAMS)
+        report = JacobianChecker(m).check_hand_blocks(self._results(m), tol=1e-10)
+
+        block = report.blocks[("ep", "ep")]
+        assert block.approx and block.tol == 1e-2
+        assert block.worst_err == pytest.approx(1e-3, rel=1e-6)
+        assert block.passed and report.passed          # 1e-3 is inside the declared 1e-2
+        assert "approx: deliberately off" in report.summary()
+
+    def test_approximation_beyond_its_declared_size_fails(self):
+        from manforge.core.material import hand_block
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        class _TooFar(OWWithHandBlocks):
+            @hand_block("ep", "ep", approx=1e-4, note="claims 1e-4, is 1e-3")
+            def dRep_dep(self):
+                return 1.0 + 1e-3
+
+        m = _TooFar(**OW_PARAMS)
+        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+        assert [b.method for b in report.failed] == ["dRep_dep"]
+
+    def test_nothing_checked_is_an_error_not_a_pass(self, model):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        with pytest.raises(ValueError, match="declares no hand-derived block"):
+            JacobianChecker(model).check_hand_blocks(self._results(model))
+
+        m = OWWithHandBlocks(**OW_PARAMS)
+        elastic_only = [r for r in self._results(m) if not r.is_plastic]
+        with pytest.raises(ValueError, match="no plastic step"):
+            JacobianChecker(m).check_hand_blocks(elastic_only)
+
+    def test_hand_returns_the_assembled_matrix(self):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithWrongBlock
+
+        m = OWWithWrongBlock(**OW_PARAMS)
+        result = [r for r in self._results(m) if r.is_plastic][-1]
+        hand, ref = JacobianChecker(m).hand(result), JacobianChecker(m).compute(result)
+
+        assert hand.source["ep"]["dlambda"] == "hand"
+        assert hand.source["stress"]["stress"] == "ad"
+        assert float(hand.part["ep"]["dlambda"]) == +1.0       # the wrong hand value
+        assert float(ref.part["ep"]["dlambda"]) == -1.0

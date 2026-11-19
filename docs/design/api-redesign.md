@@ -163,23 +163,38 @@ UMAT の構成要素すべてに手書きスロットが揃う。
 - 段 1 の時点では `trial_stress` を契約に含めず、`SubSteppingIntegrator` がその有無で分岐していた。段 2 で `increment(strain_inc, stress_n, state_n)` を契約に加え、この分岐は無くなった(4.6)。Fortran を包んだとき `stress_trial=None` になる挙動は同じである。
 - fitting は、`driver.run` が `converged=False` を返したとき `RuntimeError` にする。非収束を値で返す integrator を `driver_factory` が使っても、ペナルティとして扱われる。
 
-### 4.8 手導出ブロックの宣言(API の細部は段 3 で確定)
+### 4.8 手導出ブロックの宣言
 
-手導出したヤコビアンのブロックを、モデル上で名前付きで宣言する。
+手導出したヤコビアンのブロックを、モデル上で名前付きで宣言する(`core/material/hand_block.py`)。
 
 ```python
-@hand_block("theta", "stress")        # ∂R_θ/∂σ
-def dRt_ds(self, new, dlambda, inc): ...
+@hand_block("theta", "stress")                       # ∂R_θ/∂σ
+def calc_ft_fs(self, state, dlambda): ...
+
+@hand_block("theta", "dlambda", approx=2e-2, note="r_max を凍結して導出している")
+def calc_ft_fl(self, state, dlambda, state_n): ...
 ```
 
 - **名前**: 行は残差の行名、列は未知数名で、`JacobianBlocks.part[row][col]` と同じである。クラス定義時にレイアウトと照合し、存在しない名前はその場でエラーにする。
-- **組み立て**: フレームワークがレイアウトに従って `.part` と同型に組む。固定スライスと、次元ごとの `calc_jacobian` が不要になる。
-- **未導出のブロック**: 自動微分で埋められる。導出を 1 ブロックずつ進めながら、途中でも解ける。各ブロックの出所(手導出か自動微分か)は結果に残す。
-- **近似を含むブロック**: 手書き NR が explicit 状態を凍結して扱うモデルでは、手導出と自動微分が一致しないブロックがある(Continuous YU の θ / β / R 行。現在のテストは 2e-2 を許容している)。許容値と理由をブロックごとに宣言できるようにする。
-- **Fortran 側の対応**: 既存の `verified_against_fortran` を同じメソッドに重ねる。
-- **対象外**: 手書き NR のループ本体は汎用化しない。`project_theta` のようなモデル固有の処理があるためである。
+- **デコレータは記録を付けるだけ。** メソッドは変わらず、直接呼べる。`verified_against_fortran` と重ねられる。
+- **引数は名前で埋める。** 当初は `(new, dlambda, inc)` に統一する案だったが、手導出ブロックは Fortran のルーチンに対応する利用者のコードで、引数リストもそれに合わせて書かれている(`calc_fy_fs(state)`、`calc_ft_fl(state, dlambda, state_n)` など)。署名を揃えさせると、既存の全ブロックと、それを直接呼ぶテストの書き換えになる。使える名前は `state`(評価点の状態)、`dlambda`、`state_n`、`inc` で、それ以外はクラス定義時にエラーにする。
+- **近似を含むブロック**: 手書き NR が explicit 状態を凍結して扱うモデルでは、手導出と自動微分が一致しないブロックがある(Continuous YU の 3D / PS の θ / β / R 行)。`approx=` で許容値を、`note=` で理由を宣言する。理由の無い `approx` はエラーにする。
+- **照合**: `JacobianChecker(model).check_hand_blocks(results)` が、宣言済みブロックを自動微分と履歴全体で比べる。最悪誤差をブロックごとに集計するので、1 つの誤りが他に隠れない。未導出のブロックの一覧と導出済みの数も返す。何も照合しなかった場合(宣言なし、塑性ステップなし)は合格ではなくエラーにする。
+- **組み立て**: `JacobianChecker(model).hand(result)` は、宣言済みブロックを手導出、残りを自動微分で埋めた `JacobianBlocks` を返す。`.source[row][col]` に出所が残る。
+- **対象外**: 手書き NR のループ本体と、その中の `calc_jacobian` の組み立ては汎用化していない。組み立て順も Fortran に移植する対象で、`project_theta` のようなモデル固有の処理もあるためである。
 
-照合は 1 回の呼び出しにする。宣言済みブロックを自動微分と履歴全体で比べ、ブロック別の最悪誤差と導出済み数を返す。
+誤差の指標は、ブロックごとに `max|手導出 − 自動微分| / max(max|自動微分|, 1)` である。
+
+**適用状況**
+
+| モデル | ブロック | 近似の宣言 |
+|---|---|---|
+| 公開 `YUKinematicPS` | 16 / 16 | なし |
+| internal `YUKinematicPS` | 16 / 16 | なし |
+| internal `ContinuousYUKinematic3D` / `PS` | 25 / 25 | θ / β / R 行の 15 ブロック(実測の最悪 4.3e-3 に対し 2e-2) |
+| internal `ContinuousYUKinematic1D` | 25 / 25 | なし(従来のテストは 2e-2 を許していたが、実測は 1e-10 以内) |
+
+これらのモデルのテストにあった「どのメソッドがどのブロックか」の対応表(3 箇所)は、宣言に置き換えて削除した。
 
 ### 4.9 検証層の役割
 
@@ -189,8 +204,8 @@ def dRt_ds(self, new, dlambda, inc): ...
 | テスト補助 | Crosscheck、`TangentChecker`、履歴生成、手導出ブロックの照合 | テストと同じ |
 | 導出の記録 | `verified_against_fortran`、手導出ブロックの宣言 | モデルと同じ |
 
-- **内省は integrator から取れるようにする。** `integrator.jacobian(result)` が `JacobianBlocks` を返す。`.part[row][col]` の形は変えない。
-- **`JacobianChecker.compare` は見直す。** 2 つの解を同じ自動微分残差で比べるもので、手導出と自動微分の比較ではない。`iter_blocks` は両リポジトリで使用 0 件である。
+- **内省は integrator から取れる。** `integrator.jacobian(result)` が `JacobianBlocks` を返す(段 3 で実施)。行列の計算は `simulation/jacobian.py` に移した。`JacobianChecker.compute(result)` は同じものを返し、`.part[row][col]` の形は変えていない。
+- **`JacobianChecker.compare` は 2 つの解を同じ自動微分残差で比べるもの**で、手導出と自動微分の比較ではない。後者は `check_hand_blocks` が担う(段 3 で追加)。
 - **モジュールの移動は今回しない**(方針 5)。`manforge.verification` のパスは残し、中身の役割だけを整理する。
 
 ### 4.10 パラメータ宣言と `dimension`
@@ -224,7 +239,7 @@ class ChabocheKinematic3D(ChabocheKinematic):
 | 0 | タグ `v0.1.0`、internal のテスト修正 | 完了 |
 | 1 | 残骸の削除(#103)、非収束スイッチの一本化、`DriverResult.converged`、`StressIntegrator` の Protocol 化 | なし(未使用)。internal のテストは変更前後で同じ結果 |
 | 2 | `Increment`、フック署名、`elastic_tangent`、`isotropic_stiffness`、結果が `increment` を持つ | フック 29 定義の書き換え、剛性の override 4 つを削除 |
-| 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU を 1 次元ぶん試験移行 |
+| 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU の 3 次元と `YUKinematicPS` に宣言を付け、テストの対応表を削除 |
 | 4 | パラメータ宣言と `dimension` | 次元別コンストラクタ 23 個の削除 |
 | 5 | 入口と命名の整理 | なし(fitting 未使用) |
 | 6 | ドキュメント基盤、公開範囲の絞り込み | import の書き換え |

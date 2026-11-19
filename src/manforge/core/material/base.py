@@ -16,6 +16,10 @@ from manforge.core.state import (
 )
 from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.core.material.fortran_binding import collect_bindings as _collect_bindings
+from manforge.core.material.hand_block import (
+    collect_hand_blocks as _collect_hand_blocks,
+    validate_hand_blocks as _validate_hand_blocks,
+)
 from manforge.core.material.meta import ParamMeta
 from manforge._typing import FloatArray, Scalar, Stiffness, StressVec, StateDict
 from manforge.core.result import ReturnMappingResult
@@ -264,6 +268,17 @@ class MaterialModel(ABC):
             )
         _wrap_flow_return_check(cls)
         cls._fortran_bindings = _collect_bindings(cls)
+        # Hand-derived Jacobian blocks, checked against the residual layout:
+        # x = [σ, Δλ, implicit non-stress states], rows named by residual.
+        unknowns = ("stress", "dlambda") + tuple(
+            k for k in cls.implicit_state_names if k != "stress"
+        )
+        rows = tuple(
+            dl_rname if u == "dlambda" else fields[u].effective_residual_name
+            for u in unknowns
+        )
+        cls._hand_blocks = _collect_hand_blocks(cls)
+        _validate_hand_blocks(cls, cls._hand_blocks, rows, unknowns)
 
     @property
     def ntens(self) -> int:

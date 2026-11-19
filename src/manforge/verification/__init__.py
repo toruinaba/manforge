@@ -9,6 +9,8 @@ from manforge.verification.jacobian import (
     JacobianBlocks,
     JacobianComparisonResult,
     JacobianChecker,
+    HandBlockCheck,
+    HandBlockReport,
 )
 from manforge.verification.tangent import TangentChecker, TangentCheckResult
 from manforge.simulation.integrator.fortran_module import FortranModule
@@ -39,6 +41,8 @@ __all__ = [
     "JacobianBlocks",
     "JacobianComparisonResult",
     "JacobianChecker",
+    "HandBlockCheck",
+    "HandBlockReport",
     # Finite-difference tangent check
     "TangentChecker",
     "TangentCheckResult",

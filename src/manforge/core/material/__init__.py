@@ -7,6 +7,7 @@ from manforge.core.material.fortran_binding import (
     verified_against_fortran,
     collect_bindings,
 )
+from manforge.core.material.hand_block import HandBlock, hand_block
 
 __all__ = [
     "MaterialModel",
@@ -14,4 +15,6 @@ __all__ = [
     "FortranBinding",
     "verified_against_fortran",
     "collect_bindings",
+    "HandBlock",
+    "hand_block",
 ]

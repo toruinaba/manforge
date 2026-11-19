@@ -70,4 +70,4 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Models / Fortran
 
-参照実装は `src/manforge/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。非公開モデルは別リポジトリ(`manforge-internal`)に置き、`MODELS` dict で service 層に登録する。
+参照実装は `src/manforge/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。手導出したヤコビアンのブロックは `@hand_block(row, col)`(`core/material/hand_block.py`)でモデル上に宣言し、`JacobianChecker.check_hand_blocks` が AD の残差ヤコビアン(`simulation/jacobian.py`)とブロックごとに照合する。非公開モデルは別リポジトリ(`manforge-internal`)に置き、`MODELS` dict で service 層に登録する。

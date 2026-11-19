@@ -437,6 +437,20 @@ class _PythonIntegratorBase:
     # Public API
     # ------------------------------------------------------------------
 
+    def jacobian(self, result: StressUpdateResult):
+        """Residual Jacobian at the converged point of ``result``, in named blocks.
+
+        The autodiff Jacobian of the residual this integrator solved, as
+        :class:`~manforge.simulation.jacobian.JacobianBlocks`
+        (``.part[row][col]``).  ``result`` must be one of this integrator's
+        own: it carries the increment the residual belongs to.
+        """
+        from manforge.simulation.jacobian import residual_jacobian
+
+        if result.increment is None:
+            raise ValueError("this result carries no increment; it is not a Python integrator's")
+        return residual_jacobian(self._model, result, result.increment)
+
     def return_mapping(self, inc: Increment) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one increment.
 
