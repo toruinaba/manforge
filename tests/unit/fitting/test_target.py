@@ -117,13 +117,29 @@ def test_target_rejects_weights_length_mismatch(strain_load):
         )
 
 
-def test_target_without_driver_factory_reports_clearly(strain_load):
+def test_target_without_driver_factory_follows_its_load(strain_load):
+    """No factory anywhere: the load decides, by the rule crosscheck uses."""
+    from manforge.simulation import StressDriver
+
+    strain_target = FitTarget(
+        load=strain_load,
+        observations=[Observation(values=np.zeros(10), component=0)],
+    )
+    stress_target = FitTarget(
+        load=FieldHistory(FieldType.STRESS, "Stress", np.zeros((10, 6))),
+        observations=[Observation(values=np.zeros(10), field="Strain", component=0)],
+    )
+    assert strain_target.resolve_driver_factory(None) is StrainDriver
+    assert stress_target.resolve_driver_factory(None) is StressDriver
+
+
+def test_fit_params_default_beats_the_load(strain_load, driver_factory):
+    """The factory passed to fit_params is used before the load is consulted."""
     target = FitTarget(
         load=strain_load,
         observations=[Observation(values=np.zeros(10), component=0)],
     )
-    with pytest.raises(ValueError, match="no driver_factory"):
-        target.resolve_driver_factory(None)
+    assert target.resolve_driver_factory(driver_factory) is driver_factory
 
 
 def test_target_own_driver_factory_wins(strain_load, driver_factory):

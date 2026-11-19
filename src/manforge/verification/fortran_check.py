@@ -1,21 +1,96 @@
-"""Fortran binding runtime checker.
+"""Compare the model methods bound to Fortran subroutines with those subroutines.
 
-Provides :func:`check_bindings` which compares registered Python methods
-against their Fortran counterparts using a :class:`~manforge.simulation.FortranModule`
-instance.
+A model records which of its methods has a Fortran counterpart with
+:func:`~manforge.core.verified_against_fortran`.  :func:`check_bindings`
+calls both sides of each binding with the arguments given and compares what
+they return.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from manforge.core.material.fortran_binding import FortranBinding
+from manforge.verification._measure import array_rel_err
 
 if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
     from manforge.simulation.integrator import FortranModule
+
+
+@dataclass
+class BindingCheck:
+    """One bound method against its Fortran subroutine.
+
+    Attributes
+    ----------
+    method : str
+        Name of the model method.
+    subroutine : str
+        Name of the Fortran subroutine it is bound to.
+    rel_err : float
+        ``max|fortran − python| / max|python|`` over the returned array.
+    tol : float
+        The tolerance it is held to.
+    """
+
+    method: str
+    subroutine: str
+    rel_err: float
+    tol: float
+
+    @property
+    def passed(self) -> bool:
+        return self.rel_err <= self.tol
+
+
+@dataclass
+class BindingReport:
+    """Result of :func:`check_bindings`.
+
+    Attributes
+    ----------
+    checks : dict[str, BindingCheck]
+        One entry per method in ``cases``, keyed by method name.
+    not_checked : list[str]
+        Bound methods of the model that ``cases`` did not cover.
+    """
+
+    checks: dict[str, BindingCheck]
+    not_checked: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        """Every checked method agrees.  Says nothing about the ones not checked."""
+        return all(c.passed for c in self.checks.values())
+
+    @property
+    def failed(self) -> list[BindingCheck]:
+        """Methods outside tolerance, worst first."""
+        bad = [c for c in self.checks.values() if not c.passed]
+        return sorted(bad, key=lambda c: -c.rel_err)
+
+    def summary(self) -> str:
+        """Multi-line text: the verdict, then one line per checked method."""
+        n_bad = len(self.failed)
+        lines = [
+            f"bindings: {len(self.checks)} checked — "
+            + ("all agree" if self.passed else f"{n_bad} differ")
+        ]
+        for c in self.checks.values():
+            mark = "ok  " if c.passed else "FAIL"
+            lines.append(
+                f"  {mark} {c.method} ↔ {c.subroutine}: {c.rel_err:.3e} (tol {c.tol:.0e})"
+            )
+        if self.not_checked:
+            lines.append("  not checked: " + ", ".join(self.not_checked))
+        return "\n".join(lines)
+
+    def __str__(self) -> str:
+        return self.summary()
 
 
 def check_bindings(
@@ -24,39 +99,45 @@ def check_bindings(
     cases: dict[str, tuple[tuple, tuple]],
     *,
     tol: float = 1e-10,
-) -> dict[str, tuple[bool, float]]:
-    """Compare registered Python methods against their Fortran counterparts.
+) -> BindingReport:
+    """Compare bound Python methods against their Fortran counterparts.
 
-    Only methods listed in *cases* are checked.  Methods that return
-    non-array types (e.g. ``dict``) are not suitable for this helper — test
-    them individually.
+    Only methods listed in ``cases`` are checked; the model's other bound
+    methods are listed under ``report.not_checked``.  Methods that return
+    something other than an array (a ``dict``, say) are not suitable for
+    this helper — test them individually.
 
     Parameters
     ----------
-    model:
-        An instantiated :class:`~manforge.core.MaterialModel`.
-    fortran:
-        A :class:`~manforge.simulation.FortranModule` instance (module must be importable).
-    cases:
-        ``{method_name: (py_args, fortran_args)}``.
-        *py_args* is passed to ``getattr(model, method_name)(*py_args)``.
-        *fortran_args* is passed to ``fortran.call(subroutine, *fortran_args)``.
-    tol:
-        Pass threshold on the relative error.  A result is ``ok`` when
-        ``max_rel_err < tol``.
+    model : MaterialModel
+        The model whose bindings are checked.
+    fortran : FortranModule
+        The compiled module holding the subroutines.
+    cases : dict
+        ``{method_name: (py_args, fortran_args)}``.  ``py_args`` is passed to
+        ``getattr(model, method_name)(*py_args)``, ``fortran_args`` to
+        ``fortran.call(subroutine, *fortran_args)``.
+    tol : float, default 1e-10
+        Pass threshold on each method's
+        ``max|fortran − python| / max|python|``.
 
     Returns
     -------
-    dict[str, tuple[bool, float]]
-        ``{method_name: (ok, max_rel_err)}``.
+    BindingReport
+        ``report.passed``, and ``report.summary()`` for the per-method table.
 
     Raises
     ------
     KeyError
-        If a method in *cases* is not in ``model._fortran_bindings``.
+        If a method in ``cases`` is not bound on the model.
+    ValueError
+        If ``cases`` is empty — nothing would have been checked — or the two
+        sides return arrays of different sizes.
     """
+    if not cases:
+        raise ValueError("cases is empty — no binding was checked")
     bindings: dict[str, FortranBinding] = getattr(model, "_fortran_bindings", {})
-    results: dict[str, tuple[bool, float]] = {}
+    checks: dict[str, BindingCheck] = {}
 
     for method_name, (py_args, fortran_args) in cases.items():
         binding = bindings[method_name]
@@ -72,8 +153,13 @@ def check_bindings(
                 f"check_bindings: shape mismatch for '{method_name}': "
                 f"Python returned size {py_arr.size}, Fortran returned size {f_arr.size}"
             )
+        checks[method_name] = BindingCheck(
+            method=method_name, subroutine=binding.subroutine,
+            rel_err=array_rel_err(f_arr, py_arr), tol=tol,
+        )
 
-        max_rel_err = float(np.max(np.abs(py_arr - f_arr) / (np.abs(f_arr) + 1e-14)))
-        results[method_name] = (max_rel_err < tol, max_rel_err)
+    not_checked = [name for name in bindings if name not in cases]
+    return BindingReport(checks=checks, not_checked=not_checked)
 
-    return results
+
+__all__ = ["BindingCheck", "BindingReport", "check_bindings"]

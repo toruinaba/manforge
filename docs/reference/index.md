@@ -9,7 +9,7 @@
 | [`manforge.models`](models.md) | 参照モデル (J2 / 損傷 / AF / OW / YU) |
 | [`manforge.simulation`](simulation.md) | integrator、driver、載荷履歴、`FortranModule` |
 | [`manforge.fitting`](fitting.md) | `fit_params`、`FitTarget`、`ParameterSpace` |
-| [`manforge.verification`](verification.md) | 検査: `JacobianChecker`、`TangentChecker`、`check_bindings`、Crosscheck |
+| [`manforge.verification`](verification.md) | 検査: `check_hand_blocks`、`check_solution`、`check_tangent`、`crosscheck`、`compare_jacobians`、`check_bindings` |
 | [`manforge.service`](service.md) | WebAPI 向けの契約層 |
 | [`manforge.utils`](utils.md) | モデル用の補助関数 (smooth 近似、主値分解) |
 

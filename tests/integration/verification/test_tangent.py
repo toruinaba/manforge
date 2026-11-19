@@ -18,7 +18,7 @@ from manforge.core import Implicit, Explicit, NTENS, MaterialModel, SOLID_3D
 from manforge.core.state import _state_with_stress
 from manforge.models import J2Isotropic3D, OWKinematic3D
 from manforge.simulation import PythonIntegrator
-from manforge.verification import TangentChecker
+from manforge.verification import check_tangent
 
 
 _J2_PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
@@ -183,53 +183,56 @@ def test_custom_stress_residual_consistent_tangent(deps_vec):
     """Consistent tangent must match FD for the custom R_stress model."""
     model = _CustomStressResidual(**_J2_PARAMS)
     state0 = model.initial_state()
-    result = TangentChecker(PythonIntegrator(model)).check(
-        anp.zeros(6), state0, anp.array(deps_vec))
+    result = check_tangent(PythonIntegrator(model), anp.array(deps_vec), anp.zeros(6), state0)
     assert result.passed, (
         f"FD tangent check failed for custom R_stress: max_rel_err={result.max_rel_err:.3e}"
     )
 
 
 # ===========================================================================
-# TangentChecker / TangentCheckResult
+# check_tangent / TangentReport
 # Absorbed from tests/integration/test_verification.py (tangent part)
 # ===========================================================================
 
-from manforge.verification import TangentCheckResult  # noqa: E402
+from manforge.verification import TangentReport  # noqa: E402
 
 
 def test_tangent_checker_elastic_passes(model):
     strain_inc = anp.array([1e-5, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = TangentChecker(PythonIntegrator(model)).check(
-        anp.zeros(6), model.initial_state(), strain_inc)
+    result = check_tangent(
+        PythonIntegrator(model), strain_inc, anp.zeros(6), model.initial_state(),
+    )
     assert result.passed
     assert result.max_rel_err < 1e-5
-    assert result.ddsdde_ad.shape == (6, 6)
+    assert result.ddsdde.shape == (6, 6)
     assert result.ddsdde_fd.shape == (6, 6)
 
 
 def test_tangent_checker_plastic_uniaxial_passes(model):
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = TangentChecker(PythonIntegrator(model)).check(
-        anp.zeros(6), model.initial_state(), strain_inc)
+    result = check_tangent(
+        PythonIntegrator(model), strain_inc, anp.zeros(6), model.initial_state(),
+    )
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
 
 
 def test_tangent_checker_plastic_multiaxial_passes(model):
     strain_inc = anp.array([1.5e-3, -0.5e-3, -0.5e-3, 0.5e-3, 0.0, 0.0])
-    result = TangentChecker(PythonIntegrator(model)).check(
-        anp.zeros(6), model.initial_state(), strain_inc)
+    result = check_tangent(
+        PythonIntegrator(model), strain_inc, anp.zeros(6), model.initial_state(),
+    )
     assert result.passed, f"Max rel err: {result.max_rel_err:.3e}"
 
 
 def test_tangent_checker_result_structure(model):
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = TangentChecker(PythonIntegrator(model)).check(
-        anp.zeros(6), model.initial_state(), strain_inc)
-    assert isinstance(result, TangentCheckResult)
+    result = check_tangent(
+        PythonIntegrator(model), strain_inc, anp.zeros(6), model.initial_state(),
+    )
+    assert isinstance(result, TangentReport)
     assert isinstance(result.passed, bool)
     assert isinstance(result.max_rel_err, float)
-    assert result.ddsdde_ad.shape == (6, 6)
+    assert result.ddsdde.shape == (6, 6)
     assert result.ddsdde_fd.shape == (6, 6)
     assert result.rel_err_matrix.shape == (6, 6)
 
@@ -237,8 +240,9 @@ def test_tangent_checker_result_structure(model):
 def test_tangent_checker_tight_tol_can_fail(model):
     """tol=1e-15 triggers failure due to FD truncation error."""
     strain_inc = anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-    result = TangentChecker(PythonIntegrator(model), tol=1e-15).check(
-        anp.zeros(6), model.initial_state(), strain_inc)
+    result = check_tangent(
+        PythonIntegrator(model), strain_inc, anp.zeros(6), model.initial_state(), tol=1e-15,
+    )
     assert not result.passed
 
 

@@ -43,16 +43,37 @@ def test_each_name_has_one_home():
               "verified_against_fortran", "StressUpdateResult"]),
     ("simulation", ["PythonIntegrator", "StrainDriver", "StressDriver", "MixedDriver",
                     "FieldHistory", "FieldType", "DriverResult", "FortranIntegrator",
-                    "FortranModule", "JacobianBlocks", "SubSteppingIntegrator"]),
+                    "FortranModule", "JacobianBlocks", "hand_jacobian",
+                    "SubSteppingIntegrator"]),
     ("fitting", ["fit_params", "FitTarget", "Observation", "ParameterSpace", "FitResult"]),
-    ("verification", ["JacobianChecker", "TangentChecker", "check_bindings",
-                      "crosscheck", "CrosscheckResult", "make_increment"]),
+    ("verification", ["check_hand_blocks", "check_solution", "check_tangent",
+                      "crosscheck", "compare_jacobians", "check_bindings",
+                      "make_increment"]),
     ("service", ["ModelRegistry", "run_simulation"]),
     ("utils", ["smooth_sqrt", "smooth_macaulay", "smooth_heaviside", "positive_part"]),
 ])
 def test_names_are_where_the_documentation_says(package, names):
     exported = set(_exports(package))
     assert [n for n in names if n not in exported] == []
+
+
+def test_every_check_returns_a_report_with_a_verdict_and_a_table():
+    """``assert report.passed, report.summary()`` reads the same for every check."""
+    import manforge.verification as verification
+
+    reports = [n for n in _exports("verification") if n.endswith("Report")]
+    assert sorted(reports) == [
+        "BindingReport", "CrosscheckReport", "HandBlockReport",
+        "JacobianComparisonReport", "SolutionReport", "TangentReport",
+    ]
+    for name in reports:
+        cls = getattr(verification, name)
+        assert isinstance(cls.passed, property), name
+        assert callable(cls.summary), name
+        assert cls.__str__ is not object.__str__, name
+    # Results are what a computation returns; a check returns a report.
+    assert [n for n in _exports("verification") if n.endswith("Result")] == []
+    assert [n for n in _exports("verification") if n.endswith("Checker")] == []
 
 
 def test_checks_do_not_re_export_what_they_check():

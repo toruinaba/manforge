@@ -5,7 +5,8 @@ Two ways of obtaining the same matrix:
 * :func:`residual_jacobian` — autodiff of the framework residual, the one the
   numerical Newton-Raphson solves.  This is the reference.
 * :func:`hand_jacobian_blocks` — the blocks a model declares with
-  :func:`~manforge.core.hand_block`, evaluated by calling them.
+  :func:`~manforge.core.hand_block`, evaluated by calling them
+  (:func:`hand_jacobian` lays them over the reference as a full matrix).
 
 Both are keyed ``part[row][col]`` with the block shape rule of
 :class:`JacobianBlocks`, so a hand derivation can be laid next to the
@@ -141,13 +142,17 @@ def residual_jacobian(
     NaN Jacobian.
     """
     residual_fn, layout = build_residual(model, inc)
-    x = _point(layout, result, dlambda_if_missing=dlambda_if_missing)
+    x = point_of(layout, result, dlambda_if_missing=dlambda_if_missing)
     J = autograd.jacobian(residual_fn)(x)  # type: ignore[arg-type]
     return _split(layout, J, "ad")
 
 
-def _point(layout: ResidualLayout, result: "StressUpdateResult", *, dlambda_if_missing=None):
-    """``x = [σ, Δλ, implicit states]`` as the result reports it."""
+def point_of(layout: ResidualLayout, result: "StressUpdateResult", *, dlambda_if_missing=None):
+    """``x = [σ, Δλ, implicit states]`` as the result reports it.
+
+    ``dlambda_if_missing`` stands in for a Δλ the result does not report
+    (NaN, from a Fortran UMAT).
+    """
     state = result.state
     dlambda = result.dlambda
     if dlambda_if_missing is not None and not np.isfinite(float(dlambda)):
@@ -192,7 +197,7 @@ def residual_at(
     while the residual is always the framework's.
     """
     residual_fn, layout = build_residual(model, inc)
-    x = _point(layout, result)
+    x = point_of(layout, result)
     return ResidualPoint(
         layout=layout,
         x=np.asarray(x, dtype=float),
@@ -252,15 +257,41 @@ def hand_jacobian_blocks(
     return out
 
 
-def hand_jacobian(
-    model: "MaterialModel", result: "StressUpdateResult", inc: Increment,
-) -> JacobianBlocks:
-    """The Jacobian with every declared block taken from the hand derivation.
+def increment_of(result: "StressUpdateResult") -> Increment:
+    """The increment ``result`` was computed for; ``ValueError`` if it carries none."""
+    if result.increment is None:
+        raise ValueError(
+            "this result carries no increment (it comes from an integrator "
+            "that reports no trial state, such as FortranIntegrator), so the "
+            "residual it would be evaluated on is not known"
+        )
+    return result.increment
 
-    Blocks the model has not declared are filled from the autodiff reference
-    (``source[row][col] == "ad"``), so a derivation in progress still yields a
-    complete matrix.
+
+def hand_jacobian(model: "MaterialModel", result: "StressUpdateResult") -> JacobianBlocks:
+    """The residual Jacobian at ``result`` with the model's hand-derived blocks in place.
+
+    Every block the model declares with :func:`~manforge.core.hand_block` is
+    taken from its method; the rest are filled from the autodiff reference,
+    so a derivation in progress still yields a complete matrix.
+    ``.source[row][col]`` says which is which (``"hand"`` or ``"ad"``).
+
+    The autodiff counterpart is ``integrator.jacobian(result)``; to check the
+    declared blocks against it over a history, use
+    :func:`~manforge.verification.check_hand_blocks`.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    result : StressUpdateResult
+        Result of a stress update by a Python integrator.
+
+    Raises
+    ------
+    ValueError
+        If ``result`` carries no increment (a Fortran UMAT result).
     """
+    inc = increment_of(result)
     reference = residual_jacobian(model, result, inc)
     layout = reference.layout
     row_state = {layout.residual_name_for(u): u for u in _unknowns(layout)}
@@ -282,4 +313,6 @@ __all__ = [
     "residual_at",
     "hand_jacobian_blocks",
     "hand_jacobian",
+    "increment_of",
+    "point_of",
 ]

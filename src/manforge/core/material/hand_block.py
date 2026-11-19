@@ -14,9 +14,10 @@ derivations live on the model as ordinary methods; :func:`hand_block` records
             ...
 
 With the blocks named, the framework can lay them out next to the autodiff
-Jacobian of the same residual (``JacobianChecker.hand`` /
-``JacobianChecker.check_hand_blocks``) without a hand-maintained table of
-"which method is which block", and can say which blocks are still missing.
+Jacobian of the same residual (:func:`~manforge.simulation.hand_jacobian`,
+:func:`~manforge.verification.check_hand_blocks`) without a hand-maintained
+table of "which method is which block", and can say which blocks are still
+missing.
 
 The decorator only attaches a record; the method itself is untouched and can
 still be called directly, and stacked with ``verified_against_fortran``.
@@ -66,8 +67,10 @@ class HandBlock:
         The block is ``∂R_row / ∂col``.
     approx : float or None
         ``None`` for a block that is meant to equal the autodiff one.
-        Otherwise the largest relative deviation from it that is *by design*,
-        with ``note`` saying why.
+        Otherwise the largest relative deviation from it that is *by design*
+        — in the measure of :func:`~manforge.verification.check_hand_blocks`,
+        the largest difference over the block relative to the block's
+        largest entry — with ``note`` saying why.
     note : str
         Why the block deviates.  Required when ``approx`` is given.
     """

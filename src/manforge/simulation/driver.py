@@ -34,7 +34,7 @@ Conventions
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import numpy as np
 
@@ -746,3 +746,16 @@ class MixedDriver(DriverBase):
                 initial_state=initial_state,
             ),
         )
+
+
+def default_driver_for(load: FieldHistory) -> Callable[[StressIntegrator], DriverBase]:
+    """The driver a load history implies when none is named.
+
+    A strain history → :class:`StrainDriver`; a stress history →
+    :class:`StressDriver`.  One rule, shared by every entry point that takes
+    an optional ``driver_factory`` (``fit_params``, ``crosscheck``), so
+    leaving it out means the same thing everywhere.  Anything else —
+    :class:`MixedDriver`, or a driver with its own outer-NR tolerances — has
+    to be passed explicitly.
+    """
+    return StressDriver if load.type == FieldType.STRESS else StrainDriver

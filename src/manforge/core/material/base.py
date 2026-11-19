@@ -1042,9 +1042,10 @@ class MaterialModel(ABC):
             framework falls back to ``numerical_newton``.
         ReturnMappingResult
             The result, with fields ``stress``, ``state``, ``dlambda``,
-            ``n_iterations``, ``residual_history`` and ``converged`` (see
-            :class:`~manforge.core.ReturnMappingResult`; a closed form reports
-            ``n_iterations=1`` and ``residual_history=[f_trial, 0.0]``).
+            ``n_iterations``, ``residual_history`` and ``converged`` — all
+            required (see :class:`~manforge.core.ReturnMappingResult`; a
+            closed form reports ``n_iterations=1``,
+            ``residual_history=[f_trial, 0.0]`` and ``converged=True``).
             Set ``converged=False`` when a hand Newton loop runs out of
             iterations.
 

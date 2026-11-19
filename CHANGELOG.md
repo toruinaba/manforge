@@ -45,6 +45,10 @@ API を全面的に見直した。**0.1.0 との互換性は無い**(0.x の間�
 **手書きのリターンマッピング。** `user_defined_return_mapping` の結果は、自動微分経路と同じ条件で確かめられる。
 Δλ < 0 や非有限の値は、`converged=True` と報告されていても非収束として扱われる。
 
+`ReturnMappingResult` は全フィールドが必須になった。`converged`(0.1.0 の既定は `True`)、`n_iterations`、
+`residual_history` を省略すると `TypeError`。閉形式解は `n_iterations=1, residual_history=[f_trial, 0.0],
+converged=True` と書く。
+
 ### シミュレーション
 
 | 0.1.0 | 0.2.0 |
@@ -69,31 +73,51 @@ API を全面的に見直した。**0.1.0 との互換性は無い**(0.x の間�
 | `exp_data={"strain": ..., "stress": ...}` | `[FitTarget.stress_strain(strain, stress)]` |
 | `fit_config={...}` と `fixed_params={...}` | `ParameterSpace(free={...}, fixed={...})` |
 | `build_objective(model, driver_factory, targets, space, failures)` | `build_objective(model, targets, space, *, driver_factory=..., failures=...)` |
+| `Model(**{k: result.params[k] for k in Model.param_names})` | `result.model`(パラメータだけなら `result.model_params`) |
 
+- `driver_factory` は省略できる。省略すると載荷履歴から決まる(ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`。
+  `crosscheck` と同じ規則)。
 - 各評価のモデルは `model.with_params(**params)` で作られる。次元と、パラメータ以外の設定が引き継がれる
   (0.1.0 では設定が既定値に戻っていた)。
+- `FitResult.params` は探索空間のすべての名前を持つ(比で探索するときの補助変数も含む)。モデルのパラメータは
+  `FitResult.model_params`、それを入れたモデルは `FitResult.model`。
 
 ### 検証
 
+検査はすべて関数で、報告オブジェクトを返す。報告は `.passed` と `.summary()` を持つので、どの検査も
+`assert report.passed, report.summary()` と書ける。`JacobianChecker` と `TangentChecker` は無くなった。
+
 | 0.1.0 | 0.2.0 |
 |---|---|
-| `JacobianChecker(model).compute(result, state_n, strain_inc=...)` | `JacobianChecker(model).compute(result)`(結果が自分の増分を持つ) |
-| `JacobianChecker(model).compare(result_a, result_b, state_n, ...)` | `JacobianChecker(model).compare(result_a, result_b)` |
-| テスト内の「メソッド ↔ ブロック」の対応表 | モデル上で `@hand_block(row, col)`、`JacobianChecker(model).check_hand_blocks(results)` |
+| `JacobianChecker(model).compute(result, state_n, strain_inc=...)` | `integrator.jacobian(result)`(結果が自分の増分を持つ) |
+| `JacobianChecker(model, rtol=...).compare(result_a, result_b, state_n, ...)` | `compare_jacobians(model, result_a, result_b, tol=...)` |
+| テスト内の「メソッド ↔ ブロック」の対応表 | モデル上で `@hand_block(row, col)`、`check_hand_blocks(model, results)` |
+| `TangentChecker(integrator).check(stress, state, strain_inc)`、`check_tangent(integrator, stress, state, strain_inc)` | `check_tangent(integrator, strain_inc, stress_n, state_n)`(`stress_update` と同じ引数順) |
+| `TangentChecker(..., denom_offset=...)` | 廃止(下の「誤差の測り方」) |
+| `result.ddsdde_ad` | `report.ddsdde`(手書きの接線や UMAT の接線も検査するので) |
 | `CrosscheckStrainDriver(a, b).run(load)` / `CrosscheckStressDriver` | `crosscheck(a, b, load)`(driver は載荷履歴から決まる。それ以外は `driver_factory=`) |
-| `cc.iter_run(load)` で最初の失敗を探す | `crosscheck(..., stop_on_failure=True)`、`result.first_failure` |
-| `result.n_cases` / `result.cases` | `result.n_steps` / `result.steps` |
-| `JacobianChecker(model, rtol=...)`、`check_bindings(..., rtol=...)` | `tol=` |
-| `check_tangent(...)` | `TangentChecker(integrator).check(...)` |
+| `cc.iter_run(load)` で最初の失敗を探す | `crosscheck(..., stop_on_failure=True)`、`report.first_failure` |
+| `result.n_cases` / `result.cases` | `report.n_steps` / `report.steps` |
+| `check_bindings(..., rtol=...)` が `{名前: (合否, 誤差)}` を返す | `check_bindings(..., tol=...)` が `BindingReport` を返す(`report.checks[名前].rel_err`) |
+| `JacobianComparisonResult` / `TangentCheckResult` / `CrosscheckResult` | `JacobianComparisonReport` / `TangentReport` / `CrosscheckReport` |
+
+**誤差の測り方。** 全検査で 1 つに揃えた: 配列(ブロック、接線、応力ベクトル)全体の最大差を、参照側の最大値で割る
+— `max|候補 − 参照| / max|参照|`。合格は `誤差 <= tol`。0.1.0 では検査ごとに違い、分母に単位を持つ定数が入っていた
+(`TangentChecker` は成分ごとに `|Δ| / (|fd| + 0.01)`、`check_bindings` は成分ごとに `|Δ| / (|f| + 1e-14)`)。
+そのため同じ許容値でも、モデルを書いた単位によって合否が変わった。移行で変わりうる点:
+
+- `check_tangent`: 0 に近い成分の誤差が、接線の最大成分に対する比になる。`denom_offset` で調整していた許容値は見直す。
+- `check_bindings`: 厳密には 0 の成分に乗った丸め誤差では不合格にならない。
+- `crosscheck` と `compare_jacobians` も、成分ごとではなく配列全体で測る。
+- 参照側は、`check_tangent` では中心差分、`crosscheck` / `compare_jacobians` では 1 つ目の引数、`check_bindings` では Python 側。
 
 追加:
 
-- `JacobianChecker(model).check_solution(results)` — 手書きのリターンマッピングの解を、自動微分側の残差に代入して行ごとに検査する。
+- `check_solution(model, results)` — 手書きのリターンマッピングの解を、自動微分側の残差に代入して行ごとに検査する。
+- `hand_jacobian(model, result)`(`manforge.simulation`)— 宣言済みのブロックを手導出、残りを自動微分で埋めたヤコビアン。
 - `crosscheck(..., lockstep=True)` — 各ステップで候補側に参照側の入力を渡して 1 ステップずつ比べる。
 - `FortranIntegrator(parse_umat_failure=...)` — UMAT 自身の収束フラグを読む。
 - `integrator.jacobian(result)` — 自動微分の残差ヤコビアン。
-
-`crosscheck` と `JacobianChecker.compare` の相対誤差は、成分ごとではなく配列全体で測るようになった。
 
 ### import パス
 

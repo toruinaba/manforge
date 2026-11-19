@@ -14,7 +14,7 @@ from manforge.simulation.integrator import (
     FortranModule,
     SubSteppingIntegrator,
 )
-from manforge.simulation.jacobian import JacobianBlocks
+from manforge.simulation.jacobian import JacobianBlocks, hand_jacobian
 
 __all__ = [
     "FieldType",
@@ -33,4 +33,5 @@ __all__ = [
     "FortranModule",
     "SubSteppingIntegrator",
     "JacobianBlocks",
+    "hand_jacobian",
 ]

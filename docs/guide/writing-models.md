@@ -144,4 +144,4 @@ energy  = positive_part_sq(sigma, self.dimension)     # Σ⟨σ_i⟩₊² (Hessi
 
 ## user_defined フック — 閉形式ソルバ
 
-閉形式の return mapping が存在する場合は `user_defined_return_mapping(self, inc)` を実装すると `PythonIntegrator` が自動使用する (`None` を返すと汎用 NR にフォールバック)。consistent tangent の閉形式は `user_defined_tangent(self, new, dlambda, inc)`。`inc.trial` には予測子が動かした全フィールドが入っているので、予測子を override したモデルでも手書きソルバを書ける。`State` は読み取り専用なので、作業用の dict は `dict(inc.state_n)` で作る。`J2Isotropic3D` が両フックの参照実装。
+閉形式の return mapping が存在する場合は `user_defined_return_mapping(self, inc)` を実装すると `PythonIntegrator` が自動使用する (`None` を返すと汎用 NR にフォールバック)。consistent tangent の閉形式は `user_defined_tangent(self, new, dlambda, inc)`。`inc.trial` には予測子が動かした全フィールドが入っているので、予測子を override したモデルでも手書きソルバを書ける。`State` は読み取り専用なので、作業用の dict は `dict(inc.state_n)` で作る。戻り値の `ReturnMappingResult` は全フィールドが必須で、`converged` も必ず書く (閉形式解は `n_iterations=1`、`residual_history=[f_trial, 0.0]`、`converged=True`。手書きの NR は、許容値で止まったのか反復上限で止まったのかを `converged` で伝える)。`J2Isotropic3D` が両フックの参照実装。

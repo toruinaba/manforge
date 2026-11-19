@@ -1,6 +1,6 @@
 # API 再設計 設計メモ
 
-- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14 にある。
+- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15 にある。
 - 基準点: manforge `v0.1.0`(`10c586c`)、manforge-internal `99bc291`。本文中の `file:line` はこの基準点のもの。
 - 対象読者: manforge と manforge-internal の両方を触る人。
 
@@ -201,11 +201,11 @@ def calc_ft_fl(self, state, dlambda, state_n): ...
 | 役割 | 中身 | 寿命 |
 |---|---|---|
 | 内省 | `JacobianBlocks.part`、レイアウト、自動微分の接線 | 恒久 |
-| テスト補助 | Crosscheck、`TangentChecker`、履歴生成、手導出ブロックの照合 | テストと同じ |
+| テスト補助 | `crosscheck`、`check_tangent`、履歴生成、手導出ブロックの照合 | テストと同じ |
 | 導出の記録 | `verified_against_fortran`、手導出ブロックの宣言 | モデルと同じ |
 
-- **内省は integrator から取れる。** `integrator.jacobian(result)` が `JacobianBlocks` を返す(段 3 で実施)。行列の計算は `simulation/jacobian.py` に移した。`JacobianChecker.compute(result)` は同じものを返し、`.part[row][col]` の形は変えていない。
-- **`JacobianChecker.compare` は 2 つの解を同じ自動微分残差で比べるもの**で、手導出と自動微分の比較ではない。後者は `check_hand_blocks` が担う(段 3 で追加)。
+- **内省は integrator から取れる。** `integrator.jacobian(result)` が `JacobianBlocks` を返す(段 3 で実施)。行列の計算は `simulation/jacobian.py` に移した。`.part[row][col]` の形は変えていない。同じものを返していた `JacobianChecker.compute(result)` は 4.15 で削除した。
+- **`compare_jacobians`(当初は `JacobianChecker.compare`)は 2 つの解を同じ自動微分残差で比べるもの**で、手導出と自動微分の比較ではない。後者は `check_hand_blocks` が担う(段 3 で追加)。
 - **モジュールの移動は今回しない**(方針 5)。`manforge.verification` のパスは残し、中身の役割だけを整理する。
 
 ### 4.10 パラメータ宣言と `dimension`
@@ -331,12 +331,61 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - バージョンを 0.2.0 にし、`CHANGELOG.md` に 0.1.0 からの移行の対応表をまとめた。
 - 作業用スクリプト(`_scratch_yu*.py`)と未使用のコードを削除した。
 
+**API の不統一(4.15 で解消)**
+
+- 検査ごとに誤差の測り方と結果の形が違った(`TangentChecker`、`check_hand_blocks`、`check_bindings`)。
+- driver の選び方が `crosscheck` と `fit_params` で違った。
+- `FitResult.params` に補助変数が混ざり、fit 結果からモデルを直接作れなかった。
+- `ReturnMappingResult` の `converged` の既定値が `True` だった。
+
 **残っているもの**
 
-- 検査ごとに誤差の測り方と結果の形が違う(`TangentChecker`、`check_hand_blocks`、`check_bindings`)。
-- driver の選び方が `crosscheck`、`fit_params`、`run_simulation` で違う。
-- `FitResult.params` に補助変数が混ざり、fit 結果からモデルを直接作れない。
 - Python 3.10 / 3.11 では動作を確認していない(確認済みは 3.12 と 3.13)。
+- 小さな不統一: `run_simulation(model_cls, params)` は次元とパラメータ以外の設定を渡せない。Python の integrator が 3 クラスある(違いは経路の選び方だけ)。`DriverStep.i` と `CrosscheckStep.index`。`FitResult.n_iter` の中身は評価回数。
+
+### 4.15 検査の形と誤差の測り方
+
+全体レビュー(4.14)で見つかった不具合のうち 3 件は、検査ごとに誤差の測り方が違うことが原因だった。検査の入口と結果の形も揃っていなかった(クラスが 2 つ、関数が 2 つ。結果は `*Result`、`*Report`、素の dict)。次のとおり 1 つの形に揃えた。
+
+**検査は関数で、報告を返す。**
+
+```python
+from manforge.verification import (
+    check_hand_blocks, check_solution, check_tangent,
+    crosscheck, compare_jacobians, check_bindings,
+)
+
+report = check_hand_blocks(model, results)
+report = check_solution(model, results)
+report = check_tangent(integrator, strain_inc, stress_n, state_n)
+assert report.passed, report.summary()
+```
+
+- `JacobianChecker` と `TangentChecker` は削除した。クラスが持っていた状態は `model` と `tol` だけで、検査のたびに作り直されていた。`check_solution` はヤコビアンの検査ではないのに `JacobianChecker` にあり、`compute` は `integrator.jacobian(result)` と同じものを返していた。
+- 行列の取得は検査から分けた: 自動微分側は `integrator.jacobian(result)`、手導出側は `hand_jacobian(model, result)`(どちらも `JacobianBlocks`。後者は `manforge.simulation` に置いた)。
+- `check_tangent` の引数は `stress_update(strain_inc, stress_n, state_n)` と同じ順にした(`TangentChecker.check(stress, state, strain_inc)` は逆だった)。
+- 段 1 で関数 `check_tangent` を削除してクラスに寄せたのとは逆の向きになる。当時は「同じことをする入口が 2 つある」ことを解消するのが目的で、どちらに寄せるかは既存の `JacobianChecker` に合わせた。検査が 6 つに増え、うち 2 つ(`crosscheck`、`check_bindings`)は関数でしか書けない形だったので、関数の側に揃えた。
+- 命名: 計算の結果は `*Result`(`StressUpdateResult`、`DriverResult`、`FitResult`)、検査の結果は `*Report`。`JacobianComparisonResult` / `TangentCheckResult` / `CrosscheckResult` を `*Report` に改名し、`check_bindings` は素の dict をやめて `BindingReport` を返す。どの報告も `.passed` と `.summary()` を持つ。
+
+**誤差の測り方は 1 つ。**
+
+```
+誤差 = max|候補 − 参照| / max|参照|      合格 ⇔ 誤差 <= tol
+```
+
+- 配列(ブロック、接線、応力ベクトル)全体で測る。成分ごとに割ると、厳密には 0 の成分に乗った丸め誤差が 100 % の誤差になる。それを避けるために分母に足していた定数(`TangentChecker` の `+ 1e-2`、`check_hand_blocks` の `max(·, 1)`、`check_bindings` の `+ 1e-14`)は単位を持つので、モデルを書いた単位で合否が変わっていた。
+- 実装は `verification/_measure.py` の 1 箇所。NaN と `inf − inf` は最悪の誤差として扱う。
+- 複数の点にまたがる検査は、差も参照の大きさも、検査した点全体で最大を取る(`check_hand_blocks` は履歴全体、`crosscheck` はそのステップまで)。あるステップで量がたまたま 0 に近くても、丸め誤差が大きな誤差にはならない。
+- `check_hand_blocks` の旧い測り方(各ステップで `max|Δ| / max(max|ad|, 1)`)は、値が 1 より小さいブロックの誤差を小さく見せていた。公開の YU モデル(平面応力)では、`[beta][theta]` などで最大 1000 倍ほど小さく出ていた(どれも丸め誤差の範囲で、合否は変わらない)。値が小さいブロックだけでできた行は、実質的に絶対値で測られていたことになる。意図した近似(`approx=`)の宣言値は、この測り方で測り直す必要がある: 0 と置いて落としたブロックは 1(100 %)と読める。
+- **厳密に 0 のブロック**には、割る相手が無い。自動微分は丸め誤差(1e-13 など)を返し、手導出は 0 を返すので、ブロック自身に対する比は 1 になる。そこで、ブロックの大きさを「その行と列から決まる大きさ」(行を構成する項の大きさ `Σ|∂R/∂x|·|x|` ÷ その列の未知数の大きさ。どちらも履歴全体の最大)と比べ、12 桁以上小さければ 0 と見なして、その大きさに対して測る。`crosscheck` が、0 から動いていない状態量を扱うのと同じ考え方で、定数も同じ(`NOISE_FLOOR = 1e-12`)。
+- 検討して採らなかった案: すべてのブロックを「行と列から決まる大きさ」に対して測る(行と列をスケールしたヤコビアンでの誤差)。落とした項が行に与える影響を測るには適しているが、ブロック自身より大きい尺度で割ることになり、導出の誤りの検出が鈍る(小さいブロックの 1 % の誤りが通る。符号の誤りが 2 と読めない)。検査の目的は導出の確認なので、ブロック自身に対する比を採った。
+- `check_solution` の残差の行だけは参照配列が無いので、行を構成する項の大きさに対する後退誤差で測る(4.13)。explicit 状態は上の測り方に従う。
+
+**driver を省略できる入口は同じ規則で決める。** `fit_params` も `driver_factory` を省略でき、`crosscheck` と同じ規則(ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`)で決まる。規則は `simulation/driver.py` の `default_driver_for` の 1 箇所にある。`run_simulation(control=...)` は文字列で受け取る service 層の契約なので変えていない。
+
+**fit 結果からモデルを作れる。** `FitResult.model_params` はモデルのパラメータだけ、`FitResult.model` はテンプレートにそれを入れたモデル(クラス、次元、パラメータ以外の設定を引き継ぐ)。`FitResult.params` は探索空間のすべての名前を持つままにした(比で探索したときの比の値を読むのに要る)。
+
+**`ReturnMappingResult` に既定値を置かない。** `converged=True` が既定値だと、反復を使い切った手書きの NR が `converged` を書き忘れても成功になる。パラメータに既定値を置かないのと同じ理由で、`n_iterations`、`residual_history`、`converged` を必須にした。
 
 ## 5. 移行計画
 各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。

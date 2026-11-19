@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
     from manforge.fitting.target import FitTarget
     from manforge.simulation.driver import DriverBase
+    from manforge.simulation.integrator import StressIntegrator
 
 
 @dataclass
@@ -53,7 +54,7 @@ class FailureLog:
 
 class DriverFactoryFn(Protocol):
     """``driver_factory(integrator) -> DriverBase`` — constructs a driver for one objective evaluation."""
-    def __call__(self, integrator: object) -> "DriverBase": ...
+    def __call__(self, integrator: "StressIntegrator", /) -> "DriverBase": ...
 
 
 def build_objective(
@@ -94,8 +95,8 @@ def build_objective(
         every model parameter (free, fixed or derived).
     driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` — the driver for targets
-        that do not carry their own.  A driver class works as is:
-        ``driver_factory=StrainDriver``.
+        that do not carry their own.  ``None`` (default) lets each target's
+        load decide — see :func:`~manforge.fitting.fit_params`.
     failures : FailureLog or None
         Collects the non-convergent evaluations.  ``None`` (default) still
         penalises them, but does not report which ones.

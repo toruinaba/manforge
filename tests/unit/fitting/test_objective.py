@@ -313,6 +313,64 @@ def test_fit_reports_zero_failures_on_a_clean_run(
     assert result.failure_params == {}
 
 
+def test_fit_without_driver_factory_uses_the_driver_the_load_implies(model, target, space):
+    """A strain history needs no driver_factory; the result is the same fit."""
+    implied = fit_params(model, [target], space, max_iter=3)
+    named = fit_params(model, [target], space, driver_factory=StrainDriver, max_iter=3)
+    assert implied.params == named.params
+    assert implied.residual == named.residual
+
+
+def test_fit_result_carries_the_fitted_model(model, target):
+    """``params`` holds every name of the space; ``model_params`` the model's own.
+
+    With a helper variable in the space, ``model.with_params(**result.params)``
+    is a TypeError (``H_ratio`` is not a parameter), so the result offers the
+    filtered dict and the model built from it.
+    """
+    space = ParameterSpace(
+        free={"sigma_y0": (240.0, (100.0, 400.0)), "H_ratio": (4.0, (1.0, 10.0))},
+        fixed={"E": 210000.0, "nu": 0.3},
+        derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
+    )
+    result = fit_params(model, [target], space, max_iter=3)
+
+    assert "H_ratio" in result.params
+    assert set(result.model_params) == set(model.param_names)
+    assert result.model_params == {k: result.params[k] for k in model.param_names}
+    with pytest.raises(TypeError):
+        model.with_params(**result.params)
+
+    fitted = result.model
+    assert type(fitted) is type(model)
+    assert fitted is not model
+    assert fitted.dimension is model.dimension
+    assert fitted.params == result.model_params
+
+
+def test_fit_result_model_keeps_the_templates_settings(space):
+    """The fitted model is the template with new parameters — settings included."""
+    from manforge.models import J2Isotropic1D
+
+    class _Scaled(J2Isotropic1D):
+        def __init__(self, *, scale=1.0, **params):
+            super().__init__(**params)
+            self.scale = scale
+
+        def yield_function(self, state):
+            sigma_y = self.scale * (self.sigma_y0 + self.H * state["ep"])
+            return self.vonmises(state["stress"]) - sigma_y
+
+    template = _Scaled(scale=2.0, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    strain = np.linspace(0.0, 8e-3, 12)
+    load = FieldHistory(FieldType.STRAIN, "Strain", strain)
+    stress = StrainDriver(PythonIntegrator(template)).run(load).stress[:, 0]
+
+    result = fit_params(template, [FitTarget.stress_strain(strain, stress)], space, max_iter=2)
+    assert isinstance(result.model, _Scaled)
+    assert result.model.scale == 2.0
+
+
 def test_unsolvable_initial_point_is_diagnosed_as_setup(model, target, space):
     """x0 failing is a setup problem, not a bad search region.
 

@@ -29,8 +29,9 @@ from manforge.models import YUKinematic1D, YUKinematic3D, YUKinematicPS
 from manforge.simulation import (
     MixedDriver, StrainDriver, PythonAnalyticalIntegrator, PythonNumericalIntegrator,
     FieldHistory, FieldType,
+    PythonIntegrator,
 )
-from manforge.verification import JacobianChecker, TangentChecker
+from manforge.verification import check_hand_blocks, check_solution, check_tangent
 
 from .conftest import PARAMS
 from manforge.verification import make_increment
@@ -358,9 +359,7 @@ def test_multiaxial_tangent_matches_condensed_3d():
 def test_tangent_vs_finite_difference_elastic(strain_inc):
     model = YUKinematicPS(**PARAMS)
     integrator = PythonNumericalIntegrator(model)
-    result = TangentChecker(integrator).check(
-        np.zeros(3), _initial_state(model), strain_inc
-    )
+    result = check_tangent(integrator, strain_inc, np.zeros(3), _initial_state(model))
     assert result.passed, f"max_rel_err={result.max_rel_err:.3e}"
 
 
@@ -377,7 +376,7 @@ def test_tangent_vs_finite_difference_plastic():
         stress, state = step.stress, step.state
     assert step.is_plastic, "setup did not reach the plastic regime"
 
-    result = TangentChecker(integrator).check(stress, state, strain_inc)
+    result = check_tangent(integrator, strain_inc, stress, state)
     assert result.passed, f"max_rel_err={result.max_rel_err:.3e}"
 
 
@@ -461,7 +460,7 @@ def test_jacobian_rows_match_closed_form():
 
     dlambda = step.dlambda
     xi = model.dev(state["stress"]) - state["theta"] - state["beta"]
-    blocks = JacobianChecker(model).compute(step)
+    blocks = PythonIntegrator(model).jacobian(step)
 
     flow = P @ xi
     np.testing.assert_allclose(blocks.part["dlambda"]["stress"], flow, rtol=1e-9)
@@ -503,7 +502,7 @@ def test_stress_row_matches_closed_form_when_stiffness_is_constant():
 
     dlambda = step.dlambda
     C = model.elastic_stiffness(state)
-    blocks = JacobianChecker(model).compute(step)
+    blocks = PythonIntegrator(model).jacobian(step)
 
     np.testing.assert_allclose(
         blocks.part["stress"]["stress"], np.eye(3) + dlambda * (C @ P), rtol=1e-9
@@ -554,7 +553,7 @@ def test_hand_solution_satisfies_framework_residual():
     load = FieldHistory(FieldType.STRAIN, "Strain", data)
     results = StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
 
-    report = JacobianChecker(model).check_solution(results)
+    report = check_solution(model, results)
 
     assert report.passed, report.summary()
     assert report.not_exercised == []
@@ -585,7 +584,7 @@ def test_calc_blocks_match_autograd(peaks, driven_idx):
     )
     result = driver.run(FieldHistory.cyclic_strain(peaks, n_per_segment=25, ntens=1))
 
-    report = JacobianChecker(model).check_hand_blocks(result.step_results, tol=1e-8)
+    report = check_hand_blocks(model, result.step_results, tol=1e-8)
 
     assert report.undeclared == [], "the PS Jacobian is fully hand-derived"
     assert report.n_declared == 16
@@ -601,14 +600,14 @@ def test_calc_ft_fl_gates_on_stagnation():
     a whole-Jacobian check reports as a generic ``theta::dlambda`` mismatch.
     """
     model = YUKinematicPS(**PARAMS)
-    checker = JacobianChecker(model)
+    integrator = PythonIntegrator(model)
     n_inactive = 0
 
     for state, state_n, step in _plastic_steps(model, [0.05, -0.05, 0.05], 25):
         if abs(float(state["R"]) - float(state_n["R"])) > 1e-15:
             continue
         n_inactive += 1
-        ref = np.asarray(checker.compute(step).part["theta"]["dlambda"], float)
+        ref = np.asarray(integrator.jacobian(step).part["theta"]["dlambda"], float)
         got = np.asarray(model.calc_ft_fl(state, step.dlambda, state_n), float)
         np.testing.assert_allclose(
             got, ref, rtol=1e-8, atol=1e-10,
@@ -639,7 +638,7 @@ def test_user_defined_tangent_vs_finite_difference(n_preload):
         stress, state = np.asarray(step.stress), dict(step.state)
     assert numerical.stress_update(strain_inc, stress, state).is_plastic
 
-    result = TangentChecker(analytical).check(stress, state, strain_inc)
+    result = check_tangent(analytical, strain_inc, stress, state)
     assert result.passed, f"max_rel_err={result.max_rel_err:.3e}"
 
 

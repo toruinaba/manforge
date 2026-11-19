@@ -20,7 +20,7 @@ from manforge.models import (
     J2IsotropicDamageCrackClosure1D, J2IsotropicDamageUnilateral1D,
 )
 from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
-from manforge.verification import TangentChecker
+from manforge.verification import check_tangent
 
 try:
     import matplotlib
@@ -68,9 +68,13 @@ integ = PythonNumericalIntegrator(m)
 steps = r2["res"].step_results
 k = next(i for i in range(pk_t[-2], pk_c[-1]) if not steps[i].is_plastic
          and steps[i - 1].stress[0] > 0 > steps[i].stress[0])
-tc = TangentChecker(integ, eps=1e-9).check(
-    np.asarray(steps[k - 1].stress), steps[k - 1].state,
-    np.array([strain[k] - strain[k - 1]]))
+tc = check_tangent(
+    integ,
+    np.array([strain[k] - strain[k - 1]]),
+    np.asarray(steps[k - 1].stress),
+    steps[k - 1].state,
+    eps=1e-9,
+)
 print(f"Tangent check, elastic step across σ = 0: [{'PASS' if tc.passed else 'FAIL'}] "
       f"max rel err = {tc.max_rel_err:.1e}")
 

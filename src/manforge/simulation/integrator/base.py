@@ -462,14 +462,27 @@ class _PythonIntegratorBase:
 
         The autodiff Jacobian of the residual this integrator solved, as
         :class:`~manforge.simulation.JacobianBlocks`
-        (``.part[row][col]``).  ``result`` must be one of this integrator's
-        own: it carries the increment the residual belongs to.
-        """
-        from manforge.simulation.jacobian import residual_jacobian
+        (``.part[row][col]``) — the reference a hand derivation is checked
+        against.  On an elastic step the point is ``(σ_trial, Δλ = 0,
+        elastic state)``.
 
-        if result.increment is None:
-            raise ValueError("this result carries no increment; it is not a Python integrator's")
-        return residual_jacobian(self._model, result, result.increment)
+        ``result`` must be a Python integrator's: it carries the increment
+        the residual belongs to, so nothing else has to be passed alongside
+        it and the Jacobian cannot be evaluated on a residual other than the
+        one the solver used.  The same matrix with the model's hand-derived
+        blocks in place is :func:`~manforge.simulation.hand_jacobian`.
+
+        Raises
+        ------
+        ValueError
+            If ``result`` carries no increment (a Fortran UMAT result).  To
+            look at the Jacobian at such a point, use
+            :func:`~manforge.verification.compare_jacobians` with a Python
+            result of the same step.
+        """
+        from manforge.simulation.jacobian import increment_of, residual_jacobian
+
+        return residual_jacobian(self._model, result, increment_of(result))
 
     def return_mapping(self, inc: Increment) -> ReturnMappingResult:
         """Perform the plastic correction (return mapping) for one increment.

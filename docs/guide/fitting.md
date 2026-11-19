@@ -1,7 +1,6 @@
 # パラメータフィッティング
 
 ```python
-from manforge.simulation import StrainDriver
 from manforge.fitting import FitTarget, ParameterSpace, fit_params
 
 space = ParameterSpace(
@@ -15,15 +14,19 @@ result = fit_params(
     model,                                              # テンプレート
     [FitTarget.stress_strain(strain_exp, stress_exp)],  # 実験カーブ 1 本 = ターゲット 1 つ
     space,
-    driver_factory=StrainDriver,
     method="L-BFGS-B",          # / "Nelder-Mead" / "differential_evolution"
     nr_jacobian="broyden",      # 閉形式フックの無いモデルでは数倍高速 (既定は "exact")
     max_iter=1000,
 )
-print(result.params, result.residual)
+print(result.model_params, result.residual)
+fitted = result.model           # フィット結果を入れたモデル (テンプレートと同じクラス・次元・設定)
 ```
 
 呼び出しの形は 1 つ — モデル、ターゲットの列、`ParameterSpace`。`space` はモデルの全パラメータを (free / fixed / derived のどれかで) 与える。`model` はテンプレートで、クラス・次元・パラメータ以外の設定 (`J2IsotropicDamageUnilateral` の `c` など) を与える。各評価のモデルは `model.with_params(**params)` で作られ、テンプレート自身のパラメータ値は使われない。`max_iter` / `tol` は最適化器の設定で、return mapping の NR のものではない。
+
+**driver** — `driver_factory` を省略すると、ターゲットの載荷履歴から決まる (ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`。`crosscheck` と同じ規則)。それ以外は渡す — 3D モデルで単軸応力の実験に合わせるなら `driver_factory=lambda i: MixedDriver(i, prescribed_strain_idx=[0])`。優先順位は、ターゲット自身の `driver_factory`、`fit_params` に渡したもの、載荷履歴から決まるもの、の順。
+
+**結果** — `result.model_params` はモデルのパラメータ (`param_names` と同じキー)、`result.model` はそれを入れたモデル。`result.params` は探索空間のすべての名前を持つので、下の `B_ratio` のような補助変数も含む (`model.with_params(**result.params)` は `TypeError` になる)。
 
 **非収束の扱い** — 探索空間には return mapping に実根が無いパラメータ値が普通に含まれる。そのため評価中の非収束は例外ではなく**有限の大ペナルティ** (1e30) としてスコアされ、最適化は続行する (`inf` にしないのは L-BFGS-B の有限差分勾配を汚染しないため)。`FitResult.n_failed` に失敗評価数、`failure_message` / `failure_params` に最初の失敗の再現情報が入る。**全評価が失敗**した場合のみ raise し、メッセージが 2 ケースを区別する: 初期値自体が解けない「fitting cannot start」(初期値を見直す; データ間引きで Δε が広がると起きやすい) と、初期値は解けたが探索が全滅した「no point the optimiser tried was」(bounds を狭める)。
 
@@ -38,15 +41,16 @@ space = ParameterSpace(
     fixed={"E": 210_000.0, "nu": 0.3},
     derived={"B": lambda p: p["Y"] * p["B_ratio"]},
 )
-result = fit_params(model, targets, space, driver_factory=StrainDriver, max_iter=200)
-result.params["B"]   # 復元済み
+result = fit_params(model, targets, space, max_iter=200)
+result.params["B_ratio"]   # 探索した比
+result.model_params["B"]   # 復元済み。B_ratio は入らない
 ```
 
 **複数カーブ同時フィット — `FitTarget` / `Observation`** — 2 階層になっているのは計算コストが違うため。`FitTarget` = **1 回の解析** (載荷履歴 1 本 + driver 1 つ、目的関数 1 評価あたり driver run 1 回)。`Observation` = **1 本の実験カーブ** (同一ターゲット上の複数 observation は解析結果を共有、追加コストほぼゼロ):
 
 ```python
 from manforge.fitting import FitTarget, Observation
-from manforge.simulation import FieldHistory, FieldType, StressDriver
+from manforge.simulation import FieldHistory, FieldType
 
 targets = [
     FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較
@@ -56,14 +60,15 @@ targets = [
             Observation(values=ep_exp, field="ep", weight=1e8),  # スケール差は weight で調整
         ],
     ),
-    FitTarget(                       # 応力制御実験: このターゲットだけ driver が違う
+    FitTarget(                       # 応力制御実験: 応力履歴なので StressDriver で回る
         load=FieldHistory(FieldType.STRESS, "Stress", stress_hist),
         observations=[Observation(values=strain_exp, field="Strain", component=0)],
-        driver_factory=lambda i: StressDriver(i),
     ),
 ]
-result = fit_params(model, targets, space, driver_factory=StrainDriver)
+result = fit_params(model, targets, space)
 ```
+
+ターゲットごとに driver を変えたいときは `FitTarget(..., driver_factory=...)` で渡す。
 
 各 observation の残差二乗和は**データ点数で割られる** (長いカーブが支配するのを防ぐ)。デフォルトの比較は点対点 MSE で、**実験とシミュレーションのサンプリングが一致している必要がある**。
 

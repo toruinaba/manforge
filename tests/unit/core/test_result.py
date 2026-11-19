@@ -157,3 +157,25 @@ def test_elastic_state_is_a_fresh_dict(model, initial_state):
     state["ep"] = anp.array(123.0)
     assert float(r.state["ep"]) == 0.0
     assert float(r.increment.trial["ep"]) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Every field of a return-mapping result is stated
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("left_out", ["n_iterations", "residual_history", "converged"])
+def test_return_mapping_result_has_no_defaults(left_out):
+    """A hand-written NR that ran out of iterations must say so.
+
+    With ``converged=True`` as the default, leaving the flag out reported
+    success; with ``residual_history=[]`` the solution check had no solver
+    tolerance to allow for.
+    """
+    fields = dict(
+        stress=np.zeros(6), state={"stress": np.zeros(6)}, dlambda=np.array(0.0),
+        n_iterations=1, residual_history=[1.0, 0.0], converged=True,
+    )
+    ReturnMappingResult(**fields)
+    del fields[left_out]
+    with pytest.raises(TypeError, match=left_out):
+        ReturnMappingResult(**fields)

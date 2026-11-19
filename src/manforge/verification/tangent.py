@@ -1,95 +1,151 @@
-"""Finite-difference verification of the consistent tangent."""
+"""Finite-difference check of the consistent tangent.
+
+:func:`check_tangent` compares the tangent an integrator returns for one
+stress update with central differences of the stress it returns — the
+definition of the consistent tangent, ``dσ_{n+1} / dΔε``, taken literally.
+It needs nothing but ``stress_update``, so it applies to any integrator: the
+autodiff tangent, a hand-written ``user_defined_tangent``, or a Fortran UMAT.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from manforge._typing import FloatArray, StateDict, Stiffness
+from manforge.verification._measure import array_rel_err, max_abs
+
+if TYPE_CHECKING:
+    from manforge.simulation.integrator import StressIntegrator
 
 
 @dataclass
-class TangentCheckResult:
-    """Result of a tangent consistency check."""
+class TangentReport:
+    """Result of :func:`check_tangent`.
 
-    passed: bool
-    max_rel_err: float
-    ddsdde_ad: Stiffness
+    Attributes
+    ----------
+    ddsdde : ndarray, shape (ntens, ntens)
+        The tangent the integrator returned.
+    ddsdde_fd : ndarray, shape (ntens, ntens)
+        Central differences of the integrator's stress — the reference.
+    tol : float
+        The tolerance the tangent was judged against.
+    """
+
+    ddsdde: Stiffness
     ddsdde_fd: Stiffness
-    rel_err_matrix: FloatArray
+    tol: float
+
+    @property
+    def max_rel_err(self) -> float:
+        """``max|ddsdde − ddsdde_fd| / max|ddsdde_fd|``."""
+        return array_rel_err(self.ddsdde, self.ddsdde_fd)
+
+    @property
+    def rel_err_matrix(self) -> FloatArray:
+        """Each entry's difference relative to ``max|ddsdde_fd|``.
+
+        Its largest entry is :attr:`max_rel_err`; the position says which
+        component of the tangent is off.
+        """
+        scale = max_abs(self.ddsdde_fd)
+        diff = np.abs(
+            np.asarray(self.ddsdde, dtype=float) - np.asarray(self.ddsdde_fd, dtype=float)
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return diff / scale
+
+    @property
+    def passed(self) -> bool:
+        """The tangent is within ``tol`` of the central differences."""
+        return self.max_rel_err <= self.tol
+
+    def summary(self) -> str:
+        """Two lines: the verdict, then the error and the entry it occurs at."""
+        head = "tangent check: " + (
+            "agrees with central differences" if self.passed
+            else "differs from central differences"
+        )
+        m = self.rel_err_matrix
+        where = ""
+        if np.all(np.isfinite(m)):
+            i, j = np.unravel_index(int(np.argmax(m)), m.shape)
+            where = f", worst at [{i}][{j}]"
+        mark = "ok  " if self.passed else "FAIL"
+        return f"{head}\n  {mark} ddsdde: {self.max_rel_err:.3e} (tol {self.tol:.0e}{where})"
+
+    def __str__(self) -> str:
+        return self.summary()
 
 
-class TangentChecker:
-    """Compare AD consistent tangent against central-difference approximation.
+def check_tangent(
+    integrator: "StressIntegrator",
+    strain_inc: FloatArray,
+    stress_n: FloatArray,
+    state_n: StateDict,
+    *,
+    eps: float = 1e-7,
+    tol: float = 1e-5,
+) -> TangentReport:
+    """Compare an integrator's consistent tangent with central differences.
 
-    Parallel class-based API to :class:`~manforge.verification.JacobianChecker`.
+    The arguments after ``integrator`` are those of ``stress_update``, in the
+    same order: the check is of the update ``stress_update(strain_inc,
+    stress_n, state_n)``.
 
     Parameters
     ----------
     integrator : StressIntegrator
-        Constitutive integrator — use
-        :class:`~manforge.simulation.PythonIntegrator` (auto),
-        :class:`~manforge.simulation.PythonNumericalIntegrator`, or
-        :class:`~manforge.simulation.PythonAnalyticalIntegrator`.
-    eps : float, optional
-        Finite-difference step size (default 1e-7).
-    tol : float, optional
-        Relative-error tolerance for the pass/fail check (default 1e-5).
-    denom_offset : float, optional
-        Offset added to the denominator to avoid division by zero (default 1e-2).
+        Any integrator — :class:`~manforge.simulation.PythonIntegrator`,
+        :class:`~manforge.simulation.PythonAnalyticalIntegrator` (checks a
+        hand-written tangent), :class:`~manforge.simulation.FortranIntegrator`.
+    strain_inc : array-like, shape (ntens,)
+        Strain increment of the step.
+    stress_n : array-like, shape (ntens,)
+        Stress at the start of the step.
+    state_n : dict
+        Internal state at the start of the step.
+    eps : float, default 1e-7
+        Finite-difference step in strain.
+    tol : float, default 1e-5
+        Pass threshold on ``max|ddsdde − ddsdde_fd| / max|ddsdde_fd|``.
+
+    Returns
+    -------
+    TangentReport
+        ``report.passed``, ``report.summary()``, and both matrices.
+
+    Notes
+    -----
+    The step ``eps`` trades truncation error against round-off, and the
+    tolerance has to leave room for both: the default pair suits a tangent
+    of ordinary smoothness.  Across a yield point, or a branch a model
+    switches on, the stress is not differentiable and central differences
+    straddling it are not a reference.
 
     Examples
     --------
-    >>> checker = TangentChecker(PythonIntegrator(model))
-    >>> result = checker.check(stress_n, state_n, strain_inc)
-    >>> assert result.passed
+    ::
+
+        report = check_tangent(PythonIntegrator(model), strain_inc, stress_n, state_n)
+        assert report.passed, report.summary()
     """
+    strain_inc = np.array(strain_inc, dtype=float)
+    stress_n = np.array(stress_n, dtype=float)
+    ntens = integrator.ntens
 
-    def __init__(self, integrator: object, *, eps: float = 1e-7, tol: float = 1e-5,
-                 denom_offset: float = 1e-2) -> None:
-        self.integrator = integrator
-        self.eps = eps
-        self.tol = tol
-        self.denom_offset = denom_offset
+    ddsdde = np.array(integrator.stress_update(strain_inc, stress_n, state_n).ddsdde)
+    ddsdde_fd = np.zeros((ntens, ntens))
+    for j in range(ntens):
+        e_j = np.zeros(ntens)
+        e_j[j] = 1.0
+        plus = integrator.stress_update(strain_inc + eps * e_j, stress_n, state_n).stress
+        minus = integrator.stress_update(strain_inc - eps * e_j, stress_n, state_n).stress
+        ddsdde_fd[:, j] = (np.array(plus) - np.array(minus)) / (2.0 * eps)
+    return TangentReport(ddsdde=ddsdde, ddsdde_fd=ddsdde_fd, tol=tol)
 
-    def check(self, stress: FloatArray, state: StateDict, strain_inc: FloatArray) -> TangentCheckResult:
-        """Run the FD vs AD tangent comparison.
 
-        Parameters
-        ----------
-        stress : array-like, shape (ntens,)
-            Stress state at which to evaluate the tangent.
-        state : dict
-            Internal state at which to evaluate the tangent.
-        strain_inc : array-like, shape (ntens,)
-            Strain increment for the evaluation point.
-        """
-        ddsdde_ad = np.array(self.integrator.stress_update(strain_inc, stress, state).ddsdde)
-        ddsdde_fd = self._fd_tangent(strain_inc, stress, state)
-        rel_err_matrix = np.abs(ddsdde_ad - ddsdde_fd) / (np.abs(ddsdde_fd) + self.denom_offset)
-        max_rel_err = float(np.max(rel_err_matrix))
-        return TangentCheckResult(
-            passed=max_rel_err < self.tol,
-            max_rel_err=max_rel_err,
-            ddsdde_ad=ddsdde_ad,
-            ddsdde_fd=ddsdde_fd,
-            rel_err_matrix=rel_err_matrix,
-        )
-
-    def _fd_tangent(self, strain_inc: FloatArray, stress_n: FloatArray, state_n: StateDict) -> Stiffness:
-        ntens = self.integrator.ntens
-        ddsdde_fd = np.zeros((ntens, ntens))
-        strain_inc = np.array(strain_inc)
-        stress_n = np.array(stress_n)
-        for j in range(ntens):
-            e_j = np.zeros(ntens)
-            e_j[j] = 1.0
-            col = (
-                np.array(self.integrator.stress_update(
-                    strain_inc + self.eps * e_j, stress_n, state_n).stress)
-                - np.array(self.integrator.stress_update(
-                    strain_inc - self.eps * e_j, stress_n, state_n).stress)
-            ) / (2.0 * self.eps)
-            ddsdde_fd[:, j] = col
-        return ddsdde_fd
+__all__ = ["TangentReport", "check_tangent"]

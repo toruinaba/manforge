@@ -10,7 +10,10 @@ from manforge.simulation import (
     PythonNumericalIntegrator, StressDriver,
 )
 from manforge.verification import (
-    CrosscheckResult, CrosscheckStep, crosscheck, generate_strain_history,
+    CrosscheckReport,
+    CrosscheckStep,
+    crosscheck,
+    generate_strain_history,
 )
 
 
@@ -47,7 +50,7 @@ class _Overshoot(J2Isotropic3D):
 class TestAgreement:
     def test_closed_form_agrees_with_newton(self, model, strain_load):
         result = crosscheck(*_pair(model), strain_load)
-        assert isinstance(result, CrosscheckResult)
+        assert isinstance(result, CrosscheckReport)
         assert result.passed, result.summary()
         assert result.n_steps == len(strain_load.data)
         assert result.n_passed == result.n_steps
