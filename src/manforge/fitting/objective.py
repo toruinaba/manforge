@@ -72,7 +72,7 @@ def build_objective(
 
     An evaluation the model cannot complete — return mapping or the driver's
     outer NR failing to converge, or a singular NR Jacobian — yields the large
-    finite :data:`FAILURE_PENALTY` rather than propagating, so the optimiser
+    finite :data:`~manforge.fitting.FAILURE_PENALTY` rather than propagating, so the optimiser
     steers away from that region instead of the whole fit dying on one bad
     trial point.  Errors that indicate a broken *setup* rather than an
     unsolvable parameter value (shape mismatches, unknown field names) are
@@ -99,7 +99,7 @@ def build_objective(
         Collects the non-convergent evaluations.  ``None`` (default) still
         penalises them, but does not report which ones.
     nr_jacobian : {"exact", "broyden"}
-        Forwarded to :class:`~manforge.simulation.integrator.PythonIntegrator`.
+        Forwarded to :class:`~manforge.simulation.PythonIntegrator`.
         ``"broyden"`` cuts the per-evaluation cost several-fold for models
         without hand-derived solvers — worthwhile here because a fit pays the
         integration cost hundreds of times.

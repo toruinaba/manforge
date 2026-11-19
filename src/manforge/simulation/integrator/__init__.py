@@ -6,7 +6,7 @@ check at construction (``dimension``, ``ntens``, ``raise_on_nonconverged``,
 fulfil it:
 
 :class:`PythonIntegrator`
-    Wraps a :class:`~manforge.core.material.MaterialModel` and uses the
+    Wraps a :class:`~manforge.core.MaterialModel` and uses the
     ``"auto"`` solver strategy (user-defined hook if present, else
     numerical Newton-Raphson).
 

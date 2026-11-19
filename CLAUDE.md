@@ -21,13 +21,22 @@ uv run pytest tests/benchmarks/j2_isotropic/ -m "not fortran" -v  # Single bench
 uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 uv run manforge list / clean
 make docker-build && make docker-test
+
+# Documentation (Sphinx + MyST; needs `uv sync --extra docs`)
+make docs                    # HTML → docs/_build/html。警告はエラー扱い
 ```
 
 There is no linter configured. No CI/CD workflows exist.
 
+## Documentation
+
+- **ガイドは `docs/` の Markdown(日本語)、API リファレンスは docstring(英語)から生成する。** README は概要・インストール・クイックスタートと `docs/` への案内だけを持つ(`docs/index.md` が README のその部分を include するので、二重には書かない)。使い方の説明を足すときは README ではなく `docs/` の該当ページに書く。
+- **`make docs` が通ることを確認する。** 警告はエラー扱いで、次を検出する: 解決できない相互参照、`docs/` 内のリンク切れ、公開パッケージの `__all__` に載っているのにリファレンスに項目が無い名前(docstring の無いクラス・関数、`docs/reference/*.md` に説明の無い定数)。
+- **docstring の相互参照は公開パッケージのパスで書く**(`` :class:`~manforge.core.MaterialModel` ``。`manforge.core.material.MaterialModel` ではない)。非公開の名前は参照にせず ``` ``literal`` ``` で書く。
+
 ## Architecture
 
-manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Float64 is enabled globally in `src/manforge/__init__.py`.
+manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Arithmetic is float64 throughout — autograd wraps NumPy, so there is nothing to enable.
 
 ### Public import paths
 

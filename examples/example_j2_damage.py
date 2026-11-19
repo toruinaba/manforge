@@ -13,7 +13,6 @@ Usage
 
 import numpy as np
 
-import manforge  # noqa: F401 — enables float64
 from manforge.models import J2Isotropic1D, J2IsotropicDamage1D
 from manforge.simulation import PythonNumericalIntegrator
 

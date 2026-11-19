@@ -29,7 +29,6 @@ import numpy as np
 _fortran_dir = os.path.join(os.path.dirname(__file__), "..", "fortran")
 sys.path.insert(0, os.path.abspath(_fortran_dir))
 
-import manforge  # noqa: F401 — enables float64
 from manforge.models import J2Isotropic3D
 from manforge.simulation import (
     FortranIntegrator, PythonIntegrator, PythonNumericalIntegrator, StressDriver,

@@ -1,7 +1,7 @@
 """Fortran binding runtime checker.
 
 Provides :func:`check_bindings` which compares registered Python methods
-against their Fortran counterparts using a :class:`~manforge.simulation.integrator.FortranModule`
+against their Fortran counterparts using a :class:`~manforge.simulation.FortranModule`
 instance.
 """
 
@@ -34,9 +34,9 @@ def check_bindings(
     Parameters
     ----------
     model:
-        An instantiated :class:`~manforge.core.material.MaterialModel`.
+        An instantiated :class:`~manforge.core.MaterialModel`.
     fortran:
-        A :class:`~manforge.simulation.integrator.FortranModule` instance (module must be importable).
+        A :class:`~manforge.simulation.FortranModule` instance (module must be importable).
     cases:
         ``{method_name: (py_args, fortran_args)}``.
         *py_args* is passed to ``getattr(model, method_name)(*py_args)``.

@@ -20,7 +20,7 @@ class FortranBinding:
     Parameters
     ----------
     subroutine:
-        Exact subroutine name as passed to :meth:`~manforge.simulation.integrator.FortranModule.call`.
+        Exact subroutine name as passed to :meth:`~manforge.simulation.FortranModule.call`.
     test:
         Pytest node id of the test that verifies this binding
         (e.g. ``"tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness"``).
@@ -70,7 +70,7 @@ def collect_bindings(cls: type) -> dict[str, FortranBinding]:
     Parameters
     ----------
     cls:
-        The class to inspect (typically a concrete :class:`~manforge.core.material.MaterialModel` subclass).
+        The class to inspect (typically a concrete :class:`~manforge.core.MaterialModel` subclass).
 
     Returns
     -------

@@ -419,12 +419,12 @@ class DlambdaField:
 
     Not a :class:`StateField` — does not appear in ``state_fields`` /
     ``state_names`` / ``implicit_state_names``.  A single stateless singleton
-    ``DLAMBDA_FIELD`` is attached to :class:`~manforge.core.material.MaterialModel`
+    ``DLAMBDA_FIELD`` is attached to :class:`~manforge.core.MaterialModel`
     as the class attribute ``dlambda`` so that users can write
     ``self.dlambda(R_dl)`` inside ``state_residual``.
 
     The ``name`` class attribute exposes ``"dlambda"`` for API symmetry (e.g.
-    :class:`~manforge.simulation._layout.ResidualLayout` uses it as the default
+    ``ResidualLayout`` uses it as the default
     residual-row label for the Δλ slot).
 
     Example::

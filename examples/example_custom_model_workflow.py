@@ -22,7 +22,6 @@ import autograd.numpy as anp
 import numpy as np
 import numpy.testing as npt
 
-import manforge  # noqa: F401 — enables float64
 from manforge.core import Explicit, SCALAR, MaterialModel
 from manforge.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator, FieldHistory,

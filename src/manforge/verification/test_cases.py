@@ -21,7 +21,7 @@ from manforge.simulation.types import FieldHistory
 
 
 def make_increment(model, state_n, *, stress_trial, strain_inc=None) -> Increment:
-    """Assemble an :class:`~manforge.core.state.Increment` by hand.
+    """Assemble an :class:`~manforge.core.Increment` by hand.
 
     For calling a model's hooks directly — ``state_residual``,
     ``update_state``, ``elastic_check`` — at a point no integrator produced.

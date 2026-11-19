@@ -441,7 +441,7 @@ class _PythonIntegratorBase:
         """Residual Jacobian at the converged point of ``result``, in named blocks.
 
         The autodiff Jacobian of the residual this integrator solved, as
-        :class:`~manforge.simulation.jacobian.JacobianBlocks`
+        :class:`~manforge.simulation.JacobianBlocks`
         (``.part[row][col]``).  ``result`` must be one of this integrator's
         own: it carries the increment the residual belongs to.
         """

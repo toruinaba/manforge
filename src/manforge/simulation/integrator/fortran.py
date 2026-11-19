@@ -66,7 +66,7 @@ class FortranIntegrator:
     subroutine : str
         Name of the f2py-callable core-logic subroutine.
     dimension : StressDimension, optional
-        Dimensionality descriptor.  Defaults to :data:`SOLID_3D` (ntens=6).
+        Dimensionality descriptor.  Defaults to :data:`~manforge.core.SOLID_3D` (ntens=6).
     initial_state : callable or dict
         Either a no-arg callable returning a state dict (e.g.
         ``model.initial_state``) or the dict value directly.
@@ -115,7 +115,7 @@ class FortranIntegrator:
     Notes
     -----
     Fortran UMATs do not expose a per-step ``is_plastic`` flag or ``dlambda``.
-    The resulting :class:`~manforge.core.result.StressUpdateResult` will
+    The resulting :class:`~manforge.core.StressUpdateResult` will
     have ``is_plastic=None``, ``dlambda=nan``, and ``increment=None`` (hence
     ``stress_trial=None``).
     Driver loops that gate on ``step.result.is_plastic`` should guard with

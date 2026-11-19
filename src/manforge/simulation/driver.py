@@ -2,11 +2,11 @@
 
 All drivers share the same interface via :class:`DriverBase`:
 
-* Input  — the driver holds a :class:`~manforge.simulation.integrator.StressIntegrator`
+* Input  — the driver holds a :class:`~manforge.simulation.StressIntegrator`
   (passed at construction) and receives a
-  :class:`~manforge.simulation.types.FieldHistory` containing the prescribed
+  :class:`~manforge.simulation.FieldHistory` containing the prescribed
   loading history (strain or stress) at each :meth:`run` / :meth:`iter_run` call.
-* Output — :class:`~manforge.simulation.types.DriverResult` containing
+* Output — :class:`~manforge.simulation.DriverResult` containing
   stress and strain at every step, plus any explicitly requested state
   variables.
 
@@ -15,12 +15,12 @@ Conventions
 - Stress and strain arrays use the engineering-shear Voigt convention:
     σ, ε = [11, 22, 33, 12, 13, 23]
 - *Cumulative* quantities are the input; increments are computed internally.
-- Drivers require a :class:`~manforge.simulation.integrator.StressIntegrator`
+- Drivers require a :class:`~manforge.simulation.StressIntegrator`
   at construction time.  Wrap bare ``MaterialModel`` objects with
-  :class:`~manforge.simulation.integrator.PythonIntegrator` (auto solver),
-  :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`
+  :class:`~manforge.simulation.PythonIntegrator` (auto solver),
+  :class:`~manforge.simulation.PythonNumericalIntegrator`
   (numerical Newton-Raphson), or
-  :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`
+  :class:`~manforge.simulation.PythonAnalyticalIntegrator`
   (analytical / user-defined) before passing to a driver.
 - Non-convergence has one switch, the integrator's ``raise_on_nonconverged``.
   With ``True`` (the default) a failed step raises ``RuntimeError``, whether
@@ -71,10 +71,10 @@ class DriverBase(ABC):
     ----------
     integrator : StressIntegrator
         Constitutive integrator — use
-        :class:`~manforge.simulation.integrator.PythonIntegrator`,
-        :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`,
-        :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`, or
-        :class:`~manforge.simulation.integrator.FortranIntegrator`.
+        :class:`~manforge.simulation.PythonIntegrator`,
+        :class:`~manforge.simulation.PythonNumericalIntegrator`,
+        :class:`~manforge.simulation.PythonAnalyticalIntegrator`, or
+        :class:`~manforge.simulation.FortranIntegrator`.
     """
 
     def __init__(self, integrator: StressIntegrator) -> None:
@@ -100,7 +100,7 @@ class DriverBase(ABC):
         ------
         DriverStep
             Snapshot after each step: cumulative strain, full
-            :class:`~manforge.core.result.StressUpdateResult`, and
+            :class:`~manforge.core.StressUpdateResult`, and
             (for :class:`StressDriver`) outer-NR diagnostics.
 
         Examples
@@ -320,7 +320,7 @@ class StressDriver(DriverBase):
         initial_stress : array-like or None, optional
             Stress tensor at the start of the loading history.  If ``None``
             (default), the initial stress is zero.  Note: ``strain`` in the
-            yielded :class:`~manforge.simulation.types.DriverStep` represents
+            yielded :class:`~manforge.simulation.DriverStep` represents
             the cumulative strain increment from this prestressed state, not
             from the undeformed configuration.
         initial_state : dict or None, optional

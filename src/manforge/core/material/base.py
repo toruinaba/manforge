@@ -139,8 +139,8 @@ class MaterialModel(ABC):
     """Abstract base class for constitutive material models.
 
     Subclasses declare state variables as class-level ``StateField`` attributes
-    using :func:`~manforge.core.state.Implicit` and
-    :func:`~manforge.core.state.Explicit`::
+    using :func:`~manforge.core.Implicit` and
+    :func:`~manforge.core.Explicit`::
 
         from manforge.core import Implicit, Explicit, NTENS, SCALAR
 
@@ -208,7 +208,7 @@ class MaterialModel(ABC):
        implicit differentiation, or from :meth:`user_defined_tangent`.
 
     Every hook after the predictor receives the same
-    :class:`~manforge.core.state.Increment` (``inc.state_n``,
+    :class:`~manforge.core.Increment` (``inc.state_n``,
     ``inc.strain_inc``, ``inc.trial``).
 
     Required methods depend on which states are explicit vs implicit:
@@ -301,7 +301,7 @@ class MaterialModel(ABC):
 
     @property
     def params(self) -> dict[str, float]:
-        """Material parameters as a dict keyed by :attr:`param_names`."""
+        """Material parameters as a dict keyed by ``param_names``."""
         return {name: getattr(self, name) for name in self.param_names}
 
     def with_params(self, **params) -> Self:
@@ -672,7 +672,7 @@ class MaterialModel(ABC):
         """Residual of the implicit state evolution equations.
 
         Defines R_h(new, Δλ, inc) = 0 for state variables listed in
-        :attr:`implicit_state_names`.  When stress is declared ``Implicit``,
+        ``implicit_state_names``.  When stress is declared ``Implicit``,
         return ``self.stress(R_stress)`` in the list as well.
 
         Parameters
@@ -837,7 +837,7 @@ class MaterialModel(ABC):
     # ------------------------------------------------------------------
 
     def make_state(self, **kwargs) -> "State":
-        """Assemble a complete :class:`~manforge.core.state.State` from keyword arguments.
+        """Assemble a complete :class:`~manforge.core.State` from keyword arguments.
 
         All field names (including ``stress``) are required; extra or missing
         keys raise ``TypeError`` at the call site (before any autograd trace).
@@ -936,23 +936,23 @@ class MaterialModel(ABC):
         return new["stress"] - stress_trial + dlambda * (C @ n.strain_like)
 
     def vonmises(self, stress: StressVec) -> Scalar:
-        """Von Mises equivalent stress; delegates to :meth:`StressDimension.vonmises`."""
+        """Von Mises equivalent stress; delegates to :meth:`~manforge.core.StressDimension.vonmises`."""
         return self.dimension.vonmises(stress)
 
     def inner_product(self, a: StressVec, b: StressVec) -> Scalar:
-        """Mandel double contraction A:B; delegates to :meth:`StressDimension.inner_product`."""
+        """Mandel double contraction A:B; delegates to :meth:`~manforge.core.StressDimension.inner_product`."""
         return self.dimension.inner_product(a, b)
 
     def hydrostatic(self, stress: StressVec) -> "Scalar":
-        """Mean normal stress; delegates to :meth:`StressDimension.hydrostatic`."""
+        """Mean normal stress; delegates to :meth:`~manforge.core.StressDimension.hydrostatic`."""
         return self.dimension.hydrostatic(stress)
 
     def dev(self, stress: StressVec) -> StressVec:
-        """Deviatoric stress; delegates to :meth:`StressDimension.dev`."""
+        """Deviatoric stress; delegates to :meth:`~manforge.core.StressDimension.dev`."""
         return self.dimension.dev(stress)
 
     def isotropic_C(self, lam: float, mu: float) -> "Stiffness":
-        """Isotropic elastic stiffness from Lamé constants; delegates to :meth:`StressDimension.isotropic_C`.
+        """Isotropic elastic stiffness from Lamé constants; delegates to :meth:`~manforge.core.StressDimension.isotropic_C`.
 
         :meth:`isotropic_stiffness` is the same matrix built from the model's
         own ``E`` and ``nu``.
@@ -960,27 +960,27 @@ class MaterialModel(ABC):
         return self.dimension.isotropic_C(lam, mu)
 
     def I_vol(self) -> "Stiffness":
-        """Volumetric projection tensor; delegates to :meth:`StressDimension.I_vol`."""
+        """Volumetric projection tensor; delegates to :meth:`~manforge.core.StressDimension.I_vol`."""
         return self.dimension.I_vol()
 
     def I_dev(self) -> "Stiffness":
-        """Deviatoric projection tensor; delegates to :meth:`StressDimension.I_dev`."""
+        """Deviatoric projection tensor; delegates to :meth:`~manforge.core.StressDimension.I_dev`."""
         return self.dimension.I_dev()
 
     def vonmises_norm(self, s: StressVec) -> "Scalar":
-        """Von Mises norm of a deviatoric tensor; delegates to :meth:`StressDimension.vonmises_norm`."""
+        """Von Mises norm of a deviatoric tensor; delegates to :meth:`~manforge.core.StressDimension.vonmises_norm`."""
         return self.dimension.vonmises_norm(s)
 
     def _missing_dev_components(self, s: StressVec) -> StressVec:
-        """Unstored deviatoric direct components; delegates to :meth:`StressDimension.missing_dev_components`."""
+        """Unstored deviatoric direct components; delegates to :meth:`~manforge.core.StressDimension.missing_dev_components`."""
         return self.dimension.missing_dev_components(s)
 
     def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:
-        """Double contraction s:t for deviatoric tensors; delegates to :meth:`StressDimension.deviatoric_inner_product`."""
+        """Double contraction s:t for deviatoric tensors; delegates to :meth:`~manforge.core.StressDimension.deviatoric_inner_product`."""
         return self.dimension.deviatoric_inner_product(s, t)
 
     def strain_norm(self, strain: StressVec) -> Scalar:
-        """Equivalent strain ε_eq = √(2/3 ε:ε); delegates to :meth:`StressDimension.strain_norm`."""
+        """Equivalent strain ε_eq = √(2/3 ε:ε); delegates to :meth:`~manforge.core.StressDimension.strain_norm`."""
         return self.dimension.strain_norm(strain)
 
     # ------------------------------------------------------------------
