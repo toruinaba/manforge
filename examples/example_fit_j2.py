@@ -18,7 +18,6 @@ Usage
 
 import numpy as np
 
-import manforge  # noqa: F401 — enables JAX float64
 from manforge.models import J2Isotropic1D
 from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory
 from manforge.fitting import FitTarget, Observation, ParameterSpace, fit_params

@@ -51,7 +51,7 @@ Stress-controlled example
 Single-step comparison
 ----------------------
 Use :class:`CrosscheckStrainDriver` with a one-row
-:class:`~manforge.simulation.types.FieldHistory` and the
+:class:`~manforge.simulation.FieldHistory` and the
 ``initial_stress`` / ``initial_state`` kwargs to compare a prestressed
 single step::
 

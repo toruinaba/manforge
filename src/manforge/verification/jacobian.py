@@ -5,7 +5,7 @@
 * :meth:`~JacobianChecker.compute` — the autodiff Jacobian of the framework
   residual in named blocks, the reference a derivation is checked against;
 * :meth:`~JacobianChecker.hand` — the same matrix assembled from the blocks the
-  model declares with :func:`~manforge.core.material.hand_block`;
+  model declares with :func:`~manforge.core.hand_block`;
 * :meth:`~JacobianChecker.check_hand_blocks` — every declared block against the
   reference over a whole history, with the worst deviation per block and the
   list of blocks not derived yet.
@@ -223,7 +223,7 @@ class JacobianChecker:
     def hand(self, result: StressUpdateResult) -> JacobianBlocks:
         """The Jacobian at ``result`` with the model's hand-derived blocks in place.
 
-        Every block declared with :func:`~manforge.core.material.hand_block` is
+        Every block declared with :func:`~manforge.core.hand_block` is
         taken from its method; the rest come from autodiff, so a derivation in
         progress still gives a complete matrix.  ``.source[row][col]`` says
         which is which.

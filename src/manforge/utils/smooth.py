@@ -69,7 +69,7 @@ def smooth_direction(v: anp.ndarray, eps: float = _DEFAULT_EPS) -> anp.ndarray:
 def smooth_heaviside(x: anp.ndarray, beta: float = 500.0) -> anp.ndarray:
     """Smooth Heaviside step: 0.5·(1 + tanh(β·x/2)).
 
-    Uses :func:`_stable_tanh` so the autograd VJP follows ``1 − tanh²``
+    Uses ``_stable_tanh`` so the autograd VJP follows ``1 − tanh²``
     instead of ``1 / cosh²``, avoiding overflow at ``|β·x/2| ≳ 354``
     (i.e. ``|x| ≳ 709/β``; with default β=500, ``|x| ≳ 1.42``).
     At x=0 returns exactly 0.5; larger β gives a sharper transition.

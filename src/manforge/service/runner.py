@@ -72,7 +72,7 @@ def run_simulation(
     ----------
     model_cls : type[MaterialModel]
         Concrete model class (typically from a
-        :class:`~manforge.service.registry.ModelRegistry`).
+        :class:`~manforge.service.ModelRegistry`).
     params : dict[str, float]
         Material parameters.  Keys must match ``model_cls.param_names``
         exactly (missing or extra keys raise ``ValueError``).
@@ -80,8 +80,8 @@ def run_simulation(
         Cumulative load history.  Shape ``(N,)`` (uniaxial shorthand) or
         ``(N, ntens)``.  Interpreted per ``control``.
     control : {"strain", "stress"}
-        Driving mode.  ``"strain"`` → :class:`StrainDriver`, ``"stress"`` →
-        :class:`StressDriver`.
+        Driving mode.  ``"strain"`` → :class:`~manforge.simulation.StrainDriver`, ``"stress"`` →
+        :class:`~manforge.simulation.StressDriver`.
     include_fields : sequence of str
         Model state keys to include in ``SimulationOutput.fields``.
         Unknown names raise ``ValueError`` listing the available keys.

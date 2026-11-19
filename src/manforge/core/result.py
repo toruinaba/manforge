@@ -85,11 +85,11 @@ class StressUpdateResult:
         repeated access costs nothing extra.
     is_plastic : bool or None
         True if the step activated plasticity.  ``None`` when the information
-        is not available (e.g. results produced by :class:`FortranIntegrator`
+        is not available (e.g. results produced by :class:`~manforge.simulation.FortranIntegrator`
         where the UMAT does not expose a plasticity flag).
     increment : Increment or None
         The step this result answers: the state at its beginning, Δε, and the
-        elastic trial state (:class:`~manforge.core.state.Increment`).  Kept so
+        elastic trial state (:class:`~manforge.core.Increment`).  Kept so
         the result can be inspected later — the residual Jacobian at the
         converged point is a function of all three — without the caller
         carrying them alongside.  ``None`` for a result that has no
@@ -98,7 +98,7 @@ class StressUpdateResult:
     n_substeps : int
         Number of substeps the increment was divided into.  ``1`` means the
         increment was integrated in one pass — the only value any integrator
-        other than :class:`~manforge.simulation.integrator.SubSteppingIntegrator`
+        other than :class:`~manforge.simulation.SubSteppingIntegrator`
         ever produces.  Reported separately because :attr:`n_iterations` sums
         over substeps and would otherwise hide the subdivision.
     """

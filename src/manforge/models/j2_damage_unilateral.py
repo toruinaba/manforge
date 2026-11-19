@@ -37,7 +37,7 @@ Unknowns and residuals
 
 ε_e and Y are both taken from ψ* by autodiff, so the potential is the single
 source of truth.  Their Jacobians need ∂²ψ*/∂σ², i.e. P± — provided by
-:mod:`manforge.utils.spectral` with the zero-eigenvalue convention H(0) = c.
+:mod:`manforge.utils` with the zero-eigenvalue convention H(0) = c.
 
 Elastic predictor
 -----------------
@@ -152,7 +152,7 @@ class J2IsotropicDamageUnilateral(MaterialModel):
         compressive part of Y is weighted by h.
     c : float
         Value of the Heaviside step at a zero principal stress (see
-        :mod:`manforge.utils.spectral`).  Provisional default 1/2.
+        :mod:`manforge.utils`).  Provisional default 1/2.
     """
 
     param_names = ["E", "nu", "sigma_y0", "H", "S", "s", "p_D", "h"]

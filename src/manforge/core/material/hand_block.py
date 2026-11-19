@@ -39,7 +39,7 @@ vocabulary:
 ``state_n``
     State at the beginning of the increment.
 ``inc``
-    The whole :class:`~manforge.core.state.Increment`.
+    The whole :class:`~manforge.core.Increment`.
 
 Any other parameter name is rejected when the class is created.
 """

@@ -157,10 +157,10 @@ def fit_params(
         Template model: it supplies the class, the dimension and any
         non-parameter setting.  Its parameter values are not used — every
         evaluation takes them from ``space``
-        (:meth:`~manforge.core.material.MaterialModel.with_params`).
+        (:meth:`~manforge.core.MaterialModel.with_params`).
     targets : sequence of FitTarget
         The runs to fit against, one
-        :class:`~manforge.fitting.target.FitTarget` per experiment.  For a
+        :class:`~manforge.fitting.FitTarget` per experiment.  For a
         single measured stress-strain curve,
         ``[FitTarget.stress_strain(strain, stress)]``.  Each observation's
         squared residual is divided by its point count before summing, so a
@@ -170,7 +170,7 @@ def fit_params(
         Free variables with initial values and bounds, fixed values, and
         derived parameters.  It must supply every model parameter.  Use
         ``derived`` when parameters are correlated — see
-        :class:`~manforge.fitting.space.ParameterSpace` for the ``Y < B``
+        :class:`~manforge.fitting.ParameterSpace` for the ``Y < B``
         ratio example.
     driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` — constructs the driver
@@ -193,7 +193,7 @@ def fit_params(
         Extra options forwarded verbatim to scipy, overriding the above.
     nr_jacobian : {"exact", "broyden"}
         NR Jacobian strategy for the integrator each evaluation constructs —
-        see :class:`~manforge.simulation.integrator.PythonIntegrator`.
+        see :class:`~manforge.simulation.PythonIntegrator`.
         ``"broyden"`` is several times faster per evaluation on models
         without hand-derived solvers (measured ~4× on YU) and a fit pays
         that cost at every evaluation; the converged stresses agree with

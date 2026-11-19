@@ -41,7 +41,7 @@ class ResidualLayout:
     _residual_names : tuple[tuple[str, str], ...]
         ``(state_name, residual_name)`` pairs for each slot in canonical order:
         ``[stress, dlambda, *implicit_keys]``.  Residual names are used as row
-        labels in :class:`~manforge.verification.jacobian.JacobianBlocks`.part.
+        labels in :class:`~manforge.simulation.JacobianBlocks`.part.
     dlambda_residual_name : str
         Residual-row label for the Δλ slot (default ``"dlambda"``).
     """

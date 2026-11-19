@@ -80,21 +80,31 @@ class StressDimension:
     # ------------------------------------------------------------------
 
     def hydrostatic(self, stress):
+        """Mean normal stress p = tr(σ)/3, counting the components not stored."""
         raise NotImplementedError(f"{type(self).__name__}.hydrostatic is not implemented")
 
     def dev(self, stress):
+        """Deviatoric part of a stress vector, in the stored components."""
         raise NotImplementedError(f"{type(self).__name__}.dev is not implemented")
 
     def isotropic_C(self, lam, mu):
+        """Isotropic elastic stiffness from the Lamé constants, ``(ntens, ntens)``.
+
+        Maps engineering-shear strain to stress; statically condensed for the
+        dimensions that hold some stress components at zero.
+        """
         raise NotImplementedError(f"{type(self).__name__}.isotropic_C is not implemented")
 
     def I_vol(self):
+        """Volumetric projection, ``(ntens, ntens)``."""
         raise NotImplementedError(f"{type(self).__name__}.I_vol is not implemented")
 
     def I_dev(self):
+        """Deviatoric projection, ``(ntens, ntens)``."""
         raise NotImplementedError(f"{type(self).__name__}.I_dev is not implemented")
 
     def vonmises_norm(self, s):
+        """√(3/2 s:s) of a deviatoric stress-like vector (physical shear)."""
         raise NotImplementedError(f"{type(self).__name__}.vonmises_norm is not implemented")
 
     def missing_dev_components(self, s):

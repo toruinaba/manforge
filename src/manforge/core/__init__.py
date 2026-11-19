@@ -6,7 +6,7 @@ result types a hook returns or receives.
 """
 
 from manforge.core.state import (
-    Implicit, Explicit, State, Increment, NTENS, SCALAR,
+    Implicit, Explicit, StateField, State, Increment, NTENS, SCALAR,
     StateResidual, StateUpdate, DlambdaResidual, FlowVector,
 )
 # dimension before material: material.base needs it, and dimension pulls in
@@ -37,6 +37,7 @@ __all__ = [
     # state declarations and the objects hooks exchange
     "Implicit",
     "Explicit",
+    "StateField",
     "NTENS",
     "SCALAR",
     "State",

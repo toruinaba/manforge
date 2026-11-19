@@ -274,6 +274,15 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - **ガイドは日本語、API リファレンスは英語。** 今ある資産(日本語の README、英語の docstring)をそのまま使う。
 - **まずローカルビルドのみ。** `make docs` で HTML を作れる状態までを範囲とし、警告をエラー扱いにしてリンク切れを検出する。公開先(GitHub Pages など)は内容を確認してから別途決める。
 
+実施結果(段 6b):
+
+- **README を 600 行から 80 行に縮めた。** 概要、インストール、クイックスタート、`docs/` への案内だけを持つ。使い方の説明は `docs/` のガイド 9 ページに移した。`docs/index.md` は README の概要部分を include するので、同じ内容を 2 箇所に書かない。ガイドは素の Markdown なので、GitHub 上でもそのまま読める。
+- **API リファレンスは公開パッケージごとに 1 ページ。** `automodule` が各パッケージの `__all__` に従うので、名前は import 元のパス(`manforge.core.MaterialModel`)で 1 回だけ載る。定数(`NTENS`、`SOLID_3D` など)は docstring を持てないので、`docs/reference/*.md` に説明を書いた。
+- **`make docs` は警告をエラー扱いにする。** 検出するもの: 解決できない相互参照、`docs/` 内のリンク切れ、`__all__` に載っているのにリファレンスに項目が無い名前(`docs/conf.py` のビルド後チェック)。最後のチェックで、docstring の無かった `YUKinematic1D` と、説明の無かった `StressDimension` の演算子 6 つが見つかった。
+- **docstring の相互参照を公開パスに直した**(61 箇所)。非公開の名前への参照は literal にした。
+- **私有の基底クラスを持つクラスは、継承したメソッドを明示して載せる。** `PythonIntegrator` など 3 つと Crosscheck ドライバ 2 つは、メソッドが `_PythonIntegratorBase` / `_CrosscheckDriverBase` にあり、そのままではリファレンスに `stress_update` すら出なかった。
+- `StateField` を `manforge.core` に追加した。モデルが `self.ep(...)` / `self.stress.update(...)` として触る型で、説明の置き場が無かった。
+
 ## 5. 移行計画
 各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。
 

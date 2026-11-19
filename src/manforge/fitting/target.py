@@ -49,7 +49,7 @@ def _extract_field(result: "DriverResult", name: str) -> FloatArray:
     """Pull a computed history out of a driver result by field name.
 
     Accepts ``"Stress"``, ``"Strain"``, or any model state key (read with
-    :meth:`~manforge.simulation.types.DriverResult.history`).
+    :meth:`~manforge.simulation.DriverResult.history`).
     """
     if name == STRESS_FIELD:
         return np.asarray(result.stress, dtype=float)
@@ -92,17 +92,17 @@ class Observation:
         How to compare the curves.  ``"mse"`` (default) is a point-by-point
         mean squared error and requires ``values`` to be sampled at the same
         points as the simulation.  ``"pcm"`` is
-        :func:`~manforge.fitting.metrics.partial_curve_mapping`, which
+        :func:`~manforge.fitting.partial_curve_mapping`, which
         compares (x, y) curves by arc length and so permits different point
         counts — use it when the simulation is forced onto a coarser
         increment than the experiment was sampled at, or when the curve is
-        multi-valued.  Requires :attr:`x_values`.  Note that a coarse
+        multi-valued.  Requires ``x_values``.  Note that a coarse
         increment biases a joint fit around the yield corner; see
-        :func:`~manforge.fitting.metrics.partial_curve_mapping`.
+        :func:`~manforge.fitting.partial_curve_mapping`.
     x_values : array-like or None
         Experimental x coordinates, length ``N`` — required by ``"pcm"`` and
         rejected by ``"mse"``.  The computed x history is taken from
-        :attr:`x_field`.
+        ``x_field``.
     x_field : str
         Which computed history supplies the x axis for a curve metric.
         Defaults to ``"Strain"``.
@@ -169,7 +169,7 @@ class Observation:
         return len(np.asarray(self.values))
 
     def residual(self, result: "DriverResult") -> float:
-        """Residual of this curve under :attr:`metric`, scaled by :attr:`weight`."""
+        """Residual of this curve under ``metric``, scaled by ``weight``."""
         computed = _extract_field(result, self.field)
         if self.component is not None:
             computed = computed[:, self.component]
@@ -210,15 +210,15 @@ class FitTarget:
     Parameters
     ----------
     load : FieldHistory
-        Loading history for this run.  Its :class:`FieldType` must match the
-        driver — ``STRAIN`` for :class:`~manforge.simulation.driver.StrainDriver`,
-        ``STRESS`` for :class:`~manforge.simulation.driver.StressDriver`.
+        Loading history for this run.  Its :class:`~manforge.simulation.FieldType` must match the
+        driver — ``STRAIN`` for :class:`~manforge.simulation.StrainDriver`,
+        ``STRESS`` for :class:`~manforge.simulation.StressDriver`.
     observations : sequence of Observation
         Curves compared against this run's outputs.  All share the one run.
     driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` for this target.
         ``None`` (default) uses the one passed to
-        :func:`~manforge.fitting.optimizer.fit_params`, which is the right
+        :func:`~manforge.fitting.fit_params`, which is the right
         choice unless this target is driven differently from the others.
     initial_stress, initial_state : array-like / dict or None
         Forwarded to ``driver.run`` — use for a prestressed specimen or a
@@ -269,7 +269,7 @@ class FitTarget:
         """One strain-driven run compared against one stress curve.
 
         The common case — a measured stress-strain curve — without spelling
-        out the :class:`FieldHistory` and the :class:`Observation`.
+        out the :class:`~manforge.simulation.FieldHistory` and the :class:`Observation`.
 
         Parameters
         ----------

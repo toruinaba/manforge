@@ -142,7 +142,7 @@ class YUKinematic3D(YUKinematic):
     dimension = SOLID_3D
 
     def flow(self, state):
-        """Hand-derived flow direction, matching :meth:`calc_jacobian`.
+        """Hand-derived flow direction, matching ``calc_jacobian``.
 
         ``calc_norm_n_flow`` returns ``1.5·T@ξ/‖ξ‖`` — already engineering shear.
 
@@ -831,4 +831,10 @@ class YUKinematicPS(YUKinematic):
 
 
 class YUKinematic1D(YUKinematic):
+    """YUKinematic for uniaxial stress (ntens=1).
+
+    No hand-derived solver: return mapping and tangent come from the autodiff
+    path inherited from :class:`YUKinematic`.
+    """
+
     dimension = UNIAXIAL_1D

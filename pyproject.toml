@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pyright>=1.1.380"]
 examples = ["matplotlib"]
+docs = ["sphinx>=7.3", "myst-parser>=3.0", "furo>=2024.5"]
 fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 
 [project.urls]

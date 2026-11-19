@@ -1,7 +1,7 @@
 # manforge Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -114,6 +114,19 @@ docker-bench-yu-3d:
 			../../fortran/yu_kinematic_3d.f90 yu_3d_bench.f90 \
 			-m yu_3d_bench -llapack -lblas && \
 		PYTHONPATH=/workspace/src:\$$PWD python bench_3d.py"
+
+# ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+
+## Build the HTML documentation into docs/_build/html (needs: uv sync --extra docs).
+## Warnings are errors: a dead cross-reference or an undocumented public name fails the build.
+docs:
+	uv run sphinx-build -b html -W --keep-going -n docs docs/_build/html
+
+## Remove the built documentation
+docs-clean:
+	rm -rf docs/_build
 
 # ---------------------------------------------------------------------------
 # Cleanup

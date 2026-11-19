@@ -38,7 +38,7 @@ the other rows (the NR tolerance is stress-scaled).
 
 Y is written without the triaxiality ratio σ̃_H/σ̃_vm so that it stays smooth
 at σ̃_vm → 0; the two forms are algebraically identical.  ⟨·⟩ is
-:func:`~manforge.utils.smooth.smooth_macaulay`, which keeps the tangent free
+:func:`~manforge.utils.smooth_macaulay`, which keeps the tangent free
 of the kink at ep = p_D.
 
 Stress residual — why the row is scaled
@@ -237,7 +237,7 @@ class J2IsotropicDamageCrackClosure(J2IsotropicDamage):
     separate design.
 
     **Autodiff.**  Σ⟨σ̃_i⟩±² comes from
-    :func:`manforge.utils.spectral.spectral_trace`, whose gradient is the matrix
+    :func:`manforge.utils.spectral_trace`, whose gradient is the matrix
     function f'(σ̃) rather than the eigh derivative.  Uniaxial, plane-stress and
     pure-shear states all have repeated principal values, where the eigh
     derivative is NaN; the spectral form is exact there.

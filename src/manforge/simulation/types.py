@@ -333,7 +333,7 @@ class DriverResult:
     Parameters
     ----------
     step_results : list
-        Per-step :class:`~manforge.core.result.StressUpdateResult`
+        Per-step :class:`~manforge.core.StressUpdateResult`
         objects, one per *completed* increment.  Provides access to converged
         stress, state, tangent (ddsdde), dlambda, stress_trial, and is_plastic
         for every step.
@@ -419,7 +419,7 @@ class DriverResult:
 
 @dataclass
 class DriverStep:
-    """Per-step snapshot yielded by :meth:`~manforge.simulation.driver.DriverBase.iter_run`.
+    """Per-step snapshot yielded by :meth:`~manforge.simulation.DriverBase.iter_run`.
 
     Parameters
     ----------
@@ -433,21 +433,21 @@ class DriverStep:
         NR convergence flag.  ``False`` is reachable only with an integrator
         whose ``raise_on_nonconverged`` is ``False`` — otherwise the failure
         raises — and the driver stops after yielding that step.  For
-        :class:`~manforge.simulation.driver.StrainDriver` this is the
+        :class:`~manforge.simulation.StrainDriver` this is the
         integrator's return-mapping flag.  For
-        :class:`~manforge.simulation.driver.StressDriver` and
-        :class:`~manforge.simulation.driver.MixedDriver` it additionally
+        :class:`~manforge.simulation.StressDriver` and
+        :class:`~manforge.simulation.MixedDriver` it additionally
         covers whether the driver's own Newton-Raphson loop converged within
         ``max_iter``; a non-converged return mapping fails that loop
         immediately rather than feeding it a garbage iterate.
     n_outer_iter : int
         Number of NR iterations taken.  ``1`` for
-        :class:`~manforge.simulation.driver.StrainDriver`; the outer-loop count
-        for :class:`~manforge.simulation.driver.StressDriver`; the inner-loop
-        count for :class:`~manforge.simulation.driver.MixedDriver`.
+        :class:`~manforge.simulation.StrainDriver`; the outer-loop count
+        for :class:`~manforge.simulation.StressDriver`; the inner-loop
+        count for :class:`~manforge.simulation.MixedDriver`.
     residual_inf : float
         Final L∞ norm of the NR residual.  ``0.0`` for
-        :class:`~manforge.simulation.driver.StrainDriver`.
+        :class:`~manforge.simulation.StrainDriver`.
 
     Examples
     --------

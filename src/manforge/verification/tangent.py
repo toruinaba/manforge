@@ -29,9 +29,9 @@ class TangentChecker:
     ----------
     integrator : StressIntegrator
         Constitutive integrator — use
-        :class:`~manforge.simulation.integrator.PythonIntegrator` (auto),
-        :class:`~manforge.simulation.integrator.PythonNumericalIntegrator`, or
-        :class:`~manforge.simulation.integrator.PythonAnalyticalIntegrator`.
+        :class:`~manforge.simulation.PythonIntegrator` (auto),
+        :class:`~manforge.simulation.PythonNumericalIntegrator`, or
+        :class:`~manforge.simulation.PythonAnalyticalIntegrator`.
     eps : float, optional
         Finite-difference step size (default 1e-7).
     tol : float, optional

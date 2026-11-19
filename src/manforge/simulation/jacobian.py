@@ -5,7 +5,7 @@ Two ways of obtaining the same matrix:
 * :func:`residual_jacobian` — autodiff of the framework residual, the one the
   numerical Newton-Raphson solves.  This is the reference.
 * :func:`hand_jacobian_blocks` — the blocks a model declares with
-  :func:`~manforge.core.material.hand_block`, evaluated by calling them.
+  :func:`~manforge.core.hand_block`, evaluated by calling them.
 
 Both are keyed ``part[row][col]`` with the block shape rule of
 :class:`JacobianBlocks`, so a hand derivation can be laid next to the
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 class JacobianBlocks:
     """Named blocks of the return-mapping residual Jacobian at one point.
 
-    The residual / unknown vector layout follows :class:`~manforge.simulation._layout.ResidualLayout`:
+    The residual / unknown vector layout follows ``ResidualLayout`` (``manforge.simulation._layout``):
     ``[σ (ntens) | Δλ (1) | q_implicit_non_stress (declaration order)]``.
 
     Blocks are accessed via ``part[row_residual_name][col_state_name]``.
@@ -75,7 +75,7 @@ class JacobianBlocks:
 
     Attributes
     ----------
-    layout : ResidualLayout
+    layout : the solver's residual layout (``ResidualLayout``)
         Layout descriptor used to compute this Jacobian.
     part : dict[str, dict[str, ndarray]]
         ``part[residual_row_name][state_col_name]`` → block array.
