@@ -4,7 +4,7 @@
 Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレームワーク。降伏関数と硬化則を実装するだけで、return mapping / consistent tangent (autograd 自動微分) / パラメータフィッティング / Fortran クロス検証がすべて使える。
 
 - autograd による **consistent tangent 自動計算** — 手動でアルゴリズム接線を導出する必要なし
-- **汎用 NR ソルバ** — スカラー Δλ / ベクトル `[σ, Δλ, q]` の 2 経路を自動選択。Broyden 更新 (`nr_jacobian="broyden"`) で数倍高速化
+- **汎用 NR ソルバ** — 未知数は `[σ, Δλ, implicit 状態]`。閉形式で更新できる状態 (explicit) は未知数に入らない。Broyden 更新 (`nr_jacobian="broyden"`) で数倍高速化
 - **多次元対応** — 3D ソリッド / 平面ひずみ / 平面応力 / 1D を `StressDimension` で統一管理
 - **手導出の照合** — 手で導出したヤコビアンのブロックをモデル上で宣言し、自動微分とブロックごとに照合
 - **組み込みモデル** — J2 等方硬化 / J2 + Lemaitre 損傷 / Armstrong-Frederick / Ohno-Wang / YU を同梱
@@ -67,6 +67,7 @@ load = FieldHistory.cyclic_strain(peaks=[5e-3, -5e-3, 5e-3], n_per_segment=25, n
 | [Fortran UMAT クロス検証](docs/guide/fortran.md) | ビルド → 読み込み → 比較 |
 | [サービスに組み込む](docs/guide/service.md) | `ModelRegistry`、`run_simulation` |
 | [開発](docs/development.md) | テスト、例、ドキュメントのビルド |
+| [変更履歴](CHANGELOG.md) | 版ごとの変更と、0.1.0 からの移行の対応表 |
 | [設計メモ](docs/design/api-redesign.md) | API 再設計の方針と決定の記録 |
 
 HTML 版 (API リファレンスを含む) は手元でビルドする:

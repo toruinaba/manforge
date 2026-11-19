@@ -77,7 +77,7 @@ from manforge.verification import crosscheck, generate_strain_history
 load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
 result = crosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model), load)
 assert result.passed, result.summary()
-# crosscheck: 40 steps — all agree
+# crosscheck: 35 steps — all agree
 #   ok   stress: 2.100e-13 (tol 1e-06)
 #   ok   state[ep]: 1.100e-16 (tol 1e-06)
 #   ok   tangent: 3.400e-12 (tol 1e-05)

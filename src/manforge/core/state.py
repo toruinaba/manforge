@@ -9,17 +9,17 @@ Usage in a model class::
         alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
         ep     = Implicit(shape=SCALAR,  doc="equivalent plastic strain")
 
-The ``Implicit`` / ``Explicit`` descriptors replace the old list-based
-``state_names`` / ``implicit_state_names`` declarations.  ``MaterialModel.
-__init_subclass__`` collects them via MRO traversal and auto-derives
-``cls.state_names`` and ``cls.implicit_state_names`` for internal use.
+``MaterialModel.__init_subclass__`` collects the ``Implicit`` / ``Explicit``
+declarations via MRO traversal and derives ``cls.state_names`` and
+``cls.implicit_state_names`` from them.
 
 stress field
 ------------
-σ (stress) is automatically declared as ``Explicit(shape=NTENS, name="stress")``
-by ``MaterialModel.__init_subclass__`` if the user does not declare it.  When
-declared as ``Implicit``, σ is included as an NR unknown.  The ``implicit_stress``
-flag has been removed — use ``stress = Implicit(shape=NTENS)`` instead.
+σ is always a Newton-Raphson unknown.  If the model does not declare it,
+``MaterialModel.__init_subclass__`` adds ``Explicit(shape=NTENS, name="stress")``
+and the σ row of the residual is the framework's associative default.
+Declaring ``stress = Implicit(shape=NTENS)`` means the model writes that row
+itself, in ``state_residual``.
 
 User methods receive state arguments as :class:`State` dict-wrappers.
 Access state variables with bracket notation: ``state["stress"]``, ``state["alpha"]``.
@@ -123,11 +123,8 @@ class StateField:
     shape : _NtensSentinel, _ScalarSentinel, tuple, or int
         Array shape.  Use ``NTENS`` (from ``manforge.core``) for a vector of
         length ``model.ntens``.  Use ``SCALAR`` (from ``manforge.core``) for a
-        0-d scalar state (preferred over ``()``).  An ``int`` ``n`` is
-        equivalent to ``(n,)``.  Any other tuple is used directly (e.g.
-        ``(6, 6)``).  Passing ``()`` directly is also accepted (backward
-        compatible).  The string ``"ntens"`` is no longer accepted — use
-        ``NTENS``.
+        0-d scalar state.  An ``int`` ``n`` is equivalent to ``(n,)``.  Any
+        other tuple is used directly (e.g. ``(6, 6)``).
     default : callable or None
         Factory ``(model) -> array`` for the initial value.  ``None`` → zeros
         of the resolved shape.

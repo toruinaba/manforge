@@ -51,8 +51,6 @@ class ElasticStiffnessFn(Protocol):
     def __call__(self, state: StateDict) -> Stiffness: ...
 
 
-_EPS_INTEGRATOR = 1e-300
-
 # sentinel used for fields that Fortran UMATs do not expose
 _NAN = math.nan
 

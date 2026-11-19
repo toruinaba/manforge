@@ -80,8 +80,8 @@ class J2Isotropic(MaterialModel):
 class J2Isotropic3D(J2Isotropic):
     """J2 plasticity with analytical radial return for full-rank stress states.
 
-    Uses the scalar NR path (all non-stress states explicit): implements
-    ``update_state`` which returns the updated state directly in closed form (Δep = Δλ).
+    The only state, ``ep``, is explicit (``update_state``: Δep = Δλ), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.
 
     Provides closed-form ``user_defined_return_mapping`` and
     ``user_defined_tangent`` using the identity ``C @ n_dev = 2μ · n_dev``,
@@ -106,7 +106,7 @@ class J2Isotropic3D(J2Isotropic):
 
     @verified_against_fortran(
         "j2_isotropic_3d_elastic_stiffness",
-        test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
+        test="tests/integration/verification/test_fortran_check.py::test_check_bindings_elastic_stiffness",
     )
     def elastic_stiffness(self, state: "State | StateDict") -> Stiffness:
         return super().elastic_stiffness(state)
@@ -190,9 +190,9 @@ class J2Isotropic3D(J2Isotropic):
 class J2IsotropicPS(J2Isotropic):
     """J2 plasticity with isotropic hardening for plane-stress elements.
 
-    Uses the scalar NR path (all non-stress states explicit): implements
-    ``update_state`` (Δep = Δλ). Uses the autodiff return-mapping path
-    (``method="auto"``).
+    The only state, ``ep``, is explicit (``update_state``: Δep = Δλ), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.  There is no closed form here:
+    the return mapping is the autodiff one.
 
     Parameters
     ----------
@@ -212,8 +212,8 @@ class J2IsotropicPS(J2Isotropic):
 class J2Isotropic1D(J2Isotropic):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
 
-    Uses the scalar NR path (all non-stress states explicit): implements
-    ``update_state`` (Δep = Δλ). Provides closed-form ``user_defined_return_mapping``
+    The only state, ``ep``, is explicit (``update_state``: Δep = Δλ), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.  Provides closed-form ``user_defined_return_mapping``
     and ``user_defined_tangent`` using the 1D radial return mapping, written in
     the same ``dev`` / ``vonmises`` / ``I_vol`` / ``I_dev`` form as
     :class:`J2Isotropic3D` (with ``E`` replacing ``3μ`` due to static condensation).

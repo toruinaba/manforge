@@ -35,8 +35,9 @@ class FailureLog:
     A constitutive model need not be solvable everywhere in a box-bounded
     parameter space — return mapping can legitimately have no real root — so a
     failed evaluation is information ("not the optimum") rather than an error.
-    The objective reports it as ``inf`` and records it here, which keeps a long
-    fit alive instead of discarding every prior evaluation.
+    The objective scores it with the finite :data:`FAILURE_PENALTY` and records
+    it here, which keeps a long fit alive instead of discarding every prior
+    evaluation.
     """
 
     n_failed: int = 0

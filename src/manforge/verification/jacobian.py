@@ -396,7 +396,7 @@ class JacobianChecker:
         if not declared:
             raise ValueError(
                 f"{type(model).__name__} declares no hand-derived block "
-                "(decorate the methods with manforge.core.material.hand_block)"
+                "(decorate the methods with manforge.core.hand_block)"
             )
         worst: dict[tuple[str, str], tuple[float, int]] = {}
         rows: tuple[str, ...] = ()

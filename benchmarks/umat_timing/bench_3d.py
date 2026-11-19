@@ -13,7 +13,7 @@ import numpy as np
 from _common import plastic_point, props
 
 from manforge.models import YUKinematic3D
-from manforge.simulation.integrator import FortranModule
+from manforge.simulation import FortranModule
 
 N_REPEAT = 100_000
 

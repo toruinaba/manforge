@@ -31,5 +31,6 @@ reference/index
 :maxdepth: 1
 
 development
+changelog
 design/api-redesign
 ```

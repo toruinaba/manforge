@@ -102,7 +102,8 @@ class AFKinematic(MaterialModel):
 class AFKinematic3D(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for full-rank stress states.
 
-    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
+    All non-stress states are explicit (``update_state``), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.
 
     Parameters
     ----------
@@ -116,7 +117,8 @@ class AFKinematic3D(AFKinematic):
 class AFKinematicPS(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
 
-    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
+    All non-stress states are explicit (``update_state``), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.
 
     Parameters
     ----------
@@ -130,7 +132,8 @@ class AFKinematicPS(AFKinematic):
 class AFKinematic1D(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for uniaxial elements.
 
-    Uses the scalar NR path (all non-stress states explicit via ``update_state``).
+    All non-stress states are explicit (``update_state``), so the
+    Newton-Raphson unknowns are ``[σ, Δλ]``.
 
     The stored ``alpha`` is the deviatoric component α11_dev.  The effective
     backstress (yield-surface centre) is α_eff = (3/2)·α11_dev.

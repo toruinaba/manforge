@@ -12,7 +12,7 @@
 
 UMAT の構造と同じ並びになっている — 冒頭で試行状態を計算し、そこから分岐と補正を行う。フックの引数リストが違うモデルは、クラス定義時に `TypeError` になる (位置引数で呼ばれるため、黙って引数がずれるのを防ぐ)。
 
-状態変数を `Explicit` として宣言し、`update_state` に閉形式更新を書く。NR はスカラー Δλ のみ解く:
+状態変数を `Explicit` として宣言し、`update_state` に閉形式更新を書く。explicit 状態は NR の未知数に入らず、NR は `[σ, Δλ]` を解く:
 
 ```python
 from manforge.core import MaterialModel, Explicit, SCALAR
@@ -59,7 +59,7 @@ def elastic_stiffness(self, state):                    # 損傷
 
 ## Implicit 型 (Ohno-Wang 型) — 後方 Euler 残差
 
-閉形式で解けない発展則は状態変数を `Implicit` として宣言し、`state_residual` に残差を書く。`stress = Implicit(shape=NTENS)` を宣言すると σ も NR 未知数になる (ベクトル NR):
+閉形式で解けない発展則は状態変数を `Implicit` として宣言し、`state_residual` に残差を書く。implicit 状態は σ、Δλ と並んで NR の未知数になる (`x = [σ, Δλ, implicit 状態]`)。σ は常に未知数で、`stress = Implicit(shape=NTENS)` を宣言すると σ 行の残差も自分で書く (宣言しなければ、関連流れの既定の残差が使われる):
 
 ```python
 from manforge.core import Implicit, NTENS, SCALAR
@@ -140,7 +140,7 @@ sig_pos = positive_part(sigma, self.dimension)        # σ₊ = Σ⟨σ_i⟩ n_i
 energy  = positive_part_sq(sigma, self.dimension)     # Σ⟨σ_i⟩₊² (Hessian = 2P₊)
 ```
 
-主値 0 では折れ点を平滑化せず、規約 H(0) = c (`DEFAULT_HEAVISIDE_AT_ZERO = 1/2`、**暫定** — UMAT 側の規約に合わせて確定) で扱う。全関数が `c=` で上書き可能。設計理由は `utils/spectral.py` の docstring、参照実装は `src/manforge/models/j2_damage_unilateral.py`。
+主値 0 では折れ点を平滑化せず、規約 H(0) = c (`DEFAULT_HEAVISIDE_AT_ZERO = 1/2`、**暫定** — UMAT 側の規約に合わせて確定) で扱う。この規約を使う関数 (`positive_part` / `negative_part` とその 2 乗版、`macaulay_sq` / `neg_macaulay_sq`) は `c=` で上書きできる。設計理由は `utils/spectral.py` の docstring、参照実装は `src/manforge/models/j2_damage_unilateral.py`。
 
 ## user_defined フック — 閉形式ソルバ
 
