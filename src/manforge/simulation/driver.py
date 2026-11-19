@@ -212,6 +212,9 @@ class StrainDriver(DriverBase):
 
             * ``(N,)``       — uniaxial: only ε11 varies, lateral strains zero.
             * ``(N, ntens)`` — general: all components prescribed.
+
+            Any other shape raises ``ValueError`` (a history built with
+            another ``ntens`` is not broadcast).
         initial_stress : array-like or None, optional
             Stress tensor at the start of the loading history.  If ``None``
             (default), the initial stress is zero.
@@ -231,6 +234,14 @@ class StrainDriver(DriverBase):
         data = np.asarray(load.data, dtype=float)
         uniaxial = data.ndim == 1
         ntens = integrator.ntens
+        if not uniaxial and (data.ndim != 2 or data.shape[1] != ntens):
+            raise ValueError(
+                f"StrainDriver expects load.data of shape (N, {ntens}) for this "
+                f"{ntens}-component model (or a 1-D array for ε11 only), got "
+                f"{data.shape}.  A history built with ntens=1 has shape (N, 1): "
+                f"pass ntens={ntens}, or use MixedDriver to prescribe one strain "
+                "component and leave the others stress-free."
+            )
 
         stress_n = (np.zeros(ntens) if initial_stress is None
                     else np.array(initial_stress, dtype=float))
@@ -316,7 +327,10 @@ class StressDriver(DriverBase):
         load : FieldHistory
             Must have ``type = FieldType.STRESS`` and
             ``load.data`` shape ``(N, ntens)`` — cumulative target stress
-            tensor (Voigt) at each step.
+            tensor (Voigt) at each step.  A 1-D array is accepted for a
+            one-component model only; any other shape raises ``ValueError``
+            (a history built with another ``ntens`` is not broadcast into
+            every component).
         initial_stress : array-like or None, optional
             Stress tensor at the start of the loading history.  If ``None``
             (default), the initial stress is zero.  Note: ``strain`` in the
@@ -348,6 +362,18 @@ class StressDriver(DriverBase):
         integrator = self.integrator
         stress_history = np.asarray(load.data, dtype=float)
         ntens = integrator.ntens
+        if stress_history.ndim == 1 and ntens == 1:
+            stress_history = stress_history.reshape(-1, 1)
+        if stress_history.ndim != 2 or stress_history.shape[1] != ntens:
+            # Checked because numpy would otherwise broadcast: a (N,) or (N, 1)
+            # history against a 6-component model puts the same value into
+            # every component, shear included, and runs.
+            raise ValueError(
+                f"StressDriver expects load.data of shape (N, {ntens}) for this "
+                f"{ntens}-component model, got {stress_history.shape}.  For σ11 "
+                f"only, build the history with ntens={ntens} "
+                f"(e.g. FieldHistory.cyclic_stress(..., ntens={ntens}))."
+            )
 
         stress_n = (np.zeros(ntens) if initial_stress is None
                     else np.array(initial_stress, dtype=float))

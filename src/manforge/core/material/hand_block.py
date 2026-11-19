@@ -126,6 +126,14 @@ def collect_hand_blocks(cls: type) -> dict[tuple[str, str], str]:
         if klass is object:
             continue
         for name, obj in klass.__dict__.items():
+            if isinstance(obj, (staticmethod, classmethod)) and isinstance(
+                getattr(obj.__func__, "__hand_block__", None), HandBlock
+            ):
+                raise TypeError(
+                    f"{klass.__name__}.{name}: a hand block must be an instance "
+                    f"method, not a {type(obj).__name__} (its arguments are "
+                    "filled by name: state, dlambda, state_n, inc)"
+                )
             record = getattr(obj, "__hand_block__", None)
             if isinstance(record, HandBlock):
                 # A later override without the decorator leaves this entry in

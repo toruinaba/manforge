@@ -195,6 +195,19 @@ class TestUnderStressDriver:
         assert len(result.step_results) == result.failed_step
 
 
+def test_stress_history_of_a_fortran_run(model):
+    """A UMAT result's state has no "stress" entry; history("stress") is
+    documented to work and to equal .stress."""
+    from manforge.simulation import StrainDriver
+
+    eps = np.zeros((4, 6))
+    eps[:, 0] = np.linspace(5e-4, 3e-3, 4)
+    integ = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
+    result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, "Strain", eps))
+    np.testing.assert_array_equal(result.history("stress"), result.stress)
+    assert result.history("ep").shape == (4,)
+
+
 # ---------------------------------------------------------------------------
 # The UMAT's own convergence report
 # ---------------------------------------------------------------------------

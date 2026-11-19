@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Protocol, runtime_checkable
 
 import autograd
@@ -18,6 +19,25 @@ from manforge._typing import NRJacobian, Stiffness, StressVec, StateDict
 # ---------------------------------------------------------------------------
 # Protocol
 # ---------------------------------------------------------------------------
+
+def _inadmissible(rm: ReturnMappingResult) -> "str | None":
+    """Why a result that claims convergence cannot be a solution, or ``None``.
+
+    Δλ < 0 violates the KKT loading / unloading conditions (plastic strain
+    cannot run backwards), and a non-finite value is not a state at all.
+    """
+    dlambda = float(rm.dlambda)
+    if not np.isfinite(dlambda):
+        return f"Δλ = {dlambda}"
+    if dlambda < 0.0:
+        return f"Δλ = {dlambda:.3e} < 0 violates KKT"
+    if not np.all(np.isfinite(np.asarray(rm.stress, dtype=float))):
+        return "the stress is not finite"
+    for key, value in rm.state.items():
+        if not np.all(np.isfinite(np.asarray(value, dtype=float))):
+            return f"state[{key!r}] is not finite"
+    return None
+
 
 @runtime_checkable
 class StressIntegrator(Protocol):
@@ -462,13 +482,27 @@ class _PythonIntegratorBase:
         """
         rm = self._try_user_return_mapping(inc)
         if rm is not None:
-            if not rm.converged and self._raise_on_nonconverged:
-                res = rm.residual_history[-1] if rm.residual_history else float("nan")
-                raise RuntimeError(
-                    f"{type(self._model).__name__}.user_defined_return_mapping "
-                    f"reported converged=False after {rm.n_iterations} iterations "
-                    f"(final residual = {res:.3e})"
-                )
+            name = f"{type(self._model).__name__}.user_defined_return_mapping"
+            if not rm.converged:
+                if self._raise_on_nonconverged:
+                    res = rm.residual_history[-1] if rm.residual_history else float("nan")
+                    raise RuntimeError(
+                        f"{name} reported converged=False after "
+                        f"{rm.n_iterations} iterations (final residual = {res:.3e})"
+                    )
+                return rm
+            # A hand-written corrector answers for the same conditions as the
+            # NR path: a closed form evaluates to *something* for any input,
+            # so "it returned" is not "it is a solution".
+            defect = _inadmissible(rm)
+            if defect is not None:
+                if self._raise_on_nonconverged:
+                    raise RuntimeError(
+                        f"{name} returned an inadmissible result ({defect}).  "
+                        "The strain increment is likely too large for the "
+                        "admissible branch, or the parameters admit no solution."
+                    )
+                return dataclasses.replace(rm, converged=False)
             return rm
 
         stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(inc)

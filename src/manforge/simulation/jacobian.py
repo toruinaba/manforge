@@ -130,21 +130,30 @@ def _split(layout: ResidualLayout, J: FloatArray, source: str) -> JacobianBlocks
 
 def residual_jacobian(
     model: "MaterialModel", result: "StressUpdateResult", inc: Increment,
+    *, dlambda_if_missing=None,
 ) -> JacobianBlocks:
     """Autodiff Jacobian of the residual of ``inc`` at the converged point of ``result``.
 
     On an elastic step the point is ``(σ_trial, Δλ = 0, elastic state)``.
+
+    ``dlambda_if_missing`` stands in for Δλ when the result reports none — a
+    Fortran UMAT result carries NaN there, and a point with a NaN in it has a
+    NaN Jacobian.
     """
     residual_fn, layout = build_residual(model, inc)
-    J = autograd.jacobian(residual_fn)(_point(layout, result))  # type: ignore[arg-type]
+    x = _point(layout, result, dlambda_if_missing=dlambda_if_missing)
+    J = autograd.jacobian(residual_fn)(x)  # type: ignore[arg-type]
     return _split(layout, J, "ad")
 
 
-def _point(layout: ResidualLayout, result: "StressUpdateResult"):
+def _point(layout: ResidualLayout, result: "StressUpdateResult", *, dlambda_if_missing=None):
     """``x = [σ, Δλ, implicit states]`` as the result reports it."""
     state = result.state
+    dlambda = result.dlambda
+    if dlambda_if_missing is not None and not np.isfinite(float(dlambda)):
+        dlambda = dlambda_if_missing
     return anp.array(layout.pack(
-        result.stress, result.dlambda, {k: state[k] for k in layout.implicit_keys}
+        result.stress, dlambda, {k: state[k] for k in layout.implicit_keys}
     ))  # type: ignore[arg-type]
 
 

@@ -749,6 +749,21 @@ def test_fixed_dimension_is_inherited():
         _Child(dimension=UNIAXIAL_1D)
 
 
+def test_fixed_dimension_cannot_be_changed_in_a_subclass():
+    """A class is fixed because its algebra only holds there; a subclass
+    inherits the algebra.  This used to be accepted, and the 3D closed-form
+    return mapping then ran in plane stress."""
+    with pytest.raises(TypeError, match=r"_Re sets dimension = PLANE_STRESS, but it "
+                                        r"inherits from J2Isotropic3D, which is fixed to 3D_SOLID"):
+        class _Re(J2Isotropic3D):
+            dimension = PLANE_STRESS
+
+    class _Same(J2Isotropic3D):          # restating it is fine
+        dimension = SOLID_3D
+
+    assert _Same._fixed_dimension is SOLID_3D
+
+
 def test_subclass_fixes_an_open_family():
     class _PE(_Stub3D):
         dimension = PLANE_STRAIN
@@ -984,6 +999,48 @@ def test_hook_with_another_argument_list_is_rejected(hook, old_params, expected)
     exec(f"def {hook}({old_params}):\n    return None\n", namespace)
     with pytest.raises(TypeError, match=rf"{hook} must take \({expected}\)"):
         type("_Stale", (_GuardBase,), {hook: namespace[hook]})
+
+
+def test_hook_check_covers_a_hook_inherited_from_a_mixin():
+    """The hook is looked up the way a call finds it, so a stale argument
+    list on a mixin that is not a MaterialModel is caught as well."""
+    class _OldStyle:
+        def update_state(self, dlambda, state_new, state_n):
+            return []
+
+    with pytest.raises(TypeError, match=r"_Mixed.update_state must take \(new, dlambda, inc\)"):
+        class _Mixed(_OldStyle, _GuardBase):
+            def yield_function(self, state):
+                return 0.0
+
+
+def test_hook_parameters_must_be_positional():
+    """Hooks are called by position; a keyword-only ``inc`` passed the name
+    check and then failed at the first call."""
+    with pytest.raises(TypeError, match=r"got \(new, dlambda, \*, inc\)"):
+        class _KwOnly(_GuardBase):
+            def yield_function(self, state):
+                return 0.0
+
+            def update_state(self, new, dlambda, *, inc):
+                return []
+
+
+def test_elastic_predictor_keeps_its_keyword_only_strain_inc():
+    class _Fine(_GuardBase):
+        def yield_function(self, state):
+            return 0.0
+
+        def elastic_predictor(self, state_n, *, strain_inc):
+            return []
+
+    with pytest.raises(TypeError, match=r"elastic_predictor must take \(state_n, strain_inc\)"):
+        class _Positional(_GuardBase):
+            def yield_function(self, state):
+                return 0.0
+
+            def elastic_predictor(self, state_n, strain_inc):
+                return []
 
 
 def test_hook_check_covers_abstract_intermediates():

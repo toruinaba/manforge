@@ -261,9 +261,12 @@ def fit_params(
             if tol is not None:
                 opts["ftol"] = tol
         opts.update(extra)
+        # The clipped point, for every method: it is the one probed above.
+        # L-BFGS-B clips by itself; Nelder-Mead is run without bounds and
+        # would otherwise start from an out-of-range value nobody checked.
         result = minimize(
             obj_fn,
-            space.x0,
+            _clipped_x0(space),
             method=method,
             bounds=bounds if method != "Nelder-Mead" else None,
             callback=_callback,

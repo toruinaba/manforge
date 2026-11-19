@@ -857,6 +857,50 @@ class TestInadmissibleRoot:
         assert r.converged is True
 
 
+class TestInadmissibleHandResult:
+    """The hand-written path is held to the same conditions as the NR path.
+
+    J2's closed form is Δλ = f_trial / (3μ + H): it evaluates to *something*
+    for any H — negative for H < −3μ, infinite at H = −3μ — and the corrector
+    returns it with ``converged=True``.  Left unchecked, a service run with
+    such parameters came back ``converged=True`` with negative or non-finite
+    plastic strain.
+    """
+
+    DEPS = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+    MU = 210_000.0 / (2.0 * 1.3)
+
+    def _su(self, H, **kw):
+        m = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=H)
+        return PythonAnalyticalIntegrator(m, **kw).stress_update(
+            self.DEPS, anp.zeros(6), m.initial_state())
+
+    def test_negative_dlambda_raises_by_default(self):
+        with pytest.raises(RuntimeError, match=r"user_defined_return_mapping returned "
+                                               r"an inadmissible result \(Δλ = .* < 0 violates KKT\)"):
+            self._su(-300_000.0)
+
+    def test_negative_dlambda_is_a_value_when_asked(self):
+        r = self._su(-300_000.0, raise_on_nonconverged=False)
+        assert r.converged is False
+
+    def test_non_finite_result_is_rejected(self):
+        with np.errstate(all="ignore"):
+            with pytest.raises(RuntimeError, match="inadmissible result"):
+                self._su(-3.0 * self.MU)
+            assert self._su(-3.0 * self.MU, raise_on_nonconverged=False).converged is False
+
+    def test_auto_path_is_covered_too(self):
+        """PythonIntegrator takes the closed form when the model has one."""
+        m = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=-300_000.0)
+        with pytest.raises(RuntimeError, match="inadmissible result"):
+            PythonIntegrator(m).stress_update(self.DEPS, anp.zeros(6), m.initial_state())
+
+    def test_admissible_result_is_untouched(self):
+        r = self._su(1_000.0)
+        assert r.converged is True and float(r.dlambda) > 0.0
+
+
 # ---------------------------------------------------------------------------
 # elastic_update_state — state that tracks σ without plastic flow
 # ---------------------------------------------------------------------------
