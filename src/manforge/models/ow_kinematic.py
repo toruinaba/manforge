@@ -58,15 +58,15 @@ Notes
 
 from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Implicit, NTENS, SCALAR
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 
 
 class OWKinematic(MaterialModel):
     """J2 + Ohno-Wang kinematic hardening — common physics across stress states.
 
-    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    Pass ``dimension=`` to select the stress state, or use one of the
     pre-built concrete classes (:class:`OWKinematic3D`, :class:`OWKinematicPS`,
-    :class:`OWKinematic1D`) which set appropriate defaults.
+    :class:`OWKinematic1D`), which fix it.
 
     Uses the vector NR path (σ, α, ep all implicit).
 
@@ -93,15 +93,6 @@ class OWKinematic(MaterialModel):
     }
     alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Implicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
 
     def yield_function(self, state):
         s_xi = self.dev(state["stress"]) - state["alpha"]
@@ -135,9 +126,6 @@ class OWKinematic3D(OWKinematic):
 
     dimension = SOLID_3D
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
-
 
 class OWKinematicPS(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for plane-stress elements.
@@ -151,9 +139,6 @@ class OWKinematicPS(OWKinematic):
     """
 
     dimension = PLANE_STRESS
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
 class OWKinematic1D(OWKinematic):
@@ -171,6 +156,3 @@ class OWKinematic1D(OWKinematic):
     """
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

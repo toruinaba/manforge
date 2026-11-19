@@ -86,6 +86,52 @@ def _check_hook_signatures(cls) -> None:
             )
 
 
+def _fixed_dimension_of(cls) -> StressDimension | None:
+    """The dimension pinned by ``cls`` or its nearest ancestor's class body."""
+    for klass in cls.__mro__:
+        if klass is MaterialModel:
+            return None
+        if "dimension" in vars(klass):
+            fixed = vars(klass)["dimension"]
+            if not isinstance(fixed, StressDimension):
+                raise TypeError(
+                    f"{klass.__name__}.dimension must be a StressDimension, "
+                    f"got {type(fixed).__name__}"
+                )
+            return fixed
+    return None
+
+
+def _check_param_names(cls, fields) -> None:
+    """Validate ``param_names``: the constructor binds attributes by these names."""
+    names = getattr(cls, "param_names", None)
+    if names is None:
+        raise TypeError(
+            f"{cls.__name__}: param_names is not declared (use an empty list "
+            "for a model without parameters)"
+        )
+    if isinstance(names, str) or not all(isinstance(n, str) for n in names):
+        raise TypeError(
+            f"{cls.__name__}: param_names must be a list of str, got {names!r}"
+        )
+    bad = [n for n in names if not n.isidentifier()]
+    if bad:
+        raise TypeError(
+            f"{cls.__name__}: param_names {bad} are not valid attribute names"
+        )
+    dup = sorted({n for n in names if list(names).count(n) > 1})
+    if dup:
+        raise TypeError(f"{cls.__name__}: param_names lists {dup} more than once")
+    # A parameter is stored as an instance attribute of the same name, which
+    # would shadow a state field or a framework attribute.
+    shadow = [n for n in names if n in fields or hasattr(MaterialModel, n)]
+    if shadow:
+        raise TypeError(
+            f"{cls.__name__}: param_names {shadow} collide with a state field "
+            "or a MaterialModel attribute of the same name"
+        )
+
+
 class MaterialModel(ABC):
     """Abstract base class for constitutive material models.
 
@@ -100,6 +146,38 @@ class MaterialModel(ABC):
             stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
             alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
             ep     = Explicit(shape=SCALAR,  doc="equivalent plastic strain")
+
+    Parameters and dimension
+    ------------------------
+    ``param_names`` is the whole parameter declaration: the constructor takes
+    exactly those names as keyword arguments and stores each as an attribute,
+    so a model does not write an ``__init__``::
+
+        model = MyModel(E=210e3, nu=0.3, sigma_y0=250.0, C_k=8e3, gamma=80.0)
+        model.C_k      # 8000.0
+        model.params   # {"E": 210000.0, ...} in param_names order
+
+    **Every parameter is required** — there are no default values.  The list
+    mirrors the UMAT's ``PROPS`` array, which has none either, and a parameter
+    added later must show up at every call site rather than slip in silently.
+
+    The dimension is chosen one of two ways.  A class that does not mention
+    it takes ``dimension=`` at construction (``SOLID_3D`` when omitted).  A
+    class that assigns ``dimension`` in its body is **fixed** to it, and so
+    are its subclasses: passing a different one raises ``TypeError``.  Fix the
+    dimension whenever the model's algebra only holds there (a closed-form
+    return mapping, a hand-derived block)::
+
+        class MyModel3D(MyModel):
+            dimension = SOLID_3D
+
+        MyModel(dimension=PLANE_STRAIN, E=...)     # open: any dimension
+        MyModel3D(E=...)                           # fixed
+        MyModel3D(dimension=PLANE_STRESS, E=...)   # TypeError
+
+    Constants belong in class attributes and derived values in properties.  A
+    model that needs a non-parameter setting overrides ``__init__``, takes it
+    as a keyword, and forwards the rest: ``super().__init__(**params)``.
 
     ``state_names`` and ``implicit_state_names`` are derived automatically from
     the field declarations; hand-declaring these lists raises ``TypeError``.
@@ -144,7 +222,8 @@ class MaterialModel(ABC):
     Attributes
     ----------
     param_names : list[str]
-        Names of material parameters (keys expected in ``params`` dicts).
+        Names of the material parameters, in ``PROPS`` order.  They are the
+        constructor's keyword arguments, all required.
     state_fields : dict[str, StateField]
         Ordered mapping of field name → StateField descriptor, collected from
         the MRO by ``__init_subclass__``.  Always contains ``"stress"``.
@@ -153,7 +232,9 @@ class MaterialModel(ABC):
     implicit_state_names : list[str]
         Derived from ``state_fields`` (names where ``kind == "implicit"``).
     dimension : StressDimension
-        Dimensionality descriptor (default: ``SOLID_3D``, 6-component 3D).
+        Dimensionality descriptor.  Assigned in a class body, it fixes the
+        class to that dimension; otherwise it is the ``dimension=`` given at
+        construction (default: ``SOLID_3D``, 6-component 3D).
     ntens : int
         Read-only property; returns ``self.dimension.ntens``.
     """
@@ -164,9 +245,42 @@ class MaterialModel(ABC):
     # metadata stay valid.
     param_meta: dict[str, "ParamMeta"] = {}
     dimension: StressDimension = SOLID_3D
+    # The dimension a class body pinned (its own or an ancestor's), or None
+    # for a class that takes ``dimension=`` at construction.  Derived by
+    # __init_subclass__.
+    _fixed_dimension: ClassVar[StressDimension | None] = None
 
-    def __init__(self, *, dimension: StressDimension = SOLID_3D):
-        self.dimension = dimension
+    def __init__(self, *, dimension: StressDimension | None = None, **params):
+        cls = type(self)
+        if dimension is not None and not isinstance(dimension, StressDimension):
+            raise TypeError(
+                f"{cls.__name__}: dimension must be a StressDimension, "
+                f"got {type(dimension).__name__}"
+            )
+        fixed = cls._fixed_dimension
+        if fixed is None:
+            self.dimension = SOLID_3D if dimension is None else dimension
+        elif dimension is not None and dimension != fixed:
+            raise TypeError(
+                f"{cls.__name__} is fixed to {fixed.name}; "
+                f"got dimension={dimension.name}"
+            )
+        names = list(getattr(cls, "param_names", ()))
+        missing = [n for n in names if n not in params]
+        unexpected = [k for k in params if k not in names]
+        if missing or unexpected:
+            raise TypeError(
+                f"{cls.__name__}: "
+                + "; ".join(
+                    part for part in (
+                        f"missing parameters {missing}" if missing else "",
+                        f"unexpected {unexpected}" if unexpected else "",
+                    ) if part
+                )
+                + f".  Parameters (all required, by keyword): {names}"
+            )
+        for name in names:
+            setattr(self, name, params[name])
 
     # Derived by __init_subclass__ from StateField descriptors:
     state_fields: dict[str, StateField] = {}
@@ -192,17 +306,10 @@ class MaterialModel(ABC):
         # Checked for every subclass, abstract intermediates included: a hook
         # with a stale argument list is wrong wherever in the hierarchy it sits.
         _check_hook_signatures(cls)
+        cls._fixed_dimension = _fixed_dimension_of(cls)
         # Skip intermediate abstract classes that have not yet implemented yield_function.
         if cls.yield_function is MaterialModel.yield_function:
             return
-        # param_meta keys must be a subset of param_names (models without
-        # metadata remain valid).
-        unknown_meta = set(cls.param_meta) - set(cls.param_names)
-        if unknown_meta:
-            raise ValueError(
-                f"{cls.__name__}: param_meta keys {sorted(unknown_meta)} are not "
-                f"in param_names {cls.param_names}"
-            )
         # Collect StateField descriptors from MRO and derive state_names / implicit_state_names.
         fields = collect_state_fields(cls)
         # Auto-attach "stress" as Explicit if not declared.
@@ -212,6 +319,15 @@ class MaterialModel(ABC):
             object.__setattr__(stress_field, "name", "stress")
             # Insert stress at front of ordered dict.
             fields = {"stress": stress_field, **fields}
+        _check_param_names(cls, fields)
+        # param_meta keys must be a subset of param_names (models without
+        # metadata remain valid).
+        unknown_meta = set(cls.param_meta) - set(cls.param_names)
+        if unknown_meta:
+            raise ValueError(
+                f"{cls.__name__}: param_meta keys {sorted(unknown_meta)} are not "
+                f"in param_names {cls.param_names}"
+            )
         cls.state_fields = fields
         cls.state_names = list(fields.keys())
         cls.implicit_state_names = [k for k, f in fields.items() if f.kind == "implicit"]

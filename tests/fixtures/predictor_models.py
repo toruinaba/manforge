@@ -27,10 +27,7 @@ class BilinearPlastic1D(MaterialModel):
     stress_eff = Implicit(shape=NTENS, doc="effective stress σ̃ = E ε_e")
     ep = Explicit(shape=(), doc="equivalent plastic strain")
 
-    def __init__(self, *, E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0, k_t=0.6, k_c=0.95):
-        super().__init__(dimension=UNIAXIAL_1D)
-        self.E, self.nu, self.sigma_y0, self.H = E, nu, sigma_y0, H
-        self.k_t, self.k_c = k_t, k_c
+    dimension = UNIAXIAL_1D
 
     def nominal(self, s_eff):
         return self.k_t * anp.maximum(s_eff, 0.0) + self.k_c * anp.minimum(s_eff, 0.0)

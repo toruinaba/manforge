@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -96,7 +95,11 @@ def build_objective(
     ----------
     model : MaterialModel
         Template model instance — used to determine the class and dimension.
-        A new instance is constructed each evaluation with the current params.
+        A new instance is constructed each evaluation with the current params,
+        as ``type(model)(dimension=model.dimension, **params)``.  A setting
+        the model takes outside ``param_names`` (an ``__init__`` override) is
+        therefore not carried over from the template: the rebuilt model has
+        its default.
     driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` — the default driver for
         targets that do not carry their own.  Example: ``lambda i: StrainDriver(i)``.
@@ -121,14 +124,14 @@ def build_objective(
     """
     model_cls = type(model)
     dimension = model.dimension
-    _accepts_dimension = "dimension" in inspect.signature(model_cls.__init__).parameters
     param_names = model.param_names
     targets = list(targets)
 
     def objective(x: Sequence[float] | FloatArray) -> float:
         all_params = space.model_params(x, param_names)
-        extra = {"dimension": dimension} if _accepts_dimension else {}
-        m = model_cls(**extra, **all_params)  # type: ignore[call-arg]
+        # Every model takes dimension= : an open class needs it, a fixed one
+        # accepts its own.
+        m = model_cls(dimension=dimension, **all_params)
         integrator = PythonIntegrator(m, nr_jacobian=nr_jacobian)
         # LinAlgError is listed even though it subclasses ValueError (which is
         # otherwise a setup error left to propagate): a singular NR Jacobian

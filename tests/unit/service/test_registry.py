@@ -79,9 +79,7 @@ class TestDescribe:
             param_names = ["E", "nu", "sigma_y0"]
             ep = Explicit(shape=SCALAR, doc="ep")
 
-            def __init__(self, *, E, nu, sigma_y0):
-                super().__init__(dimension=UNIAXIAL_1D)
-                self.E, self.nu, self.sigma_y0 = E, nu, sigma_y0
+            dimension = UNIAXIAL_1D
 
             def yield_function(self, state):
                 return abs(state["stress"][0]) - self.sigma_y0

@@ -26,7 +26,7 @@ import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, Increment, SCALAR, State, StateUpdate, StateResidual
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 from manforge.core.result import ReturnMappingResult
 from manforge.core.material import verified_against_fortran
 from manforge._typing import Scalar as ScalarType, Stiffness, StateDict
@@ -35,9 +35,9 @@ from manforge._typing import Scalar as ScalarType, Stiffness, StateDict
 class J2Isotropic(MaterialModel):
     """J2 plasticity with isotropic hardening — common physics across stress states.
 
-    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    Pass ``dimension=`` to select the stress state, or use one of the
     pre-built concrete classes (:class:`J2Isotropic3D`, :class:`J2IsotropicPS`,
-    :class:`J2Isotropic1D`) which set appropriate defaults.
+    :class:`J2Isotropic1D`), which fix it.
 
     Parameters
     ----------
@@ -64,14 +64,6 @@ class J2Isotropic(MaterialModel):
                        default=1000.0, bounds=(0.0, 1e5)),
     }
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.H = H
 
     def yield_function(self, state: "State | StateDict") -> ScalarType:
         """J2 yield function f = σ_vm − (σ_y0 + H · ep)."""
@@ -111,9 +103,6 @@ class J2Isotropic3D(J2Isotropic):
     """
 
     dimension = SOLID_3D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
     @verified_against_fortran(
         "j2_isotropic_3d_elastic_stiffness",
@@ -219,9 +208,6 @@ class J2IsotropicPS(J2Isotropic):
 
     dimension = PLANE_STRESS
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
-
 
 class J2Isotropic1D(J2Isotropic):
     """J2 plasticity with isotropic hardening for uniaxial (1D) elements.
@@ -245,9 +231,6 @@ class J2Isotropic1D(J2Isotropic):
     """
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H)
 
     # ------------------------------------------------------------------
     # Analytical solver hooks

@@ -259,12 +259,6 @@ class TestAnalyticalPath:
         class _NoHook(MaterialModel):
             param_names = ["E", "nu", "sigma_y0"]
 
-            def __init__(self):
-                super().__init__()
-                self.E = 210000.0
-                self.nu = 0.3
-                self.sigma_y0 = 250.0
-
             def elastic_stiffness(self, state):
                 mu = self.E / (2.0 * (1.0 + self.nu))
                 lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
@@ -277,10 +271,11 @@ class TestAnalyticalPath:
                 return []
 
         with pytest.raises(NotImplementedError):
-            PythonAnalyticalIntegrator(_NoHook()).stress_update(
+            model = _NoHook(E=210000.0, nu=0.3, sigma_y0=250.0)
+            PythonAnalyticalIntegrator(model).stress_update(
                 anp.array([2e-3, 0.0, 0.0, 0.0, 0.0, 0.0]),
                 anp.zeros(6),
-                _NoHook().initial_state(),
+                model.initial_state(),
             )
 
     @pytest.mark.parametrize("deps_vec", [

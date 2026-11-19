@@ -599,10 +599,6 @@ class _J2ScalarWithDlambdaOverride(MaterialModel):
     stress = Explicit(shape=NTENS, doc="stress")
     ep = Explicit(shape=(), doc="ep")
 
-    def __init__(self, *, E, nu, sigma_y0):
-        super().__init__()
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
@@ -622,10 +618,6 @@ class _J2ScalarDefault(MaterialModel):
     stress = Explicit(shape=NTENS, doc="stress")
     ep = Explicit(shape=(), doc="ep")
 
-    def __init__(self, *, E, nu, sigma_y0):
-        super().__init__()
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
@@ -640,11 +632,6 @@ class _KinematicWithDlambdaOverride(MaterialModel):
     """Kinematic hardening (AF) with Perzyna-like dlambda override (c=0 → standard)."""
     param_names = ["E", "nu", "sigma_y0", "H_k", "c"]
     alpha = Implicit(shape=NTENS, doc="backstress")
-
-    def __init__(self, *, E, nu, sigma_y0, H_k, c=0.0):
-        super().__init__()
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-        self.H_k = H_k; self.c = c
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -670,10 +657,6 @@ class _KinematicDefault(MaterialModel):
     """Same AF model without dlambda override."""
     param_names = ["E", "nu", "sigma_y0", "H_k"]
     alpha = Implicit(shape=NTENS, doc="backstress")
-
-    def __init__(self, *, E, nu, sigma_y0, H_k):
-        super().__init__()
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H_k = H_k
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -958,11 +941,6 @@ class _Subloading(MaterialModel):
     R = Explicit(shape=(), default=lambda m: anp.array(0.5))
     ep = Explicit(shape=())
 
-    def __init__(self, *, E, nu):
-        super().__init__()
-        self.E = E
-        self.nu = nu
-
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
 
@@ -1117,11 +1095,6 @@ class _SubloadingNatural(MaterialModel):
     param_names = ["E", "nu"]
     stress = Implicit(shape=NTENS)
     R = Explicit(shape=(), default=lambda m: anp.array(0.0))
-
-    def __init__(self, *, E, nu):
-        super().__init__()
-        self.E = E
-        self.nu = nu
 
     def elastic_stiffness(self, state):
         return self.isotropic_C(_LAM, _MU)
@@ -1415,9 +1388,7 @@ class _WeakDamageBase(MaterialModel):
     D = Explicit(shape=())
 
     def __init__(self):
-        super().__init__()
-        for k, v in _DMG_P.items():
-            setattr(self, k, v)
+        super().__init__(**_DMG_P)
 
     def C0(self):
         mu = self.E / (2 * (1 + self.nu))
@@ -1471,10 +1442,6 @@ class _J2StrainIncResidual(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
     stress = Implicit(shape=NTENS)
     ep = Explicit(shape=())
-
-    def __init__(self, *, E, nu, sigma_y0, H):
-        super().__init__()
-        self.E, self.nu, self.sigma_y0, self.H = E, nu, sigma_y0, H
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
@@ -1557,7 +1524,8 @@ from manforge.models.j2_isotropic import J2Isotropic1D  # noqa: E402
 from manforge.simulation.integrator import SubSteppingIntegrator  # noqa: E402
 from manforge.core.state import StateResidual  # noqa: E402
 
-_BL = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
+_J2_1D = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
+_BL = dict(_J2_1D, k_t=0.6, k_c=0.95)
 
 
 def _run_1d(integ, strains):
@@ -1627,7 +1595,7 @@ class TestElasticPredictor:
     def test_cyclic_history_matches_effective_j2_reference(self):
         """σ̃, ep follow undamaged J2; σ = 𝒩(σ̃) through loading, reversal, reloading."""
         m = BilinearPlastic1D(**_BL)
-        ref = J2Isotropic1D(**_BL)
+        ref = J2Isotropic1D(**_J2_1D)
         strains = np.concatenate([np.linspace(0, 4e-3, 9)[1:], np.linspace(4e-3, -4e-3, 17)[1:],
                                   np.linspace(-4e-3, 2e-3, 13)[1:]])
         out = _run_1d(PythonNumericalIntegrator(m), strains)

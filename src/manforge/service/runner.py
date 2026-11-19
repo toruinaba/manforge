@@ -108,7 +108,9 @@ def run_simulation(
             + (f" — unexpected {extra}" if extra else "")
         )
 
-    model = model_cls(**params)
+    # The keys were just checked against param_names, so none of them is the
+    # constructor's other keyword (dimension).
+    model = model_cls(**params)  # pyright: ignore[reportArgumentType]
     unknown = sorted(set(include_fields) - set(model.state_names))
     if unknown:
         raise ValueError(

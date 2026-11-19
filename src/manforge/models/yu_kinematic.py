@@ -6,7 +6,7 @@ from manforge.core.material import MaterialModel, hand_block, verified_against_f
 from manforge.core.result import ReturnMappingResult
 from manforge.core.state import Explicit, Implicit, NTENS, SCALAR
 from manforge.core.dimension import (
-    SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D, StressDimension,
+    SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D,
 )
 
 class YUKinematic(MaterialModel):
@@ -21,24 +21,6 @@ class YUKinematic(MaterialModel):
     r = Explicit(shape=SCALAR, doc="radius of stagnation surface")
     eps_eq = Explicit(shape=SCALAR, doc="equivalent plastic strain")
     theta_max = Explicit(shape=SCALAR, doc="Theta norm max in history")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float,
-                 h: float, Ea: float, xi: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.Y = Y
-        self.C_1 = C_1
-        self.C_2 = C_2
-        self.B = B
-        self.Rsat = Rsat
-        self.k = k
-        self.b = b
-        self.h = h
-        self.Ea = Ea
-        self.xi = xi
 
     @verified_against_fortran(
         "yu_kinematic_3d_elastic_stiffness",
@@ -157,11 +139,7 @@ class YUKinematic3D(YUKinematic):
     I = np.eye(6)
     T = np.diag([1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
 
-    def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float, 
-                 h: float, Ea: float, xi: float):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
-                 B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+    dimension = SOLID_3D
 
     def flow(self, state):
         """Hand-derived flow direction, matching :meth:`calc_jacobian`.
@@ -518,11 +496,7 @@ class YUKinematicPS(YUKinematic):
     and consistent tangent by differentiating the methods below.
     """
 
-    def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float,
-                 h: float, Ea: float, xi: float):
-        super().__init__(dimension=PLANE_STRESS_P, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
-                 B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+    dimension = PLANE_STRESS_P
 
     @property
     def P(self):
@@ -857,8 +831,4 @@ class YUKinematicPS(YUKinematic):
 
 
 class YUKinematic1D(YUKinematic):
-    def __init__(self, *, E: float, nu: float, Y: float, C_1: float, C_2: float,
-                 B: float, Rsat: float, k: float, b: float,
-                 h: float, Ea: float, xi: float):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, Y=Y, C_1=C_1, C_2=C_2,
-                 B=B, Rsat=Rsat, k=k, b=b, h=h, Ea=Ea, xi=xi)
+    dimension = UNIAXIAL_1D

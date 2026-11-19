@@ -26,13 +26,10 @@ class TestResidualLayout:
             alpha = Implicit(shape=NTENS, residual_name="R_alpha")
             ep    = Implicit(shape=SCALAR, residual_name="R_ep")
 
-            def __init__(self, E, nu, sigma_y0):
-                self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0
-
             def yield_function(self, state): ...
             def state_residual(self, new, dlambda, inc): ...
 
-        model = _Custom(210000.0, 0.3, 250.0)
+        model = _Custom(E=210000.0, nu=0.3, sigma_y0=250.0)
         layout = ResidualLayout.from_model(model)
         assert layout.residual_names() == ("stress", "R_yield", "R_alpha", "R_ep")
         assert layout.residual_name_for("alpha") == "R_alpha"

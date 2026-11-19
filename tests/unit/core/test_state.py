@@ -33,9 +33,6 @@ class _EP(MaterialModel):
     param_names = []
     ep = Explicit(shape=(), doc="plastic strain")
 
-    def __init__(self, dimension=SOLID_3D):
-        super().__init__(dimension=dimension)
-
     def yield_function(self, state):
         return anp.array(0.0)
 
@@ -48,9 +45,6 @@ class _AlphaEP(MaterialModel):
     param_names = []
     alpha = Implicit(shape=NTENS, doc="backstress")
     ep = Explicit(shape=(), doc="plastic strain")
-
-    def __init__(self, dimension=SOLID_3D):
-        super().__init__(dimension=dimension)
 
     def yield_function(self, state):
         return anp.array(0.0)
@@ -67,9 +61,6 @@ class _AllImplicit(MaterialModel):
     param_names = []
     alpha = Implicit(shape=NTENS)
     ep = Implicit(shape=())
-
-    def __init__(self, dimension=SOLID_3D):
-        super().__init__(dimension=dimension)
 
     def yield_function(self, state):
         return anp.array(0.0)
@@ -184,7 +175,7 @@ def test_scalar_sentinel_resolves_to_empty_tuple():
 
 
 def test_scalar_sentinel_initial_value_is_zero_d():
-    model = _EP(SOLID_3D)
+    model = _EP()
     f = Explicit(shape=SCALAR)
     val = f.initial_value(model)
     assert np.asarray(val).shape == ()
@@ -206,19 +197,19 @@ def test_tuple_shape_passed_through():
 # ---------------------------------------------------------------------------
 
 def test_initial_value_ntens_gives_zeros_array():
-    model = _AlphaEP(SOLID_3D)
+    model = _AlphaEP()
     val = _AlphaEP.state_fields["alpha"].initial_value(model)
     assert np.allclose(val, np.zeros(6))
 
 
 def test_initial_value_scalar_gives_zero():
-    model = _EP(SOLID_3D)
+    model = _EP()
     val = _EP.state_fields["ep"].initial_value(model)
     assert float(val) == 0.0
 
 
 def test_initial_state_uses_field_shapes():
-    model = _AlphaEP(SOLID_3D)
+    model = _AlphaEP()
     state = model.initial_state()
     assert np.asarray(state["stress"]).shape == (6,)
     assert np.asarray(state["alpha"]).shape == (6,)
@@ -230,7 +221,7 @@ def test_initial_state_uses_field_shapes():
 # ---------------------------------------------------------------------------
 
 def test_implicit_field_call_returns_state_residual():
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     result = model.alpha(np.zeros(6))
     assert isinstance(result, StateResidual)
     assert result.name == "alpha"
@@ -238,7 +229,7 @@ def test_implicit_field_call_returns_state_residual():
 
 
 def test_explicit_field_call_returns_state_update():
-    model = _EP(SOLID_3D)
+    model = _EP()
     result = model.ep(np.array(0.1))
     assert isinstance(result, StateUpdate)
     assert result.name == "ep"
@@ -247,7 +238,7 @@ def test_explicit_field_call_returns_state_update():
 
 def test_field_call_name_set_from_class_declaration():
     """__set_name__ must populate the name attribute correctly."""
-    model = _AlphaEP(SOLID_3D)
+    model = _AlphaEP()
     assert _AlphaEP.state_fields["alpha"].name == "alpha"
     assert _AlphaEP.state_fields["ep"].name == "ep"
 
@@ -276,7 +267,7 @@ def test_field_call_without_set_name_raises():
 # ---------------------------------------------------------------------------
 
 def test_validate_state_items_normal_residual():
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     items = [model.alpha(np.ones(6)), model.ep(np.array(0.5))]
     result = _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "TestModel")
     assert set(result.keys()) == {"alpha", "ep"}
@@ -285,7 +276,7 @@ def test_validate_state_items_normal_residual():
 
 def test_validate_state_items_wrong_type_update_in_residual():
     """StateUpdate items returned where StateResidual expected → TypeError."""
-    model = _EP(SOLID_3D)
+    model = _EP()
     items = [model.ep(np.array(0.5))]  # StateUpdate, not StateResidual
     with pytest.raises(TypeError, match="StateResidual"):
         _validate_state_items(items, {"ep"}, StateResidual, "state_residual", "TestModel")
@@ -293,7 +284,7 @@ def test_validate_state_items_wrong_type_update_in_residual():
 
 def test_validate_state_items_wrong_type_residual_in_update():
     """StateResidual items returned where StateUpdate expected → TypeError."""
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     items = [model.alpha(np.zeros(6))]  # StateResidual, not StateUpdate
     with pytest.raises(TypeError, match="StateUpdate"):
         _validate_state_items(items, {"alpha"}, StateUpdate, "update_state", "TestModel")
@@ -305,21 +296,21 @@ def test_validate_state_items_not_list_raises():
 
 
 def test_validate_state_items_duplicate_raises():
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     items = [model.alpha(np.zeros(6)), model.alpha(np.zeros(6))]
     with pytest.raises(ValueError, match="duplicate"):
         _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "M")
 
 
 def test_validate_state_items_missing_raises():
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     items = [model.alpha(np.zeros(6))]  # ep missing
     with pytest.raises(ValueError, match="missing"):
         _validate_state_items(items, {"alpha", "ep"}, StateResidual, "state_residual", "M")
 
 
 def test_validate_state_items_extra_raises():
-    model = _AllImplicit(SOLID_3D)
+    model = _AllImplicit()
     items = [model.alpha(np.zeros(6)), model.ep(np.array(0.0))]
     with pytest.raises(ValueError, match="unexpected"):
         _validate_state_items(items, {"alpha"}, StateResidual, "state_residual", "M")
@@ -391,7 +382,7 @@ def test_make_both_missing_and_extra_raises():
 # ---------------------------------------------------------------------------
 
 def test_make_state_all_keys_required():
-    model = _AlphaEP(SOLID_3D)
+    model = _AlphaEP()
     s = model.make_state(stress=np.zeros(6), alpha=np.zeros(6), ep=np.array(0.0))
     assert isinstance(s, State)
     assert np.allclose(s["alpha"], np.zeros(6))
@@ -399,7 +390,7 @@ def test_make_state_all_keys_required():
 
 
 def test_make_state_missing_raises():
-    model = _AlphaEP(SOLID_3D)
+    model = _AlphaEP()
     with pytest.raises(TypeError, match="missing keys"):
         model.make_state(alpha=np.zeros(6))
 
@@ -426,7 +417,6 @@ class TestResidualNameValidation:
             class _Bad(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = ""
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
 
     def test_dlambda_residual_name_none_raises(self):
@@ -434,7 +424,6 @@ class TestResidualNameValidation:
             class _Bad(MaterialModel):
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = None
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
 
 
@@ -468,7 +457,6 @@ class TestCollisionDetection:
                 param_names = ["E", "nu", "sigma_y0"]
                 alpha = Implicit(shape=NTENS, residual_name="R_clash")
                 ep    = Implicit(shape=SCALAR, residual_name="R_clash")
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
                 def state_residual(self, new, dlambda, inc): ...
 
@@ -478,7 +466,6 @@ class TestCollisionDetection:
                 param_names = ["E", "nu", "sigma_y0"]
                 alpha = Implicit(shape=NTENS, residual_name="ep")
                 ep    = Implicit(shape=SCALAR)
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
                 def state_residual(self, new, dlambda, inc): ...
 
@@ -488,7 +475,6 @@ class TestCollisionDetection:
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = "R_alpha"
                 alpha = Implicit(shape=NTENS, residual_name="R_alpha")
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
                 def state_residual(self, new, dlambda, inc): ...
 
@@ -498,7 +484,6 @@ class TestCollisionDetection:
                 param_names = ["E", "nu", "sigma_y0"]
                 dlambda_residual_name = "alpha"
                 alpha = Implicit(shape=NTENS)
-                def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
                 def state_residual(self, new, dlambda, inc): ...
 
@@ -508,7 +493,6 @@ class TestCollisionDetection:
             dlambda_residual_name = "R_yield"
             alpha = Implicit(shape=NTENS, residual_name="R_alpha")
             ep    = Implicit(shape=SCALAR, residual_name="R_ep")
-            def __init__(self, E, nu, sigma_y0): ...
             def yield_function(self, state): ...
             def state_residual(self, new, dlambda, inc): ...
         assert _Ok.state_fields["alpha"].effective_residual_name == "R_alpha"
@@ -529,10 +513,6 @@ from manforge.core.state import (  # noqa: E402
 class _NoStateModel(MaterialModel):
     param_names = ["sigma_y0"]
 
-    def __init__(self, *, sigma_y0):
-        super().__init__()
-        self.sigma_y0 = sigma_y0
-
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
@@ -544,10 +524,6 @@ class _NoStateModel(MaterialModel):
 class _AlphaModelDl(MaterialModel):
     param_names = ["sigma_y0", "H_k"]
     alpha = Implicit(shape=NTENS, doc="backstress")
-
-    def __init__(self, *, sigma_y0, H_k):
-        super().__init__()
-        self.sigma_y0 = sigma_y0; self.H_k = H_k
 
     def yield_function(self, state):
         xi = state["stress"] - state["alpha"]

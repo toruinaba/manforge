@@ -54,6 +54,27 @@ def test_objective_is_zero_at_true_params(model, driver_factory, target, space):
     assert obj(space.x0) == pytest.approx(0.0)
 
 
+def test_objective_rebuilds_the_model_in_its_own_dimension(driver_factory, space):
+    """An open-family model is rebuilt with the dimension of the template.
+
+    Rebuilt as 3D instead, the 4-component path would not even fit, and the
+    evaluation would score the failure penalty.
+    """
+    from manforge.core.dimension import PLANE_STRAIN
+    from manforge.models import J2Isotropic
+
+    template = J2Isotropic(
+        dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+    data = np.zeros((10, 4))
+    data[:, 0] = np.linspace(0.0, 5e-3, 10)
+    load = FieldHistory(FieldType.STRAIN, "Strain", data)
+    stress = StrainDriver(PythonIntegrator(template)).run(load).stress[:, 0]
+    target = FitTarget(load=load, observations=[Observation(values=stress, component=0)])
+
+    obj = build_objective(template, driver_factory, [target], space)
+    assert obj(space.x0) == pytest.approx(0.0)
+
+
 def test_objective_sums_over_targets(model, driver_factory, target, space):
     """Duplicating a target scales the objective, confirming targets combine."""
     one = build_objective(model, driver_factory, [target], space)

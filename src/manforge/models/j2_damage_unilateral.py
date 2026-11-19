@@ -61,7 +61,7 @@ import autograd.numpy as anp
 import numpy as np
 from autograd.extend import defvjp, primitive
 
-from manforge.core.dimension import PLANE_STRESS, SOLID_3D, UNIAXIAL_1D, StressDimension
+from manforge.core.dimension import PLANE_STRESS, SOLID_3D, UNIAXIAL_1D
 from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, Implicit, NTENS, SCALAR
 from manforge.models.j2_damage import J2IsotropicDamage
@@ -167,13 +167,10 @@ class J2IsotropicDamageUnilateral(MaterialModel):
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
     D = Implicit(shape=SCALAR, doc="scalar damage (0 = intact)")
 
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0, h: float = 0.2,
-                 c: float = DEFAULT_HEAVISIDE_AT_ZERO):
-        super().__init__(dimension=dimension)
-        self.E, self.nu, self.sigma_y0, self.H = E, nu, sigma_y0, H
-        self.S, self.s, self.p_D, self.h = S, s, p_D, h
+    def __init__(self, *, c: float = DEFAULT_HEAVISIDE_AT_ZERO, **params):
+        # c is a numerical setting, not a material parameter: it is not in
+        # param_names and does not go into PROPS.
+        super().__init__(**params)
         self.c = c
 
     # ------------------------------------------------------------------
@@ -251,23 +248,14 @@ class J2IsotropicDamageUnilateral3D(J2IsotropicDamageUnilateral):
 
     dimension = SOLID_3D
 
-    def __init__(self, **kwargs):
-        super().__init__(dimension=SOLID_3D, **kwargs)
-
 
 class J2IsotropicDamageUnilateralPS(J2IsotropicDamageUnilateral):
     """Plane-stress variant of :class:`J2IsotropicDamageUnilateral`."""
 
     dimension = PLANE_STRESS
 
-    def __init__(self, **kwargs):
-        super().__init__(dimension=PLANE_STRESS, **kwargs)
-
 
 class J2IsotropicDamageUnilateral1D(J2IsotropicDamageUnilateral):
     """Uniaxial (1D) variant of :class:`J2IsotropicDamageUnilateral`."""
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, **kwargs):
-        super().__init__(dimension=UNIAXIAL_1D, **kwargs)
