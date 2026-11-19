@@ -988,3 +988,53 @@ class TestStressDriverInitialState:
         d = StressDriver(integrator)
         result = d.run(load, initial_stress=np.zeros(6))
         assert len(result.step_results) == 1
+
+
+# ---------------------------------------------------------------------------
+# Load shape: checked, not broadcast
+# ---------------------------------------------------------------------------
+
+class TestLoadShape:
+    """numpy would broadcast a history of the wrong width into every
+    component — shear included — and the run would proceed."""
+
+    @pytest.fixture
+    def integ(self):
+        return PythonNumericalIntegrator(
+            J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0))
+
+    @pytest.mark.parametrize("data", [
+        np.linspace(50.0, 200.0, 4),                 # (N,)
+        np.linspace(50.0, 200.0, 4).reshape(-1, 1),  # (N, 1)
+        np.zeros((4, 3)),                            # another dimension's width
+    ], ids=["1d", "one-column", "three-columns"])
+    def test_stress_driver_rejects_a_history_of_the_wrong_width(self, integ, data):
+        load = FieldHistory(FieldType.STRESS, "Stress", data)
+        with pytest.raises(ValueError, match=r"StressDriver expects load.data of shape \(N, 6\)"):
+            StressDriver(integ).run(load)
+
+    def test_default_cyclic_stress_history_is_rejected_for_a_3d_model(self, integ):
+        """cyclic_stress defaults to ntens=1; that used to run as σ = [200]*6."""
+        with pytest.raises(ValueError, match="ntens=6"):
+            StressDriver(integ).run(FieldHistory.cyclic_stress([200.0]))
+
+    def test_stress_driver_takes_a_1d_history_for_a_1d_model(self):
+        m = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+        load = FieldHistory(FieldType.STRESS, "Stress", np.linspace(50.0, 300.0, 5))
+        result = StressDriver(PythonNumericalIntegrator(m)).run(load)
+        np.testing.assert_allclose(result.stress[:, 0], np.linspace(50.0, 300.0, 5), rtol=1e-8)
+
+    @pytest.mark.parametrize("data", [
+        np.linspace(0.0, 5e-3, 4).reshape(-1, 1),
+        np.zeros((4, 3)),
+    ], ids=["one-column", "three-columns"])
+    def test_strain_driver_rejects_a_history_of_the_wrong_width(self, integ, data):
+        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        with pytest.raises(ValueError, match=r"StrainDriver expects load.data of shape \(N, 6\)"):
+            StrainDriver(integ).run(load)
+
+    def test_strain_driver_keeps_the_1d_shorthand(self, integ):
+        """A 1-D strain history is ε11 only, the other strains held at zero."""
+        load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 6))
+        result = StrainDriver(integ).run(load)
+        np.testing.assert_array_equal(result.strain[:, 1:], 0.0)

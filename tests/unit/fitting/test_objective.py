@@ -344,6 +344,20 @@ def test_out_of_bounds_initial_value_is_reported(model, target):
     assert "sigma_y0=900 outside (100, 400)" in str(exc.value)
 
 
+def test_nelder_mead_starts_from_the_point_that_was_checked(model, driver_factory, target):
+    """Nelder-Mead runs without bounds.  The start-point check looks at the
+    initial value clipped into its bounds; the search used to start from the
+    raw value instead, an out-of-range point nobody had checked."""
+    space = ParameterSpace(
+        free={"sigma_y0": (-50.0, (100.0, 400.0))},   # below its own lower bound
+        fixed={"E": 210000.0, "nu": 0.3, "H": 1000.0},
+    )
+    result = fit_params(model, [target], space, driver_factory=driver_factory,
+                        method="Nelder-Mead", max_iter=3)
+    # A few simplex steps from 100, not from -50 (which ended near -20).
+    assert result.params["sigma_y0"] > 90.0
+
+
 def test_in_bounds_initials_are_not_reported(model, target, space):
     """No spurious bounds warning when every initial value is legitimate."""
     with pytest.raises(RuntimeError) as exc:

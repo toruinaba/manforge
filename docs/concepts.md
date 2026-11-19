@@ -65,7 +65,7 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 
 **`tol` は「その対象の許容値」** — integrator と driver では自分の NR の収束、checker (`TangentChecker` / `JacobianChecker` / `check_bindings`) では検査の合否、`fit_params` では最適化器の収束を指す。2 つを同じ引数リストに並べない: `crosscheck` の `stress_tol` / `state_tol` / `tangent_tol` は合否で、driver の外側 NR の設定は `driver_factory` が作る driver が持つ。
 
-**Δλ < 0 は非収束扱い** — 残差系は Δλ < 0 側にも根を持つが、負の塑性乗数は KKT 条件違反 (塑性ひずみの巻き戻り)。残差ノルムはこの根を区別できないため、フレームワークが符号で弾く。大きい Δε で σ_trial が許容枝の外に出ると起きる。
+**Δλ < 0 は非収束扱い** — 残差系は Δλ < 0 側にも根を持つが、負の塑性乗数は KKT 条件違反 (塑性ひずみの巻き戻り)。残差ノルムはこの根を区別できないため、フレームワークが符号で弾く。大きい Δε で σ_trial が許容枝の外に出ると起きる。手書きのリターンマッピング (`user_defined_return_mapping`) の結果も同じ条件で確かめる — 閉形式解はどんな入力にも何かの値を返すので、Δλ < 0 や非有限の値 (`inf` / `nan`) は `converged=True` と報告されていても非収束として扱う。
 
 **増分の自動分割** — `SubSteppingIntegrator(integrator, max_substeps=16)` は非収束を検知して同じ増分を 2 → 4 → 8 分割で再試行する。opt-in のラッパで、収束する増分では結果・反復数・接線が一切変わらない。詳細は `simulation/integrator/substepping.py` の docstring。
 

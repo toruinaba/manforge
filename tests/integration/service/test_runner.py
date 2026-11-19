@@ -89,6 +89,24 @@ class TestNonConvergence:
         assert out.fields["ep"].shape == (0,)
 
 
+    # 1D closed form: Δλ = f_trial / (E + H).
+    @pytest.mark.parametrize("H", [-300_000.0, -206e3],
+                             ids=["negative-dlambda", "division-by-zero"])
+    def test_closed_form_model_with_unsolvable_parameters(self, H):
+        """A closed form returns a number for any parameters; the run must
+        still report that it is not a solution, not hand back negative or
+        non-finite plastic strain as converged."""
+        params = dict(J2, H=H)
+        with np.errstate(all="ignore"):
+            out = run_simulation(J2Isotropic1D, params, np.linspace(0.0, 6e-3, 5),
+                                 include_fields=["ep"])
+        assert not out.converged
+        assert out.failed_step is not None
+        assert out.n_steps == out.failed_step
+        assert np.all(np.isfinite(out.stress))
+        assert np.all(out.fields["ep"] >= 0.0)
+
+
 class TestRegistryRoundTrip:
     def test_describe_then_run_with_defaults(self):
         """The descriptor's defaults form a runnable parameter set (WebUI path)."""

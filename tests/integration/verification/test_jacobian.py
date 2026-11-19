@@ -4,6 +4,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
+from manforge.core import hand_block
 from manforge.models import J2Isotropic3D
 from manforge.simulation import (
     PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
@@ -43,6 +44,45 @@ class TestCompareJacobiansJ2:
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
         )
+
+    def test_round_off_entries_are_not_a_mismatch(self, model):
+        """The two solutions differ by 1e-13 in stress.  Entry by entry, a
+        Jacobian component that is zero on one side and 1e-17 on the other
+        used to read as a relative error of 2."""
+        deps = np.zeros(6)
+        deps[0] = 4e-3
+        state0 = model.initial_state()
+        r_num = PythonNumericalIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        r_closed = PythonAnalyticalIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        out = JacobianChecker(model).compare(r_num, r_closed)
+        assert out.passed
+        assert out.max_rel_err < 1e-12
+
+    def test_compare_with_a_result_that_reports_no_dlambda(self, model):
+        """A Fortran UMAT result carries Δλ = NaN.  The comparison is the one
+        the docstring recommends for such results, and it used to return NaN."""
+        from manforge.simulation import FortranIntegrator
+        from tests.integration.simulation.integrator.test_fortran import _FakeUmat
+
+        deps = np.zeros(6)
+        deps[0] = 4e-3
+        state0 = model.initial_state()
+        r_py = PythonIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        r_f = FortranIntegrator.from_model(_FakeUmat(), "j2", model).stress_update(
+            deps, np.zeros(6), state0)
+        assert np.isnan(float(r_f.dlambda))
+
+        out = JacobianChecker(model).compare(r_py, r_f)
+        assert out.passed
+        assert out.max_rel_err == 0.0
+
+    def test_a_real_difference_still_fails(self, model):
+        deps = np.zeros(6)
+        deps[0] = 4e-3
+        state0 = model.initial_state()
+        r_a = PythonIntegrator(model).stress_update(deps, np.zeros(6), state0)
+        r_b = PythonIntegrator(model).stress_update(1.5 * deps, np.zeros(6), state0)
+        assert not JacobianChecker(model).compare(r_a, r_b).passed
 
     def test_elastic_step_does_not_raise(self, model):
         """Elastic step (dlambda=0) should not raise in compare."""
@@ -181,6 +221,26 @@ class TestCheckHandBlocks:
         assert not report.passed                      # round-off exceeds 1e-30
         assert {b.tol for b in report.blocks.values()} == {1e-30}
         assert strict.check_hand_blocks(results, tol=1e-8).passed
+
+    def test_a_block_that_returns_nan_fails(self):
+        """NaN loses every comparison, so past the first step it used to
+        drop out of the running worst error and the block passed."""
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        class _NanLater(OWWithHandBlocks):
+            n_calls = 0
+
+            @hand_block("dlambda", "stress")
+            def dRy_ds(self, state):
+                type(self).n_calls += 1
+                block = super().dRy_ds(state)
+                return block * np.nan if type(self).n_calls > 1 else block
+
+        m = _NanLater(**OW_PARAMS)
+        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+        assert not report.passed
+        assert [(b.row, b.col) for b in report.failed] == [("dlambda", "stress")]
+        assert report.blocks[("dlambda", "stress")].worst_err == np.inf
 
     def test_a_wrong_block_is_found_by_name(self):
         """One sign error among eight blocks: named, not just 'the Jacobian is off'."""
@@ -389,3 +449,146 @@ class TestCheckSolution:
         strict = JacobianChecker(model, tol=1e-30)
         assert not strict.check_solution(results).passed
         assert strict.check_solution(results, tol=1e-8).passed
+
+    # -- what a solution is --------------------------------------------------
+
+    def test_a_non_converged_iterate_is_not_checked_as_a_solution(self):
+        """Its own residual norm used to be taken as the allowance, so an
+        iterate 190 away from the root came back 'every row satisfied'."""
+        from manforge.models import OWKinematic3D
+        from manforge.simulation import FieldHistory, FieldType, StrainDriver
+        from tests.fixtures.hand_block_models import OW_PARAMS
+
+        m = OWKinematic3D(**OW_PARAMS)
+        data = np.zeros((3, 6))
+        data[:, 0] = np.linspace(3e-3, 8e-3, 3)
+        weak = PythonNumericalIntegrator(m, max_iter=2, raise_on_nonconverged=False)
+        steps = list(StrainDriver(weak).iter_run(FieldHistory(FieldType.STRAIN, "eps", data)))
+        iterate = [s.result for s in steps if not s.converged]
+        assert iterate, "the premise: max_iter=2 leaves a step unsolved"
+
+        with pytest.raises(ValueError, match="did not converge: it is a Newton iterate"):
+            JacobianChecker(m).check_solution(iterate)
+
+    def test_a_single_entry_history_buys_no_allowance(self, model):
+        """A closed form that reports only the trial residual has not
+        iterated: there is no solver tolerance to allow for, and the trial
+        residual must not be mistaken for one."""
+        from manforge.core import ReturnMappingResult
+
+        class _Overshoot(type(model)):
+            def user_defined_return_mapping(self, inc):
+                rm = super().user_defined_return_mapping(inc)
+                stress = inc.trial["stress"] + 1.05 * (rm.stress - inc.trial["stress"])
+                return ReturnMappingResult(
+                    stress=stress, state={**rm.state, "stress": stress},
+                    dlambda=rm.dlambda, n_iterations=0,
+                    residual_history=[rm.residual_history[0]], converged=True,
+                )
+
+        m = _Overshoot(**model.params)
+        assert not JacobianChecker(m).check_solution(self._results(m)).passed
+
+    def test_substepped_steps_are_left_out_and_counted(self):
+        """A sub-stepped result ends a chain of smaller steps; it is not a
+        root of the undivided increment's residual, and used to be faulted."""
+        from manforge.models import OWKinematic3D
+        from manforge.simulation import (
+            FieldHistory, FieldType, StrainDriver, SubSteppingIntegrator,
+        )
+        from tests.fixtures.hand_block_models import OW_PARAMS
+
+        m = OWKinematic3D(**OW_PARAMS)
+        t = np.linspace(0.0, 1.0, 7)[1:]
+        data = np.zeros((6, 6))
+        data[:, 0] = 1.2e-2 * t
+        data[:, 5] = 1.0e-2 * np.sin(np.pi * t)
+        sub = SubSteppingIntegrator(PythonNumericalIntegrator(m, max_iter=5))
+        results = StrainDriver(sub).run(FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+        n_sub = sum(r.n_substeps > 1 for r in results if r.is_plastic)
+        assert 0 < n_sub < len(results), "the premise: some steps divided, some not"
+
+        report = JacobianChecker(m).check_solution(results)
+        assert report.passed, report.summary()
+        assert report.n_substepped == n_sub
+        assert f"left out: {n_sub} sub-stepped steps" in report.summary()
+
+        only_sub = [r for r in results if r.n_substeps > 1]
+        with pytest.raises(ValueError, match="every plastic step in results was sub-stepped"):
+            JacobianChecker(m).check_solution(only_sub)
+
+    def test_fortran_results_are_refused_for_the_right_reason(self, model):
+        from manforge.simulation import (
+            FieldHistory, FieldType, FortranIntegrator, StrainDriver,
+        )
+        from tests.integration.simulation.integrator.test_fortran import _FakeUmat
+
+        data = np.zeros((4, 6))
+        data[:, 0] = np.linspace(1e-3, 4e-3, 4)
+        umat = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
+        results = StrainDriver(umat).run(FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+        with pytest.raises(ValueError, match="carries no increment"):
+            JacobianChecker(model).check_solution(results)
+
+    # -- explicit states -----------------------------------------------------
+
+    @pytest.mark.parametrize("unit", [1.0, 1.0e6], ids=["MPa", "Pa"])
+    def test_a_wrong_explicit_update_fails_in_any_stress_unit(self, unit):
+        """Whether a state was exercised is judged from the state itself.
+        It used to be compared with the largest unknown — a strain against a
+        stress — so in Pa a plastic strain of 5e-4 counted as 'never moved'
+        and a wrong update passed."""
+        from manforge.core import ReturnMappingResult
+        from manforge.simulation import (
+            FieldHistory, FieldType, PythonAnalyticalIntegrator, StrainDriver,
+        )
+
+        class _DoubleEp(J2Isotropic3D):
+            def user_defined_return_mapping(self, inc):
+                rm = super().user_defined_return_mapping(inc)
+                state = {**rm.state, "ep": inc.state_n["ep"] + 2.0 * rm.dlambda}
+                return ReturnMappingResult(
+                    stress=rm.stress, state=state, dlambda=rm.dlambda,
+                    n_iterations=1, residual_history=[1.0, 0.0], converged=True,
+                )
+
+        m = _DoubleEp(E=210e3 * unit, nu=0.3, sigma_y0=250.0 * unit, H=1e3 * unit)
+        data = np.zeros((6, 6))
+        data[:, 0] = np.linspace(1.5e-3, 1.9e-3, 6)        # just past yield
+        results = StrainDriver(PythonAnalyticalIntegrator(m)).run(
+            FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+        assert float(results[-1].state["ep"]) < 1e-3
+
+        report = JacobianChecker(m).check_solution(results)
+        assert report.not_exercised == []
+        assert [r.name for r in report.failed] == ["ep"]
+
+    def test_a_nan_state_fails(self, model):
+        from manforge.core import ReturnMappingResult
+
+        class _NanEp(type(model)):
+            def user_defined_return_mapping(self, inc):
+                rm = super().user_defined_return_mapping(inc)
+                if float(inc.state_n["ep"]) == 0.0:
+                    return rm                       # first plastic step is fine
+                return ReturnMappingResult(
+                    stress=rm.stress, state={**rm.state, "ep": np.array(np.nan)},
+                    dlambda=rm.dlambda, n_iterations=1,
+                    residual_history=[1.0, 0.0], converged=True,
+                )
+
+        m = _NanEp(**model.params)
+        d = np.zeros(6)
+        d[0] = 2e-3
+        integ = PythonAnalyticalIntegrator(m, raise_on_nonconverged=False)
+        first = integ.stress_update(d, np.zeros(6), m.initial_state())
+        second = integ.stress_update(d, np.asarray(first.stress), first.state)
+        # The integrator itself now refuses a non-finite state...
+        assert first.converged and not second.converged
+        # ...and a result that got past it some other way still fails the check.
+        import dataclasses
+        forced = dataclasses.replace(
+            second, return_mapping=dataclasses.replace(second.return_mapping, converged=True))
+        report = JacobianChecker(m).check_solution([first, forced])
+        assert not report.passed
+        assert report.rows["ep"].worst_err == np.inf

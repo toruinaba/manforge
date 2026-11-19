@@ -152,9 +152,28 @@ class HandBlockReport:
         return self.summary()
 
 
-def _array_rel_err(ref: np.ndarray, cand: np.ndarray) -> float:
-    """Largest component-wise relative difference between two Jacobian blocks."""
-    return float(np.max(np.abs(cand - ref) / (np.abs(ref) + 1e-300)))
+def _block_rel_err(ref: np.ndarray, cand: np.ndarray) -> float:
+    """``max|cand − ref| / max|ref|`` of one Jacobian block.
+
+    Whole-block, not component-wise: an entry that is zero in exact
+    arithmetic and 1e-17 in floating point is round-off, not a 100 % error.
+    """
+    diff = float(np.max(np.abs(cand - ref)))
+    scale = float(np.max(np.abs(ref)))
+    if np.isnan(diff):
+        return float("inf")
+    if scale > 0.0:
+        return diff / scale
+    return 0.0 if diff == 0.0 else float("inf")
+
+
+def _as_error(value: float) -> float:
+    """NaN is the worst error, not the absence of one.
+
+    ``nan > x`` is False for every x, so a NaN left as is would lose every
+    "is this worse than the worst so far" comparison and vanish.
+    """
+    return float("inf") if np.isnan(value) else float(value)
 
 
 # check_solution allows a row this many times the residual norm the solver
@@ -205,15 +224,20 @@ class SolutionReport:
     rows : dict[str, SolutionRowCheck]
         One entry per residual row and per exercised explicit state.
     not_exercised : list[str]
-        Explicit states that never left zero in the checked steps, so their
+        Explicit states that never moved in the checked steps, so their
         update was not tested by this history.
     n_points : int
         Number of plastic steps checked.
+    n_substepped : int
+        Plastic steps left out because the integrator divided the increment
+        (``n_substeps > 1``): such a result is the end of a chain of smaller
+        steps, not a root of the residual of the undivided one.
     """
 
     rows: dict[str, SolutionRowCheck]
     not_exercised: list[str] = field(default_factory=list)
     n_points: int = 0
+    n_substepped: int = 0
 
     @property
     def passed(self) -> bool:
@@ -243,6 +267,8 @@ class SolutionReport:
             )
         if self.not_exercised:
             lines.append("  not exercised: " + ", ".join(self.not_exercised))
+        if self.n_substepped:
+            lines.append(f"  left out: {self.n_substepped} sub-stepped steps")
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -386,7 +412,8 @@ class JacobianChecker:
             n_points += 1
             for key, got in hand.items():
                 ref = np.asarray(reference.part[key[0]][key[1]], dtype=float)
-                err = float(np.max(np.abs(got - ref))) / max(float(np.max(np.abs(ref))), 1.0)
+                err = _as_error(
+                    float(np.max(np.abs(got - ref))) / max(float(np.max(np.abs(ref))), 1.0))
                 if key not in worst or err > worst[key][0]:
                     worst[key] = (err, i)
         if n_points == 0:
@@ -431,12 +458,21 @@ class JacobianChecker:
           ``max (|∂R/∂x| · |x|)`` over the row (a componentwise backward
           error, unchanged if the row is rescaled).  ``slack`` is ten times
           the residual norm the solver itself reported for the step
-          (``residual_history[-1]``; zero for a closed form), so a solution
-          is not faulted for the tolerance its own solver stopped at — and an
-          error smaller than that cannot be told from it.
+          (``residual_history[-1]``), so a solution is not faulted for the
+          tolerance its own solver stopped at — and an error smaller than
+          that cannot be told from it.  It is zero unless the solver iterated
+          (a history of at least two entries): a closed form has no
+          tolerance to allow for.
         * **Explicit states** — the reported value against the framework's
           ``update_state`` at the reported point, relative to the largest
-          magnitude the state reaches in the checked steps.
+          magnitude the state reaches in the checked steps.  A state that
+          equals its value at the start of the step in every checked step,
+          as reported and as derived, is listed under ``not_exercised``
+          instead: its update was never used.
+
+        What is not checked.  A sub-stepped result (``n_substeps > 1``) is
+        left out and counted in ``n_substepped``: it is the end of a chain of
+        smaller steps, not a root of the undivided increment's residual.
 
         Parameters
         ----------
@@ -454,28 +490,38 @@ class JacobianChecker:
         Raises
         ------
         ValueError
-            If ``results`` holds no plastic step (nothing would have been
-            checked), or a result carries no increment (a Fortran UMAT result
-            — compare that with :func:`~manforge.verification.crosscheck`).
+            If nothing would have been checked (no plastic step, or every one
+            sub-stepped); if a result carries no increment (a Fortran UMAT
+            result — compare that with
+            :func:`~manforge.verification.crosscheck`); or if a plastic
+            result did not converge (an iterate is not a solution).
         """
         model = self.model
         if tol is None:
             tol = self.tol
 
         res_rows: dict[str, list[tuple[int, float, float, float]]] = {}
-        exp_rows: dict[str, list[tuple[int, float, float]]] = {}
-        x_max = 0.0
+        exp_rows: dict[str, list[tuple[int, float, float, float]]] = {}
         n_points = 0
+        n_substepped = 0
         for i, result in enumerate(results):
+            inc = self._increment(result)
             if result.is_plastic is not True:
                 continue
-            point = residual_at(model, result, self._increment(result))
+            if not result.converged:
+                raise ValueError(
+                    f"result {i} did not converge: it is a Newton iterate, not "
+                    "a solution, and cannot be checked as one"
+                )
+            if result.n_substeps > 1:
+                n_substepped += 1
+                continue
+            point = residual_at(model, result, inc)
             layout = point.layout
             n_points += 1
-            x_max = max(x_max, float(np.max(np.abs(point.x))))
             scale = np.abs(point.jacobian) @ np.abs(point.x)
             history = result.residual_history
-            slack = _SLACK_FACTOR * float(history[-1]) if len(history) else 0.0
+            slack = _SLACK_FACTOR * float(history[-1]) if len(history) >= 2 else 0.0
             for unknown in ("stress", "dlambda", *layout.implicit_keys):
                 sl = layout.slot_slice(unknown)
                 res_rows.setdefault(layout.residual_name_for(unknown), []).append((
@@ -487,13 +533,20 @@ class JacobianChecker:
             for key in layout.explicit_keys:
                 reported = np.asarray(result.state[key], dtype=float)
                 derived = np.asarray(point.state[key], dtype=float)
+                start = np.asarray(inc.state_n[key], dtype=float)
                 exp_rows.setdefault(key, []).append((
                     i,
                     float(np.max(np.abs(reported - derived))),
                     max(float(np.max(np.abs(reported))), float(np.max(np.abs(derived)))),
+                    max(float(np.max(np.abs(reported - start))),
+                        float(np.max(np.abs(derived - start)))),
                 ))
         if n_points == 0:
-            raise ValueError("no plastic step in results — no solution was checked")
+            raise ValueError(
+                "every plastic step in results was sub-stepped — no solution was checked"
+                if n_substepped else
+                "no plastic step in results — no solution was checked"
+            )
 
         rows: dict[str, SolutionRowCheck] = {}
         for name, samples in res_rows.items():
@@ -504,26 +557,30 @@ class JacobianChecker:
             worst, at = 0.0, samples[0][0]
             for i, r, s, slack in samples:
                 denom = max(s, floor) + slack / tol
-                err = r / denom if denom > 0.0 else (0.0 if r == 0.0 else np.inf)
+                err = _as_error(r / denom if denom > 0.0 else (0.0 if r == 0.0 else np.inf))
                 if err > worst:
                     worst, at = err, i
             rows[name] = SolutionRowCheck(name, "residual", worst, at, tol)
 
         not_exercised = []
         for key, samples in exp_rows.items():
-            magnitude = max(m for _, _, m in samples)
-            # Twelve orders below the largest unknown is noise in double
-            # precision, whatever the units: the state never left zero.
-            if magnitude <= 1e-12 * x_max:
+            # Judged from the state itself, so no unit enters: it either moved
+            # from where the step started, or its update was never used.
+            if all(moved == 0.0 for _, _, _, moved in samples):
                 not_exercised.append(key)
                 continue
+            magnitude = max(m for _, _, m, _ in samples)
             worst, at = 0.0, samples[0][0]
-            for i, diff, _ in samples:
-                if diff / magnitude > worst:
-                    worst, at = diff / magnitude, i
+            for i, diff, _, _ in samples:
+                err = _as_error(diff / magnitude if magnitude > 0.0 else np.inf)
+                if err > worst:
+                    worst, at = err, i
             rows[key] = SolutionRowCheck(key, "state", worst, at, tol)
 
-        return SolutionReport(rows=rows, not_exercised=not_exercised, n_points=n_points)
+        return SolutionReport(
+            rows=rows, not_exercised=not_exercised,
+            n_points=n_points, n_substepped=n_substepped,
+        )
 
     def compare(
         self,
@@ -534,6 +591,9 @@ class JacobianChecker:
 
         Both are evaluated on the residual of ``result_a``'s increment, so
         ``result_b`` may come from an integrator that reports none (Fortran).
+        A Fortran UMAT reports no Δλ either; ``result_b``'s point then takes
+        ``result_a``'s, so the comparison is over stress and state.  Each
+        block is measured as ``max|b − a| / max|a|`` over the block.
         A difference localises *where* two solutions of the same step disagree;
         it does not compare a hand-derived Jacobian with the autodiff one — that
         is :meth:`check_hand_blocks`.
@@ -555,7 +615,10 @@ class JacobianChecker:
                 "defines the residual both points are evaluated on"
             )
         jac_a = residual_jacobian(self.model, result_a, result_a.increment)
-        jac_b = residual_jacobian(self.model, result_b, result_a.increment)
+        jac_b = residual_jacobian(
+            self.model, result_b, result_a.increment,
+            dlambda_if_missing=result_a.dlambda,
+        )
 
         block_errs: dict[str, float] = {}
         blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}
@@ -563,7 +626,7 @@ class JacobianChecker:
         for label, arr_a in jac_a.iter_blocks():
             arr_a = np.asarray(arr_a, dtype=float)
             arr_b = np.asarray(blocks_b.get(label, np.zeros_like(arr_a)), dtype=float)
-            block_errs[label] = _array_rel_err(arr_a, arr_b)
+            block_errs[label] = _block_rel_err(arr_a, arr_b)
 
         max_err = max(block_errs.values()) if block_errs else 0.0
 

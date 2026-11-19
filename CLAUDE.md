@@ -65,7 +65,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 スイッチは integrator の `raise_on_nonconverged` だけ。driver は自分の外側 NR の失敗にも同じ設定を使い、独自のスイッチを持たない。integrator の契約(`StressIntegrator` Protocol: `dimension` / `ntens` / `raise_on_nonconverged` / `initial_state` / `elastic_tangent` / `stress_update`)は `simulation/integrator/base.py`。
 
-- **Integrator**: 既定 raise。`raise_on_nonconverged=False` で `converged=False` を返す。Δλ<0 は KKT 違反なので非収束扱い。許容値はスケール不変(`tol × max(1, ‖σ_trial‖_∞)`)。
+- **Integrator**: 既定 raise。`raise_on_nonconverged=False` で `converged=False` を返す。Δλ<0 は KKT 違反なので非収束扱い(手書き経路の結果も同じ条件で確かめる: Δλ<0 と非有限の値は、`converged=True` と報告されていても非収束)。許容値はスケール不変(`tol × max(1, ‖σ_trial‖_∞)`)。
 - **Driver**: `iter_run` は非収束 step を yield して停止(非収束イテレートで状態を進めない)。`run` は完了した step だけを返し、`DriverResult.converged` / `failed_step` で知らせる(失敗した step は配列に入れない)。
 - **fitting**: 評価の非収束は有限ペナルティ(`FAILURE_PENALTY`)でスコアし続行。全評価失敗時のみ raise。設計理由は `fitting/objective.py`。
 - **service**: `run_simulation` は部分履歴 + `converged` / `failed_step` を値で返す(呼び出し側バグのみ `ValueError`)。

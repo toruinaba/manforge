@@ -209,6 +209,10 @@ def _default_driver_factory(load: FieldHistory) -> Callable[["StressIntegrator"]
 
 
 def _rel(diff: float, scale: float) -> float:
+    # NaN first: it loses every comparison, so left as is it would drop out of
+    # the maxima the summary reports and read as "ok 0.000e+00".
+    if np.isnan(diff) or np.isnan(scale):
+        return float("inf")
     if scale > 0.0:
         return diff / scale
     return 0.0 if diff == 0.0 else float("inf")
@@ -332,14 +336,14 @@ def crosscheck(
     for index, ra, a_ok, rb, b_ok in paired():
         stress_a = np.asarray(ra.stress, dtype=float)
         stress_b = np.asarray(rb.stress, dtype=float)
-        stress_scale = max(stress_scale, float(np.max(np.abs(stress_a))))
+        stress_scale = float(np.fmax(stress_scale, np.max(np.abs(stress_a))))
         run_scale = max(run_scale, stress_scale)
 
         keys = [k for k in ra.state if k != "stress" and k in rb.state]
         values = {k: (np.asarray(ra.state[k], dtype=float),
                       np.asarray(rb.state[k], dtype=float)) for k in keys}
         for k, (va, _) in values.items():
-            state_scale[k] = max(state_scale.get(k, 0.0), float(np.max(np.abs(va))))
+            state_scale[k] = float(np.fmax(state_scale.get(k, 0.0), np.max(np.abs(va))))
             run_scale = max(run_scale, state_scale[k])
 
         s_err = _rel(float(np.max(np.abs(stress_b - stress_a))), stress_scale)

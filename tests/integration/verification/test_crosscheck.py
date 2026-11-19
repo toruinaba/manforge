@@ -263,6 +263,34 @@ class TestLockstep:
 # How errors are measured
 # ---------------------------------------------------------------------------
 
+class _NanAtStep(J2Isotropic3D):
+    """Closed form whose stress turns NaN once ep passes a threshold."""
+
+    def user_defined_return_mapping(self, inc):
+        rm = super().user_defined_return_mapping(inc)
+        if float(rm.state["ep"]) > 1.5e-3:
+            return ReturnMappingResult(
+                stress=rm.stress * np.nan, state=rm.state, dlambda=rm.dlambda,
+                n_iterations=1, residual_history=[1.0, 0.0], converged=True,
+            )
+        return rm
+
+
+def test_nan_in_the_candidate_shows_in_the_summary(model):
+    """The verdict was right, but NaN dropped out of the maxima and every
+    summary line read 'ok ... 0.000e+00'."""
+    params = dict(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
+    load = FieldHistory.cyclic_strain([6e-3], n_per_segment=12, ntens=6)
+    candidate = PythonAnalyticalIntegrator(_NanAtStep(**params), raise_on_nonconverged=False)
+    result = crosscheck(PythonNumericalIntegrator(model), candidate, load)
+    assert not result.passed
+    # The integrator reports the non-finite stress as a failed step...
+    assert result.n_b_nonconverged == 1
+    # ...and the error itself reads as the worst possible, not as zero.
+    assert result.max_stress_rel_err == np.inf
+    assert "FAIL stress: inf" in result.summary()
+
+
 class TestMeasure:
     def test_stress_through_zero_does_not_inflate_the_error(self, model):
         """Unloading through σ = 0: round-off there is measured against the

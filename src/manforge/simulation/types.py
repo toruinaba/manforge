@@ -406,6 +406,8 @@ class DriverResult:
         """
         if not self.step_results:
             return np.zeros((0,))
+        if name == "stress":
+            return self.stress
         try:
             return np.stack(
                 [np.asarray(r.state[name], dtype=float) for r in self.step_results]

@@ -158,3 +158,15 @@ def test_custom_residual_names_are_the_row_names():
 def test_fixture_variants_declare_what_they_say():
     assert OWWithApproxBlock.dRep_dep.__hand_block__.approx == 1e-2
     assert "1e-3" in OWWithApproxBlock.dRep_dep.__hand_block__.note
+
+
+@pytest.mark.parametrize("wrapper", [staticmethod, classmethod])
+def test_block_under_staticmethod_or_classmethod_is_rejected(wrapper):
+    """It used to be dropped without a word: the declaration sits on the
+    function inside the wrapper, where the collection did not look."""
+    with pytest.raises(TypeError, match="a hand block must be an instance method"):
+        class _Bad(OWKinematic3D):
+            @wrapper
+            @hand_block("alpha", "alpha")
+            def dRa_da(*args):
+                return np.eye(6)

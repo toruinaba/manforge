@@ -74,35 +74,69 @@ _HOOK_PARAMS: dict[str, tuple[str, ...]] = {
 
 
 def _check_hook_signatures(cls) -> None:
-    """Reject hooks defined on *cls* with another argument list."""
+    """Reject a hook *cls* would use that has another argument list.
+
+    The hook is looked up the way a call would find it, so one inherited from
+    a mixin that is not itself a ``MaterialModel`` is checked too.
+    """
     for name, expected in _HOOK_PARAMS.items():
-        fn = cls.__dict__.get(name)
-        if fn is None:
+        fn = inspect.getattr_static(cls, name, None)
+        if not inspect.isfunction(fn) or fn is MaterialModel.__dict__.get(name):
             continue
-        got = tuple(inspect.signature(fn).parameters)[1:]   # drop self
-        if got != expected:
+        params = list(inspect.signature(fn).parameters.values())[1:]   # drop self
+        got = tuple(p.name for p in params)
+        # elastic_predictor takes strain_inc by keyword; the rest are passed
+        # by position, which a keyword-only parameter cannot receive.
+        keyword_only = {"strain_inc"} if name == "elastic_predictor" else set()
+        misplaced = [
+            p.name for p in params
+            if (p.kind is inspect.Parameter.KEYWORD_ONLY) != (p.name in keyword_only)
+            or p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        ]
+        if got != expected or misplaced:
+            shown = ", ".join(
+                ("*, " if p.kind is inspect.Parameter.KEYWORD_ONLY else "") + p.name
+                for p in params
+            )
             raise TypeError(
                 f"{cls.__name__}.{name} must take ({', '.join(expected)}), "
-                f"got ({', '.join(got)}).  The state at the start of the step, "
+                f"got ({shown}).  The state at the start of the step, "
                 "the strain increment and the trial state are read from the "
                 "Increment: inc.state_n, inc.strain_inc, inc.trial."
             )
 
 
 def _fixed_dimension_of(cls) -> StressDimension | None:
-    """The dimension pinned by ``cls`` or its nearest ancestor's class body."""
+    """The dimension pinned by ``cls`` or an ancestor's class body.
+
+    A class is fixed because its algebra only holds in that dimension, and a
+    subclass inherits the algebra, so it cannot pin another one: every class
+    in the MRO that assigns ``dimension`` must assign the same.
+    """
+    fixed: StressDimension | None = None
+    owner = None
     for klass in cls.__mro__:
         if klass is MaterialModel:
-            return None
-        if "dimension" in vars(klass):
-            fixed = vars(klass)["dimension"]
-            if not isinstance(fixed, StressDimension):
-                raise TypeError(
-                    f"{klass.__name__}.dimension must be a StressDimension, "
-                    f"got {type(fixed).__name__}"
-                )
-            return fixed
-    return None
+            break
+        if "dimension" not in vars(klass):
+            continue
+        value = vars(klass)["dimension"]
+        if not isinstance(value, StressDimension):
+            raise TypeError(
+                f"{klass.__name__}.dimension must be a StressDimension, "
+                f"got {type(value).__name__}"
+            )
+        if fixed is None:
+            fixed, owner = value, klass
+        elif value != fixed:
+            assert owner is not None      # set together with `fixed`
+            raise TypeError(
+                f"{owner.__name__} sets dimension = {fixed.name}, but it "
+                f"inherits from {klass.__name__}, which is fixed to "
+                f"{value.name}.  A fixed dimension cannot be changed in a "
+                "subclass; derive from the open family class instead."
+            )
+    return fixed
 
 
 def _check_param_names(cls, fields) -> None:
@@ -1011,10 +1045,20 @@ class MaterialModel(ABC):
             Signals that no user-defined return mapping is available; the
             framework falls back to ``numerical_newton``.
         ReturnMappingResult
-            Converged result with fields ``stress``, ``state``, ``dlambda``,
-            ``n_iterations`` (default 0 for closed-form solvers), and
-            ``residual_history`` (default ``[]`` for closed-form solvers).
-            Import via ``from manforge.core import ReturnMappingResult``.
+            The result, with fields ``stress``, ``state``, ``dlambda``,
+            ``n_iterations``, ``residual_history`` and ``converged`` (see
+            :class:`~manforge.core.ReturnMappingResult`; a closed form reports
+            ``n_iterations=1`` and ``residual_history=[f_trial, 0.0]``).
+            Set ``converged=False`` when a hand Newton loop runs out of
+            iterations.
+
+        Notes
+        -----
+        The integrator does not take ``converged=True`` on trust.  A result
+        with Δλ < 0 (a KKT violation) or with a non-finite stress, Δλ or state
+        is treated as non-convergence, exactly as on the autodiff path: a
+        closed form evaluates to *something* for any input, and that something
+        is not always a solution.
         """
         return None
 
