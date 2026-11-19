@@ -12,7 +12,7 @@ from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
 from manforge.core.state import Increment
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
-from manforge._typing import Stiffness, StressVec, StateDict
+from manforge._typing import NRJacobian, Stiffness, StressVec, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ class _PythonIntegratorBase:
         max_iter: int = 50,
         tol: float = 1e-10,
         raise_on_nonconverged: bool = True,
-        nr_jacobian: str = "exact",
+        nr_jacobian: NRJacobian = "exact",
     ) -> None:
         if nr_jacobian not in ("exact", "broyden"):
             raise ValueError(

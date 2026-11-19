@@ -51,7 +51,7 @@ def test_check_bindings_elastic_stiffness(model):
     cases = {
         "elastic_stiffness": ((model.initial_state(),), (model.E, model.nu)),
     }
-    results = check_bindings(model, fortran, cases, rtol=1e-10)
+    results = check_bindings(model, fortran, cases, tol=1e-10)
     ok, max_err = results["elastic_stiffness"]
     assert ok, f"elastic_stiffness mismatch: max_rel_err={max_err:.2e}"
     assert max_err < 1e-10

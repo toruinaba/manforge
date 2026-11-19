@@ -33,17 +33,25 @@ class TestStrainControl:
     @pytest.mark.parametrize("model_cls,params", [
         (AFKinematic1D, AF), (OWKinematic1D, OW)])
     def test_cyclic_autodiff_models(self, model_cls, params):
-        """Autodiff-NR models complete a small cyclic history via broyden."""
+        """Autodiff-NR models complete a small cyclic history."""
         from manforge.simulation.types import FieldHistory
         load = FieldHistory.cyclic_strain([4e-3, -4e-3, 4e-3], n_per_segment=10).data
         out = run_simulation(model_cls, params, load)
         assert out.converged
         assert out.n_steps == 30
 
-    def test_exact_jacobian_option(self):
-        out = run_simulation(AFKinematic1D, AF, np.linspace(0, 3e-3, 10),
-                             nr_jacobian="exact")
+    def test_default_jacobian_is_exact_as_in_every_layer(self):
+        load = np.linspace(0, 3e-3, 10)
+        default = run_simulation(AFKinematic1D, AF, load)
+        exact = run_simulation(AFKinematic1D, AF, load, nr_jacobian="exact")
+        np.testing.assert_array_equal(default.stress, exact.stress)
+
+    def test_broyden_jacobian_option(self):
+        load = np.linspace(0, 3e-3, 10)
+        exact = run_simulation(AFKinematic1D, AF, load)
+        out = run_simulation(AFKinematic1D, AF, load, nr_jacobian="broyden")
         assert out.converged
+        np.testing.assert_allclose(out.stress, exact.stress, rtol=1e-8)
 
 
 class TestStressControl:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
 from abc import ABC, abstractmethod
 from typing import ClassVar
+
+from typing_extensions import Self
 
 import autograd.numpy as anp
 
@@ -300,6 +303,43 @@ class MaterialModel(ABC):
     def params(self) -> dict[str, float]:
         """Material parameters as a dict keyed by :attr:`param_names`."""
         return {name: getattr(self, name) for name in self.param_names}
+
+    def with_params(self, **params) -> Self:
+        """This model with some parameter values replaced.
+
+        Returns a shallow copy: the class, the dimension and every setting the
+        model holds outside ``param_names`` carry over, and only the named
+        parameters change.  This is how a caller that varies parameters
+        (fitting, a parameter sweep) gets its next model — it does not depend
+        on the shape of ``__init__``, so a model with a non-parameter setting
+        keeps it::
+
+            template = J2IsotropicDamageUnilateral3D(c=0.25, E=..., ...)
+            m = template.with_params(S=0.8)
+            m.c      # 0.25
+
+        The copy shares the original's other attributes, so a value derived
+        from the parameters must be a ``property`` (computed on access), not
+        an attribute cached on the instance — a cached one would be stale here.
+
+        Raises
+        ------
+        TypeError
+            A name that is not in ``param_names``.
+        """
+        unexpected = [k for k in params if k not in self.param_names]
+        if unexpected:
+            raise TypeError(
+                f"{type(self).__name__}.with_params: unexpected {unexpected}.  "
+                f"Parameters: {list(self.param_names)}"
+            )
+        new = copy.copy(self)
+        for name, value in params.items():
+            setattr(new, name, value)
+        # Keyed on (E, nu), so it would not be reused wrongly — dropped so the
+        # copy owns nothing computed from the original's parameters.
+        new.__dict__.pop("_elastic_C_cache", None)
+        return new
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

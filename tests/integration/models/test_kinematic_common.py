@@ -238,15 +238,12 @@ def test_cyclic_loading_driver(km_model):
     history[10:, 0] = np.linspace(4e-3, -4e-3, 10)
 
     load = FieldHistory(type=FieldType.STRAIN, name="Strain", data=history)
-    result = StrainDriver(PythonNumericalIntegrator(km_model)).run(
-        load,
-        collect_state={"alpha": FieldType.STRESS, "ep": FieldType.STRAIN},
-    )
+    result = StrainDriver(PythonNumericalIntegrator(km_model)).run(load)
 
     assert result.stress.shape == (20, 6)
-    assert result.fields["ep"].data.shape == (20,)
-    assert result.fields["alpha"].data.shape == (20, 6)
-    ep = result.fields["ep"].data
+    assert result.history("ep").shape == (20,)
+    assert result.history("alpha").shape == (20, 6)
+    ep = result.history("ep")
     assert np.all(np.diff(ep) >= -1e-12), "ep decreased during loading"
 
 
@@ -395,19 +392,15 @@ def _load_1d_cyclic(n=40, eps_amp=3e-3):
 
 
 def _run_1d_dim(model, load):
-    return StrainDriver(PythonIntegrator(model)).run(load, collect_state={"ep": FieldType.STRAIN})
+    return StrainDriver(PythonIntegrator(model)).run(load)
 
 
 def _run_ps_dim(model, load):
-    return MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0]).run(
-        load, collect_state={"ep": FieldType.STRAIN}
-    )
+    return MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0]).run(load)
 
 
 def _run_3d_dim(model, load):
-    return MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0]).run(
-        load, collect_state={"ep": FieldType.STRAIN}
-    )
+    return MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0]).run(load)
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +412,7 @@ def test_af_1d_vs_3d_linear_monotonic():
     r1 = _run_1d_dim(AFKinematic1D(**_PARAMS_LINEAR), load)
     r3 = _run_3d_dim(AFKinematic3D(**_PARAMS_LINEAR), load)
     np.testing.assert_allclose(r1.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(r1.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(r1.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 def test_af_ps_vs_3d_linear_monotonic():
@@ -427,7 +420,7 @@ def test_af_ps_vs_3d_linear_monotonic():
     rps = _run_ps_dim(AFKinematicPS(**_PARAMS_LINEAR), load)
     r3  = _run_3d_dim(AFKinematic3D(**_PARAMS_LINEAR), load)
     np.testing.assert_allclose(rps.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(rps.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(rps.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +432,7 @@ def test_af_1d_vs_3d_nonlinear_monotonic():
     r1 = _run_1d_dim(AFKinematic1D(**_PARAMS_NL), load)
     r3 = _run_3d_dim(AFKinematic3D(**_PARAMS_NL), load)
     np.testing.assert_allclose(r1.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(r1.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(r1.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 def test_af_ps_vs_3d_nonlinear_monotonic():
@@ -447,7 +440,7 @@ def test_af_ps_vs_3d_nonlinear_monotonic():
     rps = _run_ps_dim(AFKinematicPS(**_PARAMS_NL), load)
     r3  = _run_3d_dim(AFKinematic3D(**_PARAMS_NL), load)
     np.testing.assert_allclose(rps.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(rps.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(rps.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 # ---------------------------------------------------------------------------
@@ -477,11 +470,9 @@ def test_af_ps_vs_3d_cyclic():
 def test_af_1d_linear_analytical():
     model = AFKinematic1D(**_PARAMS_LINEAR)
     load = _load_1d(n=30)
-    r = StrainDriver(PythonIntegrator(model)).run(
-        load, collect_state={"ep": FieldType.STRAIN, "alpha": FieldType.STRESS}
-    )
-    alpha_11 = r.fields["alpha"].data[:, 0]
-    ep_arr   = r.fields["ep"].data
+    r = StrainDriver(PythonIntegrator(model)).run(load)
+    alpha_11 = r.history("alpha")[:, 0]
+    ep_arr   = r.history("ep")
     plastic  = ep_arr > 1e-10
     if plastic.any():
         np.testing.assert_allclose(
@@ -500,7 +491,7 @@ def test_ow_1d_vs_3d_linear_monotonic():
     r1 = _run_1d_dim(OWKinematic1D(**_PARAMS_LINEAR), load)
     r3 = _run_3d_dim(OWKinematic3D(**_PARAMS_LINEAR), load)
     np.testing.assert_allclose(r1.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(r1.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(r1.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 def test_ow_ps_vs_3d_linear_monotonic():
@@ -508,7 +499,7 @@ def test_ow_ps_vs_3d_linear_monotonic():
     rps = _run_ps_dim(OWKinematicPS(**_PARAMS_LINEAR), load)
     r3  = _run_3d_dim(OWKinematic3D(**_PARAMS_LINEAR), load)
     np.testing.assert_allclose(rps.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(rps.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(rps.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +511,7 @@ def test_ow_1d_vs_3d_nonlinear_monotonic():
     r1 = _run_1d_dim(OWKinematic1D(**_PARAMS_OW_DIM), load)
     r3 = _run_3d_dim(OWKinematic3D(**_PARAMS_OW_DIM), load)
     np.testing.assert_allclose(r1.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(r1.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(r1.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 def test_ow_ps_vs_3d_nonlinear_monotonic():
@@ -528,7 +519,7 @@ def test_ow_ps_vs_3d_nonlinear_monotonic():
     rps = _run_ps_dim(OWKinematicPS(**_PARAMS_OW_DIM), load)
     r3  = _run_3d_dim(OWKinematic3D(**_PARAMS_OW_DIM), load)
     np.testing.assert_allclose(rps.stress[:, 0], r3.stress[:, 0], rtol=1e-4)
-    np.testing.assert_allclose(rps.fields["ep"].data, r3.fields["ep"].data, rtol=1e-4)
+    np.testing.assert_allclose(rps.history("ep"), r3.history("ep"), rtol=1e-4)
 
 
 # ---------------------------------------------------------------------------

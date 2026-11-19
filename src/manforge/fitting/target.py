@@ -38,7 +38,7 @@ from manforge.simulation.types import FieldHistory, FieldType
 from manforge._typing import FloatArray
 
 if TYPE_CHECKING:
-    from manforge.fitting.objective import DriverFactoryFn, ExpData
+    from manforge.fitting.objective import DriverFactoryFn
     from manforge.simulation.types import DriverResult
 
 STRESS_FIELD = "Stress"
@@ -48,19 +48,15 @@ STRAIN_FIELD = "Strain"
 def _extract_field(result: "DriverResult", name: str) -> FloatArray:
     """Pull a computed history out of a driver result by field name.
 
-    Accepts ``"Stress"``, ``"Strain"``, or any model state key.  State keys
-    are read straight off ``step_results`` rather than via
-    ``DriverResult.fields``, which would require a ``collect_state`` request
-    naming a :class:`FieldType` the residual has no use for.
+    Accepts ``"Stress"``, ``"Strain"``, or any model state key (read with
+    :meth:`~manforge.simulation.types.DriverResult.history`).
     """
     if name == STRESS_FIELD:
         return np.asarray(result.stress, dtype=float)
     if name == STRAIN_FIELD:
         return np.asarray(result.strain, dtype=float)
     try:
-        return np.stack(
-            [np.asarray(r.state[name], dtype=float) for r in result.step_results]
-        )
+        return result.history(name)
     except KeyError:
         available = sorted(result.step_results[0].state) if result.step_results else []
         raise KeyError(
@@ -260,6 +256,49 @@ class FitTarget:
                     f"{len(np.asarray(obs.weights))} weights for {n_steps} steps"
                 )
 
+    @classmethod
+    def stress_strain(
+        cls,
+        strain,
+        stress,
+        *,
+        weights=None,
+        name: str = "",
+        driver_factory: "DriverFactoryFn | None" = None,
+    ) -> "FitTarget":
+        """One strain-driven run compared against one stress curve.
+
+        The common case — a measured stress-strain curve — without spelling
+        out the :class:`FieldHistory` and the :class:`Observation`.
+
+        Parameters
+        ----------
+        strain : array-like, shape (N,) or (N, ntens)
+            Strain history, used as the load.
+        stress : array-like, shape (N,) or (N, ntens)
+            Measured stress.  A 1-D array is compared with component 0 of the
+            computed stress; a 2-D array with all of it.
+        weights : array-like, shape (N,), or None
+            Per-point weights of the stress residual.
+        name, driver_factory
+            As in :class:`FitTarget`.
+        """
+        strain = np.asarray(strain, dtype=float)
+        stress = np.asarray(stress, dtype=float)
+        return cls(
+            load=FieldHistory(FieldType.STRAIN, STRAIN_FIELD, strain),
+            observations=[
+                Observation(
+                    values=stress,
+                    field=STRESS_FIELD,
+                    component=0 if stress.ndim == 1 else None,
+                    weights=weights,
+                )
+            ],
+            driver_factory=driver_factory,
+            name=name,
+        )
+
     @property
     def label(self) -> str:
         return self.name or f"<{self.load.type.name.lower()}-driven>"
@@ -296,15 +335,19 @@ class FitTarget:
         return sum(obs.residual(result) for obs in self.observations)
 
 
-def coerce_targets(
-    exp_data: "ExpData | FitTarget | Sequence[FitTarget]",
-) -> list[FitTarget]:
-    """Accept a single legacy ``ExpData`` dict, one target, or several."""
-    if isinstance(exp_data, FitTarget):
-        return [exp_data]
-    if isinstance(exp_data, Mapping):
-        return [_target_from_exp_data(exp_data)]
-    targets = list(exp_data)
+def check_targets(targets) -> list[FitTarget]:
+    """Validate the ``targets`` argument: a non-empty sequence of FitTarget."""
+    if isinstance(targets, FitTarget):
+        raise TypeError(
+            "targets must be a sequence of FitTarget; wrap the single target "
+            "in a list"
+        )
+    if isinstance(targets, Mapping):
+        raise TypeError(
+            "targets must be a sequence of FitTarget, not a dict; for one "
+            "stress-strain curve use [FitTarget.stress_strain(strain, stress)]"
+        )
+    targets = list(targets)
     if not targets:
         raise ValueError("no fitting targets given")
     bad = [t for t in targets if not isinstance(t, FitTarget)]
@@ -313,26 +356,3 @@ def coerce_targets(
             f"expected FitTarget instances, got {type(bad[0]).__name__}"
         )
     return targets
-
-
-def _target_from_exp_data(exp_data: "ExpData") -> FitTarget:
-    """Wrap the ``{"strain": ..., "stress": ...}`` dict form as one target."""
-    missing = {"strain", "stress"} - set(exp_data)
-    if missing:
-        raise ValueError(
-            f"exp_data is missing required key(s) {sorted(missing)}"
-        )
-    strain = np.asarray(exp_data["strain"], dtype=float)
-    stress = np.asarray(exp_data["stress"], dtype=float)
-    return FitTarget(
-        load=FieldHistory(FieldType.STRAIN, STRAIN_FIELD, strain),
-        observations=[
-            Observation(
-                values=stress,
-                field=STRESS_FIELD,
-                component=0 if stress.ndim == 1 else None,
-                weights=exp_data.get("weights"),
-            )
-        ],
-        name="exp_data",
-    )

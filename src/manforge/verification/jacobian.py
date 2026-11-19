@@ -39,7 +39,7 @@ class JacobianComparisonResult:
     Attributes
     ----------
     passed : bool
-        ``True`` if every block is within ``rtol``.
+        ``True`` if every block is within ``tol``.
     blocks : dict[str, float]
         Block label → maximum relative error.
     max_rel_err : float
@@ -165,8 +165,10 @@ class JacobianChecker:
     Parameters
     ----------
     model : MaterialModel
-    rtol : float, default 1e-8
-        Relative tolerance used by :meth:`compare`.
+    tol : float, default 1e-8
+        Pass threshold of the checks, as a relative error: used by
+        :meth:`compare`, and by :meth:`check_hand_blocks` for blocks meant to
+        be exact.
 
     Examples
     --------
@@ -181,9 +183,9 @@ class JacobianChecker:
         assert report.passed, report.summary()
     """
 
-    def __init__(self, model, *, rtol: float = 1e-8):
+    def __init__(self, model, *, tol: float = 1e-8):
         self.model = model
-        self.rtol = rtol
+        self.tol = tol
 
     @staticmethod
     def _increment(result: StressUpdateResult) -> Increment:
@@ -229,7 +231,7 @@ class JacobianChecker:
         return hand_jacobian(self.model, result, self._increment(result))
 
     def check_hand_blocks(
-        self, results: Iterable[StressUpdateResult], *, tol: float = 1e-8,
+        self, results: Iterable[StressUpdateResult], *, tol: float | None = None,
     ) -> HandBlockReport:
         """Check every declared hand block against autodiff, over many steps.
 
@@ -246,9 +248,10 @@ class JacobianChecker:
         results : iterable of StressUpdateResult
             Typically ``driver.run(load).step_results``.  Only plastic steps
             are used; the rest are skipped.
-        tol : float, default 1e-8
-            Tolerance for blocks meant to be exact.  A block declared with
-            ``approx=`` is held to that value instead.
+        tol : float or None
+            Tolerance for blocks meant to be exact; ``None`` (default) uses
+            the checker's own ``tol``.  A block declared with ``approx=`` is
+            held to that value instead.
 
         Returns
         -------
@@ -262,6 +265,8 @@ class JacobianChecker:
             plastic step — either way nothing would have been checked.
         """
         model = self.model
+        if tol is None:
+            tol = self.tol
         declared = type(model)._hand_blocks
         if not declared:
             raise ValueError(
@@ -343,7 +348,7 @@ class JacobianChecker:
         max_err = max(block_errs.values()) if block_errs else 0.0
 
         return JacobianComparisonResult(
-            passed=max_err <= self.rtol,
+            passed=max_err <= self.tol,
             blocks=block_errs,
             max_rel_err=max_err,
         )

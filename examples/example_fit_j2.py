@@ -55,33 +55,35 @@ strain_exp = load.data[:, 0]
 noise_std = 0.5
 stress_exp = stress_clean + rng.normal(0.0, noise_std, size=len(strain_exp))
 
-exp_data = {"strain": strain_exp, "stress": stress_exp}
+# One measured stress-strain curve = one strain-driven target.
+targets_single = [FitTarget.stress_strain(strain_exp, stress_exp)]
 
 # ---------------------------------------------------------------------------
 # Fit sigma_y0 and H (E and nu are fixed)
 # ---------------------------------------------------------------------------
-fit_config = {
-    "sigma_y0": (180.0, (50.0, 600.0)),   # initial guess = 180 MPa
-    "H":        (500.0, (0.0, 10_000.0)), # initial guess = 500 MPa
-}
-fixed_params = {"E": true_model.E, "nu": true_model.nu}
+space_plain = ParameterSpace(
+    free={
+        "sigma_y0": (180.0, (50.0, 600.0)),   # initial guess = 180 MPa
+        "H":        (500.0, (0.0, 10_000.0)), # initial guess = 500 MPa
+    },
+    fixed={"E": true_model.E, "nu": true_model.nu},
+)
 
 print("=" * 55)
 print("  J2 Parameter Fitting — L-BFGS-B")
 print("=" * 55)
 print(f"  True  sigma_y0 = {true_model.sigma_y0:.1f} MPa")
 print(f"  True  H        = {true_model.H:.1f} MPa")
-print(f"  Init  sigma_y0 = {fit_config['sigma_y0'][0]:.1f} MPa")
-print(f"  Init  H        = {fit_config['H'][0]:.1f} MPa")
+print(f"  Init  sigma_y0 = {space_plain.free['sigma_y0'][0]:.1f} MPa")
+print(f"  Init  H        = {space_plain.free['H'][0]:.1f} MPa")
 print()
 print("  Running optimisation …")
 
 result = fit_params(
-    true_model,
-    driver_factory,
-    exp_data,
-    fit_config,
-    fixed_params=fixed_params,
+    true_model,          # template: class and dimension (its parameters are not used)
+    targets_single,
+    space_plain,
+    driver_factory=driver_factory,
     method="L-BFGS-B",
     max_iter=200,
 )
@@ -113,8 +115,8 @@ space = ParameterSpace(
     derived={"H": lambda p: p["sigma_y0"] * p["H_ratio"]},
 )
 result_ratio = fit_params(
-    true_model, driver_factory, exp_data, space,
-    method="L-BFGS-B", max_iter=200,
+    true_model, targets_single, space,
+    driver_factory=driver_factory, method="L-BFGS-B", max_iter=200,
 )
 
 print("  Reparametrised (H = sigma_y0 x H_ratio):")
@@ -151,8 +153,8 @@ targets = [
 ]
 
 result_multi = fit_params(
-    true_model, driver_factory, targets, fit_config,
-    fixed_params=fixed_params, method="L-BFGS-B", max_iter=200,
+    true_model, targets, space_plain,
+    driver_factory=driver_factory, method="L-BFGS-B", max_iter=200,
 )
 
 print("  Multi-target (2 strain amplitudes):")
@@ -188,11 +190,13 @@ targets_pcm = [
     )
 ]
 result_pcm = fit_params(
-    true_model, driver_factory, targets_pcm,
-    {"H": (500.0, (0.0, 10_000.0))},
-    fixed_params={"E": true_model.E, "nu": true_model.nu,
-                  "sigma_y0": true_model.sigma_y0},
-    method="L-BFGS-B", max_iter=100,
+    true_model, targets_pcm,
+    ParameterSpace(
+        free={"H": (500.0, (0.0, 10_000.0))},
+        fixed={"E": true_model.E, "nu": true_model.nu,
+               "sigma_y0": true_model.sigma_y0},
+    ),
+    driver_factory=driver_factory, method="L-BFGS-B", max_iter=100,
 )
 print("  PCM metric (200-pt experiment vs 25-step simulation):")
 print(f"  Fitted H        = {result_pcm.params['H']:.2f} MPa  (true {true_model.H:.0f})")
@@ -204,8 +208,8 @@ print()
 # several times cheaper; results are identical within fit tolerance.
 # ---------------------------------------------------------------------------
 result_b = fit_params(
-    true_model, driver_factory, exp_data, fit_config,
-    fixed_params=fixed_params, method="L-BFGS-B", max_iter=200,
+    true_model, targets_single, space_plain,
+    driver_factory=driver_factory, method="L-BFGS-B", max_iter=200,
     nr_jacobian="broyden",
 )
 print("  nr_jacobian='broyden':")

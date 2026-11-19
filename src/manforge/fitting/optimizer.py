@@ -14,15 +14,14 @@ from scipy.optimize import minimize, differential_evolution
 from typing_extensions import TypeAlias
 
 from manforge.fitting.objective import (
-    ExpData,
     DriverFactoryFn,
     FAILURE_PENALTY,
     FailureLog,
     build_objective,
 )
-from manforge.fitting.space import FitConfig, ParameterSpace
-from manforge.fitting.target import FitTarget, coerce_targets
-from manforge._typing import FloatArray
+from manforge.fitting.space import ParameterSpace
+from manforge.fitting.target import FitTarget, check_targets
+from manforge._typing import FloatArray, NRJacobian
 
 if TYPE_CHECKING:
     from manforge.core.material import MaterialModel
@@ -128,51 +127,56 @@ def _check_initial_point(
 
 def fit_params(
     model: "MaterialModel",
-    driver_factory: DriverFactoryFn | None,
-    exp_data: "ExpData | FitTarget | Sequence[FitTarget]",
-    fit_config: ParameterSpace | FitConfig,
-    fixed_params: dict[str, float] | None = None,
-    method: Method = "L-BFGS-B",
+    targets: Sequence[FitTarget],
+    space: ParameterSpace,
     *,
+    driver_factory: DriverFactoryFn | None = None,
+    method: Method = "L-BFGS-B",
     max_iter: int = 1000,
     tol: float | None = None,
     options: Mapping[str, Any] | None = None,
-    nr_jacobian: str = "exact",
+    nr_jacobian: NRJacobian = "exact",
 ) -> FitResult:
-    """Fit material parameters to experimental stress-strain data.
+    """Fit material parameters to experimental curves.
+
+    One form: a model, the targets, the parameter space::
+
+        result = fit_params(
+            model,
+            [FitTarget.stress_strain(strain, stress)],
+            ParameterSpace(
+                free={"sigma_y0": (200.0, (100.0, 400.0)), "H": (500.0, (0.0, 1e4))},
+                fixed={"E": 210_000.0, "nu": 0.3},
+            ),
+            driver_factory=StrainDriver,
+        )
 
     Parameters
     ----------
     model : MaterialModel
-        Constitutive model instance.
+        Template model: it supplies the class, the dimension and any
+        non-parameter setting.  Its parameter values are not used — every
+        evaluation takes them from ``space``
+        (:meth:`~manforge.core.material.MaterialModel.with_params`).
+    targets : sequence of FitTarget
+        The runs to fit against, one
+        :class:`~manforge.fitting.target.FitTarget` per experiment.  For a
+        single measured stress-strain curve,
+        ``[FitTarget.stress_strain(strain, stress)]``.  Each observation's
+        squared residual is divided by its point count before summing, so a
+        longer curve does not dominate; use ``Observation.weight`` to
+        rebalance.
+    space : ParameterSpace
+        Free variables with initial values and bounds, fixed values, and
+        derived parameters.  It must supply every model parameter.  Use
+        ``derived`` when parameters are correlated — see
+        :class:`~manforge.fitting.space.ParameterSpace` for the ``Y < B``
+        ratio example.
     driver_factory : callable or None
-        ``driver_factory(integrator) -> DriverBase`` — constructs a driver
-        bound to the given integrator for each objective evaluation.
-        Example: ``lambda i: StrainDriver(i)``.  May be ``None`` only if every
-        target carries its own ``driver_factory``.
-    exp_data : dict, FitTarget, or sequence of FitTarget
-        The curves to fit.  ``{"strain": ..., "stress": ..., "weights": ...}``
-        is shorthand for a single strain-driven target with one stress curve.
-        Pass :class:`~manforge.fitting.target.FitTarget` instances to fit
-        several experiments at once, to drive a target by stress, or to
-        compare state variables as well as stress.  Each observation's squared
-        residual is divided by its point count before summing, so a longer
-        curve does not dominate; use ``Observation.weight`` to rebalance.
-    fit_config : ParameterSpace or dict
-        A :class:`~manforge.fitting.space.ParameterSpace`, or the plain dict
-        form for the case where every free variable is a model parameter::
-
-            {
-                "sigma_y0": (initial_value, (lower_bound, upper_bound)),
-                "H":        (500.0,         (0.0, 10000.0)),
-            }
-
-        Use ``None`` (or ``(None, None)``) as bounds for unbounded parameters.
-        Use ``ParameterSpace`` when parameters are correlated — see its
-        docstring for the ``Y < B`` ratio example.
-    fixed_params : dict or None
-        Parameters held constant during optimisation.  Dict form only;
-        with a ``ParameterSpace`` declare them in ``ParameterSpace(fixed=...)``.
+        ``driver_factory(integrator) -> DriverBase`` — constructs the driver
+        for each objective evaluation.  A driver class works as is
+        (``driver_factory=StrainDriver``); use a lambda to pass driver
+        arguments.  May be ``None`` only if every target carries its own.
     method : str
         Optimisation algorithm:
         - ``"L-BFGS-B"``              — gradient-free quasi-Newton (default)
@@ -181,7 +185,8 @@ def fit_params(
     max_iter : int
         Maximum optimiser iterations.  Set small (e.g. 2) to keep tests fast.
     tol : float or None
-        Convergence tolerance passed to the optimiser's primary tolerance
+        The optimiser's convergence tolerance (not the return-mapping NR's,
+        which belongs to the integrator): passed to its primary tolerance
         (``ftol`` for L-BFGS-B, ``fatol`` for Nelder-Mead, ``tol`` for
         differential_evolution).  ``None`` keeps the method default.
     options : Mapping or None
@@ -200,14 +205,19 @@ def fit_params(
     -------
     FitResult
     """
-    space = ParameterSpace.coerce(fit_config, fixed_params)
-    targets = coerce_targets(exp_data)
+    if not isinstance(space, ParameterSpace):
+        raise TypeError(
+            "space must be a ParameterSpace; for the plain case write "
+            "ParameterSpace(free={name: (initial, (lower, upper))}, fixed={...})"
+        )
+    targets = check_targets(targets)
     free_names = space.free_names
     bounds = space.bounds
 
     failures = FailureLog()
     obj_fn = build_objective(
-        model, driver_factory, targets, space, failures,
+        model, targets, space,
+        driver_factory=driver_factory, failures=failures,
         nr_jacobian=nr_jacobian,
     )
 

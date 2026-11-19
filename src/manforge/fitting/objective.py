@@ -8,11 +8,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
-from typing_extensions import NotRequired, TypedDict
-
 from manforge.fitting.space import ParameterSpace
 from manforge.simulation.integrator import PythonIntegrator
-from manforge._typing import FloatArray
+from manforge._typing import FloatArray, NRJacobian
 
 FAILURE_PENALTY = 1e30
 """Objective value assigned to an evaluation the model could not complete.
@@ -52,17 +50,6 @@ class FailureLog:
             self.first_params = dict(params)
 
 
-class ExpData(TypedDict):
-    """Single stress-strain curve — the shorthand for a one-target fit.
-
-    Equivalent to one :class:`~manforge.fitting.target.FitTarget` with a
-    strain-driven load and one stress :class:`~manforge.fitting.target.Observation`.
-    """
-    strain: FloatArray
-    stress: FloatArray
-    weights: NotRequired[FloatArray | None]
-
-
 class DriverFactoryFn(Protocol):
     """``driver_factory(integrator) -> DriverBase`` — constructs a driver for one objective evaluation."""
     def __call__(self, integrator: object) -> "DriverBase": ...
@@ -70,12 +57,12 @@ class DriverFactoryFn(Protocol):
 
 def build_objective(
     model: "MaterialModel",
-    driver_factory: DriverFactoryFn | None,
     targets: Sequence["FitTarget"],
     space: ParameterSpace,
-    failures: FailureLog | None = None,
     *,
-    nr_jacobian: str = "exact",
+    driver_factory: DriverFactoryFn | None = None,
+    failures: FailureLog | None = None,
+    nr_jacobian: NRJacobian = "exact",
 ) -> Callable[[Sequence[float] | FloatArray], float]:
     """Build a scalar objective function for use with scipy.optimize.
 
@@ -94,20 +81,20 @@ def build_objective(
     Parameters
     ----------
     model : MaterialModel
-        Template model instance — used to determine the class and dimension.
-        A new instance is constructed each evaluation with the current params,
-        as ``type(model)(dimension=model.dimension, **params)``.  A setting
-        the model takes outside ``param_names`` (an ``__init__`` override) is
-        therefore not carried over from the template: the rebuilt model has
-        its default.
-    driver_factory : callable or None
-        ``driver_factory(integrator) -> DriverBase`` — the default driver for
-        targets that do not carry their own.  Example: ``lambda i: StrainDriver(i)``.
+        Template model.  Each evaluation uses
+        ``model.with_params(**params)``: the class, the dimension and any
+        setting held outside ``param_names`` come from the template, and every
+        parameter value comes from ``space`` — the template's own parameter
+        values are never used.
     targets : sequence of FitTarget
-        Already-coerced targets — see
-        :func:`~manforge.fitting.target.coerce_targets`.
+        The runs to fit against.
     space : ParameterSpace
-        Maps the optimisation vector onto model parameters.
+        Maps the optimisation vector onto model parameters.  It must supply
+        every model parameter (free, fixed or derived).
+    driver_factory : callable or None
+        ``driver_factory(integrator) -> DriverBase`` — the driver for targets
+        that do not carry their own.  A driver class works as is:
+        ``driver_factory=StrainDriver``.
     failures : FailureLog or None
         Collects the non-convergent evaluations.  ``None`` (default) still
         penalises them, but does not report which ones.
@@ -122,16 +109,12 @@ def build_objective(
     callable
         ``objective(x: Sequence[float]) -> float``
     """
-    model_cls = type(model)
-    dimension = model.dimension
     param_names = model.param_names
     targets = list(targets)
 
     def objective(x: Sequence[float] | FloatArray) -> float:
         all_params = space.model_params(x, param_names)
-        # Every model takes dimension= : an open class needs it, a fixed one
-        # accepts its own.
-        m = model_cls(dimension=dimension, **all_params)
+        m = model.with_params(**all_params)
         integrator = PythonIntegrator(m, nr_jacobian=nr_jacobian)
         # LinAlgError is listed even though it subclasses ValueError (which is
         # otherwise a setup error left to propagate): a singular NR Jacobian

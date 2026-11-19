@@ -9,7 +9,7 @@ the codebase imports for annotations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -33,10 +33,17 @@ Stiffness = FloatArray
 StateDict = dict[str, FloatArray]
 """Internal state as a plain dict mapping field name → array."""
 
+NRJacobian = Literal["exact", "broyden"]
+"""Return-mapping NR Jacobian strategy.  ``"exact"`` (the default everywhere)
+re-evaluates the autodiff Jacobian every iteration; ``"broyden"`` evaluates it
+once and applies rank-1 updates.  The consistent tangent is exact either way.
+"""
+
 if TYPE_CHECKING:
     pass
 
 __all__ = [
+    "NRJacobian",
     "FloatArray",
     "Scalar",
     "StressVec",

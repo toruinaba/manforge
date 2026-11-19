@@ -109,6 +109,8 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 
 **収束判定はスケール不変** — NR の許容値は `tol × max(1, ‖σ_trial‖_∞)` (driver 外側 NR は `tol + rtol·‖σ_target‖_∞`)。MPa でも Pa でも同じ挙動になる。
 
+**`tol` は「その対象の許容値」** — integrator と driver では自分の NR の収束、checker (`TangentChecker` / `JacobianChecker` / `check_bindings`) では検査の合否、`fit_params` では最適化器の収束を指す。2 つの意味が同居する所だけ接頭辞で分ける (`CrosscheckStressDriver` の `stress_tol` = 合否、`driver_tol` / `driver_rtol` / `driver_max_iter` = driver の外側 NR)。
+
 **Δλ < 0 は非収束扱い** — 残差系は Δλ < 0 側にも根を持つが、負の塑性乗数は KKT 条件違反 (塑性ひずみの巻き戻り)。残差ノルムはこの根を区別できないため、フレームワークが符号で弾く。大きい Δε で σ_trial が許容枝の外に出ると起きる。
 
 **増分の自動分割** — `SubSteppingIntegrator(integrator, max_substeps=16)` は非収束を検知して同じ増分を 2 → 4 → 8 分割で再試行する。opt-in のラッパで、収束する増分では結果・反復数・接線が一切変わらない。詳細は `simulation/integrator/substepping.py` の docstring。
@@ -191,10 +193,9 @@ result = StrainDriver(PythonIntegrator(model)).run(load)
 result.stress    # np.ndarray (N, ntens)
 result.strain    # np.ndarray (N, ntens)
 
-# 状態変数も収集
-result = StrainDriver(PythonIntegrator(model)).run(
-    load, collect_state={"ep": FieldType.STRAIN})
-result.fields["ep"].data   # np.ndarray (N,)
+# 状態変数の履歴 — 事前の指定は不要。結果から名前で取り出す
+result.history("ep")       # np.ndarray (N,)
+result.history("alpha")    # np.ndarray (N, ntens)
 
 # 応力制御 (目標応力を外側 NR で満たすひずみを解く)
 result = StressDriver(PythonIntegrator(model)).run(
@@ -224,24 +225,28 @@ for step in StrainDriver(PythonIntegrator(model)).iter_run(load):
 
 ```python
 from manforge.simulation.driver import StrainDriver
-from manforge.fitting import fit_params
+from manforge.fitting import FitTarget, ParameterSpace, fit_params
 
-fit_config = {
-    "sigma_y0": (200.0, (100.0, 500.0)),  # (初期値, (下限, 上限))
-    "H":        (500.0, (0.0,  5000.0)),
-}
+space = ParameterSpace(
+    free={
+        "sigma_y0": (200.0, (100.0, 500.0)),  # (初期値, (下限, 上限))
+        "H":        (500.0, (0.0,  5000.0)),
+    },
+    fixed={"E": 210_000.0, "nu": 0.3},
+)
 result = fit_params(
-    model,
-    driver_factory=lambda i: StrainDriver(i),
-    exp_data={"strain": strain_exp, "stress": stress_exp},
-    fit_config=fit_config,
-    fixed_params={"E": 210_000.0, "nu": 0.3},
+    model,                                              # テンプレート
+    [FitTarget.stress_strain(strain_exp, stress_exp)],  # 実験カーブ 1 本 = ターゲット 1 つ
+    space,
+    driver_factory=StrainDriver,
     method="L-BFGS-B",          # / "Nelder-Mead" / "differential_evolution"
-    nr_jacobian="broyden",      # 閉形式フックの無いモデルでは数倍高速
+    nr_jacobian="broyden",      # 閉形式フックの無いモデルでは数倍高速 (既定は "exact")
     max_iter=1000,
 )
 print(result.params, result.residual)
 ```
+
+呼び出しの形は 1 つ — モデル、ターゲットの列、`ParameterSpace`。`space` はモデルの全パラメータを (free / fixed / derived のどれかで) 与える。`model` はテンプレートで、クラス・次元・パラメータ以外の設定 (`J2IsotropicDamageUnilateral` の `c` など) を与える。各評価のモデルは `model.with_params(**params)` で作られ、テンプレート自身のパラメータ値は使われない。`max_iter` / `tol` は最適化器の設定で、return mapping の NR のものではない。
 
 **非収束の扱い** — 探索空間には return mapping に実根が無いパラメータ値が普通に含まれる。そのため評価中の非収束は例外ではなく**有限の大ペナルティ** (1e30) としてスコアされ、最適化は続行する (`inf` にしないのは L-BFGS-B の有限差分勾配を汚染しないため)。`FitResult.n_failed` に失敗評価数、`failure_message` / `failure_params` に最初の失敗の再現情報が入る。**全評価が失敗**した場合のみ raise し、メッセージが 2 ケースを区別する: 初期値自体が解けない「fitting cannot start」(初期値を見直す; データ間引きで Δε が広がると起きやすい) と、初期値は解けたが探索が全滅した「no point the optimiser tried was」(bounds を狭める)。
 
@@ -256,7 +261,7 @@ space = ParameterSpace(
     fixed={"E": 210_000.0, "nu": 0.3},
     derived={"B": lambda p: p["Y"] * p["B_ratio"]},
 )
-result = fit_params(model, driver_factory, exp_data, space, max_iter=200)
+result = fit_params(model, targets, space, driver_factory=StrainDriver, max_iter=200)
 result.params["B"]   # 復元済み
 ```
 
@@ -280,8 +285,7 @@ targets = [
         driver_factory=lambda i: StressDriver(i),
     ),
 ]
-result = fit_params(model, lambda i: StrainDriver(i), targets, fit_config,
-                    fixed_params={"E": 210_000.0, "nu": 0.3})
+result = fit_params(model, targets, space, driver_factory=StrainDriver)
 ```
 
 各 observation の残差二乗和は**データ点数で割られる** (長いカーブが支配するのを防ぐ)。デフォルトの比較は点対点 MSE で、**実験とシミュレーションのサンプリングが一致している必要がある**。
@@ -557,6 +561,7 @@ out = run_simulation(
     params={"E": 206e3, "nu": 0.3, "sigma_y0": 250.0, "H": 1000.0},
     load=np.linspace(0, 5e-3, 1000),   # ひずみ履歴 (control="stress" で応力制御)
     include_fields=["ep"],             # 状態量は選択制 (デフォルト応力のみ)
+    nr_jacobian="broyden",             # 既定は全層 "exact"。速度を優先するなら明示する
     progress=lambda done, total: ...,  # ジョブ進捗の報告に
 )
 out.stress, out.strain, out.fields["ep"]

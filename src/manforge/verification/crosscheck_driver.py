@@ -10,7 +10,8 @@ counterpart:
   :class:`CrosscheckStrainDriver` (strain-controlled loading)
 * :class:`~manforge.simulation.StressDriver` →
   :class:`CrosscheckStressDriver` (stress-controlled loading,
-  exposes ``max_iter`` / ``tol`` directly on the constructor)
+  takes the driver's own NR settings as ``driver_max_iter`` /
+  ``driver_tol`` / ``driver_rtol``)
 
 Strain-controlled example
 --------------------------
@@ -41,7 +42,7 @@ Stress-controlled example
     from manforge.verification import CrosscheckStressDriver
 
     stress_load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
-    cc = CrosscheckStressDriver(py_int, fc_int, max_iter=30, tol=1e-10)
+    cc = CrosscheckStressDriver(py_int, fc_int, driver_max_iter=30, driver_tol=1e-10)
     result = cc.run(stress_load)
     assert result.passed
 
@@ -311,21 +312,25 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         Pass threshold for relative tangent error (default 1e-5).
     state_tol : float, optional
         Pass threshold for per state-variable relative error (default 1e-6).
-    max_iter : int, optional
+    driver_max_iter : int, optional
         Maximum Newton iterations for :class:`~manforge.simulation.StressDriver`
         (default 20).
-    tol : float, optional
+    driver_tol : float, optional
         Absolute convergence tolerance for
         :class:`~manforge.simulation.StressDriver` (default 1e-8).
-    rtol : float, optional
+    driver_rtol : float, optional
         Relative convergence tolerance for
         :class:`~manforge.simulation.StressDriver` (default 1e-10).
+
+    The ``*_tol`` arguments decide whether the two implementations agree; the
+    ``driver_*`` ones are the settings of the driver's own outer NR and are
+    passed through to it.
 
     Examples
     --------
     ::
 
-        cc = CrosscheckStressDriver(py_int, fc_int, max_iter=30, tol=1e-10)
+        cc = CrosscheckStressDriver(py_int, fc_int, driver_max_iter=30, driver_tol=1e-10)
         result = cc.run(stress_load)
         assert result.passed
 
@@ -346,9 +351,9 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
         stress_tol: float = 1e-6,
         tangent_tol: float = 1e-5,
         state_tol: float = 1e-6,
-        max_iter: int = 20,
-        tol: float = 1e-8,
-        rtol: float = 1e-10,
+        driver_max_iter: int = 20,
+        driver_tol: float = 1e-8,
+        driver_rtol: float = 1e-10,
     ) -> None:
         super().__init__(
             integrator_a,
@@ -357,13 +362,14 @@ class CrosscheckStressDriver(_CrosscheckDriverBase):
             tangent_tol=tangent_tol,
             state_tol=state_tol,
         )
-        self.max_iter = max_iter
-        self.tol = tol
-        self.rtol = rtol
+        self.driver_max_iter = driver_max_iter
+        self.driver_tol = driver_tol
+        self.driver_rtol = driver_rtol
 
     def _make_driver(self, integrator):
         return StressDriver(
-            integrator, max_iter=self.max_iter, tol=self.tol, rtol=self.rtol
+            integrator, max_iter=self.driver_max_iter,
+            tol=self.driver_tol, rtol=self.driver_rtol,
         )
 
     def _iter_driver(self, driver, load, **kwargs):

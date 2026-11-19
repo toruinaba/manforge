@@ -23,7 +23,7 @@ def check_bindings(
     fortran: "FortranModule",
     cases: dict[str, tuple[tuple, tuple]],
     *,
-    rtol: float = 1e-10,
+    tol: float = 1e-10,
 ) -> dict[str, tuple[bool, float]]:
     """Compare registered Python methods against their Fortran counterparts.
 
@@ -41,9 +41,9 @@ def check_bindings(
         ``{method_name: (py_args, fortran_args)}``.
         *py_args* is passed to ``getattr(model, method_name)(*py_args)``.
         *fortran_args* is passed to ``fortran.call(subroutine, *fortran_args)``.
-    rtol:
-        Relative tolerance threshold.  A result is ``ok`` when
-        ``max_rel_err < rtol``.
+    tol:
+        Pass threshold on the relative error.  A result is ``ok`` when
+        ``max_rel_err < tol``.
 
     Returns
     -------
@@ -74,6 +74,6 @@ def check_bindings(
             )
 
         max_rel_err = float(np.max(np.abs(py_arr - f_arr) / (np.abs(f_arr) + 1e-14)))
-        results[method_name] = (max_rel_err < rtol, max_rel_err)
+        results[method_name] = (max_rel_err < tol, max_rel_err)
 
     return results

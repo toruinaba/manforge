@@ -23,6 +23,7 @@ from manforge.core.material import MaterialModel
 from manforge.simulation.driver import StrainDriver, StressDriver
 from manforge.simulation.integrator import PythonIntegrator
 from manforge.simulation.types import FieldHistory, FieldType
+from manforge._typing import NRJacobian
 
 
 @dataclass
@@ -62,7 +63,7 @@ def run_simulation(
     *,
     control: Literal["strain", "stress"] = "strain",
     include_fields: Sequence[str] = (),
-    nr_jacobian: str = "broyden",
+    nr_jacobian: NRJacobian = "exact",
     progress: Callable[[int, int], None] | None = None,
 ) -> SimulationOutput:
     """Run a strain- or stress-controlled history and return plain arrays.
@@ -84,10 +85,11 @@ def run_simulation(
     include_fields : sequence of str
         Model state keys to include in ``SimulationOutput.fields``.
         Unknown names raise ``ValueError`` listing the available keys.
-    nr_jacobian : {"broyden", "exact"}
-        Return-mapping Jacobian strategy.  Default ``"broyden"`` — measured
-        ~2.4× faster on autodiff-NR models; the consistent tangent stays
-        exact either way.
+    nr_jacobian : {"exact", "broyden"}
+        Return-mapping Jacobian strategy.  ``"exact"`` is the default in every
+        layer.  ``"broyden"`` is measured ~2.4× faster on autodiff-NR models
+        and the consistent tangent stays exact either way, so a deployment
+        that wants the speed passes it explicitly.
     progress : callable or None
         Called as ``progress(done, total)`` after each completed step.
 
