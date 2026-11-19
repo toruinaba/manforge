@@ -8,7 +8,7 @@ correctness tests use.
 
 import numpy as np
 
-from manforge.simulation import StrainDriver, PythonAnalyticalIntegrator
+from returnmap.simulation import StrainDriver, PythonAnalyticalIntegrator
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,

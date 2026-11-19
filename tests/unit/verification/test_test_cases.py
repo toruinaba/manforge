@@ -4,8 +4,8 @@ TODO: cover generate_strain_history shapes, scenario variety, seed reproducibili
 """
 
 import pytest
-from manforge.verification import generate_strain_history
-from manforge.models import J2Isotropic3D
+from returnmap.verification import generate_strain_history
+from returnmap.models import J2Isotropic3D
 
 
 def test_generate_strain_history_importable():
@@ -21,7 +21,7 @@ def test_generate_strain_history_shape():
 
 def test_make_increment_trial_is_state_n_with_the_trial_stress():
     import numpy as np
-    from manforge.verification import make_increment
+    from returnmap.verification import make_increment
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     state_n = {**model.initial_state(), "ep": np.array(0.01)}

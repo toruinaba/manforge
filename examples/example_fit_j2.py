@@ -18,9 +18,9 @@ Usage
 
 import numpy as np
 
-from manforge.models import J2Isotropic1D
-from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory
-from manforge.fitting import FitTarget, Observation, ParameterSpace, fit_params
+from returnmap.models import J2Isotropic1D
+from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory
+from returnmap.fitting import FitTarget, Observation, ParameterSpace, fit_params
 
 try:
     import matplotlib

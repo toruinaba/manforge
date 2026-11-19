@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from manforge.models import AFKinematic1D, J2Isotropic1D, OWKinematic1D
-from manforge.service import default_registry, run_simulation
+from returnmap.models import AFKinematic1D, J2Isotropic1D, OWKinematic1D
+from returnmap.service import default_registry, run_simulation
 
 J2 = dict(E=206e3, nu=0.3, sigma_y0=250.0, H=1000.0)
 AF = dict(E=206e3, nu=0.3, sigma_y0=250.0, C_k=20e3, gamma=100.0)
@@ -34,7 +34,7 @@ class TestStrainControl:
         (AFKinematic1D, AF), (OWKinematic1D, OW)])
     def test_cyclic_autodiff_models(self, model_cls, params):
         """Autodiff-NR models complete a small cyclic history."""
-        from manforge.simulation import FieldHistory
+        from returnmap.simulation import FieldHistory
         load = FieldHistory.cyclic_strain([4e-3, -4e-3, 4e-3], n_per_segment=10).data
         out = run_simulation(model_cls, params, load)
         assert out.converged

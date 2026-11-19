@@ -2,9 +2,9 @@
 
 import pytest
 
-from manforge.core import ParamMeta
-from manforge.models import J2Isotropic1D, J2Isotropic3D
-from manforge.service import ModelRegistry, ModelDescriptor, default_registry
+from returnmap.core import ParamMeta
+from returnmap.models import J2Isotropic1D, J2Isotropic3D
+from returnmap.service import ModelRegistry, ModelDescriptor, default_registry
 
 
 class TestRegister:
@@ -71,7 +71,7 @@ class TestDescribe:
         assert reg.describe("j2_3d").ntens == 6
 
     def test_model_without_meta_describes_empty(self):
-        from manforge.core import MaterialModel, Explicit, SCALAR, UNIAXIAL_1D
+        from returnmap.core import MaterialModel, Explicit, SCALAR, UNIAXIAL_1D
 
         class Bare(MaterialModel):
             param_names = ["E", "nu", "sigma_y0"]

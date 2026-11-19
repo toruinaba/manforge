@@ -57,8 +57,8 @@ def _stats(times):
 
 def _make_driver_step():
     import numpy as np
-    from manforge.models import J2Isotropic3D
-    from manforge.simulation import (
+    from returnmap.models import J2Isotropic3D
+    from returnmap.simulation import (
         StrainDriver, PythonIntegrator, FieldHistory, FieldType,
     )
 
@@ -81,8 +81,8 @@ def _make_driver_step():
 
 def _make_vector_nr():
     import numpy as np
-    from manforge.models import OWKinematic3D
-    from manforge.simulation import PythonIntegrator
+    from returnmap.models import OWKinematic3D
+    from returnmap.simulation import PythonIntegrator
 
     model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     integrator = PythonIntegrator(model)
@@ -106,9 +106,9 @@ def _make_vector_nr():
 
 def _make_fd_tangent():
     import numpy as np
-    from manforge.models import J2Isotropic3D
-    from manforge.simulation import PythonIntegrator
-    from manforge.verification import check_tangent
+    from returnmap.models import J2Isotropic3D
+    from returnmap.simulation import PythonIntegrator
+    from returnmap.verification import check_tangent
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     integrator = PythonIntegrator(model)

@@ -10,8 +10,8 @@ tangent fallback — is exercised on every host.
 import numpy as np
 import pytest
 
-from manforge.models import J2Isotropic3D
-from manforge.simulation import (
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import (
     StressDriver, FortranIntegrator, PythonIntegrator, StressIntegrator, FieldHistory,
     FieldType,
 )
@@ -198,7 +198,7 @@ class TestUnderStressDriver:
 def test_stress_history_of_a_fortran_run(model):
     """A UMAT result's state has no "stress" entry; history("stress") is
     documented to work and to equal .stress."""
-    from manforge.simulation import StrainDriver
+    from returnmap.simulation import StrainDriver
 
     eps = np.zeros((4, 6))
     eps[:, 0] = np.linspace(5e-4, 3e-3, 4)
@@ -270,7 +270,7 @@ class TestUmatFailure:
         assert r.converged is False
 
     def test_driver_stops_at_the_failed_step(self, model):
-        from manforge.simulation import StrainDriver
+        from returnmap.simulation import StrainDriver
 
         integ = FortranIntegrator.from_model(
             _ReportingUmat(fail_above=1e-3), "j2", model,
@@ -282,7 +282,7 @@ class TestUmatFailure:
         assert len(result.step_results) == 2
 
     def test_crosscheck_does_not_compare_a_failed_iterate_as_a_solution(self, model):
-        from manforge.verification import crosscheck
+        from returnmap.verification import crosscheck
 
         integ = FortranIntegrator.from_model(
             _ReportingUmat(fail_above=1e-3), "j2", model,

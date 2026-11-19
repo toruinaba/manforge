@@ -1,5 +1,5 @@
-# manforge.models
+# returnmap.models
 
 ```{eval-rst}
-.. automodule:: manforge.models
+.. automodule:: returnmap.models
 ```

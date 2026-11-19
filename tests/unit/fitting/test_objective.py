@@ -6,11 +6,11 @@ import math
 import numpy as np
 import pytest
 
-from manforge.fitting import (
+from returnmap.fitting import (
     fit_params, FAILURE_PENALTY, FailureLog, build_objective, ParameterSpace,
     FitTarget, Observation,
 )
-from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
+from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def target(model, strain_load):
 
 
 def test_objective_importable():
-    mod = importlib.import_module("manforge.fitting.objective")
+    mod = importlib.import_module("returnmap.fitting.objective")
     assert mod is not None
 
 
@@ -58,8 +58,8 @@ def test_objective_rebuilds_the_model_in_its_own_dimension(driver_factory, space
     Rebuilt as 3D instead, the 4-component path would not even fit, and the
     evaluation would score the failure penalty.
     """
-    from manforge.core import PLANE_STRAIN
-    from manforge.models import J2Isotropic
+    from returnmap.core import PLANE_STRAIN
+    from returnmap.models import J2Isotropic
 
     template = J2Isotropic(
         dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
@@ -79,7 +79,7 @@ def test_objective_keeps_the_templates_non_parameter_settings(driver_factory, sp
     The setting below is not in param_names; a model rebuilt through the
     constructor would fall back to scale=1 and miss the template's own curve.
     """
-    from manforge.models import J2Isotropic1D
+    from returnmap.models import J2Isotropic1D
 
     class _Scaled(J2Isotropic1D):
         def __init__(self, *, scale=1.0, **params):
@@ -161,7 +161,7 @@ def test_failed_evaluation_returns_penalty(model, target, space):
 
 def test_nonconverged_value_is_penalised_like_a_raise(model, target, space):
     """Non-convergence reported as a value scores the same as one that raises."""
-    from manforge.simulation import PythonNumericalIntegrator
+    from returnmap.simulation import PythonNumericalIntegrator
 
     def reporting(integrator):
         return StrainDriver(PythonNumericalIntegrator(
@@ -350,7 +350,7 @@ def test_fit_result_carries_the_fitted_model(model, target):
 
 def test_fit_result_model_keeps_the_templates_settings(space):
     """The fitted model is the template with new parameters — settings included."""
-    from manforge.models import J2Isotropic1D
+    from returnmap.models import J2Isotropic1D
 
     class _Scaled(J2Isotropic1D):
         def __init__(self, *, scale=1.0, **params):

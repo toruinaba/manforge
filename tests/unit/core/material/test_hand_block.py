@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from manforge.core import HandBlock, hand_block, verified_against_fortran
-from manforge.models import J2Isotropic3D, OWKinematic3D
+from returnmap.core import HandBlock, hand_block, verified_against_fortran
+from returnmap.models import J2Isotropic3D, OWKinematic3D
 from tests.fixtures.hand_block_models import (
     OW_PARAMS, OWWithApproxBlock, OWWithHandBlocks, OWWithWrongBlock,
 )
@@ -127,7 +127,7 @@ def test_two_methods_for_one_block_is_rejected():
 
 
 def test_custom_residual_names_are_the_row_names():
-    from manforge.core import MaterialModel, Implicit, NTENS
+    from returnmap.core import MaterialModel, Implicit, NTENS
 
     class _Named(MaterialModel):
         param_names = ["E", "nu"]

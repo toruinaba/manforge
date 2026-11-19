@@ -1,10 +1,10 @@
 ! =============================================================================
-! manforge -- J2 isotropic hardening UMAT (standalone, no ABAQUS solver)
+! returnmap -- J2 isotropic hardening UMAT (standalone, no ABAQUS solver)
 !
 ! Implements the full ABAQUS UMAT interface for J2 plasticity with linear
 ! isotropic hardening.  Algorithm is identical to the Python reference:
-!   - return_mapping  (src/manforge/core/return_mapping.py)
-!   - consistent_tangent (src/manforge/core/tangent.py)
+!   - return_mapping  (src/returnmap/core/return_mapping.py)
+!   - consistent_tangent (src/returnmap/core/tangent.py)
 !
 ! Subroutines:
 !   j2_isotropic_3d            -- f2py-callable core logic (matches J2Isotropic3D)

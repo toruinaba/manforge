@@ -11,9 +11,9 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.simulation import JacobianBlocks, PythonIntegrator
-from manforge.models import AFKinematic3D, OWKinematic3D
-from manforge.core import Implicit, NTENS, SCALAR, MaterialModel
+from returnmap.simulation import JacobianBlocks, PythonIntegrator
+from returnmap.models import AFKinematic3D, OWKinematic3D
+from returnmap.core import Implicit, NTENS, SCALAR, MaterialModel
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ class TestReducedBlocks:
     def test_part_dlambda_stress_matches_flow_direction(self, model):
         result, state0 = _plastic_result(model)
         jac = PythonIntegrator(model).jacobian(result)
-        from manforge.core.state import _state_with_stress
+        from returnmap.core.state import _state_with_stress
         n_ad = autograd.grad(
             lambda s: model.yield_function(_state_with_stress(result.state, s))
         )(result.stress)
@@ -166,7 +166,7 @@ class _ResidualNameModel(MaterialModel):
 
     def state_residual(self, new, dlambda, inc):
         import autograd as _ag
-        from manforge.core.state import _state_with_stress
+        from returnmap.core.state import _state_with_stress
         stress = new["stress"]
         n = _ag.grad(lambda s: self.yield_function(_state_with_stress(new, s)))(stress)
         R_alpha = new["alpha"] - inc.state_n["alpha"] - dlambda * n
@@ -207,21 +207,21 @@ class TestBlockScale:
     """``_block_scale(own, row, col)``: the block's own size, unless it is round-off."""
 
     def test_a_block_with_a_size_of_its_own_is_measured_against_it(self):
-        from manforge.verification.jacobian import _block_scale
+        from returnmap.verification.jacobian import _block_scale
 
         # Small next to what its row implies (1e-7 of it), but far above round-off.
         assert _block_scale(own=4e-7, row=1.0, col=0.25) == 4e-7
         assert _block_scale(own=1.6e5, row=1e3, col=2e-4) == 1.6e5
 
     def test_round_off_is_measured_against_what_row_and_column_imply(self):
-        from manforge.verification.jacobian import _block_scale
+        from returnmap.verification.jacobian import _block_scale
 
         # 1.4e-13 against 700 / 0.67: autodiff noise in a block that is zero.
         assert _block_scale(own=1.4e-13, row=700.0, col=0.67) == pytest.approx(700.0 / 0.67)
         assert _block_scale(own=0.0, row=700.0, col=0.67) == pytest.approx(700.0 / 0.67)
 
     def test_an_unknown_that_never_moved_implies_nothing(self):
-        from manforge.verification.jacobian import _block_scale
+        from returnmap.verification.jacobian import _block_scale
 
         assert _block_scale(own=3.0, row=10.0, col=0.0) == 3.0
         assert _block_scale(own=0.0, row=10.0, col=0.0) == 0.0
@@ -230,7 +230,7 @@ class TestBlockScale:
     @pytest.mark.parametrize("unit", [1e-9, 1.0, 1e6])
     def test_the_choice_does_not_depend_on_the_units(self, unit):
         """Row sizes and blocks scale together; the ratio that decides does not."""
-        from manforge.verification.jacobian import _block_scale
+        from returnmap.verification.jacobian import _block_scale
 
         assert _block_scale(own=4e-7 * unit, row=1.0 * unit, col=0.25) == 4e-7 * unit
         assert _block_scale(own=1e-13 * unit, row=1.0 * unit, col=0.25) == pytest.approx(4.0 * unit)

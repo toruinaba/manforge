@@ -7,7 +7,7 @@ make test        # 高速テスト (unit + integration、slow/fortran 除く)
 make test-all    # 全スイート
 ```
 
-その他のターゲット (e2e / slow / benchmarks / docker) は `Makefile` を参照。テストレイアウトは `tests/{unit,integration}` が `src/manforge` のモジュール構成に対応し (モジュールごとに unit か integration のどちらか)、`tests/benchmarks/<model>/` が数値同値ハーネス。
+その他のターゲット (e2e / slow / benchmarks / docker) は `Makefile` を参照。テストレイアウトは `tests/{unit,integration}` が `src/returnmap` のモジュール構成に対応し (モジュールごとに unit か integration のどちらか)、`tests/benchmarks/<model>/` が数値同値ハーネス。
 
 ## 例
 
@@ -37,4 +37,4 @@ make docs            # docs/_build/html/index.html を生成
 - `docs/` 内のページへのリンク切れ
 - 公開パッケージの `__all__` に載っているのに、リファレンスに項目が無い名前 (docstring の無いクラスや関数、`docs/reference/` に説明の無い定数)
 
-docstring の中で他の名前を参照するときは、公開パッケージのパスで書く (`` :class:`~manforge.core.MaterialModel` ``)。
+docstring の中で他の名前を参照するときは、公開パッケージのパスで書く (`` :class:`~returnmap.core.MaterialModel` ``)。

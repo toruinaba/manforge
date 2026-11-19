@@ -6,10 +6,10 @@ generated from the English docstrings.  Build with ``make docs``.
 
 from importlib.metadata import version as _version
 
-project = "manforge"
+project = "returnmap"
 author = "Toru Inaba"
 copyright = "2026, Toru Inaba"
-release = _version("manforge")
+release = _version("returnmap")
 version = release
 
 extensions = [
@@ -23,7 +23,7 @@ source_suffix = {".md": "markdown"}
 exclude_patterns = ["_build"]
 
 html_theme = "furo"
-html_title = f"manforge {release}"
+html_title = f"returnmap {release}"
 
 # -- MyST ---------------------------------------------------------------------
 myst_enable_extensions = ["colon_fence", "dollarmath"]
@@ -54,10 +54,10 @@ napoleon_use_ivar = True
 nitpicky = True
 # NumPy-style sections describe types in prose ("array, shape (n,)",
 # "dict[row][col]"), which Sphinx reads as class references.  Only two kinds
-# of class target are held to the rule: a full manforge path and a bare
+# of class target are held to the rule: a full returnmap path and a bare
 # CapitalisedName (a class of this package written without its path).
 nitpick_ignore_regex = [
-    ("py:class", r"^(?!manforge\.)(?![A-Z]\w*$).+$"),
+    ("py:class", r"^(?!returnmap\.)(?![A-Z]\w*$).+$"),
 ]
 
 
@@ -78,10 +78,10 @@ def _check_reference_is_complete(app, env):
 
     documented = set(env.domaindata["py"]["objects"])
     missing = [
-        f"manforge.{package}.{name}"
+        f"returnmap.{package}.{name}"
         for package in PUBLIC_PACKAGES
-        for name in importlib.import_module(f"manforge.{package}").__all__
-        if f"manforge.{package}.{name}" not in documented
+        for name in importlib.import_module(f"returnmap.{package}").__all__
+        if f"returnmap.{package}.{name}" not in documented
     ]
     if missing:
         raise ExtensionError(

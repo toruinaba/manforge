@@ -1,13 +1,13 @@
-# manforge — reproducible gfortran + Python 3.12 build environment
+# returnmap — reproducible gfortran + Python 3.12 build environment
 #
 # Provides gfortran, f2py (via numpy), and all Python dependencies.
 # Used to run Fortran-vs-Python equivalence benchmarks reproducibly.
 #
 # Build:
-#   docker build -t manforge-fortran .
+#   docker build -t returnmap-fortran .
 #
 # Run tests inside container:
-#   docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
+#   docker run --rm -v $(pwd):/workspace -w /workspace returnmap-fortran \
 #       bash -c "make fortran-build-umat && make test-benchmarks-fortran"
 
 FROM python:3.12-slim
@@ -26,7 +26,7 @@ ENV PATH=/opt/venv/bin:$PATH
 
 WORKDIR /build
 # README.md is required here: pyproject.toml declares it as the project readme,
-# so the manforge build in `uv sync` fails without it.
+# so the returnmap build in `uv sync` fails without it.
 COPY pyproject.toml uv.lock README.md ./
 RUN pip install --no-cache-dir uv \
  && uv sync --extra dev --extra fortran

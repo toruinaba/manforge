@@ -8,10 +8,10 @@ import pytest
 
 
 def test_residual_module_importable():
-    mod = importlib.import_module("manforge.simulation._residual")
+    mod = importlib.import_module("returnmap.simulation._residual")
     assert mod is not None
 
 
 def test_build_residual_importable():
-    from manforge.simulation._residual import build_residual
+    from returnmap.simulation._residual import build_residual
     assert callable(build_residual)

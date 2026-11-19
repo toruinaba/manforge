@@ -38,7 +38,7 @@ second by test_jacobian_fd_multiaxial.
 import numpy as np
 import pytest
 
-from manforge.simulation import (
+from returnmap.simulation import (
     PythonAnalyticalIntegrator, PythonNumericalIntegrator, MixedDriver, StrainDriver,
     FieldHistory, FieldType,
 )

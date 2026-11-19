@@ -8,7 +8,7 @@ import pytest
 
 
 def test_all_bindings_registered():
-    from manforge.models import YUKinematic3D
+    from returnmap.models import YUKinematic3D
     bindings = YUKinematic3D._fortran_bindings
     expected = {
         "elastic_stiffness":    "yu_kinematic_3d_elastic_stiffness",

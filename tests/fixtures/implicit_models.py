@@ -16,8 +16,8 @@ Uses MRO override: re-declare ``stress``, ``alpha`` and ``ep`` as ``Implicit`` t
 activate the vector NR path with σ as an NR unknown.
 """
 
-from manforge.core import Implicit, NTENS, PLANE_STRAIN
-from manforge.models import AFKinematic, AFKinematic3D, AFKinematicPS
+from returnmap.core import Implicit, NTENS, PLANE_STRAIN
+from returnmap.models import AFKinematic, AFKinematic3D, AFKinematicPS
 
 
 class _AFKinematicImplicit3D(AFKinematic3D):

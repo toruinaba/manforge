@@ -15,7 +15,7 @@
 各ファミリには、次元を固定しない親クラス (`J2Isotropic`、`AFKinematic` など) もある。
 
 ```python
-from manforge.models import AFKinematic3D
+from returnmap.models import AFKinematic3D
 
 model = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
 ```
@@ -30,8 +30,8 @@ model = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80
 平面ひずみは専用クラスが無いため親クラスに直接 `dimension=` を渡す:
 
 ```python
-from manforge.models import J2Isotropic
-from manforge.core import PLANE_STRAIN
+from returnmap.models import J2Isotropic
+from returnmap.core import PLANE_STRAIN
 model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 ```
 
@@ -50,7 +50,7 @@ model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250
 | `J2IsotropicDamageUnilateral*` | 応力も分解: 引張 (1−D)E / 圧縮 (1−hD)E で剛性回復 | `stress`, `stress_eff` (σ̃), `ep`, `D` |
 
 ```python
-from manforge.models import J2IsotropicDamageUnilateral3D
+from returnmap.models import J2IsotropicDamageUnilateral3D
 model = J2IsotropicDamageUnilateral3D(
     E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_500.0,
     S=0.5, s=1.0, p_D=0.0,   # Lemaitre: 損傷強度 [MPa], 指数, 閾値 (相当塑性ひずみ)

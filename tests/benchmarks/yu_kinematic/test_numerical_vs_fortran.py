@@ -3,7 +3,7 @@
 Requires the compiled yu_kinematic_3d Fortran extension:
     make fortran-build-yu
 or:
-    uv run manforge build fortran/abaqus_stubs.f90 fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d
+    uv run returnmap build fortran/abaqus_stubs.f90 fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d
 
 Test classes:
     TestHelpers              -- elastic_stiffness, calc_norm_n_flow,
@@ -30,12 +30,12 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.simulation import (
+from returnmap.simulation import (
     FortranModule, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
     FortranIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import crosscheck
-from manforge.models import YUKinematic3D
+from returnmap.verification import crosscheck
+from returnmap.models import YUKinematic3D
 
 from .conftest import PARAMS
 
@@ -631,7 +631,7 @@ class TestParamOrder:
     _FORTRAN_NAME = {"B": "b_bnd", "b": "b_kin", "xi": "xi_param"}
 
     def test_param_names_match_fortran_arg_order(self, fortran_mod):
-        from manforge.models import YUKinematic3D
+        from returnmap.models import YUKinematic3D
         model = YUKinematic3D(**PARAMS)
         dummy_args = _extract_yu_dummy_args(fortran_mod)
         n = len(model.param_names)

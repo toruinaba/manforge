@@ -3,13 +3,13 @@
 import numpy as np
 import pytest
 
-from manforge.core import ReturnMappingResult
-from manforge.models import J2Isotropic3D
-from manforge.simulation import (
+from returnmap.core import ReturnMappingResult
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import (
     FieldHistory, FieldType, MixedDriver, PythonAnalyticalIntegrator,
     PythonNumericalIntegrator, StressDriver,
 )
-from manforge.verification import (
+from returnmap.verification import (
     CrosscheckReport,
     CrosscheckStep,
     crosscheck,
@@ -305,8 +305,8 @@ class TestMeasure:
 
     def test_state_at_noise_level_is_treated_as_zero(self):
         """Two results that differ by 100 % in a state of magnitude 1e-25."""
-        from manforge.core import SCALAR, Explicit
-        from manforge.models import J2Isotropic
+        from returnmap.core import SCALAR, Explicit
+        from returnmap.models import J2Isotropic
 
         class _WithResidue(J2Isotropic):
             residue = Explicit(shape=SCALAR, doc="round-off left by a smooth gate")

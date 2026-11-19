@@ -14,17 +14,17 @@ import autograd
 import numpy as np
 import pytest
 
-from manforge.core import (
+from returnmap.core import (
     MaterialModel, Implicit, Explicit, NTENS, PLANE_STRAIN, PLANE_STRESS, SOLID_3D,
 )
-from manforge.models import (
+from returnmap.models import (
     AFKinematic, AFKinematic3D, AFKinematicPS, J2Isotropic3D, OWKinematic3D,
 )
-from manforge.simulation import (
+from returnmap.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
     PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import check_tangent, make_increment
+from returnmap.verification import check_tangent, make_increment
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )
@@ -632,7 +632,7 @@ class _KinematicWithDlambdaOverride(MaterialModel):
         return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, new, dlambda, inc):
-        from manforge.core.state import _state_with_stress
+        from returnmap.core.state import _state_with_stress
         n = autograd.grad(
             lambda s: self.yield_function(_state_with_stress(new, s))
         )(new["stress"])
@@ -657,7 +657,7 @@ class _KinematicDefault(MaterialModel):
         return self.vonmises(xi) - self.sigma_y0
 
     def state_residual(self, new, dlambda, inc):
-        from manforge.core.state import _state_with_stress
+        from returnmap.core.state import _state_with_stress
         n = autograd.grad(
             lambda s: self.yield_function(_state_with_stress(new, s))
         )(new["stress"])
@@ -1301,7 +1301,7 @@ class TestElasticCheck:
 
 class TestBroydenJacobian:
     def _integrators(self):
-        from manforge.models import OWKinematic3D
+        from returnmap.models import OWKinematic3D
         model_kwargs = dict(E=210000.0, nu=0.3, sigma_y0=250.0,
                             C_k=50000.0, gamma=300.0)
         exact = PythonNumericalIntegrator(OWKinematic3D(**model_kwargs))
@@ -1338,7 +1338,7 @@ class TestBroydenJacobian:
         )
 
     def test_multistep_history_matches(self):
-        from manforge.simulation import StrainDriver, FieldHistory
+        from returnmap.simulation import StrainDriver, FieldHistory
 
         exact, broyden = self._integrators()
         load = FieldHistory.cyclic_strain(
@@ -1504,9 +1504,9 @@ class TestTangentIncrementDependence:
 from tests.fixtures.predictor_models import (  # noqa: E402
     BilinearPlastic1D, BilinearPlasticTrialResidual1D,
 )
-from manforge.models import J2Isotropic1D  # noqa: E402
-from manforge.simulation import SubSteppingIntegrator  # noqa: E402
-from manforge.core import StateResidual  # noqa: E402
+from returnmap.models import J2Isotropic1D  # noqa: E402
+from returnmap.simulation import SubSteppingIntegrator  # noqa: E402
+from returnmap.core import StateResidual  # noqa: E402
 
 _J2_1D = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 _BL = dict(_J2_1D, k_t=0.6, k_c=0.95)

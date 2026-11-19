@@ -1,7 +1,7 @@
 ! =============================================================================
-! manforge -- YUKinematicPS UMAT (Yoshida-Uemori 2-surface + stagnation surface)
+! returnmap -- YUKinematicPS UMAT (Yoshida-Uemori 2-surface + stagnation surface)
 !
-! Fortran port of YUKinematicPS (src/manforge/models/yu_kinematic.py).
+! Fortran port of YUKinematicPS (src/returnmap/models/yu_kinematic.py).
 ! Plane stress under the P-metric convention (PLANE_STRESS_P), ntens = 3.
 ! Algorithm: fully-implicit Newton-Raphson on [stress(3), dlambda(1),
 !            theta(3), beta(3)] = 10 unknowns.
@@ -160,7 +160,7 @@ end subroutine yu_ps_vonmises_norm
 ! yu_ps_smooth_heaviside  (internal helper, not f2py-callable)
 !
 ! Smooth Heaviside step 0.5*(1 + tanh(beta*x/2)) with beta = 500, matching
-! manforge.utils.smooth.smooth_heaviside.
+! returnmap.utils.smooth.smooth_heaviside.
 ! =============================================================================
 subroutine yu_ps_smooth_heaviside(x, hv)
     implicit none
@@ -185,7 +185,7 @@ end subroutine yu_ps_smooth_heaviside
 ! =============================================================================
 ! yu_ps_smooth_sqrt  (internal helper, not f2py-callable)
 !
-! sqrt(x + eps^2), matching manforge.utils.smooth.smooth_sqrt.
+! sqrt(x + eps^2), matching returnmap.utils.smooth.smooth_sqrt.
 ! =============================================================================
 subroutine yu_ps_smooth_sqrt(x, res)
     implicit none

@@ -2,9 +2,9 @@
 
 import numpy as np
 import pytest
-from manforge.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-from manforge.core import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
-from manforge.verification import make_increment
+from returnmap.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+from returnmap.core import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
+from returnmap.verification import make_increment
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 

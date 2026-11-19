@@ -12,8 +12,8 @@ import pytest
 import numpy as np
 import autograd.numpy as anp
 
-from manforge.models import OWKinematic3D, OWKinematicPS, OWKinematic1D, AFKinematic3D
-from manforge.simulation import PythonIntegrator
+from returnmap.models import OWKinematic3D, OWKinematicPS, OWKinematic1D, AFKinematic3D
+from returnmap.simulation import PythonIntegrator
 
 
 # ---------------------------------------------------------------------------

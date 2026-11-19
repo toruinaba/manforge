@@ -24,8 +24,8 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.models import YUKinematicPS
-from manforge.simulation import (
+from returnmap.models import YUKinematicPS
+from returnmap.simulation import (
     FortranModule, PythonAnalyticalIntegrator, PythonNumericalIntegrator,
 )
 

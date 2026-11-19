@@ -1,7 +1,7 @@
-# manforge.utils
+# returnmap.utils
 
 ```{eval-rst}
-.. automodule:: manforge.utils
+.. automodule:: returnmap.utils
 
 .. rubric:: Constants
 

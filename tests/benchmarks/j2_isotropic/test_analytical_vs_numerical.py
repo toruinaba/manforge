@@ -16,12 +16,12 @@ import numpy as np
 import autograd.numpy as anp
 import pytest
 
-from manforge.models import J2Isotropic3D, J2Isotropic1D
-from manforge.simulation import (
+from returnmap.models import J2Isotropic3D, J2Isotropic1D
+from returnmap.simulation import (
     PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
     FieldHistory, FieldType, StrainDriver,
 )
-from manforge.verification import check_tangent, make_increment
+from returnmap.verification import check_tangent, make_increment
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ class TestAnalyticalPath:
         assert float(rm.dlambda) > 0.0
 
     def test_analytical_raises_for_model_without_hooks(self):
-        from manforge.core import MaterialModel
+        from returnmap.core import MaterialModel
 
         class _NoHook(MaterialModel):
             param_names = ["E", "nu", "sigma_y0"]
@@ -333,8 +333,8 @@ class TestAnalyticalPath:
 
     def test_driver_level_consistency(self):
         """StrainDriver with analytical integrator produces stress consistent with numerical."""
-        from manforge.verification import generate_strain_history
-        from manforge.simulation import FieldHistory, FieldType
+        from returnmap.verification import generate_strain_history
+        from returnmap.simulation import FieldHistory, FieldType
 
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
         strain_data = generate_strain_history(model)

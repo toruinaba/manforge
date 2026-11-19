@@ -1,5 +1,5 @@
 ! =============================================================================
-! manforge -- basic Fortran subroutine for f2py smoke test (Step 9)
+! returnmap -- basic Fortran subroutine for f2py smoke test (Step 9)
 !
 ! Provides a single subroutine: elastic_stress
 !   Computes stress = C @ dstran for an isotropic linear elastic material.
@@ -7,7 +7,7 @@
 !   before implementing the full UMAT in Step 10.
 !
 ! Compile:
-!   python -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
+!   python -m numpy.f2py -c test_basic.f90 -m returnmap_test_basic
 ! =============================================================================
 
 ! -----------------------------------------------------------------------------

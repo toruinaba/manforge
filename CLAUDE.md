@@ -18,8 +18,8 @@ make test-all                # Full suite including slow and fortran
 uv run pytest tests/benchmarks/j2_isotropic/ -m "not fortran" -v  # Single benchmark dir
 
 # Fortran compilation (requires gfortran; this host has none — use Docker)
-uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
-uv run manforge list / clean
+uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap list / clean
 make docker-build && make docker-test
 
 # Documentation (Sphinx + MyST; needs `uv sync --extra docs`)
@@ -32,15 +32,15 @@ There is no linter configured. No CI/CD workflows exist.
 
 - **ガイドは `docs/` の Markdown(日本語)、API リファレンスは docstring(英語)から生成する。** README は概要・インストール・クイックスタートと `docs/` への案内だけを持つ(`docs/index.md` が README のその部分を include するので、二重には書かない)。使い方の説明を足すときは README ではなく `docs/` の該当ページに書く。
 - **`make docs` が通ることを確認する。** 警告はエラー扱いで、次を検出する: 解決できない相互参照、`docs/` 内のリンク切れ、公開パッケージの `__all__` に載っているのにリファレンスに項目が無い名前(docstring の無いクラス・関数、`docs/reference/*.md` に説明の無い定数)。
-- **docstring の相互参照は公開パッケージのパスで書く**(`` :class:`~manforge.core.MaterialModel` ``。`manforge.core.material.MaterialModel` ではない)。非公開の名前は参照にせず ``` ``literal`` ``` で書く。
+- **docstring の相互参照は公開パッケージのパスで書く**(`` :class:`~returnmap.core.MaterialModel` ``。`returnmap.core.material.MaterialModel` ではない)。非公開の名前は参照にせず ``` ``literal`` ``` で書く。
 
 ## Architecture
 
-manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Arithmetic is float64 throughout — autograd wraps NumPy, so there is nothing to enable.
+returnmap is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Arithmetic is float64 throughout — autograd wraps NumPy, so there is nothing to enable.
 
 ### Public import paths
 
-公開の import 元はパッケージ単位の 7 つ: `manforge.core`(モデル定義に要るもの全部 — `MaterialModel` / 状態宣言 / 次元 / `hand_block` / `verified_against_fortran` / 結果型)、`manforge.models`、`manforge.simulation`(integrator / driver / `FieldHistory` / `FortranModule` / `JacobianBlocks`)、`manforge.fitting`、`manforge.verification`(検査のみ)、`manforge.service`、`manforge.utils`。どの名前も 1 つのパッケージの `__all__` にだけ載せる(例外なし。`tests/unit/test_public_api.py` が確認する)。README・例・テスト・docstring の例はこの形で書く。サブモジュールのパス(`manforge.core.state` 等)は実装の置き場所で、`src/` 内部の import と、非公開ヘルパを直接試すテストだけが使う。
+公開の import 元はパッケージ単位の 7 つ: `returnmap.core`(モデル定義に要るもの全部 — `MaterialModel` / 状態宣言 / 次元 / `hand_block` / `verified_against_fortran` / 結果型)、`returnmap.models`、`returnmap.simulation`(integrator / driver / `FieldHistory` / `FortranModule` / `JacobianBlocks`)、`returnmap.fitting`、`returnmap.verification`(検査のみ)、`returnmap.service`、`returnmap.utils`。どの名前も 1 つのパッケージの `__all__` にだけ載せる(例外なし。`tests/unit/test_public_api.py` が確認する)。README・例・テスト・docstring の例はこの形で書く。サブモジュールのパス(`returnmap.core.state` 等)は実装の置き場所で、`src/` 内部の import と、非公開ヘルパを直接試すテストだけが使う。
 
 ### Three-layer design
 
@@ -78,7 +78,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Test layout
 
-`tests/{unit,integration}/` follow the module layout of `src/manforge/`: a module's tests live in `test_<module>.py` at the mirrored path, under `unit/` or `integration/` (most modules have one of the two, not both). A few test files have no single source module (`test_public_api.py`, `test_flow.py`, `test_kinematic_common.py`). `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
+`tests/{unit,integration}/` follow the module layout of `src/returnmap/`: a module's tests live in `test_<module>.py` at the mirrored path, under `unit/` or `integration/` (most modules have one of the two, not both). A few test files have no single source module (`test_public_api.py`, `test_flow.py`, `test_kinematic_common.py`). `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
 
 | directory | purpose |
 |---|---|
@@ -89,4 +89,4 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Models / Fortran
 
-参照実装は `src/manforge/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。手導出したヤコビアンのブロックは `@hand_block(row, col)`(`core/material/hand_block.py`)でモデル上に宣言し、`check_hand_blocks(model, results)` が AD の残差ヤコビアン(`simulation/jacobian.py`)とブロックごとに照合する。手書きのリターンマッピング(`user_defined_return_mapping`)の解は `check_solution(model, results)` が AD 側の残差に代入して行ごとに検査する(残差そのものは宣言しない — 比べるのは根だけ)。2 つの実装を同じ載荷履歴で進めて比べるのは `crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)`(`verification/crosscheck.py`)。UMAT 自身の収束フラグは `FortranIntegrator(parse_umat_failure=...)` で読ませる。非公開モデルは別リポジトリ(`manforge-internal`)に置き、`MODELS` dict で service 層に登録する。
+参照実装は `src/returnmap/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。手導出したヤコビアンのブロックは `@hand_block(row, col)`(`core/material/hand_block.py`)でモデル上に宣言し、`check_hand_blocks(model, results)` が AD の残差ヤコビアン(`simulation/jacobian.py`)とブロックごとに照合する。手書きのリターンマッピング(`user_defined_return_mapping`)の解は `check_solution(model, results)` が AD 側の残差に代入して行ごとに検査する(残差そのものは宣言しない — 比べるのは根だけ)。2 つの実装を同じ載荷履歴で進めて比べるのは `crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)`(`verification/crosscheck.py`)。UMAT 自身の収束フラグは `FortranIntegrator(parse_umat_failure=...)` で読ませる。非公開モデルは別リポジトリ(`returnmap-internal`)に置き、`MODELS` dict で service 層に登録する。

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from manforge.fitting import ParameterSpace
+from returnmap.fitting import ParameterSpace
 
 
 def test_x0_and_bounds_follow_declaration_order():

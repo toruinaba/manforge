@@ -24,17 +24,17 @@ Four independent axes, none of which needs a hand-derived Jacobian:
 import numpy as np
 import pytest
 
-from manforge.core import PLANE_STRESS_P, P_PLANE_STRESS
-from manforge.models import YUKinematic1D, YUKinematic3D, YUKinematicPS
-from manforge.simulation import (
+from returnmap.core import PLANE_STRESS_P, P_PLANE_STRESS
+from returnmap.models import YUKinematic1D, YUKinematic3D, YUKinematicPS
+from returnmap.simulation import (
     MixedDriver, StrainDriver, PythonAnalyticalIntegrator, PythonNumericalIntegrator,
     FieldHistory, FieldType,
     PythonIntegrator,
 )
-from manforge.verification import check_hand_blocks, check_solution, check_tangent
+from returnmap.verification import check_hand_blocks, check_solution, check_tangent
 
 from .conftest import PARAMS
-from manforge.verification import make_increment
+from returnmap.verification import make_increment
 
 
 def _initial_state(model):

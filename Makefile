@@ -1,4 +1,4 @@
-# manforge Makefile
+# returnmap Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
 .PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
@@ -16,7 +16,7 @@ PY ?= uv run python
 
 ## Compile fortran/test_basic.f90 into a Python extension via f2py
 fortran-build:
-	cd fortran && $(PY) -m numpy.f2py -c test_basic.f90 -m manforge_test_basic
+	cd fortran && $(PY) -m numpy.f2py -c test_basic.f90 -m returnmap_test_basic
 
 ## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
@@ -78,13 +78,13 @@ test-all:
 
 ## Build Docker image with gfortran + Python 3.12
 docker-build:
-	docker build -t manforge-fortran .
+	docker build -t returnmap-fortran .
 
 # Runs as the invoking user so build artifacts in the bind mount stay writable
 # on the host; PY=python bypasses `uv run` because /opt/venv is not writable.
 DOCKER_RUN = docker run --rm --user $$(id -u):$$(id -g) \
 	-v $$(pwd):/workspace -w /workspace -e HOME=/tmp \
-	-e PYTHONPATH=/workspace/src:/workspace/fortran manforge-fortran
+	-e PYTHONPATH=/workspace/src:/workspace/fortran returnmap-fortran
 
 ## Run Fortran build and Fortran benchmark tests inside Docker container
 docker-test:

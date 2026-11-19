@@ -3,9 +3,9 @@ import os
 import pytest
 import autograd.numpy as anp
 
-import manforge  # noqa: F401
+import returnmap  # noqa: F401
 
-from manforge.models import (
+from returnmap.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D, AFKinematic3D, AFKinematicPS,
     AFKinematic1D, OWKinematic3D, OWKinematicPS, OWKinematic1D,
 )
