@@ -10,14 +10,11 @@ tangent fallback — is exercised on every host.
 import numpy as np
 import pytest
 
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.driver import StressDriver
-from manforge.simulation.integrator import (
-    FortranIntegrator,
-    PythonIntegrator,
-    StressIntegrator,
+from manforge.models import J2Isotropic3D
+from manforge.simulation import (
+    StressDriver, FortranIntegrator, PythonIntegrator, StressIntegrator, FieldHistory,
+    FieldType,
 )
-from manforge.simulation.types import FieldHistory, FieldType
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 

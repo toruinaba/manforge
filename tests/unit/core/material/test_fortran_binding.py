@@ -2,13 +2,9 @@
 
 import pytest
 
-from manforge.core.material import MaterialModel
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.core.material.fortran_binding import (
-    FortranBinding,
-    collect_bindings,
-    verified_against_fortran,
-)
+from manforge.core import MaterialModel, FortranBinding, verified_against_fortran
+from manforge.models import J2Isotropic3D
+from manforge.core.material.fortran_binding import collect_bindings
 
 
 def test_decorator_attaches_binding():

@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from manforge.models.yu_kinematic import YUKinematic1D, YUKinematic3D, YUKinematicPS
-from manforge.simulation.integrator import PythonNumericalIntegrator, PythonAnalyticalIntegrator, PythonIntegrator
-from manforge.simulation.driver import MixedDriver, StrainDriver
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.models import YUKinematic1D, YUKinematic3D, YUKinematicPS
+from manforge.simulation import (
+    PythonNumericalIntegrator, PythonAnalyticalIntegrator, PythonIntegrator,
+    MixedDriver, StrainDriver, FieldHistory, FieldType,
+)
 
 from matplotlib import pyplot as plt
 

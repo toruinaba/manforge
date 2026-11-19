@@ -3,16 +3,11 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401
-from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.models import J2Isotropic3D
 from manforge.simulation import (
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+    PythonNumericalIntegrator, PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import (
-    CrosscheckStrainDriver,
-    generate_strain_history,
-)
+from manforge.verification import CrosscheckStrainDriver, generate_strain_history
 
 
 @pytest.fixture

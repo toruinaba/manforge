@@ -136,9 +136,8 @@ the same `call(name, *args)` pattern.
 
 ```python
 import numpy as np
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation import PythonIntegrator
-from manforge.verification import FortranModule
+from manforge.models import J2Isotropic3D
+from manforge.simulation import PythonIntegrator, FortranModule
 
 model   = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 fortran = FortranModule("j2_isotropic_3d")

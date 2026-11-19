@@ -26,19 +26,13 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.models.j2_isotropic import J2Isotropic3D
-from manforge.simulation.integrator import (
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
-    FortranIntegrator,
+from manforge.models import J2Isotropic3D
+from manforge.simulation import (
+    PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
+    FortranIntegrator, FieldHistory, FieldType, FortranModule,
 )
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification import FortranModule
 from manforge.verification import (
-    CrosscheckStrainDriver,
-    CrosscheckStressDriver,
-    generate_strain_history,
+    CrosscheckStrainDriver, CrosscheckStressDriver, generate_strain_history,
 )
 
 
@@ -291,7 +285,7 @@ class TestNegativeCases:
 class TestSingleStepCrosscheck:
 
     def _make_cases(self, model):
-        from manforge.verification.test_cases import estimate_yield_strain
+        from manforge.verification import estimate_yield_strain
         eps_y = estimate_yield_strain(model)
         ntens = model.ntens
         state0 = dict(model.initial_state())

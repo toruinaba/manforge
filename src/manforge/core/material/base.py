@@ -142,7 +142,7 @@ class MaterialModel(ABC):
     using :func:`~manforge.core.state.Implicit` and
     :func:`~manforge.core.state.Explicit`::
 
-        from manforge.core.state import Implicit, Explicit, NTENS, SCALAR
+        from manforge.core import Implicit, Explicit, NTENS, SCALAR
 
         class MyModel(MaterialModel):
             param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]

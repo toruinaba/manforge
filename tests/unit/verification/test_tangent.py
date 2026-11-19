@@ -14,5 +14,5 @@ def test_tangent_module_importable():
 
 
 def test_tangent_checker_importable():
-    from manforge.verification.tangent import TangentChecker
+    from manforge.verification import TangentChecker
     assert callable(TangentChecker)

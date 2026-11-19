@@ -11,12 +11,10 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.verification.jacobian import JacobianChecker, JacobianBlocks
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.models.af_kinematic import AFKinematic3D
-from manforge.models.ow_kinematic import OWKinematic3D
-from manforge.core import Implicit, NTENS, SCALAR
-from manforge.core.material import MaterialModel
+from manforge.verification import JacobianChecker
+from manforge.simulation import JacobianBlocks, PythonIntegrator
+from manforge.models import AFKinematic3D, OWKinematic3D
+from manforge.core import Implicit, NTENS, SCALAR, MaterialModel
 
 
 @pytest.fixture

@@ -16,11 +16,9 @@ import numpy as np
 import autograd.numpy as anp
 
 from manforge.models import YUKinematic3D
-from manforge.simulation.integrator import (
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+from manforge.simulation import (
+    PythonNumericalIntegrator, PythonAnalyticalIntegrator, FieldHistory,
 )
-from manforge.simulation.types import FieldHistory
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,

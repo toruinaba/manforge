@@ -34,7 +34,7 @@ class TestStrainControl:
         (AFKinematic1D, AF), (OWKinematic1D, OW)])
     def test_cyclic_autodiff_models(self, model_cls, params):
         """Autodiff-NR models complete a small cyclic history."""
-        from manforge.simulation.types import FieldHistory
+        from manforge.simulation import FieldHistory
         load = FieldHistory.cyclic_strain([4e-3, -4e-3, 4e-3], n_per_segment=10).data
         out = run_simulation(model_cls, params, load)
         assert out.converged

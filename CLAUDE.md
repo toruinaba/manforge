@@ -29,6 +29,10 @@ There is no linter configured. No CI/CD workflows exist.
 
 manforge is a framework for validating Fortran UMAT (Abaqus user material) constitutive models. Users define a material model in Python; the framework handles return mapping, consistent tangent computation (via autograd), parameter fitting, and cross-validation against compiled Fortran UMAT subroutines. Float64 is enabled globally in `src/manforge/__init__.py`.
 
+### Public import paths
+
+公開の import 元はパッケージ単位の 7 つ: `manforge.core`(モデル定義に要るもの全部 — `MaterialModel` / 状態宣言 / 次元 / `hand_block` / `verified_against_fortran` / 結果型)、`manforge.models`、`manforge.simulation`(integrator / driver / `FieldHistory` / `FortranModule` / `JacobianBlocks`)、`manforge.fitting`、`manforge.verification`(検査のみ)、`manforge.service`、`manforge.utils`。どの名前も 1 つのパッケージの `__all__` にだけ載せる(例外は `ParamMeta`: 宣言側の `core` と、配備側が読む `service`)。README・例・テスト・docstring の例はこの形で書く。サブモジュールのパス(`manforge.core.state` 等)は実装の置き場所で、`src/` 内部の import と、非公開ヘルパを直接試すテストだけが使う。
+
 ### Three-layer design
 
 1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。パラメータは `param_names` が唯一の宣言で、基底の `__init__` が同名のキーワード引数を受け取って属性に入れる(モデルは `__init__` を書かない。全パラメータ必須で既定値なし — UMAT の `PROPS` と同じ規則)。次元は、クラス本体に `dimension = X` と書いたクラスとその子は固定(別の `dimension=` は `TypeError`)、書かないクラスは構築時の `dimension=` で選ぶ。特殊フック(`elastic_predictor` / `elastic_tangent` / `elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。予測子以外のフックは 1 ステップの入力をまとめた `Increment`(`inc.state_n` / `inc.strain_inc` / `inc.trial`、`core/state.py`)を受け取る。フックは位置引数で呼ばれるので、引数リストが違うとクラス定義時に `TypeError`。

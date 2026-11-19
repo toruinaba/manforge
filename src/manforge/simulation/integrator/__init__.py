@@ -18,7 +18,7 @@ fulfil it:
     (requires ``model.user_defined_return_mapping`` to be implemented).
 
 :class:`FortranIntegrator`
-    Wraps a :class:`~manforge.verification.FortranModule` and the four hook
+    Wraps a :class:`~manforge.simulation.FortranModule` and the four hook
     functions that map between Python state dicts and Fortran argument lists.
 
 :class:`SubSteppingIntegrator`

@@ -17,9 +17,11 @@ Strain-controlled example
 --------------------------
 ::
 
-    from manforge.verification import CrosscheckStrainDriver, FortranModule
-    from manforge.simulation import PythonNumericalIntegrator, FortranIntegrator
-    from manforge.simulation.types import FieldHistory, FieldType
+    from manforge.verification import CrosscheckStrainDriver
+    from manforge.simulation import (
+        PythonNumericalIntegrator, FortranIntegrator, FortranModule,
+        FieldHistory, FieldType,
+    )
     import numpy as np
 
     model   = MyModel(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)

@@ -34,8 +34,7 @@ PyPI 公開後は `pip install manforge` (+ extras: `[dev]` / `[examples]` / `[f
 ```python
 import numpy as np
 from manforge.models import J2Isotropic3D
-from manforge.simulation import StrainDriver, PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
@@ -72,6 +71,20 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
     Driver     ──steps──▶  run(load) → DriverResult
                             iter_run(load) → Iterator[DriverStep]
 ```
+
+**import 元は 7 つのパッケージ** — どの名前も 1 つのパッケージから取る:
+
+| パッケージ | 中身 |
+|---|---|
+| `manforge.core` | モデルを書く: `MaterialModel`、状態変数の宣言 (`Implicit` / `Explicit` / `NTENS` / `SCALAR`)、次元 (`SOLID_3D` 等)、`hand_block`、`verified_against_fortran`、結果型 |
+| `manforge.models` | 参照モデル (J2 / 損傷 / AF / OW / YU) |
+| `manforge.simulation` | integrator、driver、載荷履歴 (`FieldHistory`)、`FortranModule` |
+| `manforge.fitting` | `fit_params`、`FitTarget`、`ParameterSpace` |
+| `manforge.verification` | 検査: `JacobianChecker`、`TangentChecker`、`check_bindings`、Crosscheck |
+| `manforge.service` | WebAPI 向けの契約層 |
+| `manforge.utils` | モデル用の補助関数 (smooth 近似、主値分解) |
+
+その下のサブモジュール (`manforge.core.state`、`manforge.simulation.driver` など) はコードの置き場所で、文書化されたインターフェースではない。
 
 ### 3.2 Integrator の種類
 
@@ -153,7 +166,7 @@ model = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80
 
 ```python
 from manforge.models import J2Isotropic
-from manforge.core.dimension import PLANE_STRAIN
+from manforge.core import PLANE_STRAIN
 model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 ```
 
@@ -185,8 +198,8 @@ model = J2IsotropicDamageUnilateral3D(
 ### 4.2 シミュレーション実行
 
 ```python
-from manforge.simulation import StrainDriver, StressDriver, PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation import (
+    StrainDriver, StressDriver, PythonIntegrator, FieldHistory, FieldType)
 
 # ひずみ制御
 result = StrainDriver(PythonIntegrator(model)).run(load)
@@ -224,7 +237,7 @@ for step in StrainDriver(PythonIntegrator(model)).iter_run(load):
 ### 4.3 パラメータフィッティング
 
 ```python
-from manforge.simulation.driver import StrainDriver
+from manforge.simulation import StrainDriver
 from manforge.fitting import FitTarget, ParameterSpace, fit_params
 
 space = ParameterSpace(
@@ -269,7 +282,7 @@ result.params["B"]   # 復元済み
 
 ```python
 from manforge.fitting import FitTarget, Observation
-from manforge.simulation.driver import StressDriver
+from manforge.simulation import StressDriver
 
 targets = [
     FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較
@@ -317,8 +330,7 @@ UMAT の構造と同じ並びになっている — 冒頭で試行状態を計�
 状態変数を `Explicit` として宣言し、`update_state` に閉形式更新を書く。NR はスカラー Δλ のみ解く:
 
 ```python
-from manforge.core import Explicit, SCALAR
-from manforge.core.material import MaterialModel
+from manforge.core import MaterialModel, Explicit, SCALAR
 
 class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
@@ -341,7 +353,7 @@ model = MyModel(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)   # 3D
 **次元は 2 通りで決まる。** クラス本体に `dimension` を書かなければ、構築時の `dimension=` で選ぶ (省略時は 3D)。クラス本体に書くと、そのクラスと子クラスはその次元に固定され、別の次元を渡すと `TypeError` になる。閉形式のリターンマッピングや手導出ブロックのように、代数が特定の次元でしか成り立たないクラスは固定する:
 
 ```python
-from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS
+from manforge.core import PLANE_STRAIN, PLANE_STRESS
 
 class MyModelPS(MyModel):
     dimension = PLANE_STRESS          # 固定
@@ -435,10 +447,10 @@ def elastic_predictor(self, state_n, *, strain_inc):
 
 **弾性接線の手書きスロット — `elastic_tangent(inc)`** — 予測子を override すると、弾性接線は予測子の自動微分で得られる。動かすだけならそれで足りるが、UMAT には式そのものが要る。`elastic_tangent(inc)` に `dσ_trial/dΔε` を書くと、`PythonAnalyticalIntegrator` はそれを使い (未実装なら `NotImplementedError`)、`PythonNumericalIntegrator` は常に予測子を自動微分する。両者を突き合わせれば手導出を検証できる。
 
-主値に依存する量は `manforge.utils.spectral` を使う (`anp.linalg.eigh` の微分は主値が重なる単軸・平面応力・純せん断で NaN になるため):
+主値に依存する量は `manforge.utils` の主値分解の関数を使う (`anp.linalg.eigh` の微分は主値が重なる単軸・平面応力・純せん断で NaN になるため):
 
 ```python
-from manforge.utils.spectral import positive_part, negative_part, positive_part_sq
+from manforge.utils import positive_part, negative_part, positive_part_sq
 sig_pos = positive_part(sigma, self.dimension)        # σ₊ = Σ⟨σ_i⟩ n_i⊗n_i, 接線 P₊ も厳密
 energy  = positive_part_sq(sigma, self.dimension)     # Σ⟨σ_i⟩₊² (Hessian = 2P₊)
 ```
@@ -468,7 +480,7 @@ jac.part["dlambda"]["dlambda"]
    手導出したブロックは、モデル上で `hand_block` を付けて「どのブロックか」を宣言する。メソッド自体は変わらず、直接呼ぶことも `verified_against_fortran` と重ねることもできる:
 
 ```python
-from manforge.core.material import hand_block
+from manforge.core import hand_block
 
 class MyModel(MaterialModel):
     @hand_block("alpha", "stress")                 # ∂R_alpha/∂σ
@@ -522,8 +534,8 @@ uv run manforge list   # 確認
 ```
 
 ```python
-from manforge.simulation import FortranIntegrator
-from manforge.verification import FortranModule, CrosscheckStrainDriver
+from manforge.simulation import FortranIntegrator, FortranModule
+from manforge.verification import CrosscheckStrainDriver
 
 fortran = FortranModule("j2_isotropic_3d")
 fc_int = FortranIntegrator.from_model(fortran, "j2_isotropic_3d", model)

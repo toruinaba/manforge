@@ -12,7 +12,7 @@ Nine of the sixteen blocks; the σ and α rows are left undeclared on purpose.
 
 import numpy as np
 
-from manforge.core.material import hand_block
+from manforge.core import hand_block
 from manforge.models import OWKinematic3D
 
 OW_PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=8000.0, gamma=80.0)

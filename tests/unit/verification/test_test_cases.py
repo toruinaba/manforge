@@ -5,7 +5,7 @@ TODO: cover generate_strain_history shapes, scenario variety, seed reproducibili
 
 import pytest
 from manforge.verification import generate_strain_history
-from manforge.models.j2_isotropic import J2Isotropic3D
+from manforge.models import J2Isotropic3D
 
 
 def test_generate_strain_history_importable():

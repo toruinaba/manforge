@@ -30,9 +30,11 @@ pytest.importorskip(
 
 pytestmark = pytest.mark.fortran
 
-from manforge.simulation.integrator import FortranModule, PythonNumericalIntegrator, PythonAnalyticalIntegrator, FortranIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.verification.crosscheck_driver import CrosscheckStrainDriver
+from manforge.simulation import (
+    FortranModule, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
+    FortranIntegrator, FieldHistory, FieldType,
+)
+from manforge.verification import CrosscheckStrainDriver
 from manforge.models import YUKinematic3D
 
 from .conftest import PARAMS

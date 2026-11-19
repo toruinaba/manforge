@@ -6,13 +6,11 @@ import math
 import numpy as np
 import pytest
 
-from manforge.fitting import fit_params
-from manforge.fitting.objective import FAILURE_PENALTY, FailureLog, build_objective
-from manforge.fitting.space import ParameterSpace
-from manforge.fitting.target import FitTarget, Observation
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.fitting import (
+    fit_params, FAILURE_PENALTY, FailureLog, build_objective, ParameterSpace,
+    FitTarget, Observation,
+)
+from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 
 @pytest.fixture
@@ -60,7 +58,7 @@ def test_objective_rebuilds_the_model_in_its_own_dimension(driver_factory, space
     Rebuilt as 3D instead, the 4-component path would not even fit, and the
     evaluation would score the failure penalty.
     """
-    from manforge.core.dimension import PLANE_STRAIN
+    from manforge.core import PLANE_STRAIN
     from manforge.models import J2Isotropic
 
     template = J2Isotropic(
@@ -163,7 +161,7 @@ def test_failed_evaluation_returns_penalty(model, target, space):
 
 def test_nonconverged_value_is_penalised_like_a_raise(model, target, space):
     """Non-convergence reported as a value scores the same as one that raises."""
-    from manforge.simulation.integrator import PythonNumericalIntegrator
+    from manforge.simulation import PythonNumericalIntegrator
 
     def reporting(integrator):
         return StrainDriver(PythonNumericalIntegrator(

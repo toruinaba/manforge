@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import numpy.testing as npt
 from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
+from manforge.core import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
 from manforge.verification import make_increment
 
 PARAMS = dict(

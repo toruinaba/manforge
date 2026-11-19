@@ -15,11 +15,12 @@ run in the fast suite.
 import numpy as np
 import pytest
 
-from manforge.simulation.driver import StrainDriver, StressDriver
-from manforge.simulation.integrator import PythonIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
-from manforge.fitting import FitTarget, Observation, ParameterSpace
-from manforge.fitting.optimizer import fit_params, FitResult
+from manforge.simulation import (
+    StrainDriver, StressDriver, PythonIntegrator, FieldHistory, FieldType,
+)
+from manforge.fitting import (
+    FitTarget, Observation, ParameterSpace, fit_params, FitResult,
+)
 
 
 # ---------------------------------------------------------------------------

@@ -12,13 +12,12 @@ import pytest
 
 import manforge  # noqa: F401 — enables float64
 from manforge.models import (
-    J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,
-    J2IsotropicDamageUnilateral3D, J2IsotropicDamageUnilateralPS,
-    J2IsotropicDamageUnilateral1D,
+    J2Isotropic3D, J2IsotropicPS, J2Isotropic1D, J2IsotropicDamageUnilateral3D,
+    J2IsotropicDamageUnilateralPS, J2IsotropicDamageUnilateral1D,
 )
-from manforge.simulation.driver import StrainDriver
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation import (
+    StrainDriver, PythonNumericalIntegrator, FieldHistory, FieldType,
+)
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 DP = dict(S=0.5, s=1.0, p_D=0.005, h=0.2)

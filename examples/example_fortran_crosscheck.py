@@ -32,17 +32,11 @@ sys.path.insert(0, os.path.abspath(_fortran_dir))
 import manforge  # noqa: F401 — enables float64
 from manforge.models import J2Isotropic3D
 from manforge.simulation import (
-    FortranIntegrator,
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    StressDriver,
+    FortranIntegrator, PythonIntegrator, PythonNumericalIntegrator, StressDriver,
+    FieldHistory, FieldType, FortranModule,
 )
-from manforge.simulation.types import FieldHistory, FieldType
 from manforge.verification import (
-    CrosscheckStrainDriver,
-    FortranModule,
-    JacobianChecker,
-    generate_strain_history,
+    CrosscheckStrainDriver, JacobianChecker, generate_strain_history,
 )
 
 try:

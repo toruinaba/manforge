@@ -2,8 +2,7 @@
 
 Usage in a model class::
 
-    from manforge.core import Implicit, Explicit, NTENS, SCALAR
-    from manforge.core.material import MaterialModel
+    from manforge.core import MaterialModel, Implicit, Explicit, NTENS, SCALAR
 
     class OWKinematic3D(MaterialModel):
         stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown

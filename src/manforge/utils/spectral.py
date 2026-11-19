@@ -47,12 +47,16 @@ The scalar brackets (:func:`macaulay_sq`, :func:`neg_macaulay_sq`, used for
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import autograd.numpy as anp
 import numpy as np
 from autograd.extend import defvjp, primitive
 
-from manforge.core.dimension import StressDimension
+if TYPE_CHECKING:
+    # Annotations only.  manforge.core.dimension imports manforge.utils, so a
+    # runtime import here would be circular.
+    from manforge.core.dimension import StressDimension
 
 #: Value taken by the Heaviside step at 0 (provisional; see module docstring).
 DEFAULT_HEAVISIDE_AT_ZERO: float = 0.5

@@ -6,12 +6,11 @@ import pytest
 import manforge  # noqa: F401 — enables float64
 from manforge.models import (
     J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,
-    J2IsotropicDamageCrackClosure1D,
-    J2IsotropicDamageUnilateral3D, J2IsotropicDamageUnilateralPS,
-    J2IsotropicDamageUnilateral1D,
+    J2IsotropicDamageCrackClosure1D, J2IsotropicDamageUnilateral3D,
+    J2IsotropicDamageUnilateralPS, J2IsotropicDamageUnilateral1D,
 )
-from manforge.simulation.integrator import PythonNumericalIntegrator
-from manforge.verification.tangent import TangentChecker
+from manforge.simulation import PythonNumericalIntegrator
+from manforge.verification import TangentChecker
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0, S=0.5, s=1.0, p_D=0.01)
 DIRS = {6: [1.0, -0.5, -0.5, 0.6, 0.0, 0.3], 3: [1.0, 0.3, 0.4], 1: [1.0]}

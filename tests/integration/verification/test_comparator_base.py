@@ -4,8 +4,7 @@ TODO: add Comparator subclass contract tests beyond those in test_base.py.
 """
 
 import pytest
-from manforge.verification.comparator_base import Comparator
-from manforge.verification import CaseResult, ComparisonResult
+from manforge.verification import Comparator, CaseResult, ComparisonResult
 
 
 def test_comparator_base_importable():

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import manforge  # noqa: F401 — enables float64
-from manforge.core.dimension import SOLID_3D
+from manforge.core import SOLID_3D
 from manforge.models import (
     J2Isotropic, J2IsotropicDamage, J2IsotropicDamage3D, J2IsotropicDamagePS,
     J2IsotropicDamage1D,

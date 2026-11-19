@@ -6,10 +6,8 @@ TODO: cover _method="auto"/"numerical_newton"/"user_defined" selection,
 
 import numpy as np
 import pytest
-from manforge.simulation.integrator import (
-    PythonIntegrator,
-    PythonNumericalIntegrator,
-    PythonAnalyticalIntegrator,
+from manforge.simulation import (
+    PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
 )
 from manforge.models import J2Isotropic3D
 
