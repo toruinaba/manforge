@@ -57,10 +57,10 @@ def _stats(times):
 
 def _make_driver_step():
     import numpy as np
-    from manforge.models.j2_isotropic import J2Isotropic3D
-    from manforge.simulation.driver import StrainDriver
-    from manforge.simulation.integrator import PythonIntegrator
-    from manforge.simulation.types import FieldHistory, FieldType
+    from manforge.models import J2Isotropic3D
+    from manforge.simulation import (
+        StrainDriver, PythonIntegrator, FieldHistory, FieldType,
+    )
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     strain_history = np.zeros((40, 6))
@@ -81,8 +81,8 @@ def _make_driver_step():
 
 def _make_vector_nr():
     import numpy as np
-    from manforge.models.ow_kinematic import OWKinematic3D
-    from manforge.simulation.integrator import PythonIntegrator
+    from manforge.models import OWKinematic3D
+    from manforge.simulation import PythonIntegrator
 
     model = OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=1.0)
     integrator = PythonIntegrator(model)
@@ -106,9 +106,9 @@ def _make_vector_nr():
 
 def _make_fd_tangent():
     import numpy as np
-    from manforge.models.j2_isotropic import J2Isotropic3D
-    from manforge.simulation.integrator import PythonIntegrator
-    from manforge.verification.tangent import TangentChecker
+    from manforge.models import J2Isotropic3D
+    from manforge.simulation import PythonIntegrator
+    from manforge.verification import TangentChecker
 
     model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     integrator = PythonIntegrator(model)

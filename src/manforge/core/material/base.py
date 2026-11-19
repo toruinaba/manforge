@@ -879,7 +879,7 @@ class MaterialModel(ABC):
         Returns
         -------
         State
-            Immutable dict-wrapper with attribute-style access.
+            Read-only dict-wrapper; fields are read with ``state["name"]``.
         """
         required = set(self.state_names)
         data = _make(required, f"{type(self).__name__}.make_state", kwargs)
@@ -1004,10 +1004,6 @@ class MaterialModel(ABC):
     def vonmises_norm(self, s: StressVec) -> "Scalar":
         """Von Mises norm of a deviatoric tensor; delegates to :meth:`~manforge.core.StressDimension.vonmises_norm`."""
         return self.dimension.vonmises_norm(s)
-
-    def _missing_dev_components(self, s: StressVec) -> StressVec:
-        """Unstored deviatoric direct components; delegates to :meth:`~manforge.core.StressDimension.missing_dev_components`."""
-        return self.dimension.missing_dev_components(s)
 
     def deviatoric_inner_product(self, s: StressVec, t: StressVec) -> Scalar:
         """Double contraction s:t for deviatoric tensors; delegates to :meth:`~manforge.core.StressDimension.deviatoric_inner_product`."""

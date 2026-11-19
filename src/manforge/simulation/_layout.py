@@ -111,12 +111,6 @@ class ResidualLayout:
     # Slice helpers
     # ------------------------------------------------------------------
 
-    def stress_slice(self) -> slice:
-        return slice(0, self.ntens)
-
-    def dlambda_index(self) -> int:
-        return self.ntens
-
     def state_slice(self, name: str) -> slice:
         """Return the slice of the implicit-state block for *name*.
 

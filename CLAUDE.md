@@ -45,7 +45,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 ### Three-layer design
 
 1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。パラメータは `param_names` が唯一の宣言で、基底の `__init__` が同名のキーワード引数を受け取って属性に入れる(モデルは `__init__` を書かない。全パラメータ必須で既定値なし — UMAT の `PROPS` と同じ規則)。次元は、クラス本体に `dimension = X` と書いたクラスとその子は固定(別の `dimension=` は `TypeError`)、書かないクラスは構築時の `dimension=` で選ぶ。特殊フック(`elastic_predictor` / `elastic_tangent` / `elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。予測子以外のフックは 1 ステップの入力をまとめた `Increment`(`inc.state_n` / `inc.strain_inc` / `inc.trial`、`core/state.py`)を受け取る。フックは位置引数で呼ばれるので、引数リストが違うとクラス定義時に `TypeError`。
-2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。結果(`StressUpdateResult`)は自分の `Increment` を持つので、ヤコビアンの内省は `JacobianChecker(model).compute(result)` だけで済む。NR 経路(スカラー/ベクトル)は宣言から自動選択。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。既定は全層(integrator / fitting / service)で `"exact"`。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
+2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。結果(`StressUpdateResult`)は自分の `Increment` を持つので、ヤコビアンの内省は `JacobianChecker(model).compute(result)` だけで済む。NR の未知数は常に `[σ, Δλ, implicit 状態]`(explicit 状態は `update_state` で求め、未知数に入らない。σ を `Implicit` と宣言するのは σ 行の残差を自分で書くときで、宣言しなければ既定の関連流れの残差が使われる)。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。既定は全層(integrator / fitting / service)で `"exact"`。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
 3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`。状態量の履歴は要求せず `DriverResult.history(name)` で取る)、`fitting/`(`fit_params(model, targets, space, *, driver_factory=...)` の 1 形式 + `ParameterSpace` / `FitTarget` / `Observation` / metrics。各評価のモデルは `model.with_params(...)`)、`verification/`(`JacobianChecker`(`check_hand_blocks` / `check_solution`)/ `TangentChecker` / `crosscheck` / `check_bindings`)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation`。Web 依存ゼロ、plain I/O、非収束は値で返す)。
 
 ### Voigt convention(横断契約 — 全層が従う)
@@ -63,7 +63,7 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### 非収束の扱い(スイッチは 1 つ、層ごとに受け止め方が違う)
 
-スイッチは integrator の `raise_on_nonconverged` だけ。driver は自分の外側 NR の失敗にも同じ設定を使い、独自のスイッチを持たない。integrator の契約(`StressIntegrator` Protocol: `dimension` / `ntens` / `raise_on_nonconverged` / `initial_state` / `elastic_tangent` / `stress_update`)は `simulation/integrator/base.py`。
+スイッチは integrator の `raise_on_nonconverged` だけ。driver は自分の外側 NR の失敗にも同じ設定を使い、独自のスイッチを持たない。integrator の契約(`StressIntegrator` Protocol: `dimension` / `ntens` / `raise_on_nonconverged` / `initial_state` / `increment` / `elastic_tangent` / `stress_update`)は `simulation/integrator/base.py`。
 
 - **Integrator**: 既定 raise。`raise_on_nonconverged=False` で `converged=False` を返す。Δλ<0 は KKT 違反なので非収束扱い(手書き経路の結果も同じ条件で確かめる: Δλ<0 と非有限の値は、`converged=True` と報告されていても非収束)。許容値はスケール不変(`tol × max(1, ‖σ_trial‖_∞)`)。
 - **Driver**: `iter_run` は非収束 step を yield して停止(非収束イテレートで状態を進めない)。`run` は完了した step だけを返し、`DriverResult.converged` / `failed_step` で知らせる(失敗した step は配列に入れない)。
@@ -72,11 +72,11 @@ manforge is a framework for validating Fortran UMAT (Abaqus user material) const
 
 ### Test layout
 
-`tests/{unit,integration}/` mirrors `src/manforge/` 1:1 at the file level. `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
+`tests/{unit,integration}/` follow the module layout of `src/manforge/`: a module's tests live in `test_<module>.py` at the mirrored path, under `unit/` or `integration/` (most modules have one of the two, not both). A few test files have no single source module (`test_public_api.py`, `test_flow.py`, `test_kinematic_common.py`). `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
 
 | directory | purpose |
 |---|---|
-| `tests/unit/` | Pure-logic tests — no integrator, no driver |
+| `tests/unit/` | Tests of one module's own logic. Most need no integrator or driver; `unit/fitting/` does run them (an objective cannot be evaluated otherwise) |
 | `tests/integration/` | Orchestration tests — integrator + driver in the loop |
 | `tests/e2e/` | CLI subprocess + fitting pipeline smoke |
 | `tests/benchmarks/` | Numerical equivalence harnesses only |

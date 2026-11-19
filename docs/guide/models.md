@@ -2,15 +2,21 @@
 
 モデルファミリごとに親クラス (物理) + 次元特化の具象クラスがある:
 
+| ファミリ | クラス (`*` は `3D` / `PS` / `1D`) | 内容 |
+|---|---|---|
+| J2 等方硬化 | `J2Isotropic*` | 3D と 1D は閉形式のリターンマッピングを持つ |
+| J2 + Lemaitre 損傷 | `J2IsotropicDamage*` | 弱連成 |
+| 同上 + crack closure | `J2IsotropicDamageCrackClosure*` | 損傷の駆動力 Y を主値で引張/圧縮に分ける |
+| 同上 + 準片側 | `J2IsotropicDamageUnilateral*` | 応力も分解し、圧縮で剛性が回復する |
+| Armstrong-Frederick | `AFKinematic*` | 移動硬化 (閉形式で更新) |
+| Ohno-Wang | `OWKinematic*` | 移動硬化 (implicit な発展則) |
+| Yoshida-Uemori | `YUKinematic*` | 二曲面 + 停留曲面。3D と PS は手書きの NR と手導出ヤコビアンを持つ |
+
+各ファミリには、次元を固定しない親クラス (`J2Isotropic`、`AFKinematic` など) もある。
+
 ```python
-from manforge.models import (
-    J2Isotropic3D, J2IsotropicPS, J2Isotropic1D,    # J2 等方硬化
-    J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,  # J2 + Lemaitre 損傷 (弱連成)
-    J2IsotropicDamageCrackClosure3D, ...,           # 同上 + 主値分解による引張/圧縮分離 (Y のみ)
-    J2IsotropicDamageUnilateral3D, ...,             # 同上 + 応力も分解 (Lemaitre 準片側, 圧縮で剛性回復)
-    AFKinematic3D, AFKinematicPS, AFKinematic1D,    # Armstrong-Frederick
-    OWKinematic3D, OWKinematicPS, OWKinematic1D,    # Ohno-Wang
-)
+from manforge.models import AFKinematic3D
+
 model = AFKinematic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=8_000.0, gamma=80.0)
 ```
 

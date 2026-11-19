@@ -22,6 +22,13 @@ class PythonIntegrator(_PythonIntegratorBase):
         NR convergence tolerance (default 1e-10).
     raise_on_nonconverged : bool, optional
         Raise ``RuntimeError`` if NR does not converge (default ``True``).
+    nr_jacobian : {"exact", "broyden"}, optional
+        ``"exact"`` (default) re-evaluates the autodiff Jacobian at every NR
+        iteration.  ``"broyden"`` evaluates it once per step and applies
+        rank-1 updates, falling back to an exact re-evaluation when the
+        residual stops decreasing; several times faster on models without a
+        hand-written solver, at the cost of one or two more iterations.  The
+        consistent tangent is exact either way.
     """
 
     _method: ClassVar[Literal["auto", "numerical_newton", "user_defined"]] = "auto"

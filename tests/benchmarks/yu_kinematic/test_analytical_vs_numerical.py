@@ -4,8 +4,9 @@ Verifies that PythonAnalyticalIntegrator (closed-form) and
 PythonNumericalIntegrator (autodiff NR) produce identical results for
 YUKinematic3D across a variety of strain histories.
 
-YUKinematic1D has no analytical path (user_defined_return_mapping is 3D-only),
-so 1D coverage is smoke-only (autograd convergence + state monotonicity).
+YUKinematic1D has no analytical path, so 1D coverage is smoke-only (autograd
+convergence + state monotonicity).  YUKinematicPS has one as well; it is
+covered in test_plane_stress_p.py.
 
 Both routes now share one stagnation gate — smooth_heaviside(g_stag + 1e-10),
 re-evaluated every NR iteration — so state and stress agree to machine

@@ -23,7 +23,7 @@ class FortranBinding:
         Exact subroutine name as passed to :meth:`~manforge.simulation.FortranModule.call`.
     test:
         Pytest node id of the test that verifies this binding
-        (e.g. ``"tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness"``).
+        (e.g. ``"tests/integration/verification/test_fortran_check.py::test_check_bindings_elastic_stiffness"``).
         Not executed at runtime — recorded as a machine-readable pointer.
     notes:
         Free-form annotation (e.g. sign convention differences).
@@ -46,9 +46,9 @@ def verified_against_fortran(
 
         @verified_against_fortran(
             "j2_isotropic_3d_elastic_stiffness",
-            test="tests/fortran/test_j2_bindings.py::test_check_bindings_elastic_stiffness",
+            test="tests/integration/verification/test_fortran_check.py::test_check_bindings_elastic_stiffness",
         )
-        def elastic_stiffness(self):
+        def elastic_stiffness(self, state):
             ...
     """
     binding = FortranBinding(subroutine=subroutine, test=test, notes=notes)

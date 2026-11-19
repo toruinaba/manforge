@@ -7,13 +7,13 @@ All drivers share the same interface via :class:`DriverBase`:
   :class:`~manforge.simulation.FieldHistory` containing the prescribed
   loading history (strain or stress) at each :meth:`run` / :meth:`iter_run` call.
 * Output — :class:`~manforge.simulation.DriverResult` containing
-  stress and strain at every step, plus any explicitly requested state
-  variables.
+  stress and strain at every step; the history of any state variable is
+  read from it afterwards with ``result.history(name)``.
 
 Conventions
 -----------
-- Stress and strain arrays use the engineering-shear Voigt convention:
-    σ, ε = [11, 22, 33, 12, 13, 23]
+- Stress and strain arrays use the Voigt order [11, 22, 33, 12, 13, 23];
+  shear is physical in stress and engineering (γ = 2ε) in strain.
 - *Cumulative* quantities are the input; increments are computed internally.
 - Drivers require a :class:`~manforge.simulation.StressIntegrator`
   at construction time.  Wrap bare ``MaterialModel`` objects with

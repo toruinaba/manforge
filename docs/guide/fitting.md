@@ -46,7 +46,7 @@ result.params["B"]   # 復元済み
 
 ```python
 from manforge.fitting import FitTarget, Observation
-from manforge.simulation import StressDriver
+from manforge.simulation import FieldHistory, FieldType, StressDriver
 
 targets = [
     FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較

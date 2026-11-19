@@ -2,7 +2,8 @@
 
 YUKinematicPS stores in-plane tensor components with the 33 component
 identically zero and routes deviatoric contractions through PLANE_STRESS_P's
-P metric.  It is solved purely by the framework autograd path.
+P metric.  The axes below use the framework autograd path only; the
+hand-derived route the model also carries is checked in the last section.
 
 Four independent axes, none of which needs a hand-derived Jacobian:
 

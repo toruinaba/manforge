@@ -3,8 +3,8 @@
 This model is the canonical example of a *genuinely implicit* hardening law
 in manforge.  Unlike the standard Armstrong-Frederick model, the backward-Euler
 discretization of the Ohno-Wang evolution equation cannot be solved in closed
-form, so the model overrides ``state_residual`` and triggers the vector NR path
-automatically.
+form, so the model declares its states ``Implicit`` and writes
+``state_residual``; they join σ and Δλ as Newton-Raphson unknowns.
 
 Model parameters
 ----------------
@@ -53,7 +53,7 @@ per-dimension arithmetic.
 Notes
 -----
 * gamma=0 reduces to Prager's linear kinematic hardening (same limit as AF).
-* The plastic increment is always solved via the vector NR (σ is Implicit).
+* σ, α and ep are all Newton-Raphson unknowns: ``x = [σ, Δλ, α, ep]``.
 """
 
 from manforge.core.material import MaterialModel, ParamMeta
@@ -68,7 +68,7 @@ class OWKinematic(MaterialModel):
     pre-built concrete classes (:class:`OWKinematic3D`, :class:`OWKinematicPS`,
     :class:`OWKinematic1D`), which fix it.
 
-    Uses the vector NR path (σ, α, ep all implicit).
+    σ, α and ep are implicit: the Newton-Raphson unknowns are ``[σ, Δλ, α, ep]``.
 
     Parameters
     ----------
@@ -116,7 +116,7 @@ class OWKinematic(MaterialModel):
 class OWKinematic3D(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for full-rank stress states.
 
-    Uses the vector NR path (σ, α, ep all implicit).
+    σ, α and ep are implicit: the Newton-Raphson unknowns are ``[σ, Δλ, α, ep]``.
 
     Parameters
     ----------
@@ -130,7 +130,7 @@ class OWKinematic3D(OWKinematic):
 class OWKinematicPS(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for plane-stress elements.
 
-    Uses the vector NR path (σ, α, ep all implicit).
+    σ, α and ep are implicit: the Newton-Raphson unknowns are ``[σ, Δλ, α, ep]``.
 
     Parameters
     ----------
@@ -144,7 +144,7 @@ class OWKinematicPS(OWKinematic):
 class OWKinematic1D(OWKinematic):
     """J2 + Ohno-Wang kinematic hardening for uniaxial elements.
 
-    Uses the vector NR path (σ, α, ep all implicit).
+    σ, α and ep are implicit: the Newton-Raphson unknowns are ``[σ, Δλ, α, ep]``.
 
     The stored ``alpha`` is the deviatoric component α11_dev.  The effective
     backstress (yield-surface centre) is α_eff = (3/2)·α11_dev.

@@ -50,8 +50,8 @@ class FitResult:
         Free-variable values at each optimiser callback (populated only when
         ``method="L-BFGS-B"`` or ``"Nelder-Mead"``; empty otherwise).
     n_failed : int
-        Evaluations the model could not complete, scored as ``inf`` so the
-        optimiser avoids that region.  A nonzero count is not itself a problem
+        Evaluations the model could not complete, scored with the finite
+        penalty ``FAILURE_PENALTY`` so the optimiser avoids that region.  A nonzero count is not itself a problem
         — the parameter box can legitimately include unsolvable values — but a
         large fraction of ``n_iter`` means the search spent its budget there,
         so tighten the bounds or revisit the initial values.
@@ -179,11 +179,11 @@ def fit_params(
         arguments.  May be ``None`` only if every target carries its own.
     method : str
         Optimisation algorithm:
-        - ``"L-BFGS-B"``              — gradient-free quasi-Newton (default)
+        - ``"L-BFGS-B"``              — bounded quasi-Newton, gradient by finite differences (default)
         - ``"Nelder-Mead"``           — simplex, no bounds
         - ``"differential_evolution"``— global stochastic (slow but robust)
     max_iter : int
-        Maximum optimiser iterations.  Set small (e.g. 2) to keep tests fast.
+        Maximum optimiser iterations.
     tol : float or None
         The optimiser's convergence tolerance (not the return-mapping NR's,
         which belongs to the integrator): passed to its primary tolerance
