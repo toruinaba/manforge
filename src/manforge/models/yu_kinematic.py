@@ -2,7 +2,7 @@ from copy import deepcopy
 import numpy as np
 import autograd.numpy as anp
 from manforge.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
-from manforge.core.material import MaterialModel, verified_against_fortran
+from manforge.core.material import MaterialModel, hand_block, verified_against_fortran
 from manforge.core.result import ReturnMappingResult
 from manforge.core.state import Explicit, Implicit, NTENS, SCALAR
 from manforge.core.dimension import (
@@ -658,6 +658,7 @@ class YUKinematicPS(YUKinematic):
         r_vector = anp.hstack((R_stress, R_yield, R_theta, R_beta))
         return r_vector
 
+    @hand_block("dlambda", "stress")
     def calc_fy_fs(self, state):
         stress = state["stress"]
         beta = state["beta"]
@@ -666,6 +667,7 @@ class YUKinematicPS(YUKinematic):
         eta = stress - theta - beta
         return self.P @ eta
 
+    @hand_block("dlambda", "theta")
     def calc_fy_ft(self, state):
         stress = state["stress"]
         beta = state["beta"]
@@ -674,6 +676,7 @@ class YUKinematicPS(YUKinematic):
         eta = stress - theta - beta
         return -self.P @ eta
 
+    @hand_block("dlambda", "beta")
     def calc_fy_fb(self, state):
         stress = state["stress"]
         beta = state["beta"]
@@ -682,21 +685,26 @@ class YUKinematicPS(YUKinematic):
         eta = stress - theta - beta
         return -self.P @ eta
 
+    @hand_block("dlambda", "dlambda")
     def calc_fy_fl(self, state):
         return 0.0
 
+    @hand_block("stress", "stress")
     def calc_fe_fs(self, state, dlambda, state_n):
         C = self.elastic_stiffness(state)
         return np.eye(3) + dlambda * C @ self.P
 
+    @hand_block("stress", "theta")
     def calc_fe_ft(self, state, dlambda, state_n):
         C = self.elastic_stiffness(state)
         return - dlambda * C @ self.P
 
+    @hand_block("stress", "beta")
     def calc_fe_fb(self, state, dlambda, state_n):
         C = self.elastic_stiffness(state)
         return - dlambda * C @ self.P
 
+    @hand_block("stress", "dlambda")
     def calc_fe_fl(self, state, dlambda, state_n):
         eps_eq = state["eps_eq"]
         eta = state["stress"] - state["beta"] - state["theta"]
@@ -718,11 +726,13 @@ class YUKinematicPS(YUKinematic):
             state_n["theta_max"] - (self.B - self.Y)
         )
 
+    @hand_block("theta", "stress")
     def calc_ft_fs(self, state, dlambda, state_n):
         a = self.B + state["R"] - self.Y
         C_k = self._C_k(state_n)
         return - 2 / 3 * C_k * a * dlambda * np.eye(3)
 
+    @hand_block("theta", "theta")
     def calc_ft_ft(self, state, dlambda, state_n):
         theta = state["theta"]
         theta_bar = self.vonmises_norm(theta)
@@ -737,11 +747,13 @@ class YUKinematicPS(YUKinematic):
         dthb_dth = np.sqrt(1.5) * self.P @ theta / smooth_sqrt(self.deviatoric_inner_product(theta, theta))
         return f1 * np.eye(3) + f2 * np.outer(theta, dthb_dth)
 
+    @hand_block("theta", "beta")
     def calc_ft_fb(self, state, dlambda, state_n):
         a = self.B + state["R"] - self.Y
         C_k = self._C_k(state_n)
         return 2 / 3 * C_k * a * dlambda * np.eye(3)
 
+    @hand_block("theta", "dlambda")
     def calc_ft_fl(self, state, dlambda, state_n):
         stress = state["stress"]
         beta = state["beta"]
@@ -769,15 +781,19 @@ class YUKinematicPS(YUKinematic):
         )
         return f1 * eta + f2 * eta + f3 * theta
 
+    @hand_block("beta", "stress")
     def calc_fb_fs(self, state, dlambda):
         return - 2 / 3 * self.k * self.b * dlambda * np.eye(3)
 
+    @hand_block("beta", "theta")
     def calc_fb_ft(self, state, dlambda):
         return 2 / 3 * self.k * self.b * dlambda * np.eye(3)
 
+    @hand_block("beta", "beta")
     def calc_fb_fb(self, state, dlambda):
         return (1 + 2 / 3 * self.k * self.b * dlambda + 2 / 3 * self.k * self.Y * dlambda) * np.eye(3)
 
+    @hand_block("beta", "dlambda")
     def calc_fb_fl(self, state, dlambda):
         stress = state["stress"]
         beta = state["beta"]

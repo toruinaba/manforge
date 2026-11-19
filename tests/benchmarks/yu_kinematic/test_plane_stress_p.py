@@ -534,29 +534,6 @@ def test_stress_row_matches_closed_form_when_stiffness_is_constant():
 # reference: it is itself pinned against finite differences above.
 # ---------------------------------------------------------------------------
 
-# (row, col, callable) for every block of the 10x10 PS Jacobian.
-# Blocks that need theta_max take state_n and read it from there themselves,
-# matching calc_residual — so these are called with the converged state as-is.
-_BLOCKS = [
-    ("dlambda", "stress", lambda m, s, sn, dl: m.calc_fy_fs(s)),
-    ("dlambda", "theta", lambda m, s, sn, dl: m.calc_fy_ft(s)),
-    ("dlambda", "beta", lambda m, s, sn, dl: m.calc_fy_fb(s)),
-    ("dlambda", "dlambda", lambda m, s, sn, dl: m.calc_fy_fl(s)),
-    ("stress", "stress", lambda m, s, sn, dl: m.calc_fe_fs(s, dl, sn)),
-    ("stress", "theta", lambda m, s, sn, dl: m.calc_fe_ft(s, dl, sn)),
-    ("stress", "beta", lambda m, s, sn, dl: m.calc_fe_fb(s, dl, sn)),
-    ("stress", "dlambda", lambda m, s, sn, dl: m.calc_fe_fl(s, dl, sn)),
-    ("theta", "stress", lambda m, s, sn, dl: m.calc_ft_fs(s, dl, sn)),
-    ("theta", "theta", lambda m, s, sn, dl: m.calc_ft_ft(s, dl, sn)),
-    ("theta", "beta", lambda m, s, sn, dl: m.calc_ft_fb(s, dl, sn)),
-    ("theta", "dlambda", lambda m, s, sn, dl: m.calc_ft_fl(s, dl, sn)),
-    ("beta", "stress", lambda m, s, sn, dl: m.calc_fb_fs(s, dl)),
-    ("beta", "theta", lambda m, s, sn, dl: m.calc_fb_ft(s, dl)),
-    ("beta", "beta", lambda m, s, sn, dl: m.calc_fb_fb(s, dl)),
-    ("beta", "dlambda", lambda m, s, sn, dl: m.calc_fb_fl(s, dl)),
-]
-
-
 def _plastic_steps(model, peaks, n_per_segment, driven_idx=0):
     """Yield (state_new, state_n, step) for every plastic step of a history."""
     driver = MixedDriver(
@@ -580,35 +557,26 @@ def _plastic_steps(model, peaks, n_per_segment, driven_idx=0):
 def test_calc_blocks_match_autograd(peaks, driven_idx):
     """Every hand-derived Jacobian block must match the autograd Jacobian.
 
-    Errors are collected across all blocks and all steps rather than aborting
-    on the first mismatch — a single wrong block otherwise hides behind
+    The blocks are the ``calc_f*_f*`` methods YUKinematicPS declares with
+    ``hand_block`` — all 16 of the 10x10 PS Jacobian.  ``check_hand_blocks``
+    collects the worst error per block across all steps rather than aborting
+    on the first mismatch: a single wrong block otherwise hides behind
     whichever one happens to fail first.
 
     Driving component 2 (shear) as well as 0 matters here: under uniaxial
     loading a ×2 shear-convention error in a P-metric term stays invisible.
     """
     model = YUKinematicPS(**PARAMS)
-    checker = JacobianChecker(model)
-    worst = {}
-    n_steps = 0
-
-    for state, state_n, step in _plastic_steps(model, peaks, 25, driven_idx):
-        n_steps += 1
-        blocks = checker.compute(step)
-        for row, col, fn in _BLOCKS:
-            ref = np.asarray(blocks.part[row][col], dtype=float)
-            got = np.asarray(fn(model, state, state_n, step.dlambda), dtype=float)
-            err = np.abs(got - ref).max() / max(np.abs(ref).max(), 1.0)
-            key = f"{row}::{col}"
-            worst[key] = max(worst.get(key, 0.0), err)
-
-    assert n_steps > 0, "history produced no plastic steps"
-    bad = {k: v for k, v in worst.items() if v > 1e-8}
-    assert not bad, (
-        f"{len(bad)}/{len(_BLOCKS)} blocks disagree with autograd over "
-        f"{n_steps} plastic steps: "
-        + ", ".join(f"{k}={v:.3e}" for k, v in sorted(bad.items(), key=lambda kv: -kv[1]))
+    driver = MixedDriver(
+        PythonNumericalIntegrator(model), prescribed_strain_idx=[driven_idx]
     )
+    result = driver.run(FieldHistory.cyclic_strain(peaks, n_per_segment=25, ntens=1))
+
+    report = JacobianChecker(model).check_hand_blocks(result.step_results, tol=1e-8)
+
+    assert report.undeclared == [], "the PS Jacobian is fully hand-derived"
+    assert report.n_declared == 16
+    assert report.passed, report.summary()
 
 
 def test_calc_ft_fl_gates_on_stagnation():
