@@ -2,9 +2,9 @@
 
 import pytest
 
-from manforge.core import MaterialModel, FortranBinding, verified_against_fortran
-from manforge.models import J2Isotropic3D
-from manforge.core.material.fortran_binding import collect_bindings
+from returnmap.core import MaterialModel, FortranBinding, verified_against_fortran
+from returnmap.models import J2Isotropic3D
+from returnmap.core.material.fortran_binding import collect_bindings
 
 
 def test_decorator_attaches_binding():
@@ -83,7 +83,7 @@ def test_recorded_test_pointers_exist():
     import pathlib
     import re
 
-    import manforge.models as models
+    import returnmap.models as models
 
     root = pathlib.Path(__file__).resolve().parents[4]
     broken = []

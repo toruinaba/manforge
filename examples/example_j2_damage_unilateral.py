@@ -16,11 +16,11 @@ Usage
 
 import numpy as np
 
-from manforge.models import (
+from returnmap.models import (
     J2IsotropicDamageCrackClosure1D, J2IsotropicDamageUnilateral1D,
 )
-from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
-from manforge.verification import check_tangent
+from returnmap.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
+from returnmap.verification import check_tangent
 
 try:
     import matplotlib

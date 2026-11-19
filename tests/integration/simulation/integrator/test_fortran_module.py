@@ -3,20 +3,20 @@
 Absorbed from tests/fortran/test_fortran_basic.py.
 
 Tests that the basic Fortran elastic_stress / elastic_stiffness subroutines
-(compiled from fortran/test_basic.f90 as module ``manforge_test_basic``) agree
+(compiled from fortran/test_basic.f90 as module ``returnmap_test_basic``) agree
 with the Python reference to floating-point precision.
 
 Build before running:
-    uv run manforge build fortran/test_basic.f90 --name manforge_test_basic
+    uv run returnmap build fortran/test_basic.f90 --name returnmap_test_basic
 """
 
 import numpy as np
 import pytest
 
 mod = pytest.importorskip(
-    "manforge_test_basic",
-    reason="manforge_test_basic not compiled — run: "
-           "uv run manforge build fortran/test_basic.f90 --name manforge_test_basic",
+    "returnmap_test_basic",
+    reason="returnmap_test_basic not compiled — run: "
+           "uv run returnmap build fortran/test_basic.f90 --name returnmap_test_basic",
 )
 
 pytestmark = pytest.mark.fortran

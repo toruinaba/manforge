@@ -33,7 +33,7 @@ jac.part["dlambda"]["dlambda"]
    手導出したブロックは、モデル上で `hand_block` を付けて「どのブロックか」を宣言する。メソッド自体は変わらず、直接呼ぶことも `verified_against_fortran` と重ねることもできる:
 
 ```python
-from manforge.core import hand_block
+from returnmap.core import hand_block
 
 class MyModel(MaterialModel):
     @hand_block("alpha", "stress")                 # ∂R_alpha/∂σ
@@ -47,7 +47,7 @@ class MyModel(MaterialModel):
    引数は名前で埋められる (`state` = 評価点の状態、`dlambda`、`state_n`、`inc`)。Fortran の引数リストに合わせた手書きのまま宣言できる。宣言済みブロックは履歴全体で AD と照合する:
 
 ```python
-from manforge.verification import check_hand_blocks
+from returnmap.verification import check_hand_blocks
 
 report = check_hand_blocks(model, driver.run(load).step_results)
 assert report.passed, report.summary()
@@ -57,12 +57,12 @@ assert report.passed, report.summary()
 #   not derived: [stress][stress], [stress][dlambda], ...
 ```
 
-   最悪誤差をブロックごとに集計するので、1 つの誤りが他に隠れない。未導出のブロックも一覧に出る。ブロックの誤差は、履歴全体での最大差を、そのブロックの履歴全体での最大値で割ったもの — 符号の誤りは 2、0 と置いて落としたブロックは 1 と読める (あるステップでブロックがたまたま 0 に近くても、丸め誤差が大きな誤差にはならない)。厳密に 0 のブロックは、自動微分が丸め誤差 (1e-13 など) を返すので、割る相手が無い。その行と列から決まる大きさ (行を構成する項の大きさ ÷ 未知数の大きさ) より 12 桁以上小さいブロックは 0 と見なし、その大きさに対して測る。`hand_jacobian(model, result)` (`manforge.simulation`) は、宣言済みブロックを手導出、残りを AD で埋めた行列を返す。**履歴は直ひずみとせん断を同時に動かすこと** — 外積の転置や剪断 ×2 の取り違えは、単軸・純せん断では見えない。
+   最悪誤差をブロックごとに集計するので、1 つの誤りが他に隠れない。未導出のブロックも一覧に出る。ブロックの誤差は、履歴全体での最大差を、そのブロックの履歴全体での最大値で割ったもの — 符号の誤りは 2、0 と置いて落としたブロックは 1 と読める (あるステップでブロックがたまたま 0 に近くても、丸め誤差が大きな誤差にはならない)。厳密に 0 のブロックは、自動微分が丸め誤差 (1e-13 など) を返すので、割る相手が無い。その行と列から決まる大きさ (行を構成する項の大きさ ÷ 未知数の大きさ) より 12 桁以上小さいブロックは 0 と見なし、その大きさに対して測る。`hand_jacobian(model, result)` (`returnmap.simulation`) は、宣言済みブロックを手導出、残りを AD で埋めた行列を返す。**履歴は直ひずみとせん断を同時に動かすこと** — 外積の転置や剪断 ×2 の取り違えは、単軸・純せん断では見えない。
 
 3. **FD tangent チェック** — consistent tangent を中心差分と比較:
 
 ```python
-from manforge.verification import check_tangent
+from returnmap.verification import check_tangent
 
 report = check_tangent(PythonIntegrator(model), strain_inc, stress_n, state_n)
 assert report.passed, report.summary()
@@ -95,7 +95,7 @@ assert report.passed, report.summary()
 5. **実装同士のクロスチェック** — 閉形式 vs NR、または Python vs Fortran を、同じ載荷履歴で別々に進めてステップごとに比べる:
 
 ```python
-from manforge.verification import crosscheck, generate_strain_history
+from returnmap.verification import crosscheck, generate_strain_history
 
 load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
 report = crosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model), load)
@@ -113,7 +113,7 @@ assert report.passed, report.summary()
 6. **Fortran との対応の検査** — `verified_against_fortran` で Fortran のサブルーチンに対応づけたメソッドを、同じ引数で両側から呼んで比べる:
 
 ```python
-from manforge.verification import check_bindings
+from returnmap.verification import check_bindings
 
 report = check_bindings(model, FortranModule("j2_isotropic_3d"), {
     "elastic_stiffness": ((model.initial_state(),), (model.E, model.nu)),

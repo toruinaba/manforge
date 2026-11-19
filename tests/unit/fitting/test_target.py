@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-from manforge.fitting import FitTarget, Observation
-from manforge.fitting.target import check_targets, _extract_field
-from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
+from returnmap.fitting import FitTarget, Observation
+from returnmap.fitting.target import check_targets, _extract_field
+from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_target_rejects_weights_length_mismatch(strain_load):
 
 def test_target_without_driver_factory_follows_its_load(strain_load):
     """No factory anywhere: the load decides, by the rule crosscheck uses."""
-    from manforge.simulation import StressDriver
+    from returnmap.simulation import StressDriver
 
     strain_target = FitTarget(
         load=strain_load,
@@ -410,7 +410,7 @@ def test_nonconverged_run_is_raised_not_scored(model, strain_load):
     shape error at best.  It is raised as the same RuntimeError a raising
     integrator produces, which the objective turns into the failure penalty.
     """
-    from manforge.simulation import PythonNumericalIntegrator
+    from returnmap.simulation import PythonNumericalIntegrator
 
     def reporting(_integrator):
         # max_iter=0: the first plastic step cannot converge.

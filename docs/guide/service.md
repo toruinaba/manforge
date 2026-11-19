@@ -1,10 +1,10 @@
 # サービスに組み込む
 
-WebAPI やジョブワーカーへの組み込み用に、`manforge.service` が **Web 依存ゼロの契約層**を提供する。入出力は plain な dict / ndarray / dataclass のみで、pydantic / HTTP 変換はデプロイ側の仕事。
+WebAPI やジョブワーカーへの組み込み用に、`returnmap.service` が **Web 依存ゼロの契約層**を提供する。入出力は plain な dict / ndarray / dataclass のみで、pydantic / HTTP 変換はデプロイ側の仕事。
 
 ```python
 import numpy as np
-from manforge.service import ModelRegistry, default_registry, run_simulation
+from returnmap.service import ModelRegistry, default_registry, run_simulation
 
 # レジストリ: 名前 → モデルクラスの明示対応 (シングルトン無し —
 # デプロイごとに作り、公開するモデルだけを登録して監査可能にする)
@@ -33,7 +33,7 @@ out.stress, out.strain, out.fields["ep"]
 **非公開モデルの登録規約** — 非公開モデルパッケージは `MODELS: dict[str, type[MaterialModel]]` を公開し、デプロイ側がそれを import して自分のレジストリに登録する:
 
 ```python
-from manforge_internal import MODELS      # 非公開パッケージ側
+from returnmap_internal import MODELS      # 非公開パッケージ側
 for name, cls in MODELS.items():
     reg.register(name, cls)
 ```

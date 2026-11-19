@@ -1,4 +1,4 @@
-# manforge
+# returnmap
 
 <!-- docs:start -->
 Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレームワーク。降伏関数と硬化則を実装するだけで、return mapping / consistent tangent (autograd 自動微分) / パラメータフィッティング / Fortran クロス検証がすべて使える。
@@ -15,22 +15,22 @@ Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレーム�
 現状は PyPI 未公開のため、ソースからの導入が正:
 
 ```bash
-git clone <this-repo> && cd manforge
+git clone <this-repo> && cd returnmap
 uv sync --extra dev          # テスト依存含む
 uv sync --all-extras         # matplotlib / Fortran ビルド依存含む
 
 # Fortran モジュールのビルド (gfortran 必須、無ければ Docker: make docker-build)
-uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 ```
 
-PyPI 公開後は `pip install manforge` (+ extras: `[dev]` / `[examples]` / `[fortran]`)。
+PyPI 公開後は `pip install returnmap` (+ extras: `[dev]` / `[examples]` / `[fortran]`)。
 
 ## クイックスタート
 
 ```python
 import numpy as np
-from manforge.models import J2Isotropic3D
-from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory, FieldType
 
 model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 

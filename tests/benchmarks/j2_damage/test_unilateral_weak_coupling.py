@@ -10,12 +10,12 @@ never decreases.
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
-from manforge.models import (
+import returnmap  # noqa: F401 — enables float64
+from returnmap.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D, J2IsotropicDamageUnilateral3D,
     J2IsotropicDamageUnilateralPS, J2IsotropicDamageUnilateral1D,
 )
-from manforge.simulation import (
+from returnmap.simulation import (
     StrainDriver, PythonNumericalIntegrator, FieldHistory, FieldType,
 )
 

@@ -14,15 +14,15 @@ import pytest
 import autograd
 import autograd.numpy as anp
 
-from manforge.core import (
+from returnmap.core import (
     FlowVector, Explicit, NTENS, SCALAR, MaterialModel, SOLID_3D, PLANE_STRESS,
     UNIAXIAL_1D,
 )
-from manforge.core.state import _state_with_stress
-from manforge.models import (
+from returnmap.core.state import _state_with_stress
+from returnmap.models import (
     AFKinematic3D, AFKinematicPS, OWKinematic3D, J2Isotropic3D, YUKinematic3D,
 )
-from manforge.verification import make_increment
+from returnmap.verification import make_increment
 
 
 # A state with nonzero shear — the only regime where the 2× error shows up.

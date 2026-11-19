@@ -1,0 +1,735 @@
+"""StateField descriptors and State wrapper for material model state variables.
+
+Usage in a model class::
+
+    from returnmap.core import MaterialModel, Implicit, Explicit, NTENS, SCALAR
+
+    class OWKinematic3D(MaterialModel):
+        stress = Implicit(shape=NTENS,   doc="Cauchy stress")   # NR unknown
+        alpha  = Implicit(shape=NTENS,   doc="backstress tensor")
+        ep     = Implicit(shape=SCALAR,  doc="equivalent plastic strain")
+
+``MaterialModel.__init_subclass__`` collects the ``Implicit`` / ``Explicit``
+declarations via MRO traversal and derives ``cls.state_names`` and
+``cls.implicit_state_names`` from them.
+
+stress field
+------------
+σ is always a Newton-Raphson unknown.  If the model does not declare it,
+``MaterialModel.__init_subclass__`` adds ``Explicit(shape=NTENS, name="stress")``
+and the σ row of the residual is the framework's associative default.
+Declaring ``stress = Implicit(shape=NTENS)`` means the model writes that row
+itself, in ``state_residual``.
+
+User methods receive state arguments as :class:`State` dict-wrappers.
+Access state variables with bracket notation: ``state["stress"]``, ``state["alpha"]``.
+
+Returning residuals / updates
+------------------------------
+``StateField.__call__`` wraps a computed value as ``StateResidual`` (implicit)
+or ``StateUpdate`` (explicit), giving a concise return idiom::
+
+    def state_residual(self, new, dlambda, inc):
+        ...
+        return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
+
+    def update_state(self, new, dlambda, inc):
+        ...
+        return [self.alpha(alpha_new), self.ep(ep_new)]
+
+``inc`` is the :class:`Increment` of the step — the state at its beginning,
+the strain increment and the elastic trial state.
+
+The framework validates the returned list at the call boundary via
+``_validate_state_items``.
+
+``State`` is a thin dict-wrapper that carries field-ordering metadata.
+It is created at ``_wrap_state`` call boundaries so that autograd traces
+through the raw dict values unchanged.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterator, ItemsView, KeysView, Literal, ValuesView
+
+import autograd.numpy as anp
+
+from returnmap._typing import FloatArray, StateDict
+
+
+# ---------------------------------------------------------------------------
+# NTENS sentinel
+# ---------------------------------------------------------------------------
+
+class _NtensSentinel:
+    """Placeholder shape resolved to ``(model.ntens,)`` at StateField.resolve_shape()."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NTENS"
+
+    def __reduce__(self):
+        return (_get_ntens_sentinel, ())
+
+
+def _get_ntens_sentinel():
+    return NTENS
+
+
+NTENS = _NtensSentinel()
+
+
+# ---------------------------------------------------------------------------
+# SCALAR sentinel
+# ---------------------------------------------------------------------------
+
+class _ScalarSentinel:
+    """Placeholder shape resolved to ``()`` at StateField.resolve_shape()."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "SCALAR"
+
+    def __reduce__(self):
+        return (_get_scalar_sentinel, ())
+
+
+def _get_scalar_sentinel():
+    return SCALAR
+
+
+SCALAR = _ScalarSentinel()
+
+ShapeSpec = _NtensSentinel | _ScalarSentinel | int | tuple[int, ...]
+"""Type alias for valid ``shape`` arguments to ``Implicit`` / ``Explicit``."""
+
+
+# ---------------------------------------------------------------------------
+# StateField descriptor
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StateField:
+    """Descriptor for a single material-model state variable.
+
+    Parameters
+    ----------
+    kind : str
+        ``"implicit"`` — treated as an NR unknown (goes into `state_residual`).
+        ``"explicit"`` — updated in closed form (goes into `update_state`).
+    shape : _NtensSentinel, _ScalarSentinel, tuple, or int
+        Array shape.  Use ``NTENS`` (from ``returnmap.core``) for a vector of
+        length ``model.ntens``.  Use ``SCALAR`` (from ``returnmap.core``) for a
+        0-d scalar state.  An ``int`` ``n`` is equivalent to ``(n,)``.  Any
+        other tuple is used directly (e.g. ``(6, 6)``).
+    default : callable or None
+        Factory ``(model) -> array`` for the initial value.  ``None`` → zeros
+        of the resolved shape.
+    doc : str
+        Short description of the physical meaning.
+    name : str
+        Set automatically by ``__set_name__`` when declared as a class
+        attribute.  Do not pass this manually.
+    """
+
+    kind: Literal["implicit", "explicit"]
+    shape: ShapeSpec  # NTENS | SCALAR | int | tuple[int, ...]
+    default: Callable[..., FloatArray] | None = field(default=None, compare=False)
+    doc: str = field(default="", compare=False)
+    name: str = field(default="", compare=False)
+    residual_name: str | None = field(default=None, compare=False)
+
+    @property
+    def effective_residual_name(self) -> str:
+        """Residual row label: residual_name if set, else the field name."""
+        return self.residual_name if self.residual_name else self.name
+
+    def __post_init__(self):
+        if self.kind not in ("implicit", "explicit"):
+            raise ValueError(f"StateField kind must be 'implicit' or 'explicit', got {self.kind!r}")
+        if isinstance(self.shape, str):
+            raise TypeError(
+                f"StateField shape {self.shape!r} is not valid. "
+                "Use the NTENS sentinel instead:\n"
+                "    from returnmap.core import NTENS\n"
+                "    alpha = Implicit(shape=NTENS)"
+            )
+        if self.residual_name is not None:
+            if not isinstance(self.residual_name, str) or not self.residual_name:
+                raise ValueError(
+                    f"StateField residual_name must be a non-empty str or None, "
+                    f"got {self.residual_name!r}"
+                )
+
+    def __set_name__(self, owner, attr_name: str):
+        object.__setattr__(self, "name", attr_name)
+
+    def __call__(self, value: FloatArray | float) -> "StateResidual | StateUpdate":
+        """Wrap *value* as :class:`StateResidual` (implicit) or :class:`StateUpdate` (explicit).
+
+        Usage inside ``state_residual`` / ``update_state``::
+
+            return [self.alpha(R_alpha), self.ep(R_ep)]   # state_residual
+            return [self.alpha(alpha_new), self.ep(ep_new)]  # update_state
+
+        Parameters
+        ----------
+        value : array-like
+            The residual value (implicit) or the updated state value (explicit).
+            ArrayBox values produced by autograd are passed through unchanged.
+
+        Returns
+        -------
+        StateResidual or StateUpdate
+        """
+        if not self.name:
+            raise RuntimeError(
+                "StateField.__call__ used before the field was declared as a class "
+                "attribute (name not set via __set_name__). "
+                "Ensure this field is declared directly on the model class."
+            )
+        if self.kind == "implicit":
+            return StateResidual(name=self.name, value=value)
+        return StateUpdate(name=self.name, value=value)
+
+    def update(self, value: FloatArray | float) -> "StateUpdate":
+        """Wrap *value* as a :class:`StateUpdate` regardless of the field's kind.
+
+        Calling the field picks the wrapper from its kind, which is right
+        inside ``state_residual`` / ``update_state``.  Hooks that assign
+        *values* to implicit fields — :meth:`MaterialModel.elastic_predictor`
+        returning σ_trial for an ``Implicit`` stress, or an elastic trial of an
+        implicit effective stress — use this instead, because calling an
+        implicit field would produce a residual.
+        """
+        if not self.name:
+            raise RuntimeError(
+                "StateField.update used before the field was declared as a class "
+                "attribute (name not set via __set_name__)."
+            )
+        return StateUpdate(name=self.name, value=value)
+
+    def resolve_shape(self, ntens: int) -> tuple[int, ...]:
+        """Return the concrete shape with NTENS/SCALAR substituted."""
+        if self.shape is NTENS:
+            return (ntens,)
+        if self.shape is SCALAR:
+            return ()
+        if isinstance(self.shape, int):
+            return (self.shape,)
+        return tuple(self.shape)  # type: ignore[arg-type]
+
+    def initial_value(self, model: Any) -> FloatArray:
+        """Compute the initial (zero) value for this field."""
+        if self.default is not None:
+            return self.default(model)
+        shp = self.resolve_shape(model.ntens)
+        if shp == ():
+            return anp.array(0.0)
+        return anp.zeros(shp)
+
+
+def Implicit(
+    shape: ShapeSpec = SCALAR,
+    default: Callable[..., FloatArray] | None = None,
+    doc: str = "",
+    residual_name: str | None = None,
+) -> StateField:
+    """Create an implicit StateField (state variable solved as NR unknown)."""
+    return StateField(kind="implicit", shape=shape, default=default, doc=doc,
+                      residual_name=residual_name)
+
+
+def Explicit(
+    shape: ShapeSpec = SCALAR,
+    default: Callable[..., FloatArray] | None = None,
+    doc: str = "",
+    residual_name: str | None = None,
+) -> StateField:
+    """Create an explicit StateField (state variable updated in closed form)."""
+    return StateField(kind="explicit", shape=shape, default=default, doc=doc,
+                      residual_name=residual_name)
+
+
+# ---------------------------------------------------------------------------
+# StateResidual / StateUpdate wrapper types
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class StateResidual:
+    """Per-field residual value for an implicit state variable.
+
+    Produced by calling an implicit :class:`StateField`::
+
+        return [self.alpha(R_alpha), self.ep(R_ep)]
+
+    Attributes
+    ----------
+    name : str
+        Field name (set from the StateField declaration).
+    value : array-like
+        Residual value.  May be an autograd ArrayBox during NR tracing.
+    """
+
+    name: str
+    value: FloatArray | float
+
+
+@dataclass(frozen=True)
+class StateUpdate:
+    """Per-field new value for an explicit state variable.
+
+    Produced by calling an explicit :class:`StateField`::
+
+        return [self.alpha(alpha_new), self.ep(ep_new)]
+
+    Attributes
+    ----------
+    name : str
+        Field name (set from the StateField declaration).
+    value : array-like
+        Updated state value.  May be an autograd ArrayBox during NR tracing.
+    """
+
+    name: str
+    value: FloatArray | float
+
+
+# ---------------------------------------------------------------------------
+# FlowVector — shear-convention-tagged plastic flow direction
+# ---------------------------------------------------------------------------
+
+class FlowVector:
+    """Plastic flow direction carrying its shear convention explicitly.
+
+    The same flow direction has two numerically different Voigt
+    representations, differing by a factor of 2 on the shear components:
+
+    - ``strain_like`` — conjugate to the plastic strain increment
+      (engineering shear).  Use for ``Δε_p = Δλ·n``, ``C @ n``, and any
+      residual written in the strain dimension (``C⁻¹`` applied).
+    - ``stress_like`` — the textbook ``(3/2) s/‖s‖`` form (physical shear).
+      Use in evolution laws for stress-like internal variables (backstress).
+
+    Neither representation is more fundamental; picking the wrong one produces
+    a silent 2× error on shear components only, which vanishes under uniaxial
+    and biaxial loading.  This wrapper therefore refuses raw array arithmetic —
+    every use site must name the convention it wants.
+
+    Build with :meth:`MaterialModel.strain_flow` or
+    :meth:`MaterialModel.stress_flow` rather than calling the constructor.
+    """
+
+    __slots__ = ("_strain_like", "_factors")
+
+    def __init__(self, strain_like: FloatArray, factors: FloatArray):
+        self._strain_like = strain_like
+        self._factors = factors
+
+    @property
+    def strain_like(self) -> FloatArray:
+        """Engineering-shear form (conjugate to Δε_p; use with ``C @``)."""
+        return self._strain_like
+
+    @property
+    def stress_like(self) -> FloatArray:
+        """Physical-shear form (textbook ``(3/2) s/‖s‖``; use for backstress)."""
+        return self._strain_like / self._factors
+
+    def __repr__(self) -> str:
+        return f"FlowVector(strain_like={self._strain_like!r})"
+
+    def _reject(self, op: str):
+        raise TypeError(
+            f"FlowVector does not support {op}: the shear convention is ambiguous. "
+            "Use .strain_like (Δε_p conjugate, engineering shear — for C @ n and "
+            "plastic strain) or .stress_like (physical shear — for backstress "
+            "evolution laws)."
+        )
+
+    def __array__(self, *args, **kwargs):
+        self._reject("conversion to ndarray")
+
+    def __mul__(self, other):
+        self._reject("multiplication")
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, other):
+        self._reject("division")
+
+    __rtruediv__ = __truediv__
+
+    def __add__(self, other):
+        self._reject("addition")
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        self._reject("subtraction")
+
+    __rsub__ = __sub__
+
+    def __matmul__(self, other):
+        self._reject("matrix multiplication")
+
+    __rmatmul__ = __matmul__
+
+    def __neg__(self):
+        self._reject("negation")
+
+    def __iter__(self):
+        self._reject("iteration")
+
+    def __len__(self):
+        self._reject("len()")
+
+    def __getitem__(self, key):
+        self._reject("indexing")
+
+
+# ---------------------------------------------------------------------------
+# DlambdaResidual / DlambdaField — optional Δλ row override
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DlambdaResidual:
+    """Optional override for the Δλ row of the NR residual.
+
+    Produced by ``self.dlambda(R)`` inside ``state_residual``.  If present in
+    the returned list, the framework uses this as the Δλ row instead of the
+    default ``model.yield_function(state) = 0``.
+
+    Use this to implement viscoplasticity (Perzyna), non-standard consistency
+    conditions, or any model where the equation determining Δλ differs from the
+    yield surface.
+    """
+
+    value: FloatArray | float
+
+
+class DlambdaField:
+    """Framework-provided pseudo-field for the Δλ NR unknown.
+
+    Not a :class:`StateField` — does not appear in ``state_fields`` /
+    ``state_names`` / ``implicit_state_names``.  A single stateless singleton
+    ``DLAMBDA_FIELD`` is attached to :class:`~returnmap.core.MaterialModel`
+    as the class attribute ``dlambda`` so that users can write
+    ``self.dlambda(R_dl)`` inside ``state_residual``.
+
+    The ``name`` class attribute exposes ``"dlambda"`` for API symmetry (e.g.
+    ``ResidualLayout`` uses it as the default
+    residual-row label for the Δλ slot).
+
+    Example::
+
+        def state_residual(self, new, dlambda, inc):
+            f = self.yield_function(new)
+            R_dl = f - self.eta * dlambda / self.dt   # Perzyna
+            return [self.dlambda(R_dl), self.alpha(R_alpha)]
+    """
+
+    __slots__ = ()
+    name = "dlambda"
+
+    def __call__(self, value: FloatArray | float) -> DlambdaResidual:
+        return DlambdaResidual(value=value)
+
+
+DLAMBDA_FIELD = DlambdaField()
+
+
+# ---------------------------------------------------------------------------
+# Boundary validator
+# ---------------------------------------------------------------------------
+
+def _validate_state_items(
+    returned: Any,
+    expected_names: set[str],
+    expected_cls: type,
+    method_name: str,
+    model_name: str,
+    *,
+    extract_dlambda: bool = False,
+    allow_subset: bool = False,
+    hint: str = "",
+) -> "StateDict | tuple[StateDict, FloatArray | None]":
+    """Validate a list of StateResidual / StateUpdate and return a name→value dict.
+
+    Called at the framework boundary (residual.py / solver.py) after
+    ``state_residual`` / ``update_state`` returns.
+
+    Parameters
+    ----------
+    returned : object
+        The value returned by the user method.
+    expected_names : set of str
+        The field names expected in the returned list.
+    expected_cls : type
+        ``StateResidual`` for state_residual, ``StateUpdate`` for update_state.
+    method_name : str
+        ``"state_residual"`` or ``"update_state"`` (used in error messages).
+    model_name : str
+        Class name of the model (used in error messages).
+    extract_dlambda : bool, optional
+        When ``True``, ``DlambdaResidual`` items are separated from the state
+        items and returned as the second element of a tuple.
+    allow_subset : bool, optional
+        When ``True``, a returned subset of *expected_names* is accepted and
+        omitted names are simply absent from the result.  Used by
+        ``elastic_update_state``, where a model updates only the fields that
+        track σ and leaves the rest at their step-n values.
+    hint : str, optional
+        Extra guidance appended to missing-key error messages.
+
+    Returns
+    -------
+    dict[str, array-like]
+        Mapping from field name to value (when ``extract_dlambda=False``).
+    tuple[dict[str, array-like], Any]
+        ``(state_dict, dlambda_value_or_None)`` when ``extract_dlambda=True``.
+
+    Raises
+    ------
+    TypeError
+        If *returned* is not a list or contains items of the wrong type.
+    ValueError
+        If the set of names is not exactly *expected_names*.
+    """
+    if not isinstance(returned, list):
+        raise TypeError(
+            f"{model_name}.{method_name} must return a list of "
+            f"{expected_cls.__name__} (use `self.<field>(value)`), "
+            f"got {type(returned).__name__}"
+        )
+    out: dict = {}
+    dl_items = []
+    for item in returned:
+        if extract_dlambda and isinstance(item, DlambdaResidual):
+            dl_items.append(item)
+            continue
+        if not isinstance(item, expected_cls):
+            extra_info = (
+                f" (self.dlambda(...) is not allowed in {method_name})"
+                if isinstance(item, DlambdaResidual) else ""
+            )
+            raise TypeError(
+                f"{model_name}.{method_name}: every item must be "
+                f"{expected_cls.__name__} (use `self.<field>(value)`){extra_info}, "
+                f"got {type(item).__name__}"
+            )
+        if item.name in out:
+            raise ValueError(
+                f"{model_name}.{method_name}: duplicate entry for {item.name!r}"
+            )
+        out[item.name] = anp.array(item.value)
+    if extract_dlambda and len(dl_items) > 1:
+        raise ValueError(
+            f"{model_name}.{method_name}: duplicate self.dlambda(...) entries"
+        )
+    actual = set(out.keys())
+    if actual != expected_names:
+        parts = []
+        missing = expected_names - actual
+        extra = actual - expected_names
+        if missing and not allow_subset:
+            parts.append(f"missing: {sorted(missing)}")
+            if hint:
+                parts.append(hint)
+        if extra:
+            parts.append(f"unexpected: {sorted(extra)}")
+        if parts:
+            raise ValueError(f"{model_name}.{method_name}: {'; '.join(parts)}")
+    if extract_dlambda:
+        r_dl = anp.array(dl_items[0].value) if dl_items else None
+        return out, r_dl
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Field collection helper (used by __init_subclass__)
+# ---------------------------------------------------------------------------
+
+def collect_state_fields(cls) -> dict[str, StateField]:
+    """Collect StateField descriptors from *cls* and its MRO (base→derived).
+
+    Traverses the MRO from the root downward so that subclass declarations
+    override parent ones (e.g. a fixture that overrides ``Explicit`` with
+    ``Implicit`` to test the vector-NR path).
+
+    Returns
+    -------
+    dict[str, StateField]
+        Ordered by first-seen name in base→derived order; name collision
+        resolves to the *most derived* class's value.
+    """
+    mro_fields: dict[str, StateField] = {}
+    for base in reversed(cls.__mro__):
+        for attr_name, value in base.__dict__.items():
+            if isinstance(value, StateField):
+                mro_fields[attr_name] = value
+    return mro_fields
+
+
+# ---------------------------------------------------------------------------
+# State wrapper
+# ---------------------------------------------------------------------------
+
+class State:
+    """Dict-wrapper carrying field-ordering metadata for state variables.
+
+    Wraps the internal ``dict[str, array]`` and preserves declaration-order
+    field names in ``_fields``.  The internal dict is preserved unchanged so
+    autograd traces through the raw array values without modification.
+
+    Access state variables with bracket notation: ``state["stress"]``,
+    ``state["alpha"]``.  Attribute-style dot access is not supported.
+
+    ``State`` objects are created at ``_wrap_state`` call boundaries and
+    are never mutated by the framework.
+    """
+
+    __slots__ = ("_data", "_fields")
+
+    def __init__(self, data: StateDict, fields: tuple[str, ...]) -> None:
+        object.__setattr__(self, "_data", data)
+        object.__setattr__(self, "_fields", fields)
+
+    def __getitem__(self, key: str) -> FloatArray:
+        return self._data[key]  # type: ignore[return-value]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def keys(self) -> KeysView[str]:
+        return self._data.keys()
+
+    def values(self) -> ValuesView[FloatArray]:
+        return self._data.values()  # type: ignore[return-value]
+
+    def items(self) -> ItemsView[str, FloatArray]:
+        return self._data.items()  # type: ignore[return-value]
+
+    def with_stress(self, new_stress: FloatArray) -> "State":
+        """Return a new State with only the ``stress`` entry replaced."""
+        data = dict(self._data)
+        data["stress"] = new_stress  # type: ignore[assignment]
+        return State(data, self._fields)  # type: ignore[arg-type]
+
+    def as_dict(self) -> StateDict:
+        """Return the underlying dict (no copy — values are shared)."""
+        return self._data
+
+    def __repr__(self):
+        return f"State({self._data!r})"
+
+
+# ---------------------------------------------------------------------------
+# Increment — the step context handed to every model hook
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Increment:
+    """One load increment as a material model's hooks see it.
+
+    The inputs of one stress update, gathered so that every hook receives the
+    same object instead of a growing list of keyword arguments.  A quantity a
+    future model needs (a time step, a temperature) becomes a field here, and
+    no existing hook signature changes.
+
+    This mirrors how a UMAT is laid out: the trial state is computed once at
+    the top, the elastic/plastic branch is decided from it, and the plastic
+    corrector starts from it.
+
+    Attributes
+    ----------
+    state_n : State
+        State at the beginning of the increment.  ``state_n["stress"]`` is σ_n.
+    strain_inc : array, shape (ntens,)
+        Strain increment Δε (engineering shear, the ABAQUS ``DSTRAN``).
+    trial : State
+        Elastic trial state: what :meth:`MaterialModel.elastic_predictor`
+        returned, laid over ``state_n``.  ``trial["stress"]`` is σ_trial; a
+        field the predictor did not return carries its ``state_n`` value.  On
+        an elastic step this *is* the converged state.
+
+    Notes
+    -----
+    While the framework differentiates the consistent tangent, ``strain_inc``
+    and the fields of ``trial`` arrive as autograd boxes — operate on them with
+    ``autograd.numpy``.
+    """
+
+    state_n: "State"
+    strain_inc: FloatArray
+    trial: "State"
+
+
+# ---------------------------------------------------------------------------
+# make_state factory helper
+# ---------------------------------------------------------------------------
+
+def _make(required_keys: set[str], factory_name: str, kwargs: dict[str, FloatArray]) -> StateDict:
+    """Validate and assemble a state dict.
+
+    Raises ``TypeError`` listing all missing and unexpected keys so users
+    get actionable error messages at the call site (before any autograd trace).
+    """
+    given = set(kwargs.keys())
+    missing = required_keys - given
+    extra = given - required_keys
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append(f"missing keys: {sorted(missing)}")
+        if extra:
+            parts.append(f"unexpected keys: {sorted(extra)}")
+        raise TypeError(f"{factory_name}() — {'; '.join(parts)}")
+    return kwargs
+
+
+# ---------------------------------------------------------------------------
+# stress-replacement helper (used by residual.py to build ∂f/∂σ via autograd)
+# ---------------------------------------------------------------------------
+
+def _state_with_stress(state: "State | StateDict", new_stress: FloatArray) -> "State | StateDict":
+    """Return a copy of *state* with only the ``stress`` entry replaced.
+
+    Used by the framework to build ``autograd.grad(lambda s: model.yield_function(
+    _state_with_stress(state, s)))(stress)`` without disturbing other state
+    entries.  The returned object mirrors the type of *state*:
+
+    - If *state* is a :class:`State`, a new ``State`` is returned.
+    - If *state* is a plain ``dict``, a shallow copy with the replaced entry
+      is returned.
+
+    The replacement is a *thin wrapper* — existing entries are not copied,
+    only the ``"stress"`` key is swapped.  autograd ``ArrayBox`` values in
+    other entries pass through unchanged.
+
+    Parameters
+    ----------
+    state : State or dict
+        Current state (must contain the ``"stress"`` key).
+    new_stress : array-like
+        Replacement stress value (may be an autograd ArrayBox).
+
+    Returns
+    -------
+    State or dict
+        Same type as *state*, with ``state["stress"]`` replaced by *new_stress*.
+    """
+    if isinstance(state, State):
+        data = dict(state.as_dict())
+        data["stress"] = new_stress
+        return State(data, state._fields)
+    # plain dict
+    out = dict(state)
+    out["stress"] = new_stress
+    return out

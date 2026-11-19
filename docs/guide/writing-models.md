@@ -15,7 +15,7 @@ UMAT の構造と同じ並びになっている — 冒頭で試行状態を計�
 状態変数を `Explicit` として宣言し、`update_state` に閉形式更新を書く。explicit 状態は NR の未知数に入らず、NR は `[σ, Δλ]` を解く:
 
 ```python
-from manforge.core import MaterialModel, Explicit, SCALAR
+from returnmap.core import MaterialModel, Explicit, SCALAR
 
 class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
@@ -38,7 +38,7 @@ model = MyModel(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)   # 3D
 **次元は 2 通りで決まる。** クラス本体に `dimension` を書かなければ、構築時の `dimension=` で選ぶ (省略時は 3D)。クラス本体に書くと、そのクラスと子クラスはその次元に固定され、別の次元を渡すと `TypeError` になる。閉形式のリターンマッピングや手導出ブロックのように、代数が特定の次元でしか成り立たないクラスは固定する:
 
 ```python
-from manforge.core import PLANE_STRAIN, PLANE_STRESS
+from returnmap.core import PLANE_STRAIN, PLANE_STRESS
 
 class MyModelPS(MyModel):
     dimension = PLANE_STRESS          # 固定
@@ -55,14 +55,14 @@ def elastic_stiffness(self, state):                    # 損傷
     return (1.0 - state["D"]) * self.isotropic_stiffness()
 ```
 
-物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスは `dimension` の固定のみを担う — 参照実装: `src/manforge/models/j2_isotropic.py`。
+物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスは `dimension` の固定のみを担う — 参照実装: `src/returnmap/models/j2_isotropic.py`。
 
 ## Implicit 型 (Ohno-Wang 型) — 後方 Euler 残差
 
 閉形式で解けない発展則は状態変数を `Implicit` として宣言し、`state_residual` に残差を書く。implicit 状態は σ、Δλ と並んで NR の未知数になる (`x = [σ, Δλ, implicit 状態]`)。σ は常に未知数で、`stress = Implicit(shape=NTENS)` を宣言すると σ 行の残差も自分で書く (宣言しなければ、関連流れの既定の残差が使われる):
 
 ```python
-from manforge.core import Implicit, NTENS, SCALAR
+from returnmap.core import Implicit, NTENS, SCALAR
 
 class MyImplicitModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "C_k", "gamma"]
@@ -80,7 +80,7 @@ class MyImplicitModel(MaterialModel):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 ```
 
-参照実装: `src/manforge/models/ow_kinematic.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
+参照実装: `src/returnmap/models/ow_kinematic.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
 
 `inc.trial` / `inc.strain_inc` は**どの残差行にどの係数で入れてもよい** — consistent tangent は dR/dΔε を両者を通して autodiff するので、`R_σ = σ − σ_trial + …` の形を仮定しない。同じ根を持つ残差なら行のスケールを変えても接線は同一 (例: 損傷の `(1−D_n)/(1−D_{n+1})·σ − σ_trial + …`)。
 
@@ -132,15 +132,15 @@ def elastic_predictor(self, state_n, *, strain_inc):
 
 **弾性接線の手書きスロット — `elastic_tangent(inc)`** — 予測子を override すると、弾性接線は予測子の自動微分で得られる。動かすだけならそれで足りるが、UMAT には式そのものが要る。`elastic_tangent(inc)` に `dσ_trial/dΔε` を書くと、`PythonAnalyticalIntegrator` はそれを使い (未実装なら `NotImplementedError`)、`PythonNumericalIntegrator` は常に予測子を自動微分する。両者を突き合わせれば手導出を検証できる。
 
-主値に依存する量は `manforge.utils` の主値分解の関数を使う (`anp.linalg.eigh` の微分は主値が重なる単軸・平面応力・純せん断で NaN になるため):
+主値に依存する量は `returnmap.utils` の主値分解の関数を使う (`anp.linalg.eigh` の微分は主値が重なる単軸・平面応力・純せん断で NaN になるため):
 
 ```python
-from manforge.utils import positive_part, negative_part, positive_part_sq
+from returnmap.utils import positive_part, negative_part, positive_part_sq
 sig_pos = positive_part(sigma, self.dimension)        # σ₊ = Σ⟨σ_i⟩ n_i⊗n_i, 接線 P₊ も厳密
 energy  = positive_part_sq(sigma, self.dimension)     # Σ⟨σ_i⟩₊² (Hessian = 2P₊)
 ```
 
-主値 0 では折れ点を平滑化せず、規約 H(0) = c (`DEFAULT_HEAVISIDE_AT_ZERO = 1/2`、**暫定** — UMAT 側の規約に合わせて確定) で扱う。この規約を使う関数 (`positive_part` / `negative_part` とその 2 乗版、`macaulay_sq` / `neg_macaulay_sq`) は `c=` で上書きできる。設計理由は `utils/spectral.py` の docstring、参照実装は `src/manforge/models/j2_damage_unilateral.py`。
+主値 0 では折れ点を平滑化せず、規約 H(0) = c (`DEFAULT_HEAVISIDE_AT_ZERO = 1/2`、**暫定** — UMAT 側の規約に合わせて確定) で扱う。この規約を使う関数 (`positive_part` / `negative_part` とその 2 乗版、`macaulay_sq` / `neg_macaulay_sq`) は `c=` で上書きできる。設計理由は `utils/spectral.py` の docstring、参照実装は `src/returnmap/models/j2_damage_unilateral.py`。
 
 ## user_defined フック — 閉形式ソルバ
 

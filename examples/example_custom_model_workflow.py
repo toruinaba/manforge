@@ -22,11 +22,11 @@ import autograd.numpy as anp
 import numpy as np
 import numpy.testing as npt
 
-from manforge.core import Explicit, SCALAR, MaterialModel
-from manforge.simulation import (
+from returnmap.core import Explicit, SCALAR, MaterialModel
+from returnmap.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator, FieldHistory,
 )
-from manforge.verification import check_tangent
+from returnmap.verification import check_tangent
 
 # =========================================================================
 # 1. Define the model — J2 with Voce hardening:

@@ -10,6 +10,21 @@ API を全面的に見直した。**0.1.0 との互換性は無い**(0.x の間�
 
 以下は 0.1.0 から移行するときの対応表である。
 
+### パッケージ名
+
+**`manforge` から `returnmap` に改名した。** 0.1.0 の名前は、何をする道具かが読み取れなかった。モデルを書いて比べる
+ときも、手書きのアルゴリズムを検査するときも、UMAT と突き合わせるときも、中身はリターンマッピングを解いて結果を見る
+ことなので、それを名前にした。機能は変わらない。
+
+| 0.1.0 | 0.2.0 |
+|---|---|
+| `import manforge`、`from manforge.core import ...` | `import returnmap`、`from returnmap.core import ...` |
+| `uv run manforge build ...`(CLI) | `uv run returnmap build ...` |
+| 配布名 `manforge` | `returnmap` |
+| Docker イメージ `manforge-fortran` | `returnmap-fortran`(`make docker-build` で作り直す) |
+
+下の表の左の列は 0.1.0 の書き方なので、`manforge` のままにしてある。
+
 ### モデルの定義
 
 **フックの署名。** 予測子以外のフックは、1 ステップの入力をまとめた `Increment`(`inc.state_n` /
@@ -114,7 +129,7 @@ converged=True` と書く。
 追加:
 
 - `check_solution(model, results)` — 手書きのリターンマッピングの解を、自動微分側の残差に代入して行ごとに検査する。
-- `hand_jacobian(model, result)`(`manforge.simulation`)— 宣言済みのブロックを手導出、残りを自動微分で埋めたヤコビアン。
+- `hand_jacobian(model, result)`(`returnmap.simulation`)— 宣言済みのブロックを手導出、残りを自動微分で埋めたヤコビアン。
 - `crosscheck(..., lockstep=True)` — 各ステップで候補側に参照側の入力を渡して 1 ステップずつ比べる。
 - `FortranIntegrator(parse_umat_failure=...)` — UMAT 自身の収束フラグを読む。
 - `integrator.jacobian(result)` — 自動微分の残差ヤコビアン。
@@ -122,18 +137,18 @@ converged=True` と書く。
 ### import パス
 
 公開の import 元は 7 つのパッケージで、どの名前も 1 つのパッケージにだけ属する。
-サブモジュールのパス(`manforge.core.state` など)は動くが、文書化されたインターフェースではない。
+サブモジュールのパス(`returnmap.core.state` など)は動くが、文書化されたインターフェースではない。
 
 | 0.1.0 | 0.2.0 |
 |---|---|
-| `from manforge.core.material import MaterialModel, ParamMeta` | `from manforge.core import MaterialModel, ParamMeta` |
-| `from manforge.core.state import Implicit, Explicit, NTENS, SCALAR` | `from manforge.core import ...` |
-| `from manforge.core.dimension import SOLID_3D, ...` | `from manforge.core import ...` |
-| `from manforge.simulation.driver import StrainDriver` ほか | `from manforge.simulation import ...` |
-| `from manforge.verification import FortranModule, JacobianBlocks` | `from manforge.simulation import FortranModule, JacobianBlocks` |
-| `from manforge.verification import verified_against_fortran` | `from manforge.core import verified_against_fortran` |
-| `from manforge.service import ParamMeta` | `from manforge.core import ParamMeta` |
-| `from manforge.utils.smooth import smooth_sqrt` ほか | `from manforge.utils import ...` |
+| `from manforge.core.material import MaterialModel, ParamMeta` | `from returnmap.core import MaterialModel, ParamMeta` |
+| `from manforge.core.state import Implicit, Explicit, NTENS, SCALAR` | `from returnmap.core import ...` |
+| `from manforge.core.dimension import SOLID_3D, ...` | `from returnmap.core import ...` |
+| `from manforge.simulation.driver import StrainDriver` ほか | `from returnmap.simulation import ...` |
+| `from manforge.verification import FortranModule, JacobianBlocks` | `from returnmap.simulation import FortranModule, JacobianBlocks` |
+| `from manforge.verification import verified_against_fortran` | `from returnmap.core import verified_against_fortran` |
+| `from manforge.service import ParamMeta` | `from returnmap.core import ParamMeta` |
+| `from manforge.utils.smooth import smooth_sqrt` ほか | `from returnmap.utils import ...` |
 
 削除: `manforge.autodiff`、`manforge.utils.tensor`、`manforge.utils.voigt`、`StressDimension.mandel_factors_jnp` /
 `identity_jnp`、`Comparator` / `CaseResult` / `ComparisonResult` / `CrosscheckCaseResult`。

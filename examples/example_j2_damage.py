@@ -13,8 +13,8 @@ Usage
 
 import numpy as np
 
-from manforge.models import J2Isotropic1D, J2IsotropicDamage1D
-from manforge.simulation import PythonNumericalIntegrator
+from returnmap.models import J2Isotropic1D, J2IsotropicDamage1D
+from returnmap.simulation import PythonNumericalIntegrator
 
 try:
     import matplotlib

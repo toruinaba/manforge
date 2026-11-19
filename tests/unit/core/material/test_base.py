@@ -14,10 +14,10 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core import (
+from returnmap.core import (
     MaterialModel, NTENS, SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D,
 )
-from manforge.models import (
+from returnmap.models import (
     J2Isotropic3D, J2IsotropicPS, J2Isotropic1D, J2IsotropicDamage3D,
     J2IsotropicDamageCrackClosure3D, J2IsotropicDamageUnilateral3D,
 )
@@ -480,7 +480,7 @@ def test_1d_I_dev_projects_to_deviatoric():
 
 def test_explicit_state_without_update_state_raises():
     """Model with an Explicit field but no update_state must raise TypeError."""
-    from manforge.core import Explicit
+    from returnmap.core import Explicit
     with pytest.raises(TypeError, match="update_state"):
         class Bad(MaterialModel):
             param_names = []
@@ -495,7 +495,7 @@ def test_explicit_state_without_update_state_raises():
 
 def test_implicit_state_without_state_residual_raises():
     """Model with an Implicit field but no state_residual must raise TypeError."""
-    from manforge.core import Implicit
+    from returnmap.core import Implicit
     with pytest.raises(TypeError, match="state_residual"):
         class Bad(MaterialModel):
             param_names = []
@@ -511,7 +511,7 @@ def test_implicit_state_without_state_residual_raises():
 
 def test_mixed_implicit_explicit_requires_both_methods():
     """Partial implicit (some explicit, some implicit) requires both methods."""
-    from manforge.core import Implicit, Explicit
+    from returnmap.core import Implicit, Explicit
     class OK(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
@@ -534,7 +534,7 @@ def test_mixed_implicit_explicit_requires_both_methods():
 
 def test_all_implicit_states_no_update_state_needed():
     """Model with all states implicit does not need update_state."""
-    from manforge.core import Implicit
+    from returnmap.core import Implicit
     class OKImplicit(MaterialModel):
         param_names = []
         alpha = Implicit(shape=NTENS)
@@ -658,7 +658,7 @@ def test_non_parameter_setting_goes_through_an_init_override():
 ], ids=["duplicate", "bare-str", "non-str", "non-identifier",
         "state-field", "dimension", "method"])
 def test_param_names_are_validated_at_class_creation(names, match):
-    from manforge.core import Explicit, SCALAR
+    from returnmap.core import Explicit, SCALAR
 
     with pytest.raises(TypeError, match=match):
         class _Bad(MaterialModel):
@@ -790,7 +790,7 @@ def test_dimension_is_keyword_only():
 
 def test_reference_models_fix_the_dimension_their_name_says():
     """Family parents are open; every ``*3D`` / ``*PS`` / ``*1D`` class is fixed."""
-    import manforge.models as models
+    import returnmap.models as models
 
     for name in models.__all__:
         cls = getattr(models, name)
@@ -1099,6 +1099,6 @@ def test_isotropic_stiffness_needs_E_and_nu():
 
 
 def test_default_elastic_tangent_hook_is_none(model):
-    from manforge.verification import make_increment
+    from returnmap.verification import make_increment
     inc = make_increment(model, model.initial_state(), stress_trial=np.zeros(6))
     assert model.elastic_tangent(inc) is None

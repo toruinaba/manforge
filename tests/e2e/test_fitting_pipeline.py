@@ -15,10 +15,10 @@ run in the fast suite.
 import numpy as np
 import pytest
 
-from manforge.simulation import (
+from returnmap.simulation import (
     StrainDriver, StressDriver, PythonIntegrator, FieldHistory, FieldType,
 )
-from manforge.fitting import (
+from returnmap.fitting import (
     FitTarget, Observation, ParameterSpace, fit_params, FitResult,
 )
 

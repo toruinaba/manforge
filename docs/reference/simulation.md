@@ -1,7 +1,7 @@
-# manforge.simulation
+# returnmap.simulation
 
 ```{eval-rst}
-.. automodule:: manforge.simulation
+.. automodule:: returnmap.simulation
    :exclude-members: PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator
 
 .. rubric:: Python integrators
@@ -9,17 +9,17 @@
 The three share one implementation and differ only in which return-mapping
 path they take; their methods are the same.
 
-.. autoclass:: manforge.simulation.PythonIntegrator
+.. autoclass:: returnmap.simulation.PythonIntegrator
    :members:
    :inherited-members:
    :no-show-inheritance:
 
-.. autoclass:: manforge.simulation.PythonNumericalIntegrator
+.. autoclass:: returnmap.simulation.PythonNumericalIntegrator
    :members:
    :inherited-members:
    :no-show-inheritance:
 
-.. autoclass:: manforge.simulation.PythonAnalyticalIntegrator
+.. autoclass:: returnmap.simulation.PythonAnalyticalIntegrator
    :members:
    :inherited-members:
    :no-show-inheritance:

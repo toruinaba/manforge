@@ -7,8 +7,8 @@ control) is covered in tests/integration/service/test_runner.py.
 import numpy as np
 import pytest
 
-from manforge.models import J2Isotropic1D
-from manforge.service import run_simulation
+from returnmap.models import J2Isotropic1D
+from returnmap.service import run_simulation
 
 PARAMS = dict(E=206e3, nu=0.3, sigma_y0=250.0, H=1000.0)
 LOAD = np.linspace(0.0, 1e-3, 5)

@@ -1,5 +1,5 @@
 ! =============================================================================
-! manforge -- timing harness for yu_kinematic_3d
+! returnmap -- timing harness for yu_kinematic_3d
 !
 ! Kept in a separate compilation unit from the UMAT it times: the optimiser must
 ! not see the callee bodies, or it would hoist the calls out of the repeat loops.

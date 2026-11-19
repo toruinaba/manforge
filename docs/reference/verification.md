@@ -1,5 +1,5 @@
-# manforge.verification
+# returnmap.verification
 
 ```{eval-rst}
-.. automodule:: manforge.verification
+.. automodule:: returnmap.verification
 ```

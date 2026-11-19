@@ -2,7 +2,7 @@
 
 This directory contains Fortran source files for implementing and validating
 ABAQUS UMAT constitutive subroutines that can be cross-validated against the
-Python `manforge` implementation.
+Python `returnmap` implementation.
 
 ## Files
 
@@ -32,23 +32,23 @@ python -m numpy.f2py --version
 
 ## Build
 
-### Option A: `manforge build` CLI (recommended)
+### Option A: `returnmap build` CLI (recommended)
 
 ```bash
 # Install build tools (meson/ninja) if not yet done
 uv sync --extra fortran
 
 # Compile the J2 UMAT
-uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 
 # Smoke-test module only
-uv run manforge build fortran/test_basic.f90 --name manforge_test_basic
+uv run returnmap build fortran/test_basic.f90 --name returnmap_test_basic
 
 # List compiled modules
-uv run manforge list
+uv run returnmap list
 
 # Remove compiled artifacts
-uv run manforge clean
+uv run returnmap clean
 ```
 
 ### Option B: Makefile
@@ -87,10 +87,10 @@ at the project root:
 
 ```bash
 # Build the image
-docker build -t manforge-fortran .
+docker build -t returnmap-fortran .
 
 # Compile and run Fortran tests inside the container
-docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
+docker run --rm -v $(pwd):/workspace -w /workspace returnmap-fortran \
     bash -c "make fortran-build-umat && make fortran-test-umat"
 ```
 
@@ -117,7 +117,7 @@ docker run --rm -v $(pwd):/workspace -w /workspace manforge-fortran \
 
 ## Voigt notation convention
 
-Stress/strain components follow the ABAQUS convention (same as `manforge`):
+Stress/strain components follow the ABAQUS convention (same as `returnmap`):
 
 ```
 STRESS / STRAN = [s11, s22, s33, s12, s13, s23]
@@ -136,8 +136,8 @@ the same `call(name, *args)` pattern.
 
 ```python
 import numpy as np
-from manforge.models import J2Isotropic3D
-from manforge.simulation import PythonIntegrator, FortranModule
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import PythonIntegrator, FortranModule
 
 model   = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 fortran = FortranModule("j2_isotropic_3d")
@@ -181,7 +181,7 @@ subroutine j2_isotropic_3d_elastic_stiffness(E, nu, C)
 end subroutine
 ```
 
-After compiling (`manforge build` or `make fortran-build-umat`), the call pattern is identical:
+After compiling (`returnmap build` or `make fortran-build-umat`), the call pattern is identical:
 
 ```python
 # Fortran sub-component

@@ -1,7 +1,7 @@
 # パラメータフィッティング
 
 ```python
-from manforge.fitting import FitTarget, ParameterSpace, fit_params
+from returnmap.fitting import FitTarget, ParameterSpace, fit_params
 
 space = ParameterSpace(
     free={
@@ -33,7 +33,7 @@ fitted = result.model           # フィット結果を入れたモデル (テ�
 **相関パラメータ — `ParameterSpace`** — `Y < B` のような順序制約は、比を最適化変数にして下限 1.0 を課すと不等式制約なしで表現できる:
 
 ```python
-from manforge.fitting import ParameterSpace
+from returnmap.fitting import ParameterSpace
 
 space = ParameterSpace(
     free={"Y": (200.0, (50.0, 600.0)),
@@ -49,8 +49,8 @@ result.model_params["B"]   # 復元済み。B_ratio は入らない
 **複数カーブ同時フィット — `FitTarget` / `Observation`** — 2 階層になっているのは計算コストが違うため。`FitTarget` = **1 回の解析** (載荷履歴 1 本 + driver 1 つ、目的関数 1 評価あたり driver run 1 回)。`Observation` = **1 本の実験カーブ** (同一ターゲット上の複数 observation は解析結果を共有、追加コストほぼゼロ):
 
 ```python
-from manforge.fitting import FitTarget, Observation
-from manforge.simulation import FieldHistory, FieldType
+from returnmap.fitting import FitTarget, Observation
+from returnmap.simulation import FieldHistory, FieldType
 
 targets = [
     FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較

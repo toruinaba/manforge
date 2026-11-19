@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from manforge.simulation import FieldHistory, FieldType
+from returnmap.simulation import FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------

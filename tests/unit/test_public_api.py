@@ -1,6 +1,6 @@
 """The public interface: seven packages, one home per name.
 
-``manforge.core`` / ``.models`` / ``.simulation`` / ``.fitting`` /
+``returnmap.core`` / ``.models`` / ``.simulation`` / ``.fitting`` /
 ``.verification`` / ``.service`` / ``.utils`` are the documented import paths.
 These tests keep the rule honest: every name a package lists exists, no name
 is listed twice, and the names a model author or a user reaches for are where
@@ -17,12 +17,12 @@ PACKAGES = ["core", "models", "simulation", "fitting", "verification", "service"
 
 
 def _exports(package):
-    return importlib.import_module(f"manforge.{package}").__all__
+    return importlib.import_module(f"returnmap.{package}").__all__
 
 
 @pytest.mark.parametrize("package", PACKAGES)
 def test_every_listed_name_exists(package):
-    module = importlib.import_module(f"manforge.{package}")
+    module = importlib.import_module(f"returnmap.{package}")
     missing = [name for name in module.__all__ if not hasattr(module, name)]
     assert missing == []
     assert len(set(module.__all__)) == len(module.__all__), "listed twice"
@@ -59,7 +59,7 @@ def test_names_are_where_the_documentation_says(package, names):
 
 def test_every_check_returns_a_report_with_a_verdict_and_a_table():
     """``assert report.passed, report.summary()`` reads the same for every check."""
-    import manforge.verification as verification
+    import returnmap.verification as verification
 
     reports = [n for n in _exports("verification") if n.endswith("Report")]
     assert sorted(reports) == [
@@ -85,7 +85,7 @@ def test_checks_do_not_re_export_what_they_check():
 
 
 def test_service_does_not_re_export_the_model_declarations():
-    """ParamMeta is declared on the model, so it is imported from manforge.core.
+    """ParamMeta is declared on the model, so it is imported from returnmap.core.
 
     A deployment reads it off ``ModelDescriptor.param_meta`` and needs the
     class itself only for type annotations.
@@ -97,12 +97,12 @@ def test_service_does_not_re_export_the_model_declarations():
 def test_each_package_imports_on_its_own(package):
     """No package relies on another having been imported first.
 
-    ``manforge.core.dimension`` imports ``manforge.utils`` while
-    ``manforge.utils.spectral`` is written against ``manforge.core``; a fresh
+    ``returnmap.core.dimension`` imports ``returnmap.utils`` while
+    ``returnmap.utils.spectral`` is written against ``returnmap.core``; a fresh
     interpreter per package catches a cycle that import order would hide here.
     """
     proc = subprocess.run(
-        [sys.executable, "-c", f"import manforge.{package}"],
+        [sys.executable, "-c", f"import returnmap.{package}"],
         capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr

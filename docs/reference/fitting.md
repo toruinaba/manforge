@@ -1,7 +1,7 @@
-# manforge.fitting
+# returnmap.fitting
 
 ```{eval-rst}
-.. automodule:: manforge.fitting
+.. automodule:: returnmap.fitting
 
 .. rubric:: Constants
 

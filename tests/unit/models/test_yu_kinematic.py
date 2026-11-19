@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 import numpy.testing as npt
-from manforge.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
-from manforge.core import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
-from manforge.verification import make_increment
+from returnmap.models import YUKinematic3D, YUKinematicPS, YUKinematic1D
+from returnmap.core import SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D
+from returnmap.verification import make_increment
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,

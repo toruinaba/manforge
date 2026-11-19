@@ -1,7 +1,7 @@
-# manforge.core
+# returnmap.core
 
 ```{eval-rst}
-.. automodule:: manforge.core
+.. automodule:: returnmap.core
 
 .. rubric:: Constants
 
@@ -33,7 +33,7 @@
 
    Plane stress, 3 components ``[11, 22, 12]``, storing the in-plane tensor
    itself with the 33 component identically zero.  Deviatoric operations go
-   through the metric :data:`~manforge.core.P_PLANE_STRESS`.  The two
+   through the metric :data:`~returnmap.core.P_PLANE_STRESS`.  The two
    plane-stress conventions disagree on yield functions that carry a
    backstress; this is the one the YU models use.
 

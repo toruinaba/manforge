@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from manforge.verification import TangentReport, check_tangent
+from returnmap.verification import TangentReport, check_tangent
 
 C = np.array([
     [3.0, 1.0, 0.0],

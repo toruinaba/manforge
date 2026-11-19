@@ -1,8 +1,9 @@
 # API 再設計 設計メモ
 
-- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15 にある。
-- 基準点: manforge `v0.1.0`(`10c586c`)、manforge-internal `99bc291`。本文中の `file:line` はこの基準点のもの。
-- 対象読者: manforge と manforge-internal の両方を触る人。
+- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15、名前の変更は 4.16 にある。
+- 基準点: returnmap `v0.1.0`(`10c586c`)、returnmap-internal `99bc291`。本文中の `file:line` はこの基準点のもの。
+- 名前: このメモを書いた時点のパッケージ名は `manforge` だった。2026-11-20 に `returnmap` に改名した(4.16)。本文のパッケージ名と import パスは新しい名前に置き換えてある。基準点のタグ `v0.1.0` の中身は `manforge` のままである。
+- 対象読者: returnmap と returnmap-internal の両方を触る人。
 
 ## 1. 背景
 
@@ -16,11 +17,11 @@
 根拠の一覧は付録 A にある。
 
 ## 2. 方針
-1. **0.x は破壊的変更可。** manforge と manforge-internal を同時に直す。互換シムは置かない。
+1. **0.x は破壊的変更可。** returnmap と returnmap-internal を同時に直す。互換シムは置かない。
 2. **UMAT に入る量には必ず手書きスロットがあり、自動微分はそれを照合する参照側に立つ。** 自動微分だけで得られる量を成果物(Fortran UMAT)の前提にしない。
 3. **フックには引数を足し続けない。** ステップの文脈を 1 つのオブジェクトにして渡す。
-4. **設計の重点は「コアが現在表現できること全体」で決める。** manforge-internal での使用件数は移行コストの見積もりにだけ使う。
-5. **公開 import パスは当面いじらない。** 深いモジュールパス(`manforge.core.state` など)も公開扱いとする。絞り込みとモジュールの移動は別の機会に行う。→ 段 6a で、公開する import 元をパッケージ単位に決めた(4.12)。モジュールの移動はしていない。
+4. **設計の重点は「コアが現在表現できること全体」で決める。** returnmap-internal での使用件数は移行コストの見積もりにだけ使う。
+5. **公開 import パスは当面いじらない。** 深いモジュールパス(`returnmap.core.state` など)も公開扱いとする。絞り込みとモジュールの移動は別の機会に行う。→ 段 6a で、公開する import 元をパッケージ単位に決めた(4.12)。モジュールの移動はしていない。
 
 ## 3. コアが表現する範囲
 
@@ -206,7 +207,7 @@ def calc_ft_fl(self, state, dlambda, state_n): ...
 
 - **内省は integrator から取れる。** `integrator.jacobian(result)` が `JacobianBlocks` を返す(段 3 で実施)。行列の計算は `simulation/jacobian.py` に移した。`.part[row][col]` の形は変えていない。同じものを返していた `JacobianChecker.compute(result)` は 4.15 で削除した。
 - **`compare_jacobians`(当初は `JacobianChecker.compare`)は 2 つの解を同じ自動微分残差で比べるもの**で、手導出と自動微分の比較ではない。後者は `check_hand_blocks` が担う(段 3 で追加)。
-- **モジュールの移動は今回しない**(方針 5)。`manforge.verification` のパスは残し、中身の役割だけを整理する。
+- **モジュールの移動は今回しない**(方針 5)。`returnmap.verification` のパスは残し、中身の役割だけを整理する。
 
 ### 4.10 パラメータ宣言と `dimension`
 `param_names` から属性を設定する処理を基底に持たせ、次元はクラス属性で固定する(段 4 で実施)。
@@ -238,9 +239,9 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 
 **実施結果**
 
-- manforge: モデルの `__init__` 28 個を削除した(残るのは `J2IsotropicDamageUnilateral` の 1 個)。既定値 `p_D=0.0`、`h=0.2` を削除した。
-- manforge-internal: `__init__` 32 個、約 500 行を削除した。`ContinuousYUKinematic` の既定値(`H`、`k_0`、`k_mc`、`eps_f`、`damage_law`)を削除した。
-- 数値は変わらない。公開 66 ケース、manforge-internal 57 ケースとも、段 3 の結果とビット単位で一致した。
+- returnmap: モデルの `__init__` 28 個を削除した(残るのは `J2IsotropicDamageUnilateral` の 1 個)。既定値 `p_D=0.0`、`h=0.2` を削除した。
+- returnmap-internal: `__init__` 32 個、約 500 行を削除した。`ContinuousYUKinematic` の既定値(`H`、`k_0`、`k_mc`、`eps_f`、`damage_law`)を削除した。
+- 数値は変わらない。公開 66 ケース、returnmap-internal 57 ケースとも、段 3 の結果とビット単位で一致した。
 - **`param_names` の誤りが 1 件見つかった。** `ChabocheKinematicMulti` と `TeranishiKinematic` で、カンマが抜けて `"gamma3" "Qinf1"` が 1 つの名前になり、`C3` も抜けていた。コンストラクタが別に引数を持っていたので構築はでき、`model.params` を読むまで分からなかった。宣言が 1 箇所になったので、今後は構築時に分かる。
 
 ### 4.11 入口と命名の整理
@@ -251,20 +252,20 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - **`nr_jacobian`**: 既定値を全層で `"exact"` に揃え、型を `Literal["exact", "broyden"]`(`_typing.NRJacobian`)にした。`service.run_simulation` の既定が `"broyden"` から変わるので、速度を優先する配備側は明示する必要がある。
 - **`tol`**: 1 つの対象が 1 つの意味しか持たない所は `tol` のままにした(integrator と driver は自分の NR、`fit_params` は最適化器)。checker の合否は `tol` に揃えた(`JacobianChecker` と `check_bindings` の `rtol` を改名。`check_hand_blocks(tol=None)` は checker の `tol` を既定に使う)。2 つの意味が同居していた `CrosscheckStressDriver` だけ、driver に渡す分を `driver_tol` / `driver_rtol` / `driver_max_iter` に改名した。全層を役割名(`nr_tol`、`outer_tol` など)にする案は採らなかった。
 - **状態履歴**: 要求そのものをなくした。`DriverResult` は全ステップの結果を持っているので、`result.history("ep")` で任意の状態量を後から取れる。`collect_state` 引数と `DriverResult.fields` は削除した(`FieldType` の指定を読む側は無かった)。fitting も同じ経路を使う。`service.run_simulation` の `include_fields` は、返す出力に何を入れるかの指定なので残した。当初の案は「名前の列に統一」だったが、要求と読み出しの 2 段階が残るので、こちらにした。
-- **残骸の削除**(段 1 で実施): `mandel_factors_jnp` / `identity_jnp`、`manforge.autodiff` パッケージ、`utils/tensor.py`、`utils/voigt.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。当初は `autodiff` のうち `operators.py` と `backend.check_float64` だけを挙げていたが、それを除くと使う側が残らないためパッケージごと削除した。`utils/voigt.py` も同じ理由で参照が無くなったので削除した。
+- **残骸の削除**(段 1 で実施): `mandel_factors_jnp` / `identity_jnp`、`returnmap.autodiff` パッケージ、`utils/tensor.py`、`utils/voigt.py`、`check_tangent`、`CrosscheckCaseResult` の `py_*` / `f_*`、`__all__` の `_PythonIntegratorBase`。当初は `autodiff` のうち `operators.py` と `backend.check_float64` だけを挙げていたが、それを除くと使う側が残らないためパッケージごと削除した。`utils/voigt.py` も同じ理由で参照が無くなったので削除した。
 
 ### 4.12 公開する import パスとドキュメント
 段 6 で決めた。段 6a(import パス)と段 6b(ドキュメント基盤)に分けて進める。
 
 **import パス(段 6a)**
 
-同じ名前が 2〜3 通りのパスから取れていた(`Implicit` は `manforge.core` と `manforge.core.state`、`FortranModule` は `manforge.simulation.integrator` と `manforge.verification`)。README、例、manforge-internal のあいだでも書き方が揃っていなかった。
+同じ名前が 2〜3 通りのパスから取れていた(`Implicit` は `returnmap.core` と `returnmap.core.state`、`FortranModule` は `returnmap.simulation.integrator` と `returnmap.verification`)。README、例、returnmap-internal のあいだでも書き方が揃っていなかった。
 
-- **公開の import 元はパッケージ単位の 7 つとする。** `manforge.core` / `.models` / `.simulation` / `.fitting` / `.verification` / `.service` / `.utils`。
-- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `manforge.service` からも取れていたが、モデル上で宣言するものなので `manforge.core` だけにした。配備側(manforge-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `manforge.core` から取る。
-- **`manforge.core` はモデル定義に要るもの全部を持つ。** `MaterialModel`、`ParamMeta`、`hand_block`、`verified_against_fortran` を `core.material` から引き上げた。
-- **`manforge.verification` は検査だけを持つ。** 検査される側の宣言は、定義されている場所に置く。`FortranModule` と `JacobianBlocks` は `manforge.simulation`、`verified_against_fortran` と `FortranBinding` は `manforge.core`。`verification` からの再エクスポートは削除した(互換シムは置かない)。
-- **`manforge.utils` は smooth 近似と主値分解の関数を公開する。** これまで `__init__` は空で、`manforge.utils.smooth` から取るしかなかった。
+- **公開の import 元はパッケージ単位の 7 つとする。** `returnmap.core` / `.models` / `.simulation` / `.fitting` / `.verification` / `.service` / `.utils`。
+- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `returnmap.service` からも取れていたが、モデル上で宣言するものなので `returnmap.core` だけにした。配備側(manforge-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `returnmap.core` から取る。
+- **`returnmap.core` はモデル定義に要るもの全部を持つ。** `MaterialModel`、`ParamMeta`、`hand_block`、`verified_against_fortran` を `core.material` から引き上げた。
+- **`returnmap.verification` は検査だけを持つ。** 検査される側の宣言は、定義されている場所に置く。`FortranModule` と `JacobianBlocks` は `returnmap.simulation`、`verified_against_fortran` と `FortranBinding` は `returnmap.core`。`verification` からの再エクスポートは削除した(互換シムは置かない)。
+- **`returnmap.utils` は smooth 近似と主値分解の関数を公開する。** これまで `__init__` は空で、`returnmap.utils.smooth` から取るしかなかった。
 - **サブモジュールのパスは動き続けるが、文書には載せない。** モジュールの改名(`_state.py` など)で強制する案は採らなかった。約 30 モジュールの改名と、テスト配置の規約(`src` と 1:1)の見直しが要るためである。`src/` 内部の import と、非公開ヘルパを直接試すテストは、引き続きサブモジュールのパスを使う。
 - 規則は `tests/unit/test_public_api.py` で確認する(載せた名前が存在する、二重に載っていない、各パッケージが単独で import できる)。
 
@@ -277,11 +278,11 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 実施結果(段 6b):
 
 - **README を 600 行から 80 行に縮めた。** 概要、インストール、クイックスタート、`docs/` への案内だけを持つ。使い方の説明は `docs/` のガイド 9 ページに移した。`docs/index.md` は README の概要部分を include するので、同じ内容を 2 箇所に書かない。ガイドは素の Markdown なので、GitHub 上でもそのまま読める。
-- **API リファレンスは公開パッケージごとに 1 ページ。** `automodule` が各パッケージの `__all__` に従うので、名前は import 元のパス(`manforge.core.MaterialModel`)で 1 回だけ載る。定数(`NTENS`、`SOLID_3D` など)は docstring を持てないので、`docs/reference/*.md` に説明を書いた。
+- **API リファレンスは公開パッケージごとに 1 ページ。** `automodule` が各パッケージの `__all__` に従うので、名前は import 元のパス(`returnmap.core.MaterialModel`)で 1 回だけ載る。定数(`NTENS`、`SOLID_3D` など)は docstring を持てないので、`docs/reference/*.md` に説明を書いた。
 - **`make docs` は警告をエラー扱いにする。** 検出するもの: 解決できない相互参照、`docs/` 内のリンク切れ、`__all__` に載っているのにリファレンスに項目が無い名前(`docs/conf.py` のビルド後チェック)。最後のチェックで、docstring の無かった `YUKinematic1D` と、説明の無かった `StressDimension` の演算子 6 つが見つかった。
 - **docstring の相互参照を公開パスに直した**(61 箇所)。非公開の名前への参照は literal にした。
 - **私有の基底クラスを持つクラスは、継承したメソッドを明示して載せる。** `PythonIntegrator` など 3 つと Crosscheck ドライバ 2 つは、メソッドが `_PythonIntegratorBase` / `_CrosscheckDriverBase` にあり、そのままではリファレンスに `stress_update` すら出なかった。
-- `StateField` を `manforge.core` に追加した。モデルが `self.ep(...)` / `self.stress.update(...)` として触る型で、説明の置き場が無かった。
+- `StateField` を `returnmap.core` に追加した。モデルが `self.ep(...)` / `self.stress.update(...)` として触る型で、説明の置き場が無かった。
 
 ### 4.13 手書きの解の検査と crosscheck
 移行計画(段 0〜6)の後に、残っていた未決事項 6 と 7 を決めて実施した。
@@ -299,7 +300,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 
 **crosscheck(未決事項 7)**
 
-2 つの integrator を同じ載荷履歴で進めて比べる、という 1 つのことに公開名が 7 つあった(`Comparator`、`CaseResult`、`ComparisonResult`、`CrosscheckCaseResult`、`CrosscheckResult`、`CrosscheckStrainDriver`、`CrosscheckStressDriver`)。`Comparator` の実装は Crosscheck だけだった。混合制御用は無かった。manforge-internal の Fortran 突合テストは使っておらず、同じループを手で書いていた。
+2 つの integrator を同じ載荷履歴で進めて比べる、という 1 つのことに公開名が 7 つあった(`Comparator`、`CaseResult`、`ComparisonResult`、`CrosscheckCaseResult`、`CrosscheckResult`、`CrosscheckStrainDriver`、`CrosscheckStressDriver`)。`Comparator` の実装は Crosscheck だけだった。混合制御用は無かった。returnmap-internal の Fortran 突合テストは使っておらず、同じループを手で書いていた。
 
 - **`crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)` の 1 つにした。** 公開名は `crosscheck`、`CrosscheckResult`、`CrosscheckStep` の 3 つ。driver は載荷履歴から決まり(ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`)、それ以外は `driver_factory` で渡す(`fit_params` と同じ形)。混合制御も使える。driver 自身の設定は factory が持つので、`driver_tol` の受け渡しは無くなった。
 - **`FortranIntegrator(parse_umat_failure=...)` を足した。** UMAT 自身の収束フラグを読む。これが無いと UMAT 側の非収束は見えず、収束しなかった反復値が解として比較される。internal が Crosscheck を使えなかった理由はこれだった。
@@ -350,7 +351,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 **検査は関数で、報告を返す。**
 
 ```python
-from manforge.verification import (
+from returnmap.verification import (
     check_hand_blocks, check_solution, check_tangent,
     crosscheck, compare_jacobians, check_bindings,
 )
@@ -362,7 +363,7 @@ assert report.passed, report.summary()
 ```
 
 - `JacobianChecker` と `TangentChecker` は削除した。クラスが持っていた状態は `model` と `tol` だけで、検査のたびに作り直されていた。`check_solution` はヤコビアンの検査ではないのに `JacobianChecker` にあり、`compute` は `integrator.jacobian(result)` と同じものを返していた。
-- 行列の取得は検査から分けた: 自動微分側は `integrator.jacobian(result)`、手導出側は `hand_jacobian(model, result)`(どちらも `JacobianBlocks`。後者は `manforge.simulation` に置いた)。
+- 行列の取得は検査から分けた: 自動微分側は `integrator.jacobian(result)`、手導出側は `hand_jacobian(model, result)`(どちらも `JacobianBlocks`。後者は `returnmap.simulation` に置いた)。
 - `check_tangent` の引数は `stress_update(strain_inc, stress_n, state_n)` と同じ順にした(`TangentChecker.check(stress, state, strain_inc)` は逆だった)。
 - 段 1 で関数 `check_tangent` を削除してクラスに寄せたのとは逆の向きになる。当時は「同じことをする入口が 2 つある」ことを解消するのが目的で、どちらに寄せるかは既存の `JacobianChecker` に合わせた。検査が 6 つに増え、うち 2 つ(`crosscheck`、`check_bindings`)は関数でしか書けない形だったので、関数の側に揃えた。
 - 命名: 計算の結果は `*Result`(`StressUpdateResult`、`DriverResult`、`FitResult`)、検査の結果は `*Report`。`JacobianComparisonResult` / `TangentCheckResult` / `CrosscheckResult` を `*Report` に改名し、`check_bindings` は素の dict をやめて `BindingReport` を返す。どの報告も `.passed` と `.summary()` を持つ。
@@ -387,8 +388,28 @@ assert report.passed, report.summary()
 
 **`ReturnMappingResult` に既定値を置かない。** `converged=True` が既定値だと、反復を使い切った手書きの NR が `converged` を書き忘れても成功になる。パラメータに既定値を置かないのと同じ理由で、`n_iterations`、`residual_history`、`converged` を必須にした。
 
+### 4.16 名前を `returnmap` に変える
+
+`manforge` という名前からは、何をする道具かが読み取れなかった。改名にあたって、道具の位置づけを整理した。
+
+**全モデルが UMAT まで行くわけではない。** モデル定義 15 ファイル(公開と非公開の合計)のうち、手書きのリターンマッピングまで持つのは 4 ファイルで、残りは Python のモデルだけである。モデルごとに到達点を選ぶ。
+
+| 到達点 | 中身 | 検査 |
+|---|---|---|
+| A. 比較・フィット用 | Python のモデルだけ(自動微分で解く) | 収束、`check_tangent` |
+| B. 手書きのアルゴリズム | `user_defined_return_mapping`(と接線) | `check_solution`、`crosscheck` |
+| C. UMAT | Fortran | `check_bindings`、`crosscheck(Python, UMAT)` |
+
+- ヤコビアンの手導出(`@hand_block`)は、B で連立のまま NR で解く方法を選んだときだけ要る部品で、必須の段ではない。後退 Euler の方程式をスカラー方程式に縮約する方法(radial return 系)は根が同じなので、`check_solution` だけで検査できる。
+- cutting plane は後退 Euler の根とは別の点に収束するので、`check_solution` の対象にならない。汎用の解法としては作らない(今のモデル定義は残差の形で、発展則の速度形を持たない)。カジュアルなモデルの解法は自動微分の NR で足りる。
+- 到達点とは別に、公開範囲がある: 非公開リポジトリに置くだけ / `MODELS` に載せて API に出す / 本体に参照実装として入れる。非公開のモデルを本体に合流させることは前提にしない。
+
+**名前。** A・B・C のどれも、中身はリターンマッピングを解いて結果を見ることなので、`returnmap` にした。`umat` を含む名前(`umatproof` など)は、到達点 A が多数派である実態より狭い。`matforge`(元の名前の誤植を直した形)は、「mat」が material / matrix / MATLAB のどれとも読め、「forge」が生成する道具と読めるので採らなかった。
+
+**変えたもの。** 配布名、import パス(`returnmap.*`)、CLI(`returnmap build`)、Docker イメージ名(`returnmap-fortran`)、f2py の試験用モジュール名、文書。非公開リポジトリは `returnmap-internal`(import は `returnmap_internal`)。機能と計算結果は変わらない。
+
 ## 5. 移行計画
-各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。
+各段で returnmap と returnmap-internal の PR を対にし、両方のテストが通る状態で終える。returnmap-internal は editable 依存で CI が無いので、returnmap 側の PR ごとに internal のテストを手元で走らせる。
 
 | 段 | 内容 | internal への影響 |
 |---|---|---|
@@ -401,8 +422,8 @@ assert report.passed, report.summary()
 | 6a | 公開する import パスをパッケージ単位に揃える | import の書き換え |
 | 6b | ドキュメント基盤(Sphinx + MyST、README からガイドへ) | なし |
 
-- **段 2 が最大である。** フック定義は manforge のモデルに 20、manforge のテスト内モデルに約 65、manforge-internal に 29 ある。
-- **段 2 の合格条件は数値の完全一致とする。** 署名の変更だけなので、既存モデルの結果は変わらないはずである。`v0.1.0` で代表的な履歴の結果を保存し、変更後とビット単位で比べる。実施結果: 公開モデル 66 ケース、manforge-internal の全モデル 57 ケース(応力・ひずみ・全状態量・接線・反復数)が完全一致した。段 1 も同じ方法で `v0.1.0` と完全一致することを確認した。
+- **段 2 が最大である。** フック定義は returnmap のモデルに 20、returnmap のテスト内モデルに約 65、returnmap-internal に 29 ある。
+- **段 2 の合格条件は数値の完全一致とする。** 署名の変更だけなので、既存モデルの結果は変わらないはずである。`v0.1.0` で代表的な履歴の結果を保存し、変更後とビット単位で比べる。実施結果: 公開モデル 66 ケース、returnmap-internal の全モデル 57 ケース(応力・ひずみ・全状態量・接線・反復数)が完全一致した。段 1 も同じ方法で `v0.1.0` と完全一致することを確認した。
 - **段 3 は段 2 の後に行う。** 手導出ブロックの署名が `inc` を使うためである。
 - **段 4 は順序を入れ替えられる。** 段 2 より先に行えば、書き換えるコンストラクタが減る。
 
@@ -429,6 +450,6 @@ assert report.passed, report.summary()
 | `StressDriver.run` は `raise_on_nonconverged=True` を固定で渡す | `simulation/driver.py:425` |
 | 非 raise の integrator を `StrainDriver.run` に渡すと、10 ステップ中 3 行で返り、最終行は非収束、`DriverResult` に目印がない | 実行して確認 |
 | `build_objective` が `inspect.signature` で `dimension` 引数の有無を調べる | `fitting/objective.py:124` |
-| manforge-internal が import する manforge のシンボルは 30 個 | 両リポジトリの import を集計 |
-| manforge-internal のフックで `strain_inc` を本体で使うものは 24 定義中 0 | AST で集計 |
-| manforge-internal の Fortran 突合テスト 5 本は `FortranIntegrator` / `Crosscheck*` を使わない | `tests/yu/benchmarks/test_*_vs_fortran.py` |
+| returnmap-internal が import する returnmap のシンボルは 30 個 | 両リポジトリの import を集計 |
+| returnmap-internal のフックで `strain_inc` を本体で使うものは 24 定義中 0 | AST で集計 |
+| returnmap-internal の Fortran 突合テスト 5 本は `FortranIntegrator` / `Crosscheck*` を使わない | `tests/yu/benchmarks/test_*_vs_fortran.py` |

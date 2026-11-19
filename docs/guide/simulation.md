@@ -1,7 +1,7 @@
 # シミュレーション実行
 
 ```python
-from manforge.simulation import (
+from returnmap.simulation import (
     StrainDriver, StressDriver, PythonIntegrator, FieldHistory, FieldType)
 
 # ひずみ制御
@@ -21,7 +21,7 @@ result = StressDriver(PythonIntegrator(model)).run(
 **混合制御** — 一部成分はひずみ指定・残りは応力指定 (例: 3D モデルで ε11 を駆動し σ22..σ23 = 0 の単軸応力試験を再現):
 
 ```python
-from manforge.simulation import MixedDriver
+from returnmap.simulation import MixedDriver
 driver = MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0])
 result = driver.run(load_eps11)   # load.data は (N, 1) — ε11 のみ
 ```

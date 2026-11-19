@@ -6,7 +6,7 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core import (
+from returnmap.core import (
     PLANE_STRAIN, PLANE_STRESS, SOLID_3D, UNIAXIAL_1D, StressDimension,
 )
 
@@ -261,8 +261,8 @@ def test_projection_identity(ss):
 
 
 def test_isotropic_C_shapes():
-    from manforge.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
-    from manforge.core import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
+    from returnmap.models import J2Isotropic, J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+    from returnmap.core import PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 
     for model, expected_shape in [
         (J2Isotropic3D(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (6, 6)),
@@ -276,7 +276,7 @@ def test_isotropic_C_shapes():
 
 def test_isotropic_C_3d_diagonal():
     """C_3D[0,0] == E(1-nu)/((1+nu)(1-2nu))."""
-    from manforge.models import J2Isotropic3D
+    from returnmap.models import J2Isotropic3D
     E, nu = 200e3, 0.3
     model = J2Isotropic3D(E=E, nu=nu, sigma_y0=250.0, H=0.0)
     C = model.elastic_stiffness(model.initial_state())
@@ -286,7 +286,7 @@ def test_isotropic_C_3d_diagonal():
 
 def test_isotropic_C_1d():
     """C_1D[0,0] == E (Young's modulus for uniaxial stress)."""
-    from manforge.models import J2Isotropic1D
+    from returnmap.models import J2Isotropic1D
     E, nu = 200e3, 0.3
     model = J2Isotropic1D(E=E, nu=nu, sigma_y0=250.0, H=0.0)
     C = model.elastic_stiffness(model.initial_state())
@@ -295,7 +295,7 @@ def test_isotropic_C_1d():
 
 def test_plane_stress_C_symmetry():
     """Plane-stress stiffness must be symmetric."""
-    from manforge.models import J2IsotropicPS
+    from returnmap.models import J2IsotropicPS
     model = J2IsotropicPS(E=200e3, nu=0.3, sigma_y0=250.0, H=0.0)
     C = model.elastic_stiffness(model.initial_state())
     np.testing.assert_allclose(C, C.T, atol=1e-10)

@@ -13,8 +13,8 @@ Usage
 
 import numpy as np
 
-from manforge.models import OWKinematic1D
-from manforge.service import default_registry, run_simulation
+from returnmap.models import OWKinematic1D
+from returnmap.service import default_registry, run_simulation
 
 # ---------------------------------------------------------------------------
 # 1. Registry — explicit name → class mapping (what a deployment exposes)
@@ -34,7 +34,7 @@ for name in reg.names():
         print(f"    {pname:10s}{unit:7s} default={m.default:<10g} bounds={m.bounds}  — {m.doc}")
 
 # A private-model package would plug in the same way:
-#     from manforge_internal import MODELS
+#     from returnmap_internal import MODELS
 #     for name, cls in MODELS.items():
 #         reg.register(name, cls)
 

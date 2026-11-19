@@ -16,7 +16,7 @@ differs from model.param_names.
 
 Requires a compiled Fortran module (gfortran):
 
-    uv run manforge build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
+    uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 \\
         --name j2_isotropic_3d
     uv run python examples/example_fortran_crosscheck.py
 """
@@ -29,12 +29,12 @@ import numpy as np
 _fortran_dir = os.path.join(os.path.dirname(__file__), "..", "fortran")
 sys.path.insert(0, os.path.abspath(_fortran_dir))
 
-from manforge.models import J2Isotropic3D
-from manforge.simulation import (
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import (
     FortranIntegrator, PythonIntegrator, PythonNumericalIntegrator, StressDriver,
     FieldHistory, FieldType, FortranModule,
 )
-from manforge.verification import compare_jacobians, crosscheck, generate_strain_history
+from returnmap.verification import compare_jacobians, crosscheck, generate_strain_history
 
 try:
     import matplotlib

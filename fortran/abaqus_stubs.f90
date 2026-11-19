@@ -1,5 +1,5 @@
 ! =============================================================================
-! manforge -- ABAQUS internal function stubs for standalone UMAT testing
+! returnmap -- ABAQUS internal function stubs for standalone UMAT testing
 !
 ! Provides mock implementations of ABAQUS utility subroutines so that
 ! UMAT code can be compiled and tested without the ABAQUS solver.

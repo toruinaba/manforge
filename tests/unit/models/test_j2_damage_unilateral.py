@@ -4,8 +4,8 @@ import autograd
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
-from manforge.models import (
+import returnmap  # noqa: F401 — enables float64
+from returnmap.models import (
     J2IsotropicDamageUnilateral3D, J2IsotropicDamageUnilateralPS,
     J2IsotropicDamageUnilateral1D,
 )

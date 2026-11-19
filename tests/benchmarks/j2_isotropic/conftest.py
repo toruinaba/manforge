@@ -8,9 +8,9 @@ The `scenario` fixture parametrizes over scenario keys; tests receive a
 import numpy as np
 import pytest
 
-from manforge.models import J2Isotropic3D, J2Isotropic1D
-from manforge.simulation import FieldHistory
-from manforge.verification import estimate_yield_strain
+from returnmap.models import J2Isotropic3D, J2Isotropic1D
+from returnmap.simulation import FieldHistory
+from returnmap.verification import estimate_yield_strain
 
 
 # ---------------------------------------------------------------------------

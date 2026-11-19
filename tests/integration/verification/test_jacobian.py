@@ -4,13 +4,13 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.core import hand_block
-from manforge.models import J2Isotropic3D
-from manforge.simulation import (
+from returnmap.core import hand_block
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import (
     PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
     hand_jacobian,
 )
-from manforge.verification import (
+from returnmap.verification import (
     check_hand_blocks,
     check_solution,
     compare_jacobians,
@@ -67,7 +67,7 @@ class TestCompareJacobiansJ2:
     def test_compare_with_a_result_that_reports_no_dlambda(self, model):
         """A Fortran UMAT result carries Δλ = NaN.  The comparison is the one
         the docstring recommends for such results, and it used to return NaN."""
-        from manforge.simulation import FortranIntegrator
+        from returnmap.simulation import FortranIntegrator
         from tests.integration.simulation.integrator.test_fortran import _FakeUmat
 
         deps = np.zeros(6)
@@ -174,7 +174,7 @@ class TestIncrementComesFromTheResult:
 
     def test_comparison_report_names_the_blocks(self, model):
         from dataclasses import replace
-        from manforge.core import ReturnMappingResult
+        from returnmap.core import ReturnMappingResult
 
         result = PythonNumericalIntegrator(model).stress_update(
             anp.array([3e-3, 0.0, 0.0, 1e-3, 0.0, 0.0]), anp.zeros(6), model.initial_state())
@@ -213,7 +213,7 @@ class TestCheckHandBlocks:
     @staticmethod
     def _results(model, n=12):
         """A multiaxial history: direct and shear components together."""
-        from manforge.simulation import StrainDriver, FieldHistory, FieldType
+        from returnmap.simulation import StrainDriver, FieldHistory, FieldType
 
         t = np.linspace(0.0, 1.0, n + 1)[1:]
         data = np.zeros((n, 6))
@@ -295,7 +295,7 @@ class TestCheckHandBlocks:
         assert "approx: deliberately off" in report.summary()
 
     def test_approximation_beyond_its_declared_size_fails(self):
-        from manforge.core import hand_block
+        from returnmap.core import hand_block
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         class _TooFar(OWWithHandBlocks):
@@ -326,7 +326,7 @@ class TestCheckHandBlocks:
         ``max(max|ad|, 1)`` its error shrank with the unit, and a model posed
         in small units passed whatever the block returned.
         """
-        from manforge.core import hand_block
+        from returnmap.core import hand_block
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         class _SlightlyOff(OWWithHandBlocks):
@@ -348,7 +348,7 @@ class TestCheckHandBlocks:
         """The largest difference over the steps, against the largest reference
         over the steps — so a step where the block is small does not turn
         round-off into a large error."""
-        from manforge.core import hand_block
+        from returnmap.core import hand_block
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         class _Offset(OWWithHandBlocks):
@@ -372,7 +372,7 @@ class TestCheckHandBlocks:
         """``∂f/∂Δλ`` is zero for this model, so there is no ``max|ad|`` to
         divide by.  The block is measured against what its row and column
         imply: round-off passes, a value that is not zero does not."""
-        from manforge.core import hand_block
+        from returnmap.core import hand_block
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         def model_returning(value):
@@ -416,7 +416,7 @@ class TestCheckSolution:
 
     @staticmethod
     def _results(model, n=14):
-        from manforge.simulation import (
+        from returnmap.simulation import (
             FieldHistory, FieldType, PythonAnalyticalIntegrator, StrainDriver,
         )
 
@@ -437,7 +437,7 @@ class TestCheckSolution:
         assert report.n_points > 5
 
     def test_hand_newton_solution_satisfies_every_row(self):
-        from manforge.models import YUKinematic3D
+        from returnmap.models import YUKinematic3D
         from tests.benchmarks.yu_kinematic.conftest import PARAMS
 
         m = YUKinematic3D(**PARAMS)
@@ -449,7 +449,7 @@ class TestCheckSolution:
     def test_a_wrong_hand_row_is_the_only_row_reported(self):
         """A coefficient off by 2 % in the hand residual's θ row."""
         import autograd.numpy as anp
-        from manforge.models import YUKinematic3D
+        from returnmap.models import YUKinematic3D
         from tests.benchmarks.yu_kinematic.conftest import PARAMS
 
         class _WrongTheta(YUKinematic3D):
@@ -470,7 +470,7 @@ class TestCheckSolution:
 
     def test_a_wrong_closed_form_is_caught(self, model):
         """There is no hand residual to compare here — only the solution."""
-        from manforge.core import ReturnMappingResult
+        from returnmap.core import ReturnMappingResult
 
         class _Overshoot(type(model)):
             def user_defined_return_mapping(self, inc):
@@ -488,7 +488,7 @@ class TestCheckSolution:
         assert {r.name for r in report.failed} == {"stress", "dlambda"}
 
     def test_a_wrong_explicit_update_is_reported_as_a_state(self, model):
-        from manforge.core import ReturnMappingResult
+        from returnmap.core import ReturnMappingResult
 
         class _WrongEp(type(model)):
             def user_defined_return_mapping(self, inc):
@@ -506,8 +506,8 @@ class TestCheckSolution:
 
     def test_autodiff_solutions_pass_at_their_own_solver_tolerance(self):
         """A solution is not faulted for the tolerance its solver stopped at."""
-        from manforge.models import OWKinematic3D
-        from manforge.simulation import (
+        from returnmap.models import OWKinematic3D
+        from returnmap.simulation import (
             FieldHistory, PythonNumericalIntegrator, StrainDriver,
         )
         from tests.fixtures.hand_block_models import OW_PARAMS
@@ -521,9 +521,9 @@ class TestCheckSolution:
 
     def test_a_state_that_never_moves_is_listed_not_passed(self):
         """An explicit state that stays at zero says nothing about its update."""
-        from manforge.core import SCALAR, Explicit
-        from manforge.models import J2Isotropic
-        from manforge.simulation import FieldHistory, StrainDriver
+        from returnmap.core import SCALAR, Explicit
+        from returnmap.models import J2Isotropic
+        from returnmap.simulation import FieldHistory, StrainDriver
 
         class _WithIdleState(J2Isotropic):
             idle = Explicit(shape=SCALAR, doc="a mechanism this history never triggers")
@@ -542,7 +542,7 @@ class TestCheckSolution:
         assert "not exercised: idle" in report.summary()
 
     def test_nothing_checked_is_an_error_not_a_pass(self, model):
-        from manforge.simulation import FieldHistory, FieldType, StrainDriver
+        from returnmap.simulation import FieldHistory, FieldType, StrainDriver
 
         data = np.zeros((3, 6))
         data[:, 0] = np.linspace(1e-5, 3e-5, 3)        # elastic only
@@ -563,8 +563,8 @@ class TestCheckSolution:
     def test_a_non_converged_iterate_is_not_checked_as_a_solution(self):
         """Its own residual norm used to be taken as the allowance, so an
         iterate 190 away from the root came back 'every row satisfied'."""
-        from manforge.models import OWKinematic3D
-        from manforge.simulation import FieldHistory, FieldType, StrainDriver
+        from returnmap.models import OWKinematic3D
+        from returnmap.simulation import FieldHistory, FieldType, StrainDriver
         from tests.fixtures.hand_block_models import OW_PARAMS
 
         m = OWKinematic3D(**OW_PARAMS)
@@ -582,7 +582,7 @@ class TestCheckSolution:
         """A closed form that reports only the trial residual has not
         iterated: there is no solver tolerance to allow for, and the trial
         residual must not be mistaken for one."""
-        from manforge.core import ReturnMappingResult
+        from returnmap.core import ReturnMappingResult
 
         class _Overshoot(type(model)):
             def user_defined_return_mapping(self, inc):
@@ -600,8 +600,8 @@ class TestCheckSolution:
     def test_substepped_steps_are_left_out_and_counted(self):
         """A sub-stepped result ends a chain of smaller steps; it is not a
         root of the undivided increment's residual, and used to be faulted."""
-        from manforge.models import OWKinematic3D
-        from manforge.simulation import (
+        from returnmap.models import OWKinematic3D
+        from returnmap.simulation import (
             FieldHistory, FieldType, StrainDriver, SubSteppingIntegrator,
         )
         from tests.fixtures.hand_block_models import OW_PARAMS
@@ -626,7 +626,7 @@ class TestCheckSolution:
             check_solution(m, only_sub)
 
     def test_fortran_results_are_refused_for_the_right_reason(self, model):
-        from manforge.simulation import (
+        from returnmap.simulation import (
             FieldHistory, FieldType, FortranIntegrator, StrainDriver,
         )
         from tests.integration.simulation.integrator.test_fortran import _FakeUmat
@@ -646,8 +646,8 @@ class TestCheckSolution:
         It used to be compared with the largest unknown — a strain against a
         stress — so in Pa a plastic strain of 5e-4 counted as 'never moved'
         and a wrong update passed."""
-        from manforge.core import ReturnMappingResult
-        from manforge.simulation import (
+        from returnmap.core import ReturnMappingResult
+        from returnmap.simulation import (
             FieldHistory, FieldType, PythonAnalyticalIntegrator, StrainDriver,
         )
 
@@ -672,7 +672,7 @@ class TestCheckSolution:
         assert [r.name for r in report.failed] == ["ep"]
 
     def test_a_nan_state_fails(self, model):
-        from manforge.core import ReturnMappingResult
+        from returnmap.core import ReturnMappingResult
 
         class _NanEp(type(model)):
             def user_defined_return_mapping(self, inc):

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from manforge.verification._measure import array_rel_err, as_error, max_abs, rel_err
+from returnmap.verification._measure import array_rel_err, as_error, max_abs, rel_err
 
 
 def test_largest_difference_over_largest_reference():

@@ -1,5 +1,5 @@
-# manforge.service
+# returnmap.service
 
 ```{eval-rst}
-.. automodule:: manforge.service
+.. automodule:: returnmap.service
 ```

@@ -18,9 +18,9 @@ Usage
 
 import numpy as np
 
-from manforge.models import J2IsotropicDamageCrackClosure1D
-from manforge.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
-from manforge.verification import check_tangent
+from returnmap.models import J2IsotropicDamageCrackClosure1D
+from returnmap.simulation import StrainDriver, PythonNumericalIntegrator, FieldHistory
+from returnmap.verification import check_tangent
 
 try:
     import matplotlib

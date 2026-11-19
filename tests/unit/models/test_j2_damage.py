@@ -3,9 +3,9 @@
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
-from manforge.core import SOLID_3D
-from manforge.models import (
+import returnmap  # noqa: F401 — enables float64
+from returnmap.core import SOLID_3D
+from returnmap.models import (
     J2Isotropic, J2IsotropicDamage, J2IsotropicDamage3D, J2IsotropicDamagePS,
     J2IsotropicDamage1D,
 )
@@ -80,11 +80,11 @@ def test_state_declaration():
 
 import autograd  # noqa: E402
 
-from manforge.models import (  # noqa: E402
+from returnmap.models import (  # noqa: E402
     J2IsotropicDamageCrackClosure3D, J2IsotropicDamageCrackClosurePS,
     J2IsotropicDamageCrackClosure1D,
 )
-from manforge.verification import make_increment
+from returnmap.verification import make_increment
 
 CC_PAIRS = [
     (J2IsotropicDamageCrackClosure3D, J2IsotropicDamage3D),

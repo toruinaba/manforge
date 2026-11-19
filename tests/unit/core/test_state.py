@@ -16,11 +16,11 @@ import numpy as np
 import pytest
 import autograd.numpy as anp
 
-from manforge.core import (
+from returnmap.core import (
     Implicit, Explicit, State, NTENS, SCALAR, StateResidual, StateUpdate,
     MaterialModel, SOLID_3D,
 )
-from manforge.core.state import (
+from returnmap.core.state import (
     StateField, collect_state_fields, _make, _validate_state_items,
 )
 
@@ -401,7 +401,7 @@ def test_make_state_missing_raises():
 # Absorbed from tests/unit/test_residual_name.py (pure part)
 # ===========================================================================
 
-from manforge.simulation._layout import ResidualLayout  # noqa: E402
+from returnmap.simulation._layout import ResidualLayout  # noqa: E402
 
 
 class TestResidualNameValidation:
@@ -445,7 +445,7 @@ class TestEffectiveResidualName:
         assert f.effective_residual_name == "alpha"
 
     def test_explicit_field_carries_residual_name(self):
-        from manforge.core import SCALAR
+        from returnmap.core import SCALAR
         f = Explicit(shape=SCALAR, residual_name="R_ep")
         object.__setattr__(f, "name", "ep")
         assert f.effective_residual_name == "R_ep"
@@ -505,8 +505,8 @@ class TestCollisionDetection:
 # Absorbed from tests/unit/test_dlambda_validation.py
 # ===========================================================================
 
-from manforge.core import DlambdaResidual, StateResidual, StateUpdate  # noqa: E402
-from manforge.core.state import DlambdaField, DLAMBDA_FIELD  # noqa: E402
+from returnmap.core import DlambdaResidual, StateResidual, StateUpdate  # noqa: E402
+from returnmap.core.state import DlambdaField, DLAMBDA_FIELD  # noqa: E402
 
 
 class _NoStateModel(MaterialModel):
@@ -571,7 +571,7 @@ def test_dlambda_not_in_state_fields():
 # ---------------------------------------------------------------------------
 
 def test_state_field_update_returns_state_update_for_both_kinds():
-    from manforge.core import Explicit, Implicit, StateResidual, StateUpdate
+    from returnmap.core import Explicit, Implicit, StateResidual, StateUpdate
 
     class _Holder:
         imp = Implicit(shape=())

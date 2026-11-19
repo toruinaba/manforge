@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from manforge.fitting.metrics import is_curve_metric, resolve_metric
-from manforge.fitting import mean_squared_error, partial_curve_mapping
+from returnmap.fitting.metrics import is_curve_metric, resolve_metric
+from returnmap.fitting import mean_squared_error, partial_curve_mapping
 
 
 def hardening_curve(eps, E=210000.0, sy=250.0, H=1000.0):

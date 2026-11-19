@@ -12,8 +12,8 @@ reduction matters far more here than in plane stress.
 import numpy as np
 from _common import plastic_point, props
 
-from manforge.models import YUKinematic3D
-from manforge.simulation import FortranModule
+from returnmap.models import YUKinematic3D
+from returnmap.simulation import FortranModule
 
 N_REPEAT = 100_000
 

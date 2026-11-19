@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
-from manforge.models import (
+import returnmap  # noqa: F401 — enables float64
+from returnmap.models import (
     J2IsotropicDamage3D, J2IsotropicDamagePS, J2IsotropicDamage1D,
 )
-from manforge.simulation import (
+from returnmap.simulation import (
     StressDriver, PythonNumericalIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import check_tangent
+from returnmap.verification import check_tangent
 
 P = dict(E=200000.0, nu=0.3, sigma_y0=250.0, H=2000.0)
 DP = dict(S=0.5, s=1.0, p_D=0.01)
@@ -75,7 +75,7 @@ def test_stress_driver_uses_nominal_stress():
 # Crack-closure variant
 # ---------------------------------------------------------------------------
 
-from manforge.models import (  # noqa: E402
+from returnmap.models import (  # noqa: E402
     J2IsotropicDamage1D as _Base1D,
     J2IsotropicDamageCrackClosure3D, J2IsotropicDamageCrackClosurePS,
     J2IsotropicDamageCrackClosure1D,

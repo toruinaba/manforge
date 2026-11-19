@@ -17,15 +17,15 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 
 | パッケージ | 中身 |
 |---|---|
-| `manforge.core` | モデルを書く: `MaterialModel`、状態変数の宣言 (`Implicit` / `Explicit` / `NTENS` / `SCALAR`)、次元 (`SOLID_3D` 等)、`hand_block`、`verified_against_fortran`、結果型 |
-| `manforge.models` | 参照モデル (J2 / 損傷 / AF / OW / YU) |
-| `manforge.simulation` | integrator、driver、載荷履歴 (`FieldHistory`)、`FortranModule` |
-| `manforge.fitting` | `fit_params`、`FitTarget`、`ParameterSpace` |
-| `manforge.verification` | 検査: `check_hand_blocks`、`check_solution`、`check_tangent`、`crosscheck`、`compare_jacobians`、`check_bindings` |
-| `manforge.service` | WebAPI 向けの契約層 |
-| `manforge.utils` | モデル用の補助関数 (smooth 近似、主値分解) |
+| `returnmap.core` | モデルを書く: `MaterialModel`、状態変数の宣言 (`Implicit` / `Explicit` / `NTENS` / `SCALAR`)、次元 (`SOLID_3D` 等)、`hand_block`、`verified_against_fortran`、結果型 |
+| `returnmap.models` | 参照モデル (J2 / 損傷 / AF / OW / YU) |
+| `returnmap.simulation` | integrator、driver、載荷履歴 (`FieldHistory`)、`FortranModule` |
+| `returnmap.fitting` | `fit_params`、`FitTarget`、`ParameterSpace` |
+| `returnmap.verification` | 検査: `check_hand_blocks`、`check_solution`、`check_tangent`、`crosscheck`、`compare_jacobians`、`check_bindings` |
+| `returnmap.service` | WebAPI 向けの契約層 |
+| `returnmap.utils` | モデル用の補助関数 (smooth 近似、主値分解) |
 
-その下のサブモジュール (`manforge.core.state`、`manforge.simulation.driver` など) はコードの置き場所で、文書化されたインターフェースではない。
+その下のサブモジュール (`returnmap.core.state`、`returnmap.simulation.driver` など) はコードの置き場所で、文書化されたインターフェースではない。
 
 ## Integrator の種類
 

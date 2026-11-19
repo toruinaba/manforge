@@ -7,9 +7,9 @@ The compiled-module run is in
 import numpy as np
 import pytest
 
-from manforge.core import verified_against_fortran
-from manforge.models import J2Isotropic3D
-from manforge.verification import BindingReport, check_bindings
+from returnmap.core import verified_against_fortran
+from returnmap.models import J2Isotropic3D
+from returnmap.verification import BindingReport, check_bindings
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 

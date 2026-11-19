@@ -15,8 +15,8 @@ Run with:
 import numpy as np
 import autograd.numpy as anp
 
-from manforge.models import YUKinematic3D
-from manforge.simulation import (
+from returnmap.models import YUKinematic3D
+from returnmap.simulation import (
     PythonNumericalIntegrator, PythonAnalyticalIntegrator, FieldHistory,
 )
 
