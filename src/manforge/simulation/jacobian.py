@@ -24,7 +24,7 @@ import numpy as np
 
 from manforge.core.state import Increment, State
 from manforge.simulation._layout import ResidualLayout
-from manforge.simulation._residual import build_residual
+from manforge.simulation._residual import build_residual, build_state_from_x
 from manforge._typing import FloatArray
 
 if TYPE_CHECKING:
@@ -136,12 +136,61 @@ def residual_jacobian(
     On an elastic step the point is ``(σ_trial, Δλ = 0, elastic state)``.
     """
     residual_fn, layout = build_residual(model, inc)
-    state = result.state
-    x_conv = layout.pack(
-        result.stress, result.dlambda, {k: state[k] for k in layout.implicit_keys}
-    )  # type: ignore[arg-type]
-    J = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[arg-type]
+    J = autograd.jacobian(residual_fn)(_point(layout, result))  # type: ignore[arg-type]
     return _split(layout, J, "ad")
+
+
+def _point(layout: ResidualLayout, result: "StressUpdateResult"):
+    """``x = [σ, Δλ, implicit states]`` as the result reports it."""
+    state = result.state
+    return anp.array(layout.pack(
+        result.stress, result.dlambda, {k: state[k] for k in layout.implicit_keys}
+    ))  # type: ignore[arg-type]
+
+
+@dataclass
+class ResidualPoint:
+    """The framework residual evaluated at the point a result reports.
+
+    Attributes
+    ----------
+    layout : the solver's residual layout (``ResidualLayout``)
+    x : ndarray, shape (n_unknown,)
+        ``[σ, Δλ, implicit states]`` taken from the result.
+    residual : ndarray, shape (n_unknown,)
+        ``R(x)`` — zero, to solver tolerance, when the result is a root.
+    jacobian : ndarray, shape (n_unknown, n_unknown)
+        ``∂R/∂x`` at ``x`` (autodiff).
+    state : dict
+        The full state the framework derives from ``x``: the explicit states
+        are recomputed with ``update_state``, not read from the result.
+    """
+
+    layout: ResidualLayout
+    x: FloatArray
+    residual: FloatArray
+    jacobian: FloatArray
+    state: dict
+
+
+def residual_at(
+    model: "MaterialModel", result: "StressUpdateResult", inc: Increment,
+) -> ResidualPoint:
+    """Evaluate the residual of ``inc`` and its Jacobian at the point of ``result``.
+
+    The point is whatever the result reports — the solution of the autodiff
+    Newton-Raphson, of a hand-written return mapping, or of a Fortran UMAT —
+    while the residual is always the framework's.
+    """
+    residual_fn, layout = build_residual(model, inc)
+    x = _point(layout, result)
+    return ResidualPoint(
+        layout=layout,
+        x=np.asarray(x, dtype=float),
+        residual=np.asarray(residual_fn(x), dtype=float),
+        jacobian=np.asarray(autograd.jacobian(residual_fn)(x), dtype=float),  # type: ignore[arg-type]
+        state=build_state_from_x(model, x, inc, layout),
+    )
 
 
 def hand_jacobian_blocks(
@@ -220,6 +269,8 @@ def hand_jacobian(
 __all__ = [
     "JacobianBlocks",
     "residual_jacobian",
+    "ResidualPoint",
+    "residual_at",
     "hand_jacobian_blocks",
     "hand_jacobian",
 ]

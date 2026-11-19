@@ -1,11 +1,11 @@
 """Fortran UMAT crosscheck: build → load → crosscheck → drive.
 
-The complete Fortran validation workflow (README § 5.7):
+The complete Fortran validation workflow (docs/guide/fortran.md):
 
 1. Load a compiled UMAT with FortranModule
 2. Crosscheck Python vs Fortran over a generated strain history
-   (CrosscheckStrainDriver — per-step stress/ddsdde comparison)
-3. Debug a failing step via iter_run + JacobianChecker.compare
+   (crosscheck — per-step stress / state / ddsdde comparison)
+3. Debug a failing step via result.first_failure + JacobianChecker.compare
 4. Drive the Fortran UMAT directly with StressDriver (cyclic hysteresis, plot)
 
 In an external project, replace J2Isotropic3D with your model and
@@ -34,9 +34,7 @@ from manforge.simulation import (
     FortranIntegrator, PythonIntegrator, PythonNumericalIntegrator, StressDriver,
     FieldHistory, FieldType, FortranModule,
 )
-from manforge.verification import (
-    CrosscheckStrainDriver, JacobianChecker, generate_strain_history,
-)
+from manforge.verification import JacobianChecker, crosscheck, generate_strain_history
 
 try:
     import matplotlib
@@ -61,25 +59,21 @@ print("  Crosscheck: Python (numerical NR) vs Fortran UMAT")
 print("=" * 60)
 
 load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
-cc = CrosscheckStrainDriver(PythonNumericalIntegrator(model), fc_int)
-result = cc.run(load)
+result = crosscheck(PythonNumericalIntegrator(model), fc_int, load)
 
-print(f"  passed             : {result.passed}")
-print(f"  n_cases            : {result.n_cases}  (passed: {result.n_passed})")
-print(f"  max stress rel err : {result.max_stress_rel_err:.2e}")
+print(result.summary())
 assert result.passed
 
 # ---------------------------------------------------------------------------
-# 3. Debugging pattern: stream steps, inspect Jacobian blocks on failure
+# 3. Debugging pattern: the first step that disagrees carries both raw
+#    results; compare the residual Jacobian at the two solutions to see where.
 # ---------------------------------------------------------------------------
-checker = JacobianChecker(model)
-for cr in cc.iter_run(load):
-    if not cr.passed:
-        cmp = checker.compare(cr.result_a, cr.result_b)
-        print(f"  step failed — block comparison:\n{cmp.blocks}")
-        break
+step = result.first_failure
+if step is not None:
+    cmp = JacobianChecker(model).compare(step.result_a, step.result_b)
+    print(f"  step {step.index} failed — block comparison:\n{cmp.blocks}")
 else:
-    print("  iter_run: no failing step (as expected)")
+    print("  no failing step (as expected)")
 print()
 
 # ---------------------------------------------------------------------------

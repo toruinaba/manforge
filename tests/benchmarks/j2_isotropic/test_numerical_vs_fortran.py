@@ -31,9 +31,7 @@ from manforge.simulation import (
     PythonIntegrator, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
     FortranIntegrator, FieldHistory, FieldType, FortranModule,
 )
-from manforge.verification import (
-    CrosscheckStrainDriver, CrosscheckStressDriver, generate_strain_history,
-)
+from manforge.verification import crosscheck, generate_strain_history
 
 
 # ---------------------------------------------------------------------------
@@ -147,24 +145,22 @@ class TestFortranModuleCall:
 
 
 # ---------------------------------------------------------------------------
-# Multi-step trajectory benchmark (CrosscheckStrainDriver)
+# Multi-step trajectory benchmark (crosscheck)
 # ---------------------------------------------------------------------------
 
 class TestCrosscheckTrajectory:
 
     def test_numerical_newton_vs_fortran(self, py_int, fc_int, j2):
         """PythonNumericalIntegrator vs UMAT over full strain history."""
-        cc = CrosscheckStrainDriver(py_int, fc_int)
-        result = cc.run(_j2_load(j2))
+        result = crosscheck(py_int, fc_int, _j2_load(j2))
 
         assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
         assert result.max_stress_rel_err < 1e-6
-        assert result.n_cases == result.n_passed
+        assert result.n_steps == result.n_passed
 
     def test_analytical_vs_fortran(self, py_int_an, fc_int, j2):
         """PythonAnalyticalIntegrator (closed-form) vs UMAT over full strain history."""
-        cc = CrosscheckStrainDriver(py_int_an, fc_int)
-        result = cc.run(_j2_load(j2))
+        result = crosscheck(py_int_an, fc_int, _j2_load(j2))
 
         assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
         assert result.max_stress_rel_err < 1e-6
@@ -176,8 +172,7 @@ class TestCrosscheckTrajectory:
         py_int = PythonNumericalIntegrator(model)
         load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 
-        cc = CrosscheckStrainDriver(py_int, fc_int)
-        result = cc.run(load)
+        result = crosscheck(py_int, fc_int, load)
 
         assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
         assert result.max_stress_rel_err < 1e-6
@@ -232,14 +227,13 @@ class TestCrosscheckStressDriven:
         stress_data[:, 0] = targets
         load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
 
-        cc = CrosscheckStressDriver(py_int, fc_int)
-        result = cc.run(load)
+        result = crosscheck(py_int, fc_int, load)
 
         assert result.passed, f"max_stress_rel_err = {result.max_stress_rel_err:.2e}"
 
 
 # ---------------------------------------------------------------------------
-# iter_run early-break and negative cases
+# Negative cases
 # ---------------------------------------------------------------------------
 
 class TestNegativeCases:
@@ -252,30 +246,27 @@ class TestNegativeCases:
             param_fn=lambda: (j2.sigma_y0, j2.H, j2.E, j2.nu),  # deliberately wrong
         )
 
-        cc = CrosscheckStrainDriver(py_int, fc_int_bad)
-        result = cc.run(_j2_load(j2))
+        result = crosscheck(py_int, fc_int_bad, _j2_load(j2))
 
         assert not result.passed, (
             "Expected failure with wrong param_fn, "
             f"but max_stress_rel_err = {result.max_stress_rel_err:.2e}"
         )
 
-    def test_iter_run_early_break(self, fortran_mod, j2):
-        """iter_run allows breaking on first failing step."""
+    def test_stop_on_failure_ends_at_the_first_failing_step(self, fortran_mod, j2):
+        """stop_on_failure cuts the run at the first step that disagrees."""
         py_int = PythonNumericalIntegrator(j2)
         fc_int_bad = FortranIntegrator.from_model(
             fortran_mod, "j2_isotropic_3d", j2,
             param_fn=lambda: (j2.sigma_y0, j2.H, j2.E, j2.nu),
         )
 
-        cc = CrosscheckStrainDriver(py_int, fc_int_bad)
-        found_failure = False
-        for cr in cc.iter_run(_j2_load(j2)):
-            if not cr.passed:
-                found_failure = True
-                break
+        result = crosscheck(py_int, fc_int_bad, _j2_load(j2), stop_on_failure=True)
 
-        assert found_failure, "Expected at least one failing step with wrong param_fn"
+        assert result.first_failure is not None, (
+            "Expected at least one failing step with wrong param_fn"
+        )
+        assert result.first_failure is result.steps[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -318,15 +309,13 @@ class TestSingleStepCrosscheck:
         return cases
 
     def _run(self, py_int, fc_int, model):
-        cc = CrosscheckStrainDriver(py_int, fc_int)
         failures = []
         for case in self._make_cases(model):
             data = case["deps"][np.newaxis]
             load = FieldHistory(FieldType.STRAIN, "eps", data)
-            for cr in cc.iter_run(load, initial_stress=case["stress_n"],
-                                  initial_state=case["state_n"]):
-                if not cr.passed:
-                    failures.append((case, cr))
+            result = crosscheck(py_int, fc_int, load, initial_stress=case["stress_n"],
+                                initial_state=case["state_n"])
+            failures.extend((case, step) for step in result.steps if not step.passed)
         return failures
 
     def test_numerical_newton_single_steps(self, py_int, fc_int, j2):

@@ -283,6 +283,30 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 - **私有の基底クラスを持つクラスは、継承したメソッドを明示して載せる。** `PythonIntegrator` など 3 つと Crosscheck ドライバ 2 つは、メソッドが `_PythonIntegratorBase` / `_CrosscheckDriverBase` にあり、そのままではリファレンスに `stress_update` すら出なかった。
 - `StateField` を `manforge.core` に追加した。モデルが `self.ep(...)` / `self.stress.update(...)` として触る型で、説明の置き場が無かった。
 
+### 4.13 手書きの解の検査と crosscheck
+移行計画(段 0〜6)の後に、残っていた未決事項 6 と 7 を決めて実施した。
+
+**手書きの解の検査(未決事項 6)**
+
+手書きの NR を持つモデルには、残差ベクトルを返す `calc_residual` がある。`state_residual`(自動微分側)と同じ代数をもう一度手で書いたもので、Fortran に移植される。この 2 つが食い違った前例がある。検査は「手書き経路と自動微分経路の履歴が一致する」ことだけで、食い違ったときにどの行が原因かは分からなかった。
+
+- **残差は宣言しない。** 手導出ブロックと同じ形(`@hand_residual` で宣言し、値を照合する)は採らなかった。残差は根が同じなら行をスケールしてよいので、解の外で値まで一致させる照合は正しい書き換えを誤りと判定する。閉形式解(`J2Isotropic3D`)には残差ベクトルがそもそも無い。
+- **解を自動微分側の残差に代入する。** `JacobianChecker.check_solution(results)` は、手書き経路が返した解を、そのステップの自動微分側の残差に代入する。手書きの行が食い違っていれば、その行だけが 0 にならない。explicit 状態は、報告された値を `update_state` の結果と比べる。
+- **各ステップを個別に判定する。** そのステップの開始状態は手書き経路自身のものなので、誤差の累積に左右されない。
+- **誤差の測り方。** 行ごとに `max|R| / (行を構成する項の大きさ + slack / tol)`。項の大きさは `max(|∂R/∂x|·|x|)`(成分ごとの後退誤差で、行をスケールしても変わらない)。`slack` はソルバ自身が報告した残差ノルムの 10 倍で、ソルバが止まった許容値を誤りとは判定しない。実測では、閉形式解が 1e-16、手書き NR が 1e-12、Continuous YU(手書き NR の許容値が緩い)が 1e-9 で、既定の `tol=1e-8` に対して 1 桁以上の余裕がある。
+- **動かなかった状態は合格にしない。** 履歴中に一度も 0 から動かなかった explicit 状態は `not_exercised` に載る。その更新式は検査されていない。
+
+**crosscheck(未決事項 7)**
+
+2 つの integrator を同じ載荷履歴で進めて比べる、という 1 つのことに公開名が 7 つあった(`Comparator`、`CaseResult`、`ComparisonResult`、`CrosscheckCaseResult`、`CrosscheckResult`、`CrosscheckStrainDriver`、`CrosscheckStressDriver`)。`Comparator` の実装は Crosscheck だけだった。混合制御用は無かった。manforge-internal の Fortran 突合テストは使っておらず、同じループを手で書いていた。
+
+- **`crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)` の 1 つにした。** 公開名は `crosscheck`、`CrosscheckResult`、`CrosscheckStep` の 3 つ。driver は載荷履歴から決まり(ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`)、それ以外は `driver_factory` で渡す(`fit_params` と同じ形)。混合制御も使える。driver 自身の設定は factory が持つので、`driver_tol` の受け渡しは無くなった。
+- **`FortranIntegrator(parse_umat_failure=...)` を足した。** UMAT 自身の収束フラグを読む。これが無いと UMAT 側の非収束は見えず、収束しなかった反復値が解として比較される。internal が Crosscheck を使えなかった理由はこれだった。
+- **`lockstep=True` を足した。** 既定では 2 つの経路を独立に進めるので、最初の食い違いの後はすべてずれ、長い履歴では正しい実装同士でも丸め誤差が累積する。lock-step では参照側だけを進め、各ステップで候補側に参照側の入力(ステップ開始時の応力と状態、ひずみ増分)を渡して出力を比べる。「同じ状態から同じ増分で一致するか」という、UMAT の移植が満たすべき条件そのものになる。internal のテストには「長い履歴には lock-step のハーネスが要る」というコメントがあった。
+- **誤差の測り方を変えた。** これまでは応力が `|Δ| / (|σ| + 1)`(MPa を仮定した加算項)、状態量と接線が成分ごとの純粋な相対誤差で、0 に近い成分で丸め誤差が大きな相対誤差になった。配列全体で `max|b − a|` を取り、参照側がそれまでに到達した最大値に対する相対値にした。単位に依らない。
+- **収束しなかったステップは合格にしない。**
+- **internal の「両方を進めて比べる」テスト 10 本を `crosscheck` に置き換えた。** 手書きのループと `assert_allclose` の並びが消えた。Continuous YU の反転履歴は独立に進めると `q` が 1.5e-8 までずれるので、lock-step にした(6.5e-15)。
+
 ## 5. 移行計画
 各段で manforge と manforge-internal の PR を対にし、両方のテストが通る状態で終える。manforge-internal は editable 依存で CI が無いので、manforge 側の PR ごとに internal のテストを手元で走らせる。
 
@@ -309,8 +333,8 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 3. ~~パラメータの既定値~~ → 持たない。全パラメータ必須に決定(4.10)。
 4. ~~派生属性の初期化~~ → フックは足さない。定数はクラス属性、導出値は `property`、パラメータではない設定だけ `__init__` を override する(4.10)。調べた時点で、`__init__` でパラメータから計算している属性は無かった(YU の `P` / `T` は `dimension` から取る形になっていた)。
 5. ~~次元を固定するクラスの判定~~ → クラス本体に `dimension` を書いたクラスとその子は固定、に決定(4.10)。
-6. **手導出の残差も宣言するか。** 現在の `calc_residual` は explicit 状態を凍結した形で、フレームワークの残差と構造が違う。
-7. **Crosscheck ドライバの扱い。** manforge-internal では使われていない。段 3 の試験移行の結果を見て、残すか形を変えるかを決める。
+6. ~~手導出の残差も宣言するか~~ → 宣言しない。手書き経路の解を自動微分側の残差に代入する `check_solution` を足した(4.13)。
+7. ~~Crosscheck ドライバの扱い~~ → `crosscheck` の 1 つの入口に作り直した。`FortranIntegrator` が UMAT の収束フラグを読めるようにし、lock-step の比較を足した(4.13)。
 8. ~~ドキュメントのツールと言語~~ → Sphinx + MyST、ガイドは日本語で API リファレンスは英語、まずローカルビルドのみ、に決定(4.12)。
 
 ## 付録 A. 調査で確認した事実

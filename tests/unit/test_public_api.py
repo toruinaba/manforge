@@ -46,7 +46,7 @@ def test_each_name_has_one_home():
                     "FortranModule", "JacobianBlocks", "SubSteppingIntegrator"]),
     ("fitting", ["fit_params", "FitTarget", "Observation", "ParameterSpace", "FitResult"]),
     ("verification", ["JacobianChecker", "TangentChecker", "check_bindings",
-                      "CrosscheckStrainDriver", "make_increment"]),
+                      "crosscheck", "CrosscheckResult", "make_increment"]),
     ("service", ["ModelRegistry", "run_simulation"]),
     ("utils", ["smooth_sqrt", "smooth_macaulay", "smooth_heaviside", "positive_part"]),
 ])

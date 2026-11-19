@@ -8,7 +8,9 @@
   model declares with :func:`~manforge.core.hand_block`;
 * :meth:`~JacobianChecker.check_hand_blocks` — every declared block against the
   reference over a whole history, with the worst deviation per block and the
-  list of blocks not derived yet.
+  list of blocks not derived yet;
+* :meth:`~JacobianChecker.check_solution` — the solutions of a hand-written
+  return mapping substituted into the framework residual, row by row.
 
 The matrices themselves come from :mod:`manforge.simulation.jacobian`.
 """
@@ -27,9 +29,9 @@ from manforge.simulation.jacobian import (
     JacobianBlocks,
     hand_jacobian,
     hand_jacobian_blocks,
+    residual_at,
     residual_jacobian,
 )
-from manforge.verification.comparator_base import _array_rel_err
 
 
 @dataclass
@@ -144,6 +146,103 @@ class HandBlockReport:
             lines.append(
                 "  not derived: " + ", ".join(f"[{r}][{c}]" for r, c in self.undeclared)
             )
+        return "\n".join(lines)
+
+    def __str__(self) -> str:
+        return self.summary()
+
+
+def _array_rel_err(ref: np.ndarray, cand: np.ndarray) -> float:
+    """Largest component-wise relative difference between two Jacobian blocks."""
+    return float(np.max(np.abs(cand - ref) / (np.abs(ref) + 1e-300)))
+
+
+# check_solution allows a row this many times the residual norm the solver
+# reported: a row can carry the whole of that norm, and the two residuals are
+# evaluated by different code, so the bound itself needs room.
+_SLACK_FACTOR = 10.0
+
+
+@dataclass
+class SolutionRowCheck:
+    """One line of a :class:`SolutionReport`.
+
+    Attributes
+    ----------
+    name : str
+        A residual row (``"stress"``, the Δλ row, an implicit state) or an
+        explicit state.
+    kind : {"residual", "state"}
+        ``"residual"``: the framework residual row evaluated at the reported
+        solution.  ``"state"``: an explicit state as reported, against the
+        framework's ``update_state`` at the same point.
+    worst_err : float
+        Largest error over the checked steps (see
+        :meth:`JacobianChecker.check_solution` for the measure).
+    worst_at : int
+        Index, in the checked sequence, of the step where it occurred.
+    tol : float
+        Tolerance the line is held to.
+    """
+
+    name: str
+    kind: str
+    worst_err: float
+    worst_at: int
+    tol: float
+
+    @property
+    def passed(self) -> bool:
+        return self.worst_err <= self.tol
+
+
+@dataclass
+class SolutionReport:
+    """Result of :meth:`JacobianChecker.check_solution`.
+
+    Attributes
+    ----------
+    rows : dict[str, SolutionRowCheck]
+        One entry per residual row and per exercised explicit state.
+    not_exercised : list[str]
+        Explicit states that never left zero in the checked steps, so their
+        update was not tested by this history.
+    n_points : int
+        Number of plastic steps checked.
+    """
+
+    rows: dict[str, SolutionRowCheck]
+    not_exercised: list[str] = field(default_factory=list)
+    n_points: int = 0
+
+    @property
+    def passed(self) -> bool:
+        """Every row and every exercised state within tolerance."""
+        return all(r.passed for r in self.rows.values())
+
+    @property
+    def failed(self) -> list[SolutionRowCheck]:
+        """Lines outside tolerance, worst first."""
+        bad = [r for r in self.rows.values() if not r.passed]
+        return sorted(bad, key=lambda r: -r.worst_err)
+
+    def summary(self) -> str:
+        """Multi-line text: one line per residual row, then the explicit states."""
+        n_bad = len(self.failed)
+        lines = [
+            f"solution check: {self.n_points} plastic steps — "
+            + ("every row satisfied" if self.passed
+               else f"{n_bad} {'row' if n_bad == 1 else 'rows'} off")
+        ]
+        for r in self.rows.values():
+            mark = "ok  " if r.passed else "FAIL"
+            label = f"[{r.name}]" if r.kind == "residual" else f"{r.name} (explicit state)"
+            lines.append(
+                f"  {mark} {label}: {r.worst_err:.3e} "
+                f"(tol {r.tol:.0e}, worst at point {r.worst_at})"
+            )
+        if self.not_exercised:
+            lines.append("  not exercised: " + ", ".join(self.not_exercised))
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -304,6 +403,127 @@ class JacobianChecker:
             )
         undeclared = [(r, c) for r in rows for c in cols if (r, c) not in declared]
         return HandBlockReport(blocks=checks, undeclared=undeclared, n_points=n_points)
+
+    def check_solution(
+        self, results: Iterable[StressUpdateResult], *, tol: float | None = None,
+    ) -> SolutionReport:
+        """Substitute reported solutions into the framework residual, row by row.
+
+        For a model with a hand-written return mapping
+        (``user_defined_return_mapping`` — a closed form, or a hand NR on its
+        own residual), run the history through
+        :class:`~manforge.simulation.PythonAnalyticalIntegrator` and pass the
+        step results here.  Each plastic step is judged on its own: is the
+        reported solution a root of the residual the autodiff path solves for
+        that step, starting from the same state?
+
+        A hand residual row that differs from the framework's leaves exactly
+        that row unsatisfied, so the report says *which* row is wrong.
+        Comparing two trajectories only says that the stress drifted apart,
+        and after the first disagreement every later step differs.  Only roots
+        are compared: a hand residual scaled differently, with the same
+        solution, passes.
+
+        The measure, per plastic step:
+
+        * **Residual rows** — ``max|R_row| / (scale_row + slack / tol)``.
+          ``scale_row`` is the size of the terms the row is made of,
+          ``max (|∂R/∂x| · |x|)`` over the row (a componentwise backward
+          error, unchanged if the row is rescaled).  ``slack`` is ten times
+          the residual norm the solver itself reported for the step
+          (``residual_history[-1]``; zero for a closed form), so a solution
+          is not faulted for the tolerance its own solver stopped at — and an
+          error smaller than that cannot be told from it.
+        * **Explicit states** — the reported value against the framework's
+          ``update_state`` at the reported point, relative to the largest
+          magnitude the state reaches in the checked steps.
+
+        Parameters
+        ----------
+        results : iterable of StressUpdateResult
+            Typically ``driver.run(load).step_results`` of a Python
+            integrator.  Only plastic steps are used.
+        tol : float or None
+            Tolerance; ``None`` (default) uses the checker's own ``tol``.
+
+        Returns
+        -------
+        SolutionReport
+            ``report.passed``, and ``report.summary()`` for the per-row table.
+
+        Raises
+        ------
+        ValueError
+            If ``results`` holds no plastic step (nothing would have been
+            checked), or a result carries no increment (a Fortran UMAT result
+            — compare that with :func:`~manforge.verification.crosscheck`).
+        """
+        model = self.model
+        if tol is None:
+            tol = self.tol
+
+        res_rows: dict[str, list[tuple[int, float, float, float]]] = {}
+        exp_rows: dict[str, list[tuple[int, float, float]]] = {}
+        x_max = 0.0
+        n_points = 0
+        for i, result in enumerate(results):
+            if result.is_plastic is not True:
+                continue
+            point = residual_at(model, result, self._increment(result))
+            layout = point.layout
+            n_points += 1
+            x_max = max(x_max, float(np.max(np.abs(point.x))))
+            scale = np.abs(point.jacobian) @ np.abs(point.x)
+            history = result.residual_history
+            slack = _SLACK_FACTOR * float(history[-1]) if len(history) else 0.0
+            for unknown in ("stress", "dlambda", *layout.implicit_keys):
+                sl = layout.slot_slice(unknown)
+                res_rows.setdefault(layout.residual_name_for(unknown), []).append((
+                    i,
+                    float(np.max(np.abs(point.residual[sl]))),
+                    float(np.max(scale[sl])),
+                    slack,
+                ))
+            for key in layout.explicit_keys:
+                reported = np.asarray(result.state[key], dtype=float)
+                derived = np.asarray(point.state[key], dtype=float)
+                exp_rows.setdefault(key, []).append((
+                    i,
+                    float(np.max(np.abs(reported - derived))),
+                    max(float(np.max(np.abs(reported))), float(np.max(np.abs(derived)))),
+                ))
+        if n_points == 0:
+            raise ValueError("no plastic step in results — no solution was checked")
+
+        rows: dict[str, SolutionRowCheck] = {}
+        for name, samples in res_rows.items():
+            # A row whose terms all vanish at some step (a mechanism not yet
+            # active) is measured against a small fraction of its own history
+            # there, not against round-off.
+            floor = np.sqrt(np.finfo(float).eps) * max(s for _, _, s, _ in samples)
+            worst, at = 0.0, samples[0][0]
+            for i, r, s, slack in samples:
+                denom = max(s, floor) + slack / tol
+                err = r / denom if denom > 0.0 else (0.0 if r == 0.0 else np.inf)
+                if err > worst:
+                    worst, at = err, i
+            rows[name] = SolutionRowCheck(name, "residual", worst, at, tol)
+
+        not_exercised = []
+        for key, samples in exp_rows.items():
+            magnitude = max(m for _, _, m in samples)
+            # Twelve orders below the largest unknown is noise in double
+            # precision, whatever the units: the state never left zero.
+            if magnitude <= 1e-12 * x_max:
+                not_exercised.append(key)
+                continue
+            worst, at = 0.0, samples[0][0]
+            for i, diff, _ in samples:
+                if diff / magnitude > worst:
+                    worst, at = diff / magnitude, i
+            rows[key] = SolutionRowCheck(key, "state", worst, at, tol)
+
+        return SolutionReport(rows=rows, not_exercised=not_exercised, n_points=n_points)
 
     def compare(
         self,
