@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from manforge.models import AFKinematic, AFKinematic3D, AFKinematicPS, AFKinematic1D
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, PLANE_STRAIN
+from manforge.verification import make_increment
 
 PARAMS = dict(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0)
 
@@ -34,8 +35,12 @@ def test_af_3d_parent_vs_subclass_update_state(rng):
     state_new = {"stress": stress, "alpha": alpha, "ep": 0.01}
     state_n = {"stress": stress, "alpha": alpha, "ep": 0.01}
     dlambda = 0.005
-    res_p = parent.update_state(dlambda, state_new, state_n)
-    res_c = child.update_state(dlambda, state_new, state_n)
+    res_p = parent.update_state(
+        state_new, dlambda,
+        make_increment(parent, state_n, stress_trial=state_n["stress"]))
+    res_c = child.update_state(
+        state_new, dlambda,
+        make_increment(child, state_n, stress_trial=state_n["stress"]))
     # alpha and ep updates
     for rp, rc in zip(res_p, res_c):
         np.testing.assert_allclose(rp.value, rc.value)

@@ -49,7 +49,7 @@ def test_check_bindings_elastic_stiffness(model):
     from manforge.verification import check_bindings
     fortran = FortranModule("j2_isotropic_3d")
     cases = {
-        "elastic_stiffness": ((), (model.E, model.nu)),
+        "elastic_stiffness": ((model.initial_state(),), (model.E, model.nu)),
     }
     results = check_bindings(model, fortran, cases, rtol=1e-10)
     ok, max_err = results["elastic_stiffness"]

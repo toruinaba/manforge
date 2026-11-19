@@ -45,7 +45,7 @@ def test_unloading_freezes_damage_and_uses_damaged_stiffness(cls):
     r = integ.stress_update(-0.1 * deps, stress, state)
     assert not r.is_plastic
     assert float(r.state["D"]) == float(state["D"])
-    C0 = np.asarray(m.elastic_stiffness(None))
+    C0 = np.asarray(m.undamaged_stiffness())
     np.testing.assert_allclose(np.asarray(r.ddsdde), (1 - float(state["D"])) * C0)
     np.testing.assert_allclose(
         np.asarray(r.stress), stress + (1 - float(state["D"])) * C0 @ (-0.1 * deps)

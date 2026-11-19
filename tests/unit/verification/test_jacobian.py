@@ -42,12 +42,12 @@ def _plastic_result(model, strain_scale=3e-3):
 class TestReducedBlocks:
     def test_returns_jacobian_blocks(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         assert isinstance(jac, JacobianBlocks)
 
     def test_fixed_block_shapes(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         ntens = model.ntens
         assert jac.part["stress"]["stress"].shape == (ntens, ntens)
         assert jac.part["stress"]["dlambda"].shape == (ntens,)
@@ -56,13 +56,13 @@ class TestReducedBlocks:
 
     def test_state_blocks_absent_for_j2(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         assert set(jac.row_names()) == {"stress", "dlambda"}
         assert set(jac.col_names()) == {"stress", "dlambda"}
 
     def test_part_dlambda_stress_matches_flow_direction(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         from manforge.core.state import _state_with_stress
         n_ad = autograd.grad(
             lambda s: model.yield_function(_state_with_stress(result.state, s))
@@ -73,7 +73,7 @@ class TestReducedBlocks:
 
     def test_full_matrix_blocks_consistent(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         layout = jac.layout
         ntens = model.ntens
         np.testing.assert_array_equal(
@@ -89,7 +89,7 @@ class TestReducedBlocks:
         deps = anp.array([1e-4, 0, 0, 0, 0, 0])
         state0 = model.initial_state()
         result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), state0)
-        jac = JacobianChecker(model).compute(result, state0)
+        jac = JacobianChecker(model).compute(result)
         assert isinstance(jac, JacobianBlocks)
 
 
@@ -100,7 +100,7 @@ class TestReducedBlocks:
 class TestReducedBlocksAF:
     def test_af_state_blocks_are_empty_dicts(self, af_model):
         result, state0 = _plastic_result(af_model)
-        jac = JacobianChecker(af_model).compute(result, state0)
+        jac = JacobianChecker(af_model).compute(result)
         assert set(jac.row_names()) == {"stress", "dlambda"}
         assert set(jac.col_names()) == {"stress", "dlambda"}
 
@@ -112,18 +112,18 @@ class TestReducedBlocksAF:
 class TestAugmentedBlocks:
     def test_returns_jacobian_blocks(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result, state0)
+        jac = JacobianChecker(ow_model).compute(result)
         assert isinstance(jac, JacobianBlocks)
 
     def test_state_block_keys(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result, state0)
+        jac = JacobianChecker(ow_model).compute(result)
         assert set(jac.row_names()) == {"stress", "dlambda", "alpha", "ep"}
         assert set(jac.col_names()) == {"stress", "dlambda", "alpha", "ep"}
 
     def test_state_block_shapes(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result, state0)
+        jac = JacobianChecker(ow_model).compute(result)
         ntens = ow_model.ntens
         assert jac.part["alpha"]["stress"].shape == (ntens, ntens)
         assert jac.part["alpha"]["dlambda"].shape == (ntens,)
@@ -133,14 +133,14 @@ class TestAugmentedBlocks:
     @pytest.mark.slow
     def test_full_matrix_size(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result, state0)
+        jac = JacobianChecker(ow_model).compute(result)
         ntens = ow_model.ntens
         n_state = ntens + 1
         assert jac.full.shape == (ntens + 1 + n_state, ntens + 1 + n_state)
 
     def test_part_shapes_match_slot_shape(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result, state0)
+        jac = JacobianChecker(ow_model).compute(result)
         layout = jac.layout
         col_names = jac.col_names()
         for col_state in col_names:
@@ -170,14 +170,14 @@ class _ResidualNameModel(MaterialModel):
     def yield_function(self, state):
         return self.vonmises(state["stress"] - state["alpha"]) - (self.sigma_y0 + self.H * state["ep"])
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         import autograd as _ag
         from manforge.core.state import _state_with_stress
-        stress = state_new["stress"]
-        n = _ag.grad(lambda s: self.yield_function(_state_with_stress(state_new, s)))(stress)
-        R_alpha = state_new["alpha"] - state_n["alpha"] - dlambda * n
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        stress = new["stress"]
+        n = _ag.grad(lambda s: self.yield_function(_state_with_stress(new, s)))(stress)
+        R_alpha = new["alpha"] - inc.state_n["alpha"] - dlambda * n
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
 
@@ -188,17 +188,17 @@ class TestResidualNameOptIn:
 
     def test_row_names_use_residual_names(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result, state0)
+        jac = JacobianChecker(rn_model).compute(result)
         assert set(jac.row_names()) == {"stress", "R_yield", "R_alpha", "R_ep"}
 
     def test_col_names_use_state_names(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result, state0)
+        jac = JacobianChecker(rn_model).compute(result)
         assert set(jac.col_names()) == {"stress", "dlambda", "alpha", "ep"}
 
     def test_custom_row_access(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result, state0)
+        jac = JacobianChecker(rn_model).compute(result)
         assert jac.part["R_alpha"]["stress"].shape == (rn_model.ntens, rn_model.ntens)
         assert jac.part["R_yield"]["stress"].shape == (rn_model.ntens,)
         assert "alpha" not in jac.part

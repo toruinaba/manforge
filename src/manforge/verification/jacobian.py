@@ -9,10 +9,12 @@ import autograd
 import autograd.numpy as anp
 import numpy as np
 
+from manforge.core.result import StressUpdateResult
+from manforge.core.state import Increment
 from manforge.simulation._residual import build_residual
 from manforge.simulation._layout import ResidualLayout
 from manforge.verification.comparator_base import _array_rel_err
-from manforge._typing import FloatArray, StressVec, StateDict
+from manforge._typing import FloatArray
 
 
 @dataclass
@@ -112,9 +114,14 @@ class JacobianComparisonResult:
 class JacobianChecker:
     """Compute and compare residual Jacobians for a material model.
 
-    Wraps the Jacobian computation and comparison operations for a fixed model,
-    mirroring the class-based interface of ``CrosscheckStrainDriver`` /
-    ``CrosscheckStressDriver``.
+    The Jacobian is that of the framework residual — the one the autodiff
+    Newton-Raphson solves — evaluated at a converged point.  Its named blocks
+    are the reference a hand-derived Jacobian is checked against.
+
+    A result carries the increment it was computed for (state at the start of
+    the step, Δε, trial state), so nothing else has to be passed alongside it,
+    and the Jacobian cannot be evaluated on a residual other than the one the
+    solver used.
 
     Parameters
     ----------
@@ -126,12 +133,12 @@ class JacobianChecker:
     --------
     ::
 
-        checker = JacobianChecker(model)
-        jac = checker.compute(result, state_n)
+        result = PythonIntegrator(model).stress_update(deps, stress_n, state_n)
+        jac = JacobianChecker(model).compute(result)
         print(jac.part["dlambda"]["stress"])
 
         # Manual crosscheck after a failed step
-        cmp = checker.compare(result_a, result_b, state_n)
+        cmp = checker.compare(result_a, result_b)
         if not cmp.passed:
             print(cmp.blocks)
     """
@@ -140,65 +147,42 @@ class JacobianChecker:
         self.model = model
         self.rtol = rtol
 
-    def compute(
-        self,
-        result: object,
-        state_n: StateDict,
-        *,
-        stress_trial: "StressVec | None" = None,
-        strain_inc: "FloatArray | None" = None,
-    ) -> JacobianBlocks:
-        """Compute the residual Jacobian at the converged point and decompose into blocks.
+    def compute(self, result: StressUpdateResult) -> JacobianBlocks:
+        """Residual Jacobian at the converged point of ``result``, in named blocks.
 
         Parameters
         ----------
-        result : StressUpdateResult or ReturnMappingResult
-            Converged result from a stress integration step.
-        state_n : dict
-            State at the beginning of the increment (must include ``"stress"``).
-        stress_trial : array-like, optional
-            Required when *result* is a
-            :class:`~manforge.core.result.ReturnMappingResult`.
-        strain_inc : array-like, optional
-            Strain increment Δε of the step.  Must be supplied for models
-            whose ``update_state`` / ``state_residual`` read ``strain_inc``
-            (e.g. elastic/plastic strain decomposition) — the solver passes it
-            to the same residual, and a Jacobian built without it would be
-            computed on a *different* residual than the one NR solved.
+        result : StressUpdateResult
+            Result of a stress update by a Python integrator.  On an elastic
+            step the point is ``(σ_trial, Δλ = 0, trial state)``.
 
         Returns
         -------
         JacobianBlocks
+
+        Raises
+        ------
+        ValueError
+            If ``result`` carries no increment (a Fortran UMAT result).  Use
+            :meth:`compare` to evaluate at such a point with the increment of
+            a Python result of the same step.
         """
-        from manforge.core.result import StressUpdateResult
+        if result.increment is None:
+            raise ValueError(
+                "this result carries no increment (it comes from an integrator "
+                "that reports no trial state, such as FortranIntegrator), so "
+                "the residual it would be evaluated on is not known.  Use "
+                "compare(python_result, this_result)."
+            )
+        return self._at(result, result.increment)
 
-        if isinstance(result, StressUpdateResult):
-            if result.return_mapping is None:
-                stress = result.stress_trial
-                dlambda = anp.array(0.0)
-                stress_trial = result.stress_trial
-                state = result.state
-            else:
-                stress = result.return_mapping.stress
-                dlambda = result.return_mapping.dlambda
-                stress_trial = result.stress_trial
-                state = result.return_mapping.state
-        else:
-            stress = result.stress
-            dlambda = result.dlambda
-            state = result.state
-            if stress_trial is None:
-                raise ValueError(
-                    "stress_trial must be provided when passing a ReturnMappingResult "
-                    "to compute(). Use stress_update() instead, or pass "
-                    "stress_trial=... explicitly."
-                )
+    def _at(self, result: StressUpdateResult, inc: Increment) -> JacobianBlocks:
+        """Jacobian of the residual of ``inc`` at the converged point of ``result``."""
+        residual_fn, layout = build_residual(self.model, inc)
 
-        assert stress_trial is not None
-        residual_fn, layout = build_residual(self.model, stress_trial, state_n, strain_inc)
-
+        state = result.state
         q_imp = {k: state[k] for k in layout.implicit_keys}
-        x_conv = layout.pack(stress, dlambda, q_imp)  # type: ignore[arg-type]
+        x_conv = layout.pack(result.stress, result.dlambda, q_imp)  # type: ignore[arg-type]
 
         J = autograd.jacobian(residual_fn)(anp.array(x_conv))  # type: ignore[arg-type]
 
@@ -219,31 +203,34 @@ class JacobianChecker:
 
     def compare(
         self,
-        result_a: object,
-        result_b: object,
-        state_n: StateDict,
-        *,
-        strain_inc: "FloatArray | None" = None,
+        result_a: StressUpdateResult,
+        result_b: StressUpdateResult,
     ) -> JacobianComparisonResult:
-        """Compare Jacobian blocks from two StressUpdateResults.
+        """Compare the residual Jacobian at the converged points of two results.
+
+        Both are evaluated on the residual of ``result_a``'s increment, so
+        ``result_b`` may come from an integrator that reports none (Fortran).
+        A difference localises *where* two solutions of the same step disagree;
+        it does not compare a hand-derived Jacobian with the autodiff one.
 
         Parameters
         ----------
         result_a : StressUpdateResult
-            First result (e.g. from ``PythonNumericalIntegrator``).
+            Result of a Python integrator (e.g. ``PythonNumericalIntegrator``).
         result_b : StressUpdateResult
-            Second result (e.g. from ``PythonAnalyticalIntegrator``).
-        state_n : dict
-            Initial state at the start of the step (before the increment).
-        strain_inc : array-like, optional
-            Strain increment Δε of the step — see :meth:`compute`.
+            Result of the same step by another integrator.
 
         Returns
         -------
         JacobianComparisonResult
         """
-        jac_a = self.compute(result_a, state_n, strain_inc=strain_inc)
-        jac_b = self.compute(result_b, state_n, strain_inc=strain_inc)
+        if result_a.increment is None:
+            raise ValueError(
+                "result_a must come from a Python integrator: its increment "
+                "defines the residual both points are evaluated on"
+            )
+        jac_a = self._at(result_a, result_a.increment)
+        jac_b = self._at(result_b, result_a.increment)
 
         block_errs: dict[str, float] = {}
         blocks_b = {label: arr for label, arr in jac_b.iter_blocks()}

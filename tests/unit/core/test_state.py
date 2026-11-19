@@ -39,8 +39,8 @@ class _EP(MaterialModel):
     def yield_function(self, state):
         return anp.array(0.0)
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
 
 class _AlphaEP(MaterialModel):
@@ -55,11 +55,11 @@ class _AlphaEP(MaterialModel):
     def yield_function(self, state):
         return anp.array(0.0)
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        return [self.alpha(state_new["alpha"] - state_n["alpha"])]
+    def state_residual(self, new, dlambda, inc):
+        return [self.alpha(new["alpha"] - inc.state_n["alpha"])]
 
 
 class _AllImplicit(MaterialModel):
@@ -74,10 +74,10 @@ class _AllImplicit(MaterialModel):
     def yield_function(self, state):
         return anp.array(0.0)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         return [
-            self.alpha(state_new["alpha"] - state_n["alpha"]),
-            self.ep(state_new["ep"] - state_n["ep"]),
+            self.alpha(new["alpha"] - inc.state_n["alpha"]),
+            self.ep(new["ep"] - inc.state_n["ep"]),
         ]
 
 
@@ -125,10 +125,10 @@ def test_mro_override_explicit_to_implicit():
     class _Override(_AlphaEP):
         ep = Implicit(shape=(), doc="overridden to implicit")
 
-        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+        def state_residual(self, new, dlambda, inc):
             return [
-                self.alpha(state_new["alpha"] - state_n["alpha"]),
-                self.ep(state_new["ep"] - state_n["ep"]),
+                self.alpha(new["alpha"] - inc.state_n["alpha"]),
+                self.ep(new["ep"] - inc.state_n["ep"]),
             ]
 
     assert "alpha" in _Override.implicit_state_names
@@ -144,8 +144,8 @@ def test_mro_override_implicit_to_explicit():
     class _Override(_AllImplicit):
         alpha = Explicit(shape=NTENS, doc="overridden to explicit")
 
-        def update_state(self, dlambda, state_n, state_trial):
-            return [self.alpha(state_n["alpha"])]
+        def update_state(self, new, dlambda, inc):
+            return [self.alpha(new["alpha"])]
 
     assert "ep" in _Override.implicit_state_names
     assert "alpha" not in _Override.implicit_state_names
@@ -470,7 +470,7 @@ class TestCollisionDetection:
                 ep    = Implicit(shape=SCALAR, residual_name="R_clash")
                 def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
-                def state_residual(self, s, d, sn, *, stress_trial, strain_inc=None): ...
+                def state_residual(self, new, dlambda, inc): ...
 
     def test_residual_name_collides_with_other_state_name(self):
         with pytest.raises(ValueError, match="collides"):
@@ -480,7 +480,7 @@ class TestCollisionDetection:
                 ep    = Implicit(shape=SCALAR)
                 def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
-                def state_residual(self, s, d, sn, *, stress_trial, strain_inc=None): ...
+                def state_residual(self, new, dlambda, inc): ...
 
     def test_dlambda_residual_name_collides_with_residual_name(self):
         with pytest.raises(ValueError, match="R_alpha"):
@@ -490,7 +490,7 @@ class TestCollisionDetection:
                 alpha = Implicit(shape=NTENS, residual_name="R_alpha")
                 def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
-                def state_residual(self, s, d, sn, *, stress_trial, strain_inc=None): ...
+                def state_residual(self, new, dlambda, inc): ...
 
     def test_dlambda_residual_name_collides_with_state_name(self):
         with pytest.raises(ValueError, match="alpha"):
@@ -500,7 +500,7 @@ class TestCollisionDetection:
                 alpha = Implicit(shape=NTENS)
                 def __init__(self, E, nu, sigma_y0): ...
                 def yield_function(self, state): ...
-                def state_residual(self, s, d, sn, *, stress_trial, strain_inc=None): ...
+                def state_residual(self, new, dlambda, inc): ...
 
     def test_no_collision_is_fine(self):
         class _Ok(MaterialModel):
@@ -510,7 +510,7 @@ class TestCollisionDetection:
             ep    = Implicit(shape=SCALAR, residual_name="R_ep")
             def __init__(self, E, nu, sigma_y0): ...
             def yield_function(self, state): ...
-            def state_residual(self, s, d, sn, st, *, stress_trial): ...
+            def state_residual(self, new, dlambda, inc): ...
         assert _Ok.state_fields["alpha"].effective_residual_name == "R_alpha"
         assert _Ok.dlambda_residual_name == "R_yield"
 
@@ -536,7 +536,7 @@ class _NoStateModel(MaterialModel):
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - self.sigma_y0
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         _lam = 115384.0; _mu = 76923.0
         return self.isotropic_C(_lam, _mu)
 
@@ -553,12 +553,12 @@ class _AlphaModelDl(MaterialModel):
         xi = state["stress"] - state["alpha"]
         return self.vonmises(xi) - self.sigma_y0
 
-    def elastic_stiffness(self, state=None):
+    def elastic_stiffness(self, state):
         _lam = 115384.0; _mu = 76923.0
         return self.isotropic_C(_lam, _mu)
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        R_alpha = state_new["alpha"] - state_n["alpha"]
+    def state_residual(self, new, dlambda, inc):
+        R_alpha = new["alpha"] - inc.state_n["alpha"]
         return [self.alpha(R_alpha)]
 
 

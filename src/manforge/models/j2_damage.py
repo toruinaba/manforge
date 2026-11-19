@@ -68,16 +68,15 @@ Limitations
 - No failure criterion: the model has no critical damage D_c and does not
   delete elements.  As D → 1 the σ row becomes singular (the 1/(1 − D)
   scaling), so keep loading well short of that.
-- The bare ``return_mapping()`` tangent fallback (no σ_trial supplied)
-  reconstructs σ_trial from the associative default and is not exact for
-  this model; ``stress_update`` always passes σ_trial and is unaffected.
 """
 
 import autograd
 import autograd.numpy as anp
 
 from manforge.core.material import MaterialModel, ParamMeta
-from manforge.core.state import Explicit, Implicit, NTENS, SCALAR, State, StateResidual, StateUpdate
+from manforge.core.state import (
+    Explicit, Implicit, Increment, NTENS, SCALAR, State, StateResidual, StateUpdate,
+)
 from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
 from manforge.utils.smooth import smooth_macaulay
 from manforge.utils.spectral import negative_part_sq, positive_part_sq
@@ -143,8 +142,8 @@ class J2IsotropicDamage(MaterialModel):
     # ------------------------------------------------------------------
 
     def undamaged_stiffness(self) -> Stiffness:
-        """Undamaged elastic stiffness C0 (the parent's isotropic default)."""
-        return super().elastic_stiffness(None)
+        """Undamaged elastic stiffness C0 — the isotropic stiffness from E, ν."""
+        return self.isotropic_stiffness()
 
     def effective_stress(self, state: "State | StateDict") -> StressVec:
         """σ̃ = σ / (1 − D)."""
@@ -161,12 +160,9 @@ class J2IsotropicDamage(MaterialModel):
     # MaterialModel interface
     # ------------------------------------------------------------------
 
-    def elastic_stiffness(self, state: "State | StateDict | None" = None) -> Stiffness:
-        """Damaged stiffness (1 − D) C0; C0 when no state is given."""
-        C0 = self.undamaged_stiffness()
-        if state is None:
-            return C0
-        return (1.0 - state["D"]) * C0
+    def elastic_stiffness(self, state: "State | StateDict") -> Stiffness:
+        """Damaged stiffness (1 − D) C0."""
+        return (1.0 - state["D"]) * self.undamaged_stiffness()
 
     def yield_function(self, state: "State | StateDict") -> ScalarType:
         """f = σ̃_vm − (σ_y0 + H ep), evaluated in effective space."""
@@ -181,27 +177,26 @@ class J2IsotropicDamage(MaterialModel):
         return self.strain_flow(n)
 
     def update_state(
-        self, dlambda: ScalarType, state_new: "State | StateDict", state_n: "State | StateDict",
-        *, stress_trial: "StressVec | None" = None, strain_inc=None,
+        self, new: "State | StateDict", dlambda: ScalarType, inc: Increment,
     ) -> list[StateUpdate | StateResidual]:
         """Δep = Δλ (effective-space associative flow)."""
-        return [self.ep(state_n["ep"] + dlambda)]
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
     def state_residual(
-        self, state_new: "State | StateDict", dlambda: ScalarType, state_n: "State | StateDict",
-        *, stress_trial: StressVec, strain_inc=None,
+        self, new: "State | StateDict", dlambda: ScalarType, inc: Increment,
     ) -> list[StateResidual]:
         """Scaled effective-space return for σ and Lemaitre backward Euler for D."""
-        D_n, D_1 = state_n["D"], state_new["D"]
+        state_n = inc.state_n
+        D_n, D_1 = state_n["D"], new["D"]
         C0 = self.undamaged_stiffness()
-        n = self.flow(state_new).strain_like
+        n = self.flow(new).strain_like
 
-        R_stress = ((1.0 - D_n) / (1.0 - D_1)) * state_new["stress"] - stress_trial \
+        R_stress = ((1.0 - D_n) / (1.0 - D_1)) * new["stress"] - inc.trial["stress"] \
             + dlambda * (1.0 - D_n) * (C0 @ n)
 
-        dp_D = (smooth_macaulay(state_new["ep"] - self.p_D)
+        dp_D = (smooth_macaulay(new["ep"] - self.p_D)
                 - smooth_macaulay(state_n["ep"] - self.p_D))
-        Y = self.energy_release_rate(self.effective_stress(state_new))
+        Y = self.energy_release_rate(self.effective_stress(new))
         # Scaled by E into stress units: the NR tolerance is tol·max(1, ‖σ_trial‖∞)
         # (stress units), so an unscaled dimensionless D row would stop with D
         # accurate only to ~tol·‖σ‖ — around 1e-8 at MPa scale.

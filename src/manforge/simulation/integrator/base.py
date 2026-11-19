@@ -10,8 +10,9 @@ import numpy as np
 
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
 from manforge.core.dimension import StressDimension
+from manforge.core.state import Increment
 from manforge.simulation._residual import build_residual, build_state_from_x, _wrap_state
-from manforge._typing import FloatArray, Stiffness, StressVec, StateDict
+from manforge._typing import Stiffness, StressVec, StateDict
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,16 @@ class StressIntegrator(Protocol):
     def raise_on_nonconverged(self) -> bool: ...
 
     def initial_state(self) -> StateDict: ...
+
+    def increment(
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
+    ) -> "Increment | None":
+        """The step context for this increment, trial state included.
+
+        ``None`` from an integrator with no model-side increment to report — a
+        Fortran UMAT is a closed target and exposes no trial state.
+        """
+        ...
 
     def elastic_tangent(self, stress_n: StressVec, state_n: StateDict) -> Stiffness:
         """Elastic tangent dσ/dΔε at Δε = 0 from the given state.
@@ -127,13 +138,91 @@ class _PythonIntegratorBase:
         """
         return self._model.elastic_stiffness(state_n)
 
-    def _try_user_return_mapping(
-        self, stress_trial: StressVec, C: Stiffness, state_n: StateDict
-    ) -> "ReturnMappingResult | None":
+    # ------------------------------------------------------------------
+    # Increment: the trial state and the step context built around it
+    # ------------------------------------------------------------------
+
+    def _has_custom_predictor(self) -> bool:
+        from manforge.core.material import MaterialModel
+        return type(self._model).elastic_predictor is not MaterialModel.elastic_predictor
+
+    def _predict(self, state_n, strain_inc):
+        """``(σ_trial, non-stress trial updates)`` from the model's predictor hook.
+
+        Validated on every call: it is evaluated once per step plus once per
+        autodiff trace, so the cost is negligible next to the NR.
+        """
+        from manforge.core.state import StateResidual, StateUpdate, _validate_state_items
+
+        model = self._model
+        name = type(model).__name__
+        returned = model.elastic_predictor(state_n, strain_inc=strain_inc)
+        if isinstance(returned, list) and any(isinstance(i, StateResidual) for i in returned):
+            raise TypeError(
+                f"{name}.elastic_predictor returned a StateResidual — the "
+                "predictor assigns values, so wrap implicit fields with "
+                "self.<field>.update(value), not self.<field>(value)."
+            )
+        items = _validate_state_items(
+            returned, set(model.state_names), StateUpdate, "elastic_predictor", name,
+            allow_subset=True,
+        )
+        assert isinstance(items, dict)
+        if "stress" not in items:
+            raise ValueError(
+                f"{name}.elastic_predictor must return the trial stress "
+                "(self.stress.update(sigma_trial))"
+            )
+        sigma = items.pop("stress")
+        return sigma, items
+
+    def increment(
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
+    ) -> Increment:
+        """Build the step context: run the elastic predictor, no branch, no NR."""
+        model = self._model
+        # σ_n is the stress the caller passes, whatever the dict carries.
+        state_n_s = _wrap_state({**state_n, "stress": stress_n}, model)
+        if self._has_custom_predictor():
+            stress_trial, trial_updates = self._predict(state_n_s, strain_inc)
+        else:
+            # Kept as the literal expression (not routed through the default
+            # hook) so the default path stays bit-identical.
+            stress_trial = stress_n + model.elastic_stiffness(state_n_s) @ strain_inc
+            trial_updates = {}
+        trial = _wrap_state(
+            {**state_n_s.as_dict(), **trial_updates, "stress": stress_trial}, model
+        )
+        return Increment(state_n=state_n_s, strain_inc=strain_inc, trial=trial)
+
+    def _perturbed(self, inc: Increment, d) -> Increment:
+        """``inc`` with Δε → Δε + d, the trial state following through the predictor.
+
+        Used to differentiate the residual with respect to the load increment.
+        """
+        model = self._model
+        deps_d = anp.array(inc.strain_inc) + d
+        if self._has_custom_predictor():
+            # Non-linear elastic predictor: σ_trial(Δε + d), not σ_trial + C_n d.
+            stress_d, updates_d = self._predict(inc.state_n, deps_d)
+            trial_d = _wrap_state(
+                {**inc.state_n.as_dict(), **updates_d, "stress": stress_d}, model
+            )
+        else:
+            C_n = anp.array(model.elastic_stiffness(inc.state_n))
+            stress_d = anp.array(inc.trial["stress"]) + anp.dot(C_n, d)
+            trial_d = inc.trial.with_stress(stress_d)
+        return Increment(state_n=inc.state_n, strain_inc=deps_d, trial=trial_d)
+
+    # ------------------------------------------------------------------
+    # Hand-written hooks
+    # ------------------------------------------------------------------
+
+    def _try_user_return_mapping(self, inc: Increment) -> "ReturnMappingResult | None":
         """Attempt user_defined_return_mapping; return ReturnMappingResult or None."""
         if self._method == "numerical_newton":
             return None
-        rm = self._model.user_defined_return_mapping(stress_trial, C, state_n)
+        rm = self._model.user_defined_return_mapping(inc)
         if rm is not None:
             return rm
         if self._method == "user_defined":
@@ -144,43 +233,96 @@ class _PythonIntegratorBase:
         return None
 
     def _try_user_tangent(
-        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict, C: Stiffness,
-        stress_trial: "StressVec | None" = None,
-        strain_inc: "FloatArray | None" = None,
+        self, rm: ReturnMappingResult, inc: Increment
     ) -> "Stiffness | None":
         """Attempt user_defined_tangent; return ddsdde array or None."""
         if self._method == "numerical_newton":
             return None
-        ddsdde = self._model.user_defined_tangent(
-            rm.stress, rm.state, rm.dlambda, C, state_n,
-            stress_trial=stress_trial, strain_inc=strain_inc,
-        )
+        model = self._model
+        new = _wrap_state({**rm.state, "stress": rm.stress}, model)
+        ddsdde = model.user_defined_tangent(new, rm.dlambda, inc)
         if ddsdde is not None:
             return ddsdde
         if self._method == "user_defined":
             raise NotImplementedError(
-                f"{type(self._model).__name__} does not implement "
+                f"{type(model).__name__} does not implement "
                 "user_defined_tangent; cannot use PythonAnalyticalIntegrator."
             )
         return None
 
-    def _numerical_newton(
-        self, stress_trial: StressVec, state_n: StateDict, strain_inc: "FloatArray | None" = None,
-        *, trial_updates: "StateDict | None" = None,
-    ) -> tuple:
+    def _elastic_updates(self, inc: Increment) -> StateDict:
+        """Only the fields ``elastic_update_state`` returned (possibly empty)."""
+        from manforge.core.state import StateUpdate, _validate_state_items
+
+        model = self._model
+        returned = model.elastic_update_state(inc)
+        if not returned:
+            return {}
+        explicit_keys = {
+            k for k, f in model.state_fields.items()
+            if f.kind == "explicit" and k != "stress"
+        }
+        updated = _validate_state_items(
+            returned, explicit_keys, StateUpdate,
+            "elastic_update_state", type(model).__name__,
+            allow_subset=True,
+        )
+        assert isinstance(updated, dict)
+        return updated
+
+    def _elastic_tangent(self, inc: Increment):
+        """Tangent of an elastic step: an array, or a thunk when it needs autodiff.
+
+        ===========================  ============================  =====================
+        integrator                   default predictor             predictor overridden
+        ===========================  ============================  =====================
+        PythonNumericalIntegrator    elastic_stiffness(state_n)    autodiff of predictor
+        PythonAnalyticalIntegrator   elastic_stiffness(state_n)    model.elastic_tangent
+        PythonIntegrator             elastic_stiffness(state_n)    model.elastic_tangent
+                                                                   if given, else autodiff
+        ===========================  ============================  =====================
+        """
+        model = self._model
+        if not self._has_custom_predictor():
+            return model.elastic_stiffness(inc.state_n)
+
+        if self._method != "numerical_newton":
+            # Eager, like the plastic user_defined tangent: cheap, and
+            # _method == "user_defined" must raise here, not at first access.
+            ddsdde = model.elastic_tangent(inc)
+            if ddsdde is not None:
+                return ddsdde
+            if self._method == "user_defined":
+                raise NotImplementedError(
+                    f"{type(model).__name__} overrides elastic_predictor but does "
+                    "not implement elastic_tangent; cannot use "
+                    "PythonAnalyticalIntegrator."
+                )
+
+        # Lazy, like the plastic tangent: StrainDriver never reads it.
+        deps0 = anp.array(inc.strain_inc)
+        return lambda: anp.array(np.array(
+            autograd.jacobian(lambda d: self._predict(inc.state_n, d)[0])(deps0)  # type: ignore[call-arg]
+        ))
+
+    # ------------------------------------------------------------------
+    # Numerical return mapping and consistent tangent
+    # ------------------------------------------------------------------
+
+    def _numerical_newton(self, inc: Increment) -> tuple:
         """Unified NR return mapping.
 
         Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
-        Implicit unknowns start from the elastic-predictor value when
-        ``trial_updates`` carries one (e.g. σ̃_trial), else from ``state_n``.
+        Every unknown starts from its trial value (σ_trial, and for an implicit
+        state the value the elastic predictor returned, else its step-n value).
         """
         model = self._model
-        residual_fn, layout = build_residual(model, stress_trial, state_n, strain_inc)
-        start = {**state_n, **(trial_updates or {})}
+        residual_fn, layout = build_residual(model, inc)
+        stress_trial = inc.trial["stress"]
 
         x = layout.pack(
             stress_trial, 0.0,
-            {k: start[k] for k in layout.implicit_keys}
+            {k: inc.trial[k] for k in layout.implicit_keys}
         )
 
         # The residual rows carry stress units (R_σ and R_Δλ = f both scale
@@ -234,7 +376,7 @@ class _PythonIntegratorBase:
                 f"tol = {tol_eff:.3e})"
             )
 
-        state_new = build_state_from_x(model, x, state_n, layout, stress_trial, strain_inc)
+        state_new = build_state_from_x(model, x, inc, layout)
         sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
 
         # A small residual only says NR found *a* root of f = 0 and the flow
@@ -264,113 +406,47 @@ class _PythonIntegratorBase:
             converged,
         )
 
-    def _consistent_tangent(
-        self, rm: ReturnMappingResult, stress_n: StressVec, state_n: StateDict,
-        strain_inc: "FloatArray | None" = None,
-        stress_trial: "StressVec | None" = None,
-        *, predictor=None,
-    ) -> Stiffness:
+    def _consistent_tangent(self, rm: ReturnMappingResult, inc: Increment) -> Stiffness:
         """Consistent (algorithmic) tangent dσ_{n+1}/dΔε via implicit differentiation."""
         model = self._model
         ntens = model.ntens
-        stress = rm.stress
-        state = rm.state
-        dlambda = rm.dlambda
 
-        state_with_stress_dict = dict(state)
-        state_with_stress_dict["stress"] = stress
-        state_full = _wrap_state(state_with_stress_dict, model)
-        C_n = model.elastic_stiffness(state_n)
-        if stress_trial is None:
-            # Reached only via a bare return_mapping() call, which never had a
-            # σ_trial of its own.  Invert the σ row of the converged residual
-            # instead of re-deriving the direction from grad(yield_function),
-            # which is wrong for any model that overrides flow().
-            C_conv = model.elastic_stiffness(state_full)
-            n_conv = model.flow(state_full).strain_like
-            trial: StressVec = anp.array(stress) + float(dlambda) * (C_conv @ n_conv)
-        else:
-            trial = stress_trial
+        residual_fn, layout = build_residual(model, inc)
 
-        residual_fn, layout = build_residual(model, trial, state_n, strain_inc)
-
-        q_imp = {k: state[k] for k in layout.implicit_keys}
-        x_conv = layout.pack(stress, dlambda, q_imp)
+        q_imp = {k: rm.state[k] for k in layout.implicit_keys}
+        x_conv = layout.pack(rm.stress, rm.dlambda, q_imp)
 
         x_conv_arr = anp.array(x_conv)
         A = autograd.jacobian(residual_fn)(x_conv_arr)  # type: ignore[call-arg]
 
         # Implicit differentiation: A·dx/dΔε = −dR/dΔε.  The load increment
-        # reaches R through σ_trial = σ_n + C_n·Δε and through Δε itself, and
-        # a user residual may use either in any row with any coefficient (e.g.
-        # a damage residual scaled by (1−D_{n+1})/(1−D_n)).  Hard-coding
+        # reaches R through the trial state and through Δε itself, and a user
+        # residual may use either in any row with any coefficient (e.g. a
+        # damage residual scaled by (1−D_{n+1})/(1−D_n)).  Hard-coding
         # dR/dΔε = [−C_n; 0] would silently assume R_σ = σ − σ_trial + h(x)
         # and give a wrong tangent for every other form, so differentiate R
-        # in a perturbation d of the increment instead.  When strain_inc is
-        # unknown (bare return_mapping call) only the σ_trial path exists, and
-        # an overridden elastic_predictor cannot be re-evaluated — that path
-        # linearises the predictor with C_n.
-        C_n_arr = anp.array(C_n)
-        trial_arr = anp.array(trial)
-        deps_arr = anp.array(strain_inc) if strain_inc is not None else None
-
+        # in a perturbation d of the increment instead.
         def residual_of_increment(d):
-            if predictor is not None and deps_arr is not None:
-                # Non-linear elastic predictor: σ_trial(Δε + d), not σ_trial + C_n d.
-                trial_d = predictor(deps_arr + d)[0]
-            else:
-                trial_d = trial_arr + anp.dot(C_n_arr, d)
-            return residual_fn(
-                x_conv_arr,
-                stress_trial=trial_d,
-                strain_inc=None if deps_arr is None else deps_arr + d,
-            )
+            return residual_fn(x_conv_arr, inc=self._perturbed(inc, d))
 
         B = autograd.jacobian(residual_of_increment)(anp.zeros(ntens))  # type: ignore[call-arg]
         dxde = -np.linalg.solve(np.array(A), np.array(B))
         return anp.array(dxde[:ntens, :])
 
-    def _elastic_updates(
-        self, state_n: StateDict, stress_trial: StressVec,
-        strain_inc: "FloatArray | None" = None,
-    ) -> StateDict:
-        """Only the fields ``elastic_update_state`` returned (possibly empty)."""
-        from manforge.core.state import StateUpdate, _validate_state_items
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        model = self._model
-        returned = model.elastic_update_state(
-            _wrap_state(state_n, model),
-            stress_trial=stress_trial,
-            strain_inc=strain_inc,
-        )
-        if not returned:
-            return {}
-        explicit_keys = {
-            k for k, f in model.state_fields.items()
-            if f.kind == "explicit" and k != "stress"
-        }
-        updated = _validate_state_items(
-            returned, explicit_keys, StateUpdate,
-            "elastic_update_state", type(model).__name__,
-            allow_subset=True,
-        )
-        assert isinstance(updated, dict)
-        return updated
+    def return_mapping(self, inc: Increment) -> ReturnMappingResult:
+        """Perform the plastic correction (return mapping) for one increment.
 
-    def return_mapping(
-        self, stress_trial: StressVec, state_n: StateDict,
-        strain_inc: "FloatArray | None" = None,
-        *, trial_updates: "StateDict | None" = None,
-    ) -> ReturnMappingResult:
-        """Perform the plastic correction (return mapping) for one load increment.
-
-        Both the ``user_defined`` and ``numerical_newton`` paths honour
-        ``raise_on_nonconverged``: a ``converged=False`` result raises
-        ``RuntimeError`` unless the integrator was built with
-        ``raise_on_nonconverged=False``, in which case the flag is returned as-is.
+        ``inc`` comes from :meth:`increment`.  Both the ``user_defined`` and
+        ``numerical_newton`` paths honour ``raise_on_nonconverged``: a
+        ``converged=False`` result raises ``RuntimeError`` unless the integrator
+        was built with ``raise_on_nonconverged=False``, in which case the flag
+        is returned as-is.
         """
-        C_n = self._model.elastic_stiffness(state_n)
-        rm = self._try_user_return_mapping(stress_trial, C_n, state_n)
+        rm = self._try_user_return_mapping(inc)
         if rm is not None:
             if not rm.converged and self._raise_on_nonconverged:
                 res = rm.residual_history[-1] if rm.residual_history else float("nan")
@@ -381,9 +457,7 @@ class _PythonIntegratorBase:
                 )
             return rm
 
-        stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(
-            stress_trial, state_n, strain_inc, trial_updates=trial_updates,
-        )
+        stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(inc)
         return ReturnMappingResult(
             stress=stress,
             state=state_new,
@@ -393,135 +467,44 @@ class _PythonIntegratorBase:
             converged=converged,
         )
 
-    def _has_custom_predictor(self) -> bool:
-        from manforge.core.material import MaterialModel
-        return type(self._model).elastic_predictor is not MaterialModel.elastic_predictor
-
-    def _make_predictor(self, stress_n: StressVec, state_n: StateDict):
-        """``predict(Δε) -> (σ_trial, non-stress trial updates)`` from the model hook.
-
-        Validated on every call: it is evaluated once per step plus once per
-        autodiff trace, so the cost is negligible next to the NR.
-        """
-        from manforge.core.state import StateResidual, StateUpdate, _validate_state_items
-
-        model = self._model
-        name = type(model).__name__
-        state_n_s = _wrap_state({**state_n, "stress": stress_n}, model)
-        all_names = set(model.state_names)
-
-        def predict(strain_inc):
-            returned = model.elastic_predictor(state_n_s, strain_inc=strain_inc)
-            if isinstance(returned, list) and any(isinstance(i, StateResidual) for i in returned):
-                raise TypeError(
-                    f"{name}.elastic_predictor returned a StateResidual — the "
-                    "predictor assigns values, so wrap implicit fields with "
-                    "self.<field>.update(value), not self.<field>(value)."
-                )
-            items = _validate_state_items(
-                returned, all_names, StateUpdate, "elastic_predictor", name,
-                allow_subset=True,
-            )
-            assert isinstance(items, dict)
-            if "stress" not in items:
-                raise ValueError(
-                    f"{name}.elastic_predictor must return the trial stress "
-                    "(self.stress.update(sigma_trial))"
-                )
-            sigma = items.pop("stress")
-            return sigma, items
-
-        return predict
-
-    def trial_stress(
-        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
-    ) -> StressVec:
-        """σ_trial of the elastic predictor for this increment (no branch, no NR)."""
-        if not self._has_custom_predictor():
-            C_n = self._model.elastic_stiffness(state_n)
-            return stress_n + C_n @ strain_inc
-        return self._make_predictor(stress_n, state_n)(strain_inc)[0]
-
     def stress_update(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
     ) -> StressUpdateResult:
         """Perform a complete constitutive stress update for one load increment."""
-        from manforge.core.material import MaterialModel
-
         model = self._model
-        C_n = model.elastic_stiffness(state_n)
-        custom = self._has_custom_predictor()
-        predictor = None
-        trial_updates: StateDict = {}
-        if custom:
-            predictor = self._make_predictor(stress_n, state_n)
-            stress_trial, trial_updates = predictor(strain_inc)
-        else:
-            # Kept as the literal expression (not routed through the default
-            # hook) so the default path stays bit-identical.
-            stress_trial = stress_n + C_n @ strain_inc
+        inc = self.increment(strain_inc, stress_n, state_n)
 
-        if custom and type(model).elastic_check is MaterialModel.elastic_check:
-            # The default elastic_check only sees σ_trial; test the full trial
-            # state so predictor-moved fields (e.g. σ̃_trial) are not stale.
-            state_trial = {**state_n, **trial_updates, "stress": stress_trial}
-            is_elastic = bool(model.yield_function(_wrap_state(state_trial, model)) <= 0.0)
-        else:
-            is_elastic = model.elastic_check(
-                _wrap_state(state_n, model),
-                stress_trial=stress_trial,
-                strain_inc=strain_inc,
-            )
+        is_elastic = model.elastic_check(inc)
         if not isinstance(is_elastic, bool):
             raise TypeError(
-                f"{type(self._model).__name__}.elastic_check must return a bool "
+                f"{type(model).__name__}.elastic_check must return a bool "
                 f"(it selects a code path and is never differentiated), got "
                 f"{type(is_elastic).__name__}"
             )
         if is_elastic:
-            if custom:
-                assert predictor is not None
-                # Lazy, like the plastic tangent: StrainDriver never reads it.
-                deps0 = anp.array(strain_inc)
-                ddsdde = lambda: anp.array(np.array(  # noqa: E731
-                    autograd.jacobian(lambda d: predictor(d)[0])(deps0)  # type: ignore[call-arg]
-                ))
-            else:
-                ddsdde = C_n
-            # Predictor-moved fields first, elastic_update_state on top: the
-            # latter is the post-branch update and wins on overlap.
-            elastic_updates = self._elastic_updates(state_n, stress_trial, strain_inc)
-            if trial_updates or elastic_updates:
-                elastic_state = {**state_n, **trial_updates, **elastic_updates}
-            else:
-                elastic_state = state_n
+            # The trial state is the converged state; elastic_update_state is
+            # the post-branch update and is applied on top of it.
             return StressUpdateResult(
                 return_mapping=None,
-                ddsdde=ddsdde,
-                stress_trial=stress_trial,
+                ddsdde=self._elastic_tangent(inc),
                 is_plastic=False,
-                _state_n=elastic_state,
+                increment=inc,
+                _elastic_updates=self._elastic_updates(inc),
             )
 
-        rm = self.return_mapping(
-            stress_trial, state_n, strain_inc,
-            trial_updates=trial_updates or None,
-        )
+        rm = self.return_mapping(inc)
 
         # user_defined tangents stay eager: they are cheap, and _method ==
         # "user_defined" must raise NotImplementedError here, not at first
         # access.  Only the autodiff tangent is deferred — StrainDriver never
         # reads ddsdde, and its Jacobian costs as much as several NR iterations.
-        ddsdde = self._try_user_tangent(rm, stress_n, state_n, C_n, stress_trial, strain_inc)
+        ddsdde = self._try_user_tangent(rm, inc)
         if ddsdde is None:
-            ddsdde = lambda: self._consistent_tangent(
-                rm, stress_n, state_n, strain_inc, stress_trial, predictor=predictor,
-            )
+            ddsdde = lambda: self._consistent_tangent(rm, inc)  # noqa: E731
 
         return StressUpdateResult(
             return_mapping=rm,
             ddsdde=ddsdde,
-            stress_trial=stress_trial,
             is_plastic=True,
-            _state_n=state_n,
+            increment=inc,
         )

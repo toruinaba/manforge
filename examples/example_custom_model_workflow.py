@@ -50,8 +50,8 @@ class J2Voce(MaterialModel):
         sigma_y = self.sigma_y0 + self.Q * (1.0 - anp.exp(-self.b * state["ep"]))
         return self.vonmises(state["stress"]) - sigma_y
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        return [self.ep(state_n["ep"] + dlambda)]
+    def update_state(self, new, dlambda, inc):
+        return [self.ep(inc.state_n["ep"] + dlambda)]
 
 
 model = J2Voce(E=210_000.0, nu=0.3, sigma_y0=250.0, Q=150.0, b=20.0)
@@ -80,7 +80,7 @@ print("=" * 60)
 print("  Step 3: Jacobian blocks vs hand derivation")
 print("=" * 60)
 
-jac = JacobianChecker(model).compute(result, state0)
+jac = JacobianChecker(model).compute(result)
 
 # flow direction: d f / d sigma = (3/2) s / sigma_vm
 n_hand = 1.5 * model.dev(result.stress) / model.vonmises(result.stress)

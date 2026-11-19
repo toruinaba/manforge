@@ -24,6 +24,7 @@ from manforge.utils.smooth import (
     smooth_max,
     _DEFAULT_EPS,
 )
+from manforge.verification import make_increment
 
 EPS = _DEFAULT_EPS
 
@@ -282,7 +283,9 @@ class TestAFPattern:
         state_trial = dict(state0); state_trial["stress"] = stress
 
         def alpha_sq_norm(dl):
-            items = model.update_state(dl, state0, state_trial)
+            items = model.update_state(
+                state0, dl,
+                make_increment(model, state_trial, stress_trial=state_trial["stress"]))
             st = {item.name: item.value for item in items}
             return anp.sum(st["alpha"] ** 2)
 

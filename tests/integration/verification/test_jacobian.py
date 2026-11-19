@@ -5,7 +5,9 @@ import numpy as np
 import pytest
 
 from manforge.models import J2Isotropic3D
-from manforge.simulation.integrator import PythonIntegrator, PythonAnalyticalIntegrator
+from manforge.simulation.integrator import (
+    PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
+)
 from manforge.verification.jacobian import JacobianChecker, JacobianComparisonResult
 
 
@@ -20,12 +22,12 @@ class TestCompareJacobiansJ2:
     def test_returns_result_type(self, model):
         r_ad, state0 = _result(model, 3e-3)
         r_an, _ = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r_ad, r_an, state0)
+        out = JacobianChecker(model).compare(r_ad, r_an)
         assert isinstance(out, JacobianComparisonResult)
 
     def test_identical_results_zero_error(self, model):
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r, state0)
+        out = JacobianChecker(model).compare(r, r)
         assert out.passed
         assert out.max_rel_err == pytest.approx(0.0, abs=1e-15)
 
@@ -37,7 +39,7 @@ class TestCompareJacobiansJ2:
             np.array([3e-3] + [0.0] * (model.ntens - 1)),
             np.zeros(model.ntens), state0,
         )
-        out = JacobianChecker(model, rtol=1e-8).compare(r_ad, r_an_ud, state0)
+        out = JacobianChecker(model, rtol=1e-8).compare(r_ad, r_an_ud)
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
         )
@@ -46,19 +48,19 @@ class TestCompareJacobiansJ2:
         """Elastic step (dlambda=0) should not raise in compare."""
         r, state0 = _result(model, 1e-5)
         assert not r.is_plastic
-        out = JacobianChecker(model).compare(r, r, state0)
+        out = JacobianChecker(model).compare(r, r)
         assert out.passed
 
     def test_blocks_dict_populated(self, model):
         """blocks dict should contain at least the four base block keys."""
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r, state0)
+        out = JacobianChecker(model).compare(r, r)
         for key in ("stress::stress", "stress::dlambda", "dlambda::stress", "dlambda::dlambda"):
             assert key in out.blocks
 
     def test_max_rel_err_equals_max_of_blocks(self, model):
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r, state0)
+        out = JacobianChecker(model).compare(r, r)
         assert out.max_rel_err == pytest.approx(max(out.blocks.values()), abs=1e-15)
 
 
@@ -70,9 +72,9 @@ class _StrainIncDependentJ2(J2Isotropic3D):
     decomposition would.
     """
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-        bump = anp.sum(strain_inc * strain_inc)
-        return [self.ep(state_n["ep"] + dlambda + bump)]
+    def update_state(self, new, dlambda, inc):
+        bump = anp.sum(inc.strain_inc * inc.strain_inc)
+        return [self.ep(inc.state_n["ep"] + dlambda + bump)]
 
 
 class TestComputeStrainInc:
@@ -92,10 +94,43 @@ class TestComputeStrainInc:
 
     def test_compute_forwards_strain_inc(self):
         model, deps, state0, result = self._plastic_result()
-        jac = JacobianChecker(model).compute(result, state0, strain_inc=deps)
+        jac = JacobianChecker(model).compute(result)
         assert jac.full.shape == (7, 7)
 
     def test_compare_forwards_strain_inc(self):
         model, deps, state0, result = self._plastic_result()
-        out = JacobianChecker(model).compare(result, result, state0, strain_inc=deps)
+        out = JacobianChecker(model).compare(result, result)
         assert out.passed
+
+
+# ---------------------------------------------------------------------------
+# The increment comes from the result
+# ---------------------------------------------------------------------------
+
+class TestIncrementComesFromTheResult:
+    @staticmethod
+    def _step(model):
+        deps = anp.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
+        return PythonNumericalIntegrator(model).stress_update(
+            deps, anp.zeros(6), model.initial_state())
+
+    def test_compute_needs_nothing_but_the_result(self, model):
+        result = self._step(model)
+        jac = JacobianChecker(model).compute(result)
+        assert jac.full.shape == (7, 7)
+
+    def test_result_without_increment_is_rejected(self, model):
+        """A Fortran result reports no trial state; its residual is unknown."""
+        from dataclasses import replace
+        result = replace(self._step(model), increment=None)
+        with pytest.raises(ValueError, match="no increment"):
+            JacobianChecker(model).compute(result)
+
+    def test_compare_evaluates_both_on_the_first_results_increment(self, model):
+        from dataclasses import replace
+        result = self._step(model)
+        no_increment = replace(result, increment=None)
+        out = JacobianChecker(model).compare(result, no_increment)
+        assert out.passed and out.max_rel_err == 0.0
+        with pytest.raises(ValueError, match="result_a must come from a Python integrator"):
+            JacobianChecker(model).compare(no_increment, result)

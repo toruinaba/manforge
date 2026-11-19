@@ -274,7 +274,7 @@ def test_isotropic_C_shapes():
         (J2IsotropicPS(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (3, 3)),
         (J2Isotropic1D(E=200e3, nu=0.3, sigma_y0=250.0, H=1000.0), (1, 1)),
     ]:
-        C = model.elastic_stiffness()
+        C = model.elastic_stiffness(model.initial_state())
         assert C.shape == expected_shape, f"{model.dimension.name}: expected {expected_shape}, got {C.shape}"
 
 
@@ -283,7 +283,7 @@ def test_isotropic_C_3d_diagonal():
     from manforge.models.j2_isotropic import J2Isotropic3D
     E, nu = 200e3, 0.3
     model = J2Isotropic3D(E=E, nu=nu, sigma_y0=250.0, H=0.0)
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     expected_C11 = E * (1 - nu) / ((1 + nu) * (1 - 2 * nu))
     np.testing.assert_allclose(C[0, 0], expected_C11, rtol=1e-10)
 
@@ -293,7 +293,7 @@ def test_isotropic_C_1d():
     from manforge.models.j2_isotropic import J2Isotropic1D
     E, nu = 200e3, 0.3
     model = J2Isotropic1D(E=E, nu=nu, sigma_y0=250.0, H=0.0)
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     np.testing.assert_allclose(C[0, 0], E, rtol=1e-10)
 
 
@@ -301,5 +301,5 @@ def test_plane_stress_C_symmetry():
     """Plane-stress stiffness must be symmetric."""
     from manforge.models.j2_isotropic import J2IsotropicPS
     model = J2IsotropicPS(E=200e3, nu=0.3, sigma_y0=250.0, H=0.0)
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     np.testing.assert_allclose(C, C.T, atol=1e-10)

@@ -88,7 +88,7 @@ def test_initial_state_zeros(km_model):
 
 def test_elastic_stress_is_trial(km_model, km_state0):
     """Elastic step: stress = C @ deps, tangent = C, state unchanged."""
-    C = km_model.elastic_stiffness()
+    C = km_model.elastic_stiffness(km_model.initial_state())
     deps = anp.array([0.5e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
     _r = PythonIntegrator(km_model).stress_update( deps, anp.zeros(6), km_state0)
 
@@ -215,7 +215,7 @@ def test_bauschinger_effect(km_model, km_state0):
     assert anp.linalg.norm(state1["alpha"]) > 1e-3
 
     # Elastic unloading to near-zero stress
-    C = km_model.elastic_stiffness()
+    C = km_model.elastic_stiffness(km_model.initial_state())
     deps_unload = anp.linalg.solve(C, -stress1)
     _r2 = PythonIntegrator(km_model).stress_update( deps_unload, stress1, state1)
     stress2, state2 = _r2.stress, _r2.state
@@ -363,7 +363,7 @@ def test_1d_bauschinger(model_type):
     assert float(state1["alpha"][0]) > 0.0
 
     # Elastic unloading to near zero stress
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     deps_unload = anp.linalg.solve(C, -stress1)
     _r2 = PythonIntegrator(model).stress_update( deps_unload, stress1, state1)
     stress2, state2 = _r2.stress, _r2.state

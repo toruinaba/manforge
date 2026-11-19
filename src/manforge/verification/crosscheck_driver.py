@@ -58,7 +58,7 @@ single step::
                           initial_state=case["state_n"]):
         assert cr.passed
         # Jacobian inspection on failure:
-        # jac = JacobianChecker(model).compare(cr.result_a, cr.result_b, cr.state_n)
+        # jac = JacobianChecker(model).compare(cr.result_a, cr.result_b)
 """
 
 from __future__ import annotations
@@ -102,18 +102,14 @@ class CrosscheckCaseResult(CaseResult):
     result_a : StressUpdateResult or None
         Raw result from integrator_a.  Pass to
         :meth:`~manforge.verification.JacobianChecker.compare` with ``result_b``
-        and ``state_n`` to diagnose Jacobian-level differences.
+        to diagnose Jacobian-level differences; a Python result carries the
+        increment (``result_a.increment``) the comparison needs.
     result_b : StressUpdateResult or None
         Raw result from integrator_b.
-    state_n : dict or None
-        State dict at the *start* of this step (integrator_a side).
-        Required as the ``state_n`` argument to
-        :meth:`~manforge.verification.JacobianChecker.compare`.
     """
 
     result_a: StressUpdateResult | None = None
     result_b: StressUpdateResult | None = None
-    state_n: StateDict | None = None
     a_n_iterations: int = 0
     a_residual_history: list[float] = field(default_factory=list)
     b_n_iterations: int = 0
@@ -201,12 +197,6 @@ class _CrosscheckDriverBase(Comparator):
         init_stress_b = (np.array(initial_stress, dtype=float)
                          if initial_stress is not None else None)
 
-        # state_n tracks integrator_a's state at the *start* of each step.
-        if initial_state is not None:
-            step_state_n = {k: np.asarray(v) for k, v in initial_state.items()}
-        else:
-            step_state_n = self.integrator_a.initial_state()
-
         for sa, sb in zip(
             self._iter_driver(da, load, initial_stress=init_stress_a,
                               initial_state=init_state_a, **kwargs),
@@ -232,14 +222,10 @@ class _CrosscheckDriverBase(Comparator):
             st_err = _state_rel_err(state_b, state_a)
             ok     = _case_passed(s_err, st_err, t_err, self.stress_tol, self.state_tol, self.tangent_tol)
 
-            current_state_n = step_state_n
-            step_state_n = {k: np.asarray(v) for k, v in ra.state.items()}
-
             yield CrosscheckCaseResult(
                 index=sa.i,
                 result_a=ra,
                 result_b=rb,
-                state_n=current_state_n,
                 stress_rel_err=s_err,
                 state_rel_err=st_err,
                 tangent_rel_err=t_err,

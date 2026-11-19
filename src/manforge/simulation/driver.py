@@ -44,7 +44,7 @@ from manforge._typing import StateDict, StressVec
 
 _INTEGRATOR_MEMBERS = (
     "dimension", "ntens", "raise_on_nonconverged",
-    "initial_state", "elastic_tangent", "stress_update",
+    "initial_state", "increment", "elastic_tangent", "stress_update",
 )
 
 

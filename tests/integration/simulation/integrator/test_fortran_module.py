@@ -24,7 +24,7 @@ pytestmark = pytest.mark.fortran
 
 def _py_stress(model, dstran):
     import autograd.numpy as anp
-    C = model.elastic_stiffness()
+    C = model.elastic_stiffness(model.initial_state())
     return np.array(C @ anp.array(dstran))
 
 

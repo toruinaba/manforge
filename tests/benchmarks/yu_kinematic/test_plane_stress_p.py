@@ -36,6 +36,7 @@ from manforge.verification import JacobianChecker
 from manforge.verification.tangent import TangentChecker
 
 from .conftest import PARAMS
+from manforge.verification import make_increment
 
 
 def _initial_state(model):
@@ -229,9 +230,11 @@ def test_state_residual_is_covariant_with_3d(theta_max, seed):
                model_3d.make_state(**_to_3d_state(state_n_ps)))
 
     res_ps = _named(model_ps.state_residual(
-        args_ps[0], dlambda_ps, args_ps[1], stress_trial=np.zeros(3)))
+        args_ps[0], dlambda_ps,
+        make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
     res_3d = _named(model_3d.state_residual(
-        args_3d[0], dlambda_3d, args_3d[1], stress_trial=np.zeros(6)))
+        args_3d[0], dlambda_3d,
+        make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
     for key in ("theta", "beta"):
         np.testing.assert_allclose(
             _to_3d_deviator(res_ps[key]), res_3d[key],
@@ -239,9 +242,11 @@ def test_state_residual_is_covariant_with_3d(theta_max, seed):
         )
 
     up_ps = _named(model_ps.update_state(
-        dlambda_ps, args_ps[0], args_ps[1], stress_trial=np.zeros(3)))
+        args_ps[0], dlambda_ps,
+        make_increment(model_ps, args_ps[1], stress_trial=np.zeros(3))))
     up_3d = _named(model_3d.update_state(
-        dlambda_3d, args_3d[0], args_3d[1], stress_trial=np.zeros(6)))
+        args_3d[0], dlambda_3d,
+        make_increment(model_3d, args_3d[1], stress_trial=np.zeros(6))))
     np.testing.assert_allclose(
         _to_3d_deviator(up_ps["q"]), up_3d["q"], rtol=1e-10, atol=1e-12
     )
@@ -466,7 +471,7 @@ def test_jacobian_rows_match_closed_form():
 
     dlambda = step.dlambda
     xi = model.dev(state["stress"]) - state["theta"] - state["beta"]
-    blocks = JacobianChecker(model).compute(step, state_n)
+    blocks = JacobianChecker(model).compute(step)
 
     flow = P @ xi
     np.testing.assert_allclose(blocks.part["dlambda"]["stress"], flow, rtol=1e-9)
@@ -508,7 +513,7 @@ def test_stress_row_matches_closed_form_when_stiffness_is_constant():
 
     dlambda = step.dlambda
     C = model.elastic_stiffness(state)
-    blocks = JacobianChecker(model).compute(step, state_n)
+    blocks = JacobianChecker(model).compute(step)
 
     np.testing.assert_allclose(
         blocks.part["stress"]["stress"], np.eye(3) + dlambda * (C @ P), rtol=1e-9
@@ -589,7 +594,7 @@ def test_calc_blocks_match_autograd(peaks, driven_idx):
 
     for state, state_n, step in _plastic_steps(model, peaks, 25, driven_idx):
         n_steps += 1
-        blocks = checker.compute(step, state_n)
+        blocks = checker.compute(step)
         for row, col, fn in _BLOCKS:
             ref = np.asarray(blocks.part[row][col], dtype=float)
             got = np.asarray(fn(model, state, state_n, step.dlambda), dtype=float)
@@ -622,7 +627,7 @@ def test_calc_ft_fl_gates_on_stagnation():
         if abs(float(state["R"]) - float(state_n["R"])) > 1e-15:
             continue
         n_inactive += 1
-        ref = np.asarray(checker.compute(step, state_n).part["theta"]["dlambda"], float)
+        ref = np.asarray(checker.compute(step).part["theta"]["dlambda"], float)
         got = np.asarray(model.calc_ft_fl(state, step.dlambda, state_n), float)
         np.testing.assert_allclose(
             got, ref, rtol=1e-8, atol=1e-10,

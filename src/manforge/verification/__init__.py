@@ -15,6 +15,7 @@ from manforge.simulation.integrator.fortran_module import FortranModule
 from manforge.verification.test_cases import (
     estimate_yield_strain,
     generate_strain_history,
+    make_increment,
 )
 from manforge.core.material.fortran_binding import (
     FortranBinding,
@@ -46,6 +47,7 @@ __all__ = [
     # Test case generation
     "estimate_yield_strain",
     "generate_strain_history",
+    "make_increment",
     # Fortran binding registry
     "FortranBinding",
     "verified_against_fortran",

@@ -41,8 +41,8 @@ class ParamFn(Protocol):
 
 
 class ElasticStiffnessFn(Protocol):
-    """``elastic_stiffness_fn(state=None) -> stiffness`` — returns elastic stiffness matrix."""
-    def __call__(self, state: StateDict | None = None) -> Stiffness: ...
+    """``elastic_stiffness_fn(state) -> stiffness`` — returns elastic stiffness matrix."""
+    def __call__(self, state: StateDict) -> Stiffness: ...
 
 
 _EPS_INTEGRATOR = 1e-300
@@ -116,7 +116,8 @@ class FortranIntegrator:
     -----
     Fortran UMATs do not expose a per-step ``is_plastic`` flag or ``dlambda``.
     The resulting :class:`~manforge.core.result.StressUpdateResult` will
-    have ``is_plastic=None``, ``dlambda=nan``, and ``stress_trial=None``.
+    have ``is_plastic=None``, ``dlambda=nan``, and ``increment=None`` (hence
+    ``stress_trial=None``).
     Driver loops that gate on ``step.result.is_plastic`` should guard with
     ``if result.is_plastic is True``.  ``stress_trial`` is not reconstructed on
     the Python side — the UMAT is treated as a closed verification target.
@@ -152,7 +153,7 @@ class FortranIntegrator:
 
         if elastic_stiffness_subroutine is not None:
             _sub = elastic_stiffness_subroutine
-            elastic_stiffness_fn = lambda state=None: fortran.call(_sub, *self._param_fn())
+            elastic_stiffness_fn = lambda state: fortran.call(_sub, *self._param_fn())
         self._elastic_stiffness_fn = elastic_stiffness_fn
 
         n_state = len(self._state_names)
@@ -292,6 +293,12 @@ class FortranIntegrator:
         probe = self.stress_update(np.zeros(self.ntens), stress_n, state_n)
         return np.asarray(probe.ddsdde, dtype=np.float64)
 
+    def increment(
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
+    ) -> None:
+        """Always ``None``: the UMAT is a closed target and reports no trial state."""
+        return None
+
     def initial_state(self) -> StateDict:
         result = _resolve_callable_or_value(self._initial_state)
         assert isinstance(result, dict)
@@ -334,9 +341,8 @@ class FortranIntegrator:
         return StressUpdateResult(
             return_mapping=rm,
             ddsdde=ddsdde,
-            stress_trial=None,
             is_plastic=None,
-            _state_n=state_n,
+            increment=None,
         )
 
 

@@ -45,10 +45,7 @@ class YUKinematic(MaterialModel):
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_elastic_stiffness",
     )
     def elastic_stiffness(self, state):
-        eps_eq = state["eps_eq"]
-        mu = self.E / (2.0 * (1.0 + self.nu))
-        lam = self.E * self.nu / ((1.0 + self.nu) * (1.0 - 2.0 * self.nu))
-        return self._calc_E_factor(eps_eq) * self.isotropic_C(lam, mu) # f
+        return self._calc_E_factor(state["eps_eq"]) * self.isotropic_stiffness()
 
     def yield_function(self, state):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
@@ -106,13 +103,14 @@ class YUKinematic(MaterialModel):
         delta_R = (R_n + k_eff * self.Rsat * dlambda) / (1 + k_eff * dlambda) - R_n
         return g_flag * delta_q, g_flag * delta_r, g_flag * delta_R
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
+        state_n = inc.state_n
         R_n = state_n["R"]
         q_n = state_n["q"]
         r_n = state_n["r"]
-        beta_new = state_new["beta"]
+        beta_new = new["beta"]
         d_beta = beta_new - state_n["beta"]
-        theta_new = state_new["theta"]
+        theta_new = new["theta"]
         theta_norm = self.vonmises_norm(theta_new)
         g_xi = beta_new - q_n
         g_stag = self.vonmises_norm(g_xi) - r_n
@@ -126,17 +124,18 @@ class YUKinematic(MaterialModel):
             self.theta_max(smooth_max(state_n["theta_max"], theta_norm))
         ]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        stress_new = state_new["stress"]
-        theta_new = state_new["theta"]
-        beta_new = state_new["beta"]
-        R_new = state_new["R"]
+    def state_residual(self, new, dlambda, inc):
+        state_n = inc.state_n
+        stress_new = new["stress"]
+        theta_new = new["theta"]
+        beta_new = new["beta"]
+        R_new = new["R"]
         theta_max = state_n["theta_max"]
         s_xi = self.dev(stress_new) - theta_new - beta_new
         a = self.B + R_new - self.Y
         theta_norm = self.vonmises_norm(theta_new)
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
         R_theta = theta_new - state_n["theta"] - (C_k * a / self.Y * s_xi - C_k * smooth_sqrt(a / theta_norm) * theta_new) * dlambda
         R_beta = beta_new - state_n["beta"] - (self.k * self.b / self.Y * s_xi - self.k * beta_new) * dlambda
         return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
@@ -180,9 +179,11 @@ class YUKinematic3D(YUKinematic):
         "yu_kinematic_3d",
         test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestCrosscheckTrajectory::test_analytical_vs_fortran",
     )
-    def user_defined_return_mapping(
-            self, stress_trial: anp.ndarray, C: anp.ndarray, state_n: dict
-        ):
+    def user_defined_return_mapping(self, inc):
+        # The hand NR below works on plain dicts, the way the Fortran port
+        # works on arrays; State is read-only.
+        state_n = dict(inc.state_n)
+        stress_trial = inc.trial["stress"]
         iter_rm = 50
         n_iteration = 0
         converged = False
@@ -232,9 +233,8 @@ class YUKinematic3D(YUKinematic):
             converged=converged,
         )
 
-    def user_defined_tangent(self, stress, state, dlambda, C, state_n, stress_trial=None, strain_inc=None):
-        ddsdde = self.calc_ddsdde(state, state_n, stress_trial, dlambda)
-        return ddsdde
+    def user_defined_tangent(self, new, dlambda, inc):
+        return self.calc_ddsdde(new, inc.state_n, inc.trial["stress"], dlambda)
 
     @verified_against_fortran(
         "yu_calc_norm_n_flow",
@@ -538,7 +538,8 @@ class YUKinematicPS(YUKinematic):
         s_xi = self.dev(state["stress"]) - state["theta"] - state["beta"]
         return 0.5 * self.deviatoric_inner_product(s_xi, s_xi) - self.Y * self.Y / 3.0
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
+        state_n = inc.state_n
         R_n = state_n["R"]
         q_n = state_n["q"]
         r_n = state_n["r"]
@@ -548,9 +549,9 @@ class YUKinematicPS(YUKinematic):
         # free of σ, θ, β -- without it C(eps_eq) couples into every block of the
         # sigma row.  Same substitution as k_eff.
         delta_eps_eq = dlambda * 2.0 / 3.0 * self.Y
-        beta_new = state_new["beta"]
+        beta_new = new["beta"]
         d_beta = beta_new - state_n["beta"]
-        theta_new = state_new["theta"]
+        theta_new = new["theta"]
         theta_norm = self.vonmises_norm(theta_new)
         g_xi = beta_new - q_n
         g_stag = self.vonmises_norm(g_xi) - r_n
@@ -564,16 +565,17 @@ class YUKinematicPS(YUKinematic):
             self.theta_max(smooth_max(state_n["theta_max"], theta_norm))
         ]
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-        theta_new = state_new["theta"]
-        beta_new = state_new["beta"]
-        R_new = state_new["R"]
+    def state_residual(self, new, dlambda, inc):
+        state_n = inc.state_n
+        theta_new = new["theta"]
+        beta_new = new["beta"]
+        R_new = new["R"]
         theta_max = state_n["theta_max"]
-        s_xi = self.dev(state_new["stress"]) - theta_new - beta_new
+        s_xi = self.dev(new["stress"]) - theta_new - beta_new
         a = self.B + R_new - self.Y
         theta_norm = self.vonmises_norm(theta_new)
         C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
-        R_stress = self.default_stress_residual(state_new, dlambda, stress_trial)
+        R_stress = self.default_stress_residual(new, dlambda, inc.trial["stress"])
         R_theta = theta_new - state_n["theta"] - 2.0 / 3.0 * (
             C_k * a * s_xi - C_k * self.Y * smooth_sqrt(a / theta_norm) * theta_new
         ) * dlambda
@@ -582,9 +584,10 @@ class YUKinematicPS(YUKinematic):
         ) * dlambda
         return [self.stress(R_stress), self.theta(R_theta), self.beta(R_beta)]
 
-    def user_defined_return_mapping(
-        self, stress_trial: anp.ndarray, C: anp.ndarray, state_n: dict
-    ):
+    def user_defined_return_mapping(self, inc):
+        # Plain dicts for the hand NR, as in YUKinematic3D.
+        state_n = dict(inc.state_n)
+        stress_trial = inc.trial["stress"]
         iter_rm = 50
         n_iteration = 0
         converged = False
@@ -631,9 +634,8 @@ class YUKinematicPS(YUKinematic):
             converged=converged
         )
 
-    def user_defined_tangent(self, stress, state, dlambda, C, state_n, stress_trial=None, strain_inc=None):
-        ddsdde = self.calc_ddsdde(state, state_n, stress_trial, dlambda)
-        return ddsdde
+    def user_defined_tangent(self, new, dlambda, inc):
+        return self.calc_ddsdde(new, inc.state_n, inc.trial["stress"], dlambda)
             
     def calc_residual(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)

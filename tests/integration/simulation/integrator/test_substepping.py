@@ -45,8 +45,8 @@ class _FailsAboveDlambda(J2Isotropic3D):
     # which is what pins the doubling schedule in TestSubdivision.
     dlambda_limit = 6.0e-4
 
-    def user_defined_return_mapping(self, stress_trial, C, state_n):
-        rm = super().user_defined_return_mapping(stress_trial, C, state_n)
+    def user_defined_return_mapping(self, inc):
+        rm = super().user_defined_return_mapping(inc)
         if float(rm.dlambda) > self.dlambda_limit:
             return ReturnMappingResult(
                 stress=rm.stress,
@@ -439,6 +439,9 @@ class TestExhaustion:
 
             def initial_state(self):
                 return self._inner.initial_state()
+
+            def increment(self, strain_inc, stress_n, state_n):
+                return None
 
             def elastic_tangent(self, stress_n, state_n):
                 probe = self.stress_update(np.zeros(self.ntens), stress_n, state_n)

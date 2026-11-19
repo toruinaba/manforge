@@ -39,8 +39,8 @@ def test_stress_auto_attached_as_explicit():
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - 250.0
 
-        def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
-            return [self.ep(state_n["ep"] + dlambda)]
+        def update_state(self, new, dlambda, inc):
+            return [self.ep(inc.state_n["ep"] + dlambda)]
 
     assert "stress" in _M.state_fields
     assert _M.state_fields["stress"].kind == "explicit"
@@ -58,8 +58,8 @@ def test_stress_implicit_declaration():
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - 250.0
 
-        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-            return [self.ep(state_new["ep"] - state_n["ep"] - dlambda)]
+        def state_residual(self, new, dlambda, inc):
+            return [self.ep(new["ep"] - inc.state_n["ep"] - dlambda)]
 
     assert _M.state_fields["stress"].kind == "implicit"
     assert "stress" in _M.implicit_state_names
@@ -142,18 +142,18 @@ class _CustomStressResidual(MaterialModel):
         sigma_y = self.sigma_y0 + self.H * state["ep"]
         return self.vonmises(state["stress"]) - sigma_y
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         # Hand-coded J2 associative R_stress using correct Mandel-scaled flow direction.
         # s_hat = (3/2) * s * m² / σ_vm  (m = Mandel factors; m²=[1,1,1,2,2,2] for 3D)
         # This matches autograd.grad(yield_function w.r.t. stress) without nested autograd.
-        stress = state_new["stress"]
-        C = self.elastic_stiffness(state_new)
+        stress = new["stress"]
+        C = self.elastic_stiffness(new)
         s = self.dev(stress)
         vm = self.vonmises(stress)
         m2 = anp.array(self.dimension.mandel_factors_np) ** 2
         s_hat = 1.5 * (s * m2) / vm
-        R_stress = stress - stress_trial + dlambda * (C @ s_hat)
-        R_ep = state_new["ep"] - state_n["ep"] - dlambda
+        R_stress = stress - inc.trial["stress"] + dlambda * (C @ s_hat)
+        R_ep = new["ep"] - inc.state_n["ep"] - dlambda
         return [self.stress(R_stress), self.ep(R_ep)]
 
 

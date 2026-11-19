@@ -30,13 +30,16 @@ Returning residuals / updates
 ``StateField.__call__`` wraps a computed value as ``StateResidual`` (implicit)
 or ``StateUpdate`` (explicit), giving a concise return idiom::
 
-    def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
+    def state_residual(self, new, dlambda, inc):
         ...
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 
-    def update_state(self, dlambda, state_new, state_n, *, stress_trial=None, strain_inc=None):
+    def update_state(self, new, dlambda, inc):
         ...
         return [self.alpha(alpha_new), self.ep(ep_new)]
+
+``inc`` is the :class:`Increment` of the step — the state at its beginning,
+the strain increment and the elastic trial state.
 
 The framework validates the returned list at the call boundary via
 ``_validate_state_items``.
@@ -427,8 +430,8 @@ class DlambdaField:
 
     Example::
 
-        def state_residual(self, state_new, dlambda, state_n, *, stress_trial, strain_inc=None):
-            f = self.yield_function(state_new)
+        def state_residual(self, new, dlambda, inc):
+            f = self.yield_function(new)
             R_dl = f - self.eta * dlambda / self.dt   # Perzyna
             return [self.dlambda(R_dl), self.alpha(R_alpha)]
     """
@@ -629,6 +632,47 @@ class State:
 
     def __repr__(self):
         return f"State({self._data!r})"
+
+
+# ---------------------------------------------------------------------------
+# Increment — the step context handed to every model hook
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Increment:
+    """One load increment as a material model's hooks see it.
+
+    The inputs of one stress update, gathered so that every hook receives the
+    same object instead of a growing list of keyword arguments.  A quantity a
+    future model needs (a time step, a temperature) becomes a field here, and
+    no existing hook signature changes.
+
+    This mirrors how a UMAT is laid out: the trial state is computed once at
+    the top, the elastic/plastic branch is decided from it, and the plastic
+    corrector starts from it.
+
+    Attributes
+    ----------
+    state_n : State
+        State at the beginning of the increment.  ``state_n["stress"]`` is σ_n.
+    strain_inc : array, shape (ntens,)
+        Strain increment Δε (engineering shear, the ABAQUS ``DSTRAN``).
+    trial : State
+        Elastic trial state: what :meth:`MaterialModel.elastic_predictor`
+        returned, laid over ``state_n``.  ``trial["stress"]`` is σ_trial; a
+        field the predictor did not return carries its ``state_n`` value.  On
+        an elastic step this *is* the converged state.
+
+    Notes
+    -----
+    While the framework differentiates the consistent tangent, ``strain_inc``
+    and the fields of ``trial`` arrive as autograd boxes — operate on them with
+    ``autograd.numpy``.
+    """
+
+    state_n: "State"
+    strain_inc: FloatArray
+    trial: "State"
 
 
 # ---------------------------------------------------------------------------

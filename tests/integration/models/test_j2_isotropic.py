@@ -88,7 +88,7 @@ def test_elastic_step_shapes(pe_model, pe_state):
 def test_elastic_step_stress_equals_C_deps(pe_model, pe_state):
     """Elastic stress must equal C @ deps."""
     deps = anp.array([1e-4, 0.0, 0.0, 0.0])
-    C = pe_model.elastic_stiffness()
+    C = pe_model.elastic_stiffness(pe_model.initial_state())
     stress = PythonIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).stress
     np.testing.assert_allclose(np.asarray(stress), np.asarray(C @ deps), rtol=1e-10)
 
@@ -96,7 +96,7 @@ def test_elastic_step_stress_equals_C_deps(pe_model, pe_state):
 def test_elastic_step_tangent_equals_C(pe_model, pe_state):
     """Elastic tangent must equal the elastic stiffness C."""
     deps = anp.array([1e-4, 0.0, 0.0, 0.0])
-    C = pe_model.elastic_stiffness()
+    C = pe_model.elastic_stiffness(pe_model.initial_state())
     ddsdde = PythonIntegrator(pe_model).stress_update(deps, anp.zeros(4), pe_state).ddsdde
     np.testing.assert_allclose(np.asarray(ddsdde), np.asarray(C), rtol=1e-10)
 

@@ -6,6 +6,7 @@ import numpy as np
 
 from manforge.core.dimension import StressDimension
 from manforge.core.result import ReturnMappingResult, StressUpdateResult
+from manforge.core.state import Increment
 from manforge._typing import Stiffness, StressVec, StateDict
 
 
@@ -82,6 +83,12 @@ class SubSteppingIntegrator:
     def elastic_tangent(self, stress_n: StressVec, state_n: StateDict) -> Stiffness:
         return self._integrator.elastic_tangent(stress_n, state_n)
 
+    def increment(
+        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
+    ) -> "Increment | None":
+        """The wrapped integrator's context for the *undivided* increment."""
+        return self._integrator.increment(strain_inc, stress_n, state_n)
+
     def _attempt(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict, m: int
     ) -> "StressUpdateResult | None":
@@ -140,28 +147,12 @@ class SubSteppingIntegrator:
             # hand-derived terms per model; that trade was taken deliberately.
             # Thunked so the wrapped result's own lazy tangent stays deferred.
             ddsdde=lambda: last.ddsdde,
-            stress_trial=self._big_trial(strain_inc, stress_n, state_n),
             is_plastic=any_plastic,
-            _state_n=state_n,
+            # The undivided increment — what the caller asked about — not the
+            # last substep's.
+            increment=self.increment(strain_inc, stress_n, state_n),
             n_substeps=m,
         )
-
-    def _big_trial(
-        self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
-    ) -> "StressVec | None":
-        """σ_trial of the *undivided* increment — what the caller asked about.
-
-        ``None`` when the wrapped integrator cannot report a trial stress.
-        ``trial_stress`` is not part of the :class:`StressIntegrator` contract:
-        Python integrators have it and honour a model's (possibly non-linear)
-        ``elastic_predictor``, while a Fortran UMAT is a closed target whose
-        results carry ``stress_trial=None`` — reconstructing one here as
-        σ_n + C Δε would contradict that.
-        """
-        trial_stress = getattr(self._integrator, "trial_stress", None)
-        if trial_stress is None:
-            return None
-        return np.asarray(trial_stress(strain_inc, stress_n, state_n), dtype=float)
 
     def stress_update(
         self, strain_inc: StressVec, stress_n: StressVec, state_n: StateDict
@@ -198,8 +189,7 @@ class SubSteppingIntegrator:
         return StressUpdateResult(
             return_mapping=rm,
             ddsdde=lambda: self.elastic_tangent(stress_n, state_n),
-            stress_trial=self._big_trial(strain_inc, stress_n, state_n),
             is_plastic=None,
-            _state_n=state_n,
+            increment=self.increment(strain_inc, stress_n, state_n),
             n_substeps=self._max_substeps,
         )
