@@ -4,7 +4,7 @@ Demonstrates:
 - Defining a J2Isotropic1D model with constructor parameters
 - Building a cyclic strain history with FieldHistory.cyclic_strain
 - Running a cyclic strain history with StrainDriver (hysteresis loop)
-- Verifying the consistent tangent with TangentChecker
+- Verifying the consistent tangent with check_tangent
 - Plotting the stress-strain hysteresis loop (saved as PNG)
 
 Usage
@@ -16,7 +16,7 @@ import numpy as np
 
 from manforge.models import J2Isotropic1D
 from manforge.simulation import StrainDriver, PythonIntegrator, FieldHistory
-from manforge.verification import TangentChecker
+from manforge.verification import check_tangent
 
 try:
     import matplotlib
@@ -70,15 +70,15 @@ print()
 # ---------------------------------------------------------------------------
 # Tangent verification
 # ---------------------------------------------------------------------------
-checker = TangentChecker(PythonIntegrator(model))
+integrator = PythonIntegrator(model)
 
 print("Tangent check — elastic domain:")
-result_e = checker.check(np.zeros(1), model.initial_state(), np.array([1e-5]))
+result_e = check_tangent(integrator, np.array([1e-5]), np.zeros(1), model.initial_state())
 status = "PASS" if result_e.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_e.max_rel_err:.2e}")
 
 print("Tangent check — plastic domain (uniaxial):")
-result_p = checker.check(np.zeros(1), model.initial_state(), np.array([2e-3]))
+result_p = check_tangent(integrator, np.array([2e-3]), np.zeros(1), model.initial_state())
 status = "PASS" if result_p.passed else "FAIL"
 print(f"  [{status}]  max rel err = {result_p.max_rel_err:.2e}")
 print()

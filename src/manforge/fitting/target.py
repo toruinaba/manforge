@@ -34,11 +34,13 @@ from manforge.fitting.metrics import (
     partial_curve_mapping,
     resolve_metric,
 )
+from manforge.simulation.driver import default_driver_for
 from manforge.simulation.types import FieldHistory, FieldType
 from manforge._typing import FloatArray
 
 if TYPE_CHECKING:
     from manforge.fitting.objective import DriverFactoryFn
+    from manforge.simulation.integrator import StressIntegrator
     from manforge.simulation.types import DriverResult
 
 STRESS_FIELD = "Stress"
@@ -220,6 +222,9 @@ class FitTarget:
         ``None`` (default) uses the one passed to
         :func:`~manforge.fitting.fit_params`, which is the right
         choice unless this target is driven differently from the others.
+        If neither is given the driver follows from ``load``:
+        :class:`~manforge.simulation.StrainDriver` for a strain history,
+        :class:`~manforge.simulation.StressDriver` for a stress history.
     initial_stress, initial_state : array-like / dict or None
         Forwarded to ``driver.run`` — use for a prestressed specimen or a
         pre-hardened initial state.
@@ -306,15 +311,12 @@ class FitTarget:
     def resolve_driver_factory(
         self, default: "DriverFactoryFn | None"
     ) -> "DriverFactoryFn":
-        factory = self.driver_factory or default
-        if factory is None:
-            raise ValueError(
-                f"target {self.label!r} has no driver_factory and none was "
-                f"passed to fit_params"
-            )
-        return factory
+        """This target's own factory, else ``default``, else the one the load implies."""
+        return self.driver_factory or default or default_driver_for(self.load)
 
-    def residual(self, integrator: object, default_factory: "DriverFactoryFn | None") -> float:
+    def residual(
+        self, integrator: "StressIntegrator", default_factory: "DriverFactoryFn | None",
+    ) -> float:
         """Run this target once and sum its observations' residuals."""
         driver = self.resolve_driver_factory(default_factory)(integrator)
         result = driver.run(

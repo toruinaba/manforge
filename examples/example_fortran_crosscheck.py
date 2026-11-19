@@ -5,7 +5,7 @@ The complete Fortran validation workflow (docs/guide/fortran.md):
 1. Load a compiled UMAT with FortranModule
 2. Crosscheck Python vs Fortran over a generated strain history
    (crosscheck — per-step stress / state / ddsdde comparison)
-3. Debug a failing step via result.first_failure + JacobianChecker.compare
+3. Debug a failing step via report.first_failure + compare_jacobians
 4. Drive the Fortran UMAT directly with StressDriver (cyclic hysteresis, plot)
 
 In an external project, replace J2Isotropic3D with your model and
@@ -34,7 +34,7 @@ from manforge.simulation import (
     FortranIntegrator, PythonIntegrator, PythonNumericalIntegrator, StressDriver,
     FieldHistory, FieldType, FortranModule,
 )
-from manforge.verification import JacobianChecker, crosscheck, generate_strain_history
+from manforge.verification import compare_jacobians, crosscheck, generate_strain_history
 
 try:
     import matplotlib
@@ -59,19 +59,19 @@ print("  Crosscheck: Python (numerical NR) vs Fortran UMAT")
 print("=" * 60)
 
 load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
-result = crosscheck(PythonNumericalIntegrator(model), fc_int, load)
+report = crosscheck(PythonNumericalIntegrator(model), fc_int, load)
 
-print(result.summary())
-assert result.passed
+print(report.summary())
+assert report.passed
 
 # ---------------------------------------------------------------------------
 # 3. Debugging pattern: the first step that disagrees carries both raw
 #    results; compare the residual Jacobian at the two solutions to see where.
 # ---------------------------------------------------------------------------
-step = result.first_failure
+step = report.first_failure
 if step is not None:
-    cmp = JacobianChecker(model).compare(step.result_a, step.result_b)
-    print(f"  step {step.index} failed — block comparison:\n{cmp.blocks}")
+    print(f"  step {step.index} failed — block comparison:")
+    print(compare_jacobians(model, step.result_a, step.result_b).summary())
 else:
     print("  no failing step (as expected)")
 print()

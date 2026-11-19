@@ -1,4 +1,4 @@
-"""Unit tests for JacobianBlocks structure and JacobianChecker.compute.
+"""Unit tests for JacobianBlocks structure and ``integrator.jacobian``.
 
 Pure structure/shape tests that build a StressUpdateResult directly.
 Integrator-driven compare tests live in tests/integration/verification/test_jacobian.py.
@@ -11,7 +11,6 @@ import autograd.numpy as anp
 import numpy as np
 import pytest
 
-from manforge.verification import JacobianChecker
 from manforge.simulation import JacobianBlocks, PythonIntegrator
 from manforge.models import AFKinematic3D, OWKinematic3D
 from manforge.core import Implicit, NTENS, SCALAR, MaterialModel
@@ -40,12 +39,12 @@ def _plastic_result(model, strain_scale=3e-3):
 class TestReducedBlocks:
     def test_returns_jacobian_blocks(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         assert isinstance(jac, JacobianBlocks)
 
     def test_fixed_block_shapes(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         ntens = model.ntens
         assert jac.part["stress"]["stress"].shape == (ntens, ntens)
         assert jac.part["stress"]["dlambda"].shape == (ntens,)
@@ -54,13 +53,13 @@ class TestReducedBlocks:
 
     def test_state_blocks_absent_for_j2(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         assert set(jac.row_names()) == {"stress", "dlambda"}
         assert set(jac.col_names()) == {"stress", "dlambda"}
 
     def test_part_dlambda_stress_matches_flow_direction(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         from manforge.core.state import _state_with_stress
         n_ad = autograd.grad(
             lambda s: model.yield_function(_state_with_stress(result.state, s))
@@ -71,7 +70,7 @@ class TestReducedBlocks:
 
     def test_full_matrix_blocks_consistent(self, model):
         result, state0 = _plastic_result(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         layout = jac.layout
         ntens = model.ntens
         np.testing.assert_array_equal(
@@ -87,7 +86,7 @@ class TestReducedBlocks:
         deps = anp.array([1e-4, 0, 0, 0, 0, 0])
         state0 = model.initial_state()
         result = PythonIntegrator(model).stress_update(deps, anp.zeros(6), state0)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         assert isinstance(jac, JacobianBlocks)
 
 
@@ -98,7 +97,7 @@ class TestReducedBlocks:
 class TestReducedBlocksAF:
     def test_af_state_blocks_are_empty_dicts(self, af_model):
         result, state0 = _plastic_result(af_model)
-        jac = JacobianChecker(af_model).compute(result)
+        jac = PythonIntegrator(af_model).jacobian(result)
         assert set(jac.row_names()) == {"stress", "dlambda"}
         assert set(jac.col_names()) == {"stress", "dlambda"}
 
@@ -110,18 +109,18 @@ class TestReducedBlocksAF:
 class TestAugmentedBlocks:
     def test_returns_jacobian_blocks(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result)
+        jac = PythonIntegrator(ow_model).jacobian(result)
         assert isinstance(jac, JacobianBlocks)
 
     def test_state_block_keys(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result)
+        jac = PythonIntegrator(ow_model).jacobian(result)
         assert set(jac.row_names()) == {"stress", "dlambda", "alpha", "ep"}
         assert set(jac.col_names()) == {"stress", "dlambda", "alpha", "ep"}
 
     def test_state_block_shapes(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result)
+        jac = PythonIntegrator(ow_model).jacobian(result)
         ntens = ow_model.ntens
         assert jac.part["alpha"]["stress"].shape == (ntens, ntens)
         assert jac.part["alpha"]["dlambda"].shape == (ntens,)
@@ -131,14 +130,14 @@ class TestAugmentedBlocks:
     @pytest.mark.slow
     def test_full_matrix_size(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result)
+        jac = PythonIntegrator(ow_model).jacobian(result)
         ntens = ow_model.ntens
         n_state = ntens + 1
         assert jac.full.shape == (ntens + 1 + n_state, ntens + 1 + n_state)
 
     def test_part_shapes_match_slot_shape(self, ow_model):
         result, state0 = _plastic_result(ow_model)
-        jac = JacobianChecker(ow_model).compute(result)
+        jac = PythonIntegrator(ow_model).jacobian(result)
         layout = jac.layout
         col_names = jac.col_names()
         for col_state in col_names:
@@ -183,18 +182,55 @@ class TestResidualNameOptIn:
 
     def test_row_names_use_residual_names(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result)
+        jac = PythonIntegrator(rn_model).jacobian(result)
         assert set(jac.row_names()) == {"stress", "R_yield", "R_alpha", "R_ep"}
 
     def test_col_names_use_state_names(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result)
+        jac = PythonIntegrator(rn_model).jacobian(result)
         assert set(jac.col_names()) == {"stress", "dlambda", "alpha", "ep"}
 
     def test_custom_row_access(self, rn_model):
         result, state0 = _plastic_result(rn_model)
-        jac = JacobianChecker(rn_model).compute(result)
+        jac = PythonIntegrator(rn_model).jacobian(result)
         assert jac.part["R_alpha"]["stress"].shape == (rn_model.ntens, rn_model.ntens)
         assert jac.part["R_yield"]["stress"].shape == (rn_model.ntens,)
         assert "alpha" not in jac.part
         assert "dlambda" not in jac.part
+
+
+# ---------------------------------------------------------------------------
+# What a block's error is relative to
+# ---------------------------------------------------------------------------
+
+class TestBlockScale:
+    """``_block_scale(own, row, col)``: the block's own size, unless it is round-off."""
+
+    def test_a_block_with_a_size_of_its_own_is_measured_against_it(self):
+        from manforge.verification.jacobian import _block_scale
+
+        # Small next to what its row implies (1e-7 of it), but far above round-off.
+        assert _block_scale(own=4e-7, row=1.0, col=0.25) == 4e-7
+        assert _block_scale(own=1.6e5, row=1e3, col=2e-4) == 1.6e5
+
+    def test_round_off_is_measured_against_what_row_and_column_imply(self):
+        from manforge.verification.jacobian import _block_scale
+
+        # 1.4e-13 against 700 / 0.67: autodiff noise in a block that is zero.
+        assert _block_scale(own=1.4e-13, row=700.0, col=0.67) == pytest.approx(700.0 / 0.67)
+        assert _block_scale(own=0.0, row=700.0, col=0.67) == pytest.approx(700.0 / 0.67)
+
+    def test_an_unknown_that_never_moved_implies_nothing(self):
+        from manforge.verification.jacobian import _block_scale
+
+        assert _block_scale(own=3.0, row=10.0, col=0.0) == 3.0
+        assert _block_scale(own=0.0, row=10.0, col=0.0) == 0.0
+        assert _block_scale(own=3.0, row=float("nan"), col=1.0) == 3.0
+
+    @pytest.mark.parametrize("unit", [1e-9, 1.0, 1e6])
+    def test_the_choice_does_not_depend_on_the_units(self, unit):
+        """Row sizes and blocks scale together; the ratio that decides does not."""
+        from manforge.verification.jacobian import _block_scale
+
+        assert _block_scale(own=4e-7 * unit, row=1.0 * unit, col=0.25) == 4e-7 * unit
+        assert _block_scale(own=1e-13 * unit, row=1.0 * unit, col=0.25) == pytest.approx(4.0 * unit)

@@ -152,6 +152,7 @@ class J2Isotropic3D(J2Isotropic):
             dlambda=anp.asarray(dlambda),
             n_iterations=1,
             residual_history=[float(f_trial), 0.0],
+            converged=True,
         )
 
     def user_defined_tangent(
@@ -280,6 +281,7 @@ class J2Isotropic1D(J2Isotropic):
             dlambda=anp.asarray(dlambda),
             n_iterations=1,
             residual_history=[float(f_trial), 0.0],
+            converged=True,
         )
 
     def user_defined_tangent(

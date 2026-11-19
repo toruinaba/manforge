@@ -1,4 +1,4 @@
-"""Tests for JacobianChecker.compare."""
+"""Tests for compare_jacobians, check_hand_blocks and check_solution."""
 
 import autograd.numpy as anp
 import numpy as np
@@ -8,8 +8,14 @@ from manforge.core import hand_block
 from manforge.models import J2Isotropic3D
 from manforge.simulation import (
     PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
+    hand_jacobian,
 )
-from manforge.verification import JacobianChecker, JacobianComparisonResult
+from manforge.verification import (
+    check_hand_blocks,
+    check_solution,
+    compare_jacobians,
+    JacobianComparisonReport,
+)
 
 
 def _result(model, strain_scale):
@@ -23,12 +29,12 @@ class TestCompareJacobiansJ2:
     def test_returns_result_type(self, model):
         r_ad, state0 = _result(model, 3e-3)
         r_an, _ = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r_ad, r_an)
-        assert isinstance(out, JacobianComparisonResult)
+        out = compare_jacobians(model, r_ad, r_an)
+        assert isinstance(out, JacobianComparisonReport)
 
     def test_identical_results_zero_error(self, model):
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r)
+        out = compare_jacobians(model, r, r)
         assert out.passed
         assert out.max_rel_err == pytest.approx(0.0, abs=1e-15)
 
@@ -40,7 +46,7 @@ class TestCompareJacobiansJ2:
             np.array([3e-3] + [0.0] * (model.ntens - 1)),
             np.zeros(model.ntens), state0,
         )
-        out = JacobianChecker(model, tol=1e-8).compare(r_ad, r_an_ud)
+        out = compare_jacobians(model, r_ad, r_an_ud, tol=1e-8)
         assert out.passed, (
             f"max_rel_err={out.max_rel_err:.3e}, blocks={out.blocks}"
         )
@@ -54,7 +60,7 @@ class TestCompareJacobiansJ2:
         state0 = model.initial_state()
         r_num = PythonNumericalIntegrator(model).stress_update(deps, np.zeros(6), state0)
         r_closed = PythonAnalyticalIntegrator(model).stress_update(deps, np.zeros(6), state0)
-        out = JacobianChecker(model).compare(r_num, r_closed)
+        out = compare_jacobians(model, r_num, r_closed)
         assert out.passed
         assert out.max_rel_err < 1e-12
 
@@ -72,7 +78,7 @@ class TestCompareJacobiansJ2:
             deps, np.zeros(6), state0)
         assert np.isnan(float(r_f.dlambda))
 
-        out = JacobianChecker(model).compare(r_py, r_f)
+        out = compare_jacobians(model, r_py, r_f)
         assert out.passed
         assert out.max_rel_err == 0.0
 
@@ -82,25 +88,25 @@ class TestCompareJacobiansJ2:
         state0 = model.initial_state()
         r_a = PythonIntegrator(model).stress_update(deps, np.zeros(6), state0)
         r_b = PythonIntegrator(model).stress_update(1.5 * deps, np.zeros(6), state0)
-        assert not JacobianChecker(model).compare(r_a, r_b).passed
+        assert not compare_jacobians(model, r_a, r_b).passed
 
     def test_elastic_step_does_not_raise(self, model):
         """Elastic step (dlambda=0) should not raise in compare."""
         r, state0 = _result(model, 1e-5)
         assert not r.is_plastic
-        out = JacobianChecker(model).compare(r, r)
+        out = compare_jacobians(model, r, r)
         assert out.passed
 
     def test_blocks_dict_populated(self, model):
         """blocks dict should contain at least the four base block keys."""
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r)
+        out = compare_jacobians(model, r, r)
         for key in ("stress::stress", "stress::dlambda", "dlambda::stress", "dlambda::dlambda"):
             assert key in out.blocks
 
     def test_max_rel_err_equals_max_of_blocks(self, model):
         r, state0 = _result(model, 3e-3)
-        out = JacobianChecker(model).compare(r, r)
+        out = compare_jacobians(model, r, r)
         assert out.max_rel_err == pytest.approx(max(out.blocks.values()), abs=1e-15)
 
 
@@ -134,12 +140,12 @@ class TestComputeStrainInc:
 
     def test_compute_forwards_strain_inc(self):
         model, deps, state0, result = self._plastic_result()
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         assert jac.full.shape == (7, 7)
 
     def test_compare_forwards_strain_inc(self):
         model, deps, state0, result = self._plastic_result()
-        out = JacobianChecker(model).compare(result, result)
+        out = compare_jacobians(model, result, result)
         assert out.passed
 
 
@@ -156,7 +162,7 @@ class TestIncrementComesFromTheResult:
 
     def test_compute_needs_nothing_but_the_result(self, model):
         result = self._step(model)
-        jac = JacobianChecker(model).compute(result)
+        jac = PythonIntegrator(model).jacobian(result)
         assert jac.full.shape == (7, 7)
 
     def test_result_without_increment_is_rejected(self, model):
@@ -164,16 +170,39 @@ class TestIncrementComesFromTheResult:
         from dataclasses import replace
         result = replace(self._step(model), increment=None)
         with pytest.raises(ValueError, match="no increment"):
-            JacobianChecker(model).compute(result)
+            PythonIntegrator(model).jacobian(result)
+
+    def test_comparison_report_names_the_blocks(self, model):
+        from dataclasses import replace
+        from manforge.core import ReturnMappingResult
+
+        result = PythonNumericalIntegrator(model).stress_update(
+            anp.array([3e-3, 0.0, 0.0, 1e-3, 0.0, 0.0]), anp.zeros(6), model.initial_state())
+        same = compare_jacobians(model, result, result)
+        assert same.passed and same.failed == []
+        assert "jacobian comparison: 4 blocks — all agree" in same.summary()
+        assert str(same) == same.summary()
+
+        rm = result.return_mapping
+        moved = replace(result, return_mapping=ReturnMappingResult(
+            stress=rm.stress * 1.01, state={**rm.state, "stress": rm.stress * 1.01},
+            dlambda=rm.dlambda, n_iterations=rm.n_iterations,
+            residual_history=rm.residual_history, converged=True,
+        ))
+        differs = compare_jacobians(model, result, moved, tol=1e-6)
+        assert not differs.passed and differs.tol == 1e-6
+        assert differs.failed[0] in differs.blocks
+        assert differs.blocks[differs.failed[0]] == differs.max_rel_err
+        assert "FAIL " + differs.failed[0] in differs.summary()
 
     def test_compare_evaluates_both_on_the_first_results_increment(self, model):
         from dataclasses import replace
         result = self._step(model)
         no_increment = replace(result, increment=None)
-        out = JacobianChecker(model).compare(result, no_increment)
+        out = compare_jacobians(model, result, no_increment)
         assert out.passed and out.max_rel_err == 0.0
         with pytest.raises(ValueError, match="result_a must come from a Python integrator"):
-            JacobianChecker(model).compare(no_increment, result)
+            compare_jacobians(model, no_increment, result)
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +227,7 @@ class TestCheckHandBlocks:
 
         m = OWWithHandBlocks(**OW_PARAMS)
         results = self._results(m)
-        report = JacobianChecker(m).check_hand_blocks(results)
+        report = check_hand_blocks(m, results)
 
         assert report.passed, report.summary()
         assert report.n_declared == 8 and report.n_total == 16
@@ -211,16 +240,15 @@ class TestCheckHandBlocks:
         assert "8/16 derived" in report.summary()
         assert "not derived: [stress][stress]" in report.summary()
 
-    def test_the_checkers_tol_is_the_default_and_can_be_overridden(self):
+    def test_tol_is_what_exact_blocks_are_held_to(self):
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         m = OWWithHandBlocks(**OW_PARAMS)
         results = self._results(m)
-        strict = JacobianChecker(m, tol=1e-30)
-        report = strict.check_hand_blocks(results)
+        report = check_hand_blocks(m, results, tol=1e-30)
         assert not report.passed                      # round-off exceeds 1e-30
         assert {b.tol for b in report.blocks.values()} == {1e-30}
-        assert strict.check_hand_blocks(results, tol=1e-8).passed
+        assert check_hand_blocks(m, results).passed   # default 1e-8
 
     def test_a_block_that_returns_nan_fails(self):
         """NaN loses every comparison, so past the first step it used to
@@ -237,7 +265,7 @@ class TestCheckHandBlocks:
                 return block * np.nan if type(self).n_calls > 1 else block
 
         m = _NanLater(**OW_PARAMS)
-        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+        report = check_hand_blocks(m, self._results(m))
         assert not report.passed
         assert [(b.row, b.col) for b in report.failed] == [("dlambda", "stress")]
         assert report.blocks[("dlambda", "stress")].worst_err == np.inf
@@ -247,7 +275,7 @@ class TestCheckHandBlocks:
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithWrongBlock
 
         m = OWWithWrongBlock(**OW_PARAMS)
-        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+        report = check_hand_blocks(m, self._results(m))
 
         assert not report.passed
         assert [(b.row, b.col, b.method) for b in report.failed] == [("ep", "dlambda", "dRep_dl")]
@@ -258,7 +286,7 @@ class TestCheckHandBlocks:
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithApproxBlock
 
         m = OWWithApproxBlock(**OW_PARAMS)
-        report = JacobianChecker(m).check_hand_blocks(self._results(m), tol=1e-10)
+        report = check_hand_blocks(m, self._results(m), tol=1e-10)
 
         block = report.blocks[("ep", "ep")]
         assert block.approx and block.tol == 1e-2
@@ -276,26 +304,105 @@ class TestCheckHandBlocks:
                 return 1.0 + 1e-3
 
         m = _TooFar(**OW_PARAMS)
-        report = JacobianChecker(m).check_hand_blocks(self._results(m))
+        report = check_hand_blocks(m, self._results(m))
         assert [b.method for b in report.failed] == ["dRep_dep"]
 
     def test_nothing_checked_is_an_error_not_a_pass(self, model):
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
         with pytest.raises(ValueError, match="declares no hand-derived block"):
-            JacobianChecker(model).check_hand_blocks(self._results(model))
+            check_hand_blocks(model, self._results(model))
 
         m = OWWithHandBlocks(**OW_PARAMS)
         elastic_only = [r for r in self._results(m) if not r.is_plastic]
         with pytest.raises(ValueError, match="no plastic step"):
-            JacobianChecker(m).check_hand_blocks(elastic_only)
+            check_hand_blocks(m, elastic_only)
+
+    @pytest.mark.parametrize("unit", [1e-9, 1.0, 1e6])
+    def test_error_does_not_depend_on_the_units(self, unit):
+        """A block 1e-6 off is 1e-6 off in Pa, MPa or GPa.
+
+        ``∂R_σ/∂Δλ = C n`` carries the unit of stress.  Measured against
+        ``max(max|ad|, 1)`` its error shrank with the unit, and a model posed
+        in small units passed whatever the block returned.
+        """
+        from manforge.core import hand_block
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        class _SlightlyOff(OWWithHandBlocks):
+            @hand_block("stress", "dlambda")
+            def dRs_dl(self, state):
+                exact = self.elastic_stiffness(state) @ self.flow(state).strain_like
+                return (1.0 + 1e-6) * np.asarray(exact, dtype=float)
+
+        params = {k: v * unit if k in ("E", "sigma_y0", "C_k") else v
+                  for k, v in OW_PARAMS.items()}
+        m = _SlightlyOff(**params)
+        report = check_hand_blocks(m, self._results(m))
+
+        block = report.blocks[("stress", "dlambda")]
+        assert block.worst_err == pytest.approx(1e-6, rel=1e-3)
+        assert [b.method for b in report.failed] == ["dRs_dl"]
+
+    def test_error_is_relative_to_the_blocks_size_over_the_history(self):
+        """The largest difference over the steps, against the largest reference
+        over the steps — so a step where the block is small does not turn
+        round-off into a large error."""
+        from manforge.core import hand_block
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        class _Offset(OWWithHandBlocks):
+            @hand_block("stress", "dlambda")
+            def dRs_dl(self, state):
+                exact = self.elastic_stiffness(state) @ self.flow(state).strain_like
+                return np.asarray(exact, dtype=float) + 1.0     # 1 MPa on every entry
+
+        m = _Offset(**OW_PARAMS)
+        results = self._results(m)
+        report = check_hand_blocks(m, results)
+
+        integrator = PythonNumericalIntegrator(m)
+        largest = max(
+            np.abs(integrator.jacobian(r).part["stress"]["dlambda"]).max()
+            for r in results if r.is_plastic
+        )
+        assert report.blocks[("stress", "dlambda")].worst_err == pytest.approx(1.0 / largest)
+
+    def test_a_block_that_is_zero_is_held_to_the_size_its_row_implies(self):
+        """``∂f/∂Δλ`` is zero for this model, so there is no ``max|ad|`` to
+        divide by.  The block is measured against what its row and column
+        imply: round-off passes, a value that is not zero does not."""
+        from manforge.core import hand_block
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
+
+        def model_returning(value):
+            class _M(OWWithHandBlocks):
+                @hand_block("dlambda", "dlambda")
+                def dRy_dl(self):
+                    return value
+            return _M(**OW_PARAMS)
+
+        m = model_returning(0.0)
+        results = self._results(m)
+        integrator = PythonNumericalIntegrator(m)
+        assert all(float(integrator.jacobian(r).part["dlambda"]["dlambda"]) == 0.0
+                   for r in results if r.is_plastic)
+        assert check_hand_blocks(m, results).blocks[("dlambda", "dlambda")].worst_err == 0.0
+
+        noise = check_hand_blocks(model_returning(1e-10), results)
+        assert noise.blocks[("dlambda", "dlambda")].passed, noise.summary()
+        assert 0.0 < noise.blocks[("dlambda", "dlambda")].worst_err < 1e-12
+
+        wrong = check_hand_blocks(model_returning(10.0), results)
+        assert [b.method for b in wrong.failed] == ["dRy_dl"]
+        assert np.isfinite(wrong.blocks[("dlambda", "dlambda")].worst_err)
 
     def test_hand_returns_the_assembled_matrix(self):
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithWrongBlock
 
         m = OWWithWrongBlock(**OW_PARAMS)
         result = [r for r in self._results(m) if r.is_plastic][-1]
-        hand, ref = JacobianChecker(m).hand(result), JacobianChecker(m).compute(result)
+        hand, ref = hand_jacobian(m, result), PythonIntegrator(m).jacobian(result)
 
         assert hand.source["ep"]["dlambda"] == "hand"
         assert hand.source["stress"]["stress"] == "ad"
@@ -322,7 +429,7 @@ class TestCheckSolution:
         return StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
 
     def test_closed_form_solution_satisfies_every_row(self, model):
-        report = JacobianChecker(model).check_solution(self._results(model))
+        report = check_solution(model, self._results(model))
         assert report.passed, report.summary()
         assert set(report.rows) == {"stress", "dlambda", "ep"}
         assert report.rows["ep"].kind == "state"
@@ -334,7 +441,7 @@ class TestCheckSolution:
         from tests.benchmarks.yu_kinematic.conftest import PARAMS
 
         m = YUKinematic3D(**PARAMS)
-        report = JacobianChecker(m).check_solution(self._results(m))
+        report = check_solution(m, self._results(m))
         assert report.passed, report.summary()
         assert {"stress", "dlambda", "theta", "beta"} <= set(report.rows)
         assert {"R", "q", "r", "eps_eq", "theta_max"} <= set(report.rows)
@@ -354,7 +461,7 @@ class TestCheckSolution:
                 return r + extra
 
         m = _WrongTheta(**PARAMS)
-        report = JacobianChecker(m).check_solution(self._results(m))
+        report = check_solution(m, self._results(m))
         assert not report.passed
         assert [r.name for r in report.failed] == ["theta"]
         assert report.rows["theta"].worst_err > 1e-4
@@ -376,7 +483,7 @@ class TestCheckSolution:
                 )
 
         m = _Overshoot(**model.params)
-        report = JacobianChecker(m).check_solution(self._results(m))
+        report = check_solution(m, self._results(m))
         assert not report.passed
         assert {r.name for r in report.failed} == {"stress", "dlambda"}
 
@@ -393,7 +500,7 @@ class TestCheckSolution:
                 )
 
         m = _WrongEp(**model.params)
-        report = JacobianChecker(m).check_solution(self._results(m)[:6])
+        report = check_solution(m, self._results(m)[:6])
         assert [r.name for r in report.failed] == ["ep"]
         assert "ep (explicit state)" in report.summary()
 
@@ -408,7 +515,7 @@ class TestCheckSolution:
         m = OWKinematic3D(**OW_PARAMS)
         load = FieldHistory.cyclic_strain([4e-3, -4e-3], n_per_segment=10, ntens=6)
         results = StrainDriver(PythonNumericalIntegrator(m)).run(load).step_results
-        report = JacobianChecker(m).check_solution(results)
+        report = check_solution(m, results)
         assert report.passed, report.summary()
         assert max(r.worst_err for r in report.rows.values()) < 1e-9
 
@@ -428,7 +535,7 @@ class TestCheckSolution:
         m = _WithIdleState(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
         load = FieldHistory.cyclic_strain([4e-3], n_per_segment=10, ntens=6)
         results = StrainDriver(PythonNumericalIntegrator(m)).run(load).step_results
-        report = JacobianChecker(m).check_solution(results)
+        report = check_solution(m, results)
         assert report.passed, report.summary()
         assert report.not_exercised == ["idle"]
         assert "idle" not in report.rows and "ep" in report.rows
@@ -442,13 +549,14 @@ class TestCheckSolution:
         load = FieldHistory(FieldType.STRAIN, "Strain", data)
         results = StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
         with pytest.raises(ValueError, match="no plastic step"):
-            JacobianChecker(model).check_solution(results)
+            check_solution(model, results)
 
-    def test_tol_follows_the_checker_and_can_be_overridden(self, model):
+    def test_tol_is_what_every_line_is_held_to(self, model):
         results = self._results(model)
-        strict = JacobianChecker(model, tol=1e-30)
-        assert not strict.check_solution(results).passed
-        assert strict.check_solution(results, tol=1e-8).passed
+        report = check_solution(model, results, tol=1e-30)
+        assert not report.passed                      # round-off exceeds 1e-30
+        assert {r.tol for r in report.rows.values()} == {1e-30}
+        assert check_solution(model, results).passed  # default 1e-8
 
     # -- what a solution is --------------------------------------------------
 
@@ -468,7 +576,7 @@ class TestCheckSolution:
         assert iterate, "the premise: max_iter=2 leaves a step unsolved"
 
         with pytest.raises(ValueError, match="did not converge: it is a Newton iterate"):
-            JacobianChecker(m).check_solution(iterate)
+            check_solution(m, iterate)
 
     def test_a_single_entry_history_buys_no_allowance(self, model):
         """A closed form that reports only the trial residual has not
@@ -487,7 +595,7 @@ class TestCheckSolution:
                 )
 
         m = _Overshoot(**model.params)
-        assert not JacobianChecker(m).check_solution(self._results(m)).passed
+        assert not check_solution(m, self._results(m)).passed
 
     def test_substepped_steps_are_left_out_and_counted(self):
         """A sub-stepped result ends a chain of smaller steps; it is not a
@@ -508,14 +616,14 @@ class TestCheckSolution:
         n_sub = sum(r.n_substeps > 1 for r in results if r.is_plastic)
         assert 0 < n_sub < len(results), "the premise: some steps divided, some not"
 
-        report = JacobianChecker(m).check_solution(results)
+        report = check_solution(m, results)
         assert report.passed, report.summary()
         assert report.n_substepped == n_sub
         assert f"left out: {n_sub} sub-stepped steps" in report.summary()
 
         only_sub = [r for r in results if r.n_substeps > 1]
         with pytest.raises(ValueError, match="every plastic step in results was sub-stepped"):
-            JacobianChecker(m).check_solution(only_sub)
+            check_solution(m, only_sub)
 
     def test_fortran_results_are_refused_for_the_right_reason(self, model):
         from manforge.simulation import (
@@ -528,7 +636,7 @@ class TestCheckSolution:
         umat = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
         results = StrainDriver(umat).run(FieldHistory(FieldType.STRAIN, "eps", data)).step_results
         with pytest.raises(ValueError, match="carries no increment"):
-            JacobianChecker(model).check_solution(results)
+            check_solution(model, results)
 
     # -- explicit states -----------------------------------------------------
 
@@ -559,7 +667,7 @@ class TestCheckSolution:
             FieldHistory(FieldType.STRAIN, "eps", data)).step_results
         assert float(results[-1].state["ep"]) < 1e-3
 
-        report = JacobianChecker(m).check_solution(results)
+        report = check_solution(m, results)
         assert report.not_exercised == []
         assert [r.name for r in report.failed] == ["ep"]
 
@@ -589,6 +697,6 @@ class TestCheckSolution:
         import dataclasses
         forced = dataclasses.replace(
             second, return_mapping=dataclasses.replace(second.return_mapping, converged=True))
-        report = JacobianChecker(m).check_solution([first, forced])
+        report = check_solution(m, [first, forced])
         assert not report.passed
         assert report.rows["ep"].worst_err == np.inf

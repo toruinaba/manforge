@@ -21,7 +21,7 @@ MaterialModel  ──defines──▶  yield_function / update_state / state_res
 | `manforge.models` | 参照モデル (J2 / 損傷 / AF / OW / YU) |
 | `manforge.simulation` | integrator、driver、載荷履歴 (`FieldHistory`)、`FortranModule` |
 | `manforge.fitting` | `fit_params`、`FitTarget`、`ParameterSpace` |
-| `manforge.verification` | 検査: `JacobianChecker`、`TangentChecker`、`check_bindings`、Crosscheck |
+| `manforge.verification` | 検査: `check_hand_blocks`、`check_solution`、`check_tangent`、`crosscheck`、`compare_jacobians`、`check_bindings` |
 | `manforge.service` | WebAPI 向けの契約層 |
 | `manforge.utils` | モデル用の補助関数 (smooth 近似、主値分解) |
 
@@ -63,7 +63,7 @@ n * 2.0                    # TypeError — 規約を名指ししない演算は�
 
 **収束判定はスケール不変** — NR の許容値は `tol × max(1, ‖σ_trial‖_∞)` (driver 外側 NR は `tol + rtol·‖σ_target‖_∞`)。MPa でも Pa でも同じ挙動になる。
 
-**`tol` は「その対象の許容値」** — integrator と driver では自分の NR の収束、checker (`TangentChecker` / `JacobianChecker` / `check_bindings`) では検査の合否、`fit_params` では最適化器の収束を指す。2 つを同じ引数リストに並べない: `crosscheck` の `stress_tol` / `state_tol` / `tangent_tol` は合否で、driver の外側 NR の設定は `driver_factory` が作る driver が持つ。
+**`tol` は「その対象の許容値」** — integrator と driver では自分の NR の収束、検査 (`check_hand_blocks` / `check_solution` / `check_tangent` / `compare_jacobians` / `check_bindings`) では合否 (誤差の測り方は全検査で同じ — [検証ワークフロー](guide/verification.md))、`fit_params` では最適化器の収束を指す。2 つを同じ引数リストに並べない: `crosscheck` の `stress_tol` / `state_tol` / `tangent_tol` は合否で、driver の外側 NR の設定は `driver_factory` が作る driver が持つ。
 
 **Δλ < 0 は非収束扱い** — 残差系は Δλ < 0 側にも根を持つが、負の塑性乗数は KKT 条件違反 (塑性ひずみの巻き戻り)。残差ノルムはこの根を区別できないため、フレームワークが符号で弾く。大きい Δε で σ_trial が許容枝の外に出ると起きる。手書きのリターンマッピング (`user_defined_return_mapping`) の結果も同じ条件で確かめる — 閉形式解はどんな入力にも何かの値を返すので、Δλ < 0 や非有限の値 (`inf` / `nan`) は `converged=True` と報告されていても非収束として扱う。
 

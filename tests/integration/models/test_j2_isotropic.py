@@ -24,7 +24,7 @@ from manforge.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
     PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import TangentChecker
+from manforge.verification import check_tangent
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +142,12 @@ def test_plastic_ep_positive(pe_model, pe_state, strain_inc_vec):
 ])
 def test_analytical_tangent_fd_check(pe_model_3d, pe_state_3d, strain_inc_vec):
     """3D analytical tangent passes finite-difference check."""
-    result = TangentChecker(PythonAnalyticalIntegrator(pe_model_3d)).check(
-        anp.zeros(6), pe_state_3d, anp.array(strain_inc_vec))
+    result = check_tangent(
+        PythonAnalyticalIntegrator(pe_model_3d),
+        anp.array(strain_inc_vec),
+        anp.zeros(6),
+        pe_state_3d,
+    )
     assert result.passed, f"FD check failed: max_rel_err = {result.max_rel_err:.3e}"
 
 

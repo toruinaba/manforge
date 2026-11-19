@@ -54,14 +54,26 @@ class ReturnMappingResult:
         converged residual (< ``tol`` for ``numerical_newton``, 0.0 for
         closed-form ``user_defined``).  Closed-form implementations should
         therefore supply ``[float(f_trial), 0.0]``.
+    converged : bool
+        Whether the solver reached its tolerance.  A closed form passes
+        ``True``; a hand-written Newton-Raphson passes whether its loop
+        ended on the tolerance or on the iteration limit.
+
+    Notes
+    -----
+    Every field is required.  A default of ``converged=True`` would let a
+    hand-written Newton-Raphson that ran out of iterations report success
+    simply by not mentioning the flag — the same reason model parameters
+    have no defaults.  The integrator additionally treats Δλ < 0 and
+    non-finite values as non-converged whatever the flag says.
     """
 
     stress: StressVec
     state: StateDict
     dlambda: Scalar
-    n_iterations: int = 0
-    residual_history: list[float] = field(default_factory=list)
-    converged: bool = True
+    n_iterations: int
+    residual_history: list[float]
+    converged: bool
 
 
 @dataclass

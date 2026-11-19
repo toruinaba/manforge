@@ -16,21 +16,21 @@ state variables and consistent tangent are compared at every step.
     py = PythonIntegrator(model)
     umat = FortranIntegrator.from_model(FortranModule("my_model"), "my_model_core", model)
 
-    result = crosscheck(py, umat, load)
-    assert result.passed, result.summary()
+    report = crosscheck(py, umat, load)
+    assert report.passed, report.summary()
 
 The driver is chosen from the load (strain history → ``StrainDriver``, stress
 history → ``StressDriver``); pass ``driver_factory`` for anything else, such
 as uniaxial stress on a 3D model::
 
-    result = crosscheck(
+    report = crosscheck(
         py, umat, axial_strain,
         driver_factory=lambda i: MixedDriver(i, prescribed_strain_idx=[0]),
     )
 
-When a run disagrees, ``result.first_failure`` is the first step that does,
+When a run disagrees, ``report.first_failure`` is the first step that does,
 with both raw results (``.result_a`` / ``.result_b``) for inspection — e.g.
-``JacobianChecker(model).compare(step.result_a, step.result_b)``.
+``compare_jacobians(model, step.result_a, step.result_b)``.
 
 Two ways of marching
 --------------------
@@ -48,7 +48,7 @@ wrong in itself, not an echo of an earlier one.
 
 To judge each step of a hand-written Python return mapping against the
 framework residual instead of against another implementation, use
-:meth:`~manforge.verification.JacobianChecker.check_solution`.
+:func:`~manforge.verification.check_solution`.
 """
 
 from __future__ import annotations
@@ -59,18 +59,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from manforge.simulation.driver import StrainDriver, StressDriver
-from manforge.simulation.types import FieldHistory, FieldType
+from manforge.simulation.driver import default_driver_for
+from manforge.simulation.types import FieldHistory
+from manforge.verification._measure import NOISE_FLOOR, max_abs, rel_err
 
 if TYPE_CHECKING:
     from manforge.core.result import StressUpdateResult
     from manforge.simulation.driver import DriverBase
     from manforge.simulation.integrator import StressIntegrator
 
-# A state variable this many orders below the largest quantity of the run is
-# round-off in double precision, whatever the units; it is compared against
-# that floor rather than against itself.
-_NOISE_FLOOR = 1e-12
 
 
 @dataclass
@@ -109,7 +106,7 @@ class CrosscheckStep:
 
 
 @dataclass
-class CrosscheckResult:
+class CrosscheckReport:
     """Result of :func:`crosscheck`.
 
     Attributes
@@ -204,20 +201,6 @@ class CrosscheckResult:
         return self.summary()
 
 
-def _default_driver_factory(load: FieldHistory) -> Callable[["StressIntegrator"], "DriverBase"]:
-    return StressDriver if load.type == FieldType.STRESS else StrainDriver
-
-
-def _rel(diff: float, scale: float) -> float:
-    # NaN first: it loses every comparison, so left as is it would drop out of
-    # the maxima the summary reports and read as "ok 0.000e+00".
-    if np.isnan(diff) or np.isnan(scale):
-        return float("inf")
-    if scale > 0.0:
-        return diff / scale
-    return 0.0 if diff == 0.0 else float("inf")
-
-
 def crosscheck(
     integrator_a: "StressIntegrator",
     integrator_b: "StressIntegrator",
@@ -230,7 +213,7 @@ def crosscheck(
     stop_on_failure: bool = False,
     lockstep: bool = False,
     **run_kwargs,
-) -> CrosscheckResult:
+) -> CrosscheckReport:
     """Drive two integrators through ``load`` and compare them step by step.
 
     Parameters
@@ -254,7 +237,7 @@ def crosscheck(
         Pass thresholds on the relative errors (defaults 1e-6, 1e-6, 1e-5).
     stop_on_failure : bool
         Stop at the first step that disagrees instead of running the whole
-        history; ``result.first_failure`` is then the last step.
+        history; ``report.first_failure`` is then the last step.
     lockstep : bool
         ``False`` (default): both integrators are driven through the history
         independently, each carrying its own state.  ``True``: only
@@ -269,8 +252,8 @@ def crosscheck(
 
     Returns
     -------
-    CrosscheckResult
-        ``result.passed``, ``result.summary()``, and the per-step records.
+    CrosscheckReport
+        ``report.passed``, ``report.summary()``, and the per-step records.
 
     Notes
     -----
@@ -287,7 +270,7 @@ def crosscheck(
     result has no ``"stress"`` entry in its state; stress is compared on its
     own).
     """
-    factory = driver_factory if driver_factory is not None else _default_driver_factory(load)
+    factory = driver_factory if driver_factory is not None else default_driver_for(load)
     driver_a = factory(integrator_a)
 
     def independent(kwargs: dict) -> dict:
@@ -346,17 +329,16 @@ def crosscheck(
             state_scale[k] = float(np.fmax(state_scale.get(k, 0.0), np.max(np.abs(va))))
             run_scale = max(run_scale, state_scale[k])
 
-        s_err = _rel(float(np.max(np.abs(stress_b - stress_a))), stress_scale)
+        s_err = rel_err(max_abs(stress_b - stress_a), stress_scale)
         st_err = {
-            k: _rel(float(np.max(np.abs(vb - va))),
-                    max(state_scale[k], _NOISE_FLOOR * run_scale))
+            k: rel_err(max_abs(vb - va), max(state_scale[k], NOISE_FLOOR * run_scale))
             for k, (va, vb) in values.items()
         }
         t_err: float | None = None
         if ra.ddsdde is not None and rb.ddsdde is not None:
             da = np.asarray(ra.ddsdde, dtype=float)
             db = np.asarray(rb.ddsdde, dtype=float)
-            t_err = _rel(float(np.max(np.abs(db - da))), float(np.max(np.abs(da))))
+            t_err = rel_err(max_abs(db - da), max_abs(da))
 
         passed = (
             a_ok and b_ok
@@ -372,9 +354,9 @@ def crosscheck(
         if stop_on_failure and not passed:
             break
 
-    return CrosscheckResult(
+    return CrosscheckReport(
         steps=steps, stress_tol=stress_tol, state_tol=state_tol, tangent_tol=tangent_tol,
     )
 
 
-__all__ = ["crosscheck", "CrosscheckResult", "CrosscheckStep"]
+__all__ = ["crosscheck", "CrosscheckReport", "CrosscheckStep"]

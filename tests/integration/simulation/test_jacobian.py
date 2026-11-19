@@ -5,11 +5,9 @@ import pytest
 
 from manforge.simulation import (
     StrainDriver, PythonNumericalIntegrator, JacobianBlocks, FieldHistory, FieldType,
+    hand_jacobian,
 )
-from manforge.simulation.jacobian import (
-    hand_jacobian, hand_jacobian_blocks, residual_jacobian,
-)
-from manforge.verification import JacobianChecker
+from manforge.simulation.jacobian import hand_jacobian_blocks, residual_jacobian
 from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 
 
@@ -35,10 +33,10 @@ def plastic_result(model):
     return result
 
 
-def test_integrator_jacobian_is_the_checker_reference(model, plastic_result):
+def test_integrator_jacobian_is_the_autodiff_residual_jacobian(model, plastic_result):
     integrator = PythonNumericalIntegrator(model)
     jac = integrator.jacobian(plastic_result)
-    ref = JacobianChecker(model).compute(plastic_result)
+    ref = residual_jacobian(model, plastic_result, plastic_result.increment)
     assert isinstance(jac, JacobianBlocks)
     np.testing.assert_array_equal(np.asarray(jac.full), np.asarray(ref.full))
     assert jac.part["alpha"]["stress"].shape == (6, 6)
@@ -73,7 +71,7 @@ def test_arguments_are_filled_by_name(model, plastic_result):
 
 def test_hand_jacobian_marks_where_each_block_came_from(model, plastic_result):
     inc = plastic_result.increment
-    hand = hand_jacobian(model, plastic_result, inc)
+    hand = hand_jacobian(model, plastic_result)
     ref = residual_jacobian(model, plastic_result, inc)
 
     declared = set(type(model)._hand_blocks)

@@ -5,7 +5,7 @@ model (README § 5.6):
 
 1. Define the model   — J2 + Voce (nonlinear isotropic) hardening, from scratch
 2. NR convergence     — residual_history shows quadratic convergence
-3. Jacobian blocks    — JacobianChecker vs hand-derived derivatives
+3. Jacobian blocks    — autodiff Jacobian vs hand-derived derivatives
 4. FD tangent check   — consistent tangent vs central finite differences
 5. Driver run         — full cyclic history
 
@@ -26,7 +26,7 @@ from manforge.core import Explicit, SCALAR, MaterialModel
 from manforge.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator, FieldHistory,
 )
-from manforge.verification import JacobianChecker, TangentChecker
+from manforge.verification import check_tangent
 
 # =========================================================================
 # 1. Define the model — J2 with Voce hardening:
@@ -58,7 +58,8 @@ print("  Step 2: NR convergence (residual_history)")
 print("=" * 60)
 
 deps = np.array([3e-3, 0.0, 0.0, 0.0, 0.0, 0.0])
-result = PythonNumericalIntegrator(model).stress_update(deps, np.zeros(6), state0)
+integrator = PythonNumericalIntegrator(model)
+result = integrator.stress_update(deps, np.zeros(6), state0)
 
 assert result.converged and result.is_plastic
 print(f"  n_iterations     : {result.n_iterations}")
@@ -73,7 +74,7 @@ print("=" * 60)
 print("  Step 3: Jacobian blocks vs hand derivation")
 print("=" * 60)
 
-jac = JacobianChecker(model).compute(result)
+jac = integrator.jacobian(result)
 
 # flow direction: d f / d sigma = (3/2) s / sigma_vm
 n_hand = 1.5 * model.dev(result.stress) / model.vonmises(result.stress)
@@ -101,9 +102,8 @@ print("=" * 60)
 print("  Step 4: consistent tangent vs finite differences")
 print("=" * 60)
 
-checker = TangentChecker(PythonIntegrator(model))
 for label, d in [("elastic", np.full(6, 1e-5)), ("plastic", deps)]:
-    r = checker.check(np.zeros(6), model.initial_state(), d)
+    r = check_tangent(PythonIntegrator(model), d, np.zeros(6), model.initial_state())
     status = "PASS" if r.passed else "FAIL"
     print(f"  [{status}] {label:8s} max rel err = {r.max_rel_err:.2e}")
 print()

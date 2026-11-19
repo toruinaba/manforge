@@ -36,8 +36,17 @@ class FitResult:
     Attributes
     ----------
     params : dict[str, float]
-        Optimised parameter values — free variables, fixed values, and
-        derived parameters alike.
+        Every name of the parameter space at the optimum — free variables,
+        fixed values and derived parameters alike.  This includes helper
+        variables that are not model parameters (a ratio the search runs
+        on, say); use ``model_params`` for the model's own.
+    model_params : dict[str, float]
+        The model parameters at the optimum: exactly the model's
+        ``param_names``.
+    model : MaterialModel
+        The fitted model — the template passed to
+        :func:`~manforge.fitting.fit_params` with ``model_params`` in place
+        (same class, dimension and non-parameter settings).
     residual : float
         Objective function value at the optimum.
     success : bool
@@ -63,6 +72,8 @@ class FitResult:
     """
 
     params: dict[str, float]
+    model_params: dict[str, float]
+    model: "MaterialModel"
     residual: float
     success: bool
     n_iter: int
@@ -148,8 +159,8 @@ def fit_params(
                 free={"sigma_y0": (200.0, (100.0, 400.0)), "H": (500.0, (0.0, 1e4))},
                 fixed={"E": 210_000.0, "nu": 0.3},
             ),
-            driver_factory=StrainDriver,
         )
+        fitted = result.model          # the template with the fitted parameters
 
     Parameters
     ----------
@@ -174,9 +185,13 @@ def fit_params(
         ratio example.
     driver_factory : callable or None
         ``driver_factory(integrator) -> DriverBase`` — constructs the driver
-        for each objective evaluation.  A driver class works as is
-        (``driver_factory=StrainDriver``); use a lambda to pass driver
-        arguments.  May be ``None`` only if every target carries its own.
+        for each objective evaluation.  ``None`` (default) lets each
+        target's load decide, as :func:`~manforge.verification.crosscheck`
+        does: :class:`~manforge.simulation.StrainDriver` for a strain
+        history, :class:`~manforge.simulation.StressDriver` for a stress
+        history.  Pass a factory for anything else — uniaxial stress on a 3D
+        model is ``lambda i: MixedDriver(i, prescribed_strain_idx=[0])``.  A
+        target's own ``driver_factory`` takes precedence over this one.
     method : str
         Optimisation algorithm:
         - ``"L-BFGS-B"``              — bounded quasi-Newton, gradient by finite differences (default)
@@ -293,8 +308,11 @@ def fit_params(
             )
         raise RuntimeError(message)
 
+    model_params = space.model_params(result.x, model.param_names)
     return FitResult(
         params=space.resolve(result.x),
+        model_params=model_params,
+        model=model.with_params(**model_params),
         residual=float(result.fun),
         success=bool(result.success),
         n_iter=int(result.nfev),
