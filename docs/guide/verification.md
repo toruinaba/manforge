@@ -49,14 +49,40 @@ r = TangentChecker(PythonIntegrator(model)).check(stress_n, state_n, strain_inc)
 print(r.passed, r.max_rel_err)
 ```
 
-4. **実装同士のクロスチェック** — 閉形式 vs NR、または Python vs Fortran を全履歴で比較:
+4. **手書きの解の検査** — 手書きのリターンマッピング (`user_defined_return_mapping`: 閉形式解や、自前の残差で回す手書き NR) が返した解を、自動微分側の残差に代入する:
 
 ```python
-from manforge.verification import CrosscheckStrainDriver, generate_strain_history
-
-cc = CrosscheckStrainDriver(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model))
-cr = cc.run(FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model)))
-print(cr.passed, cr.max_stress_rel_err)
+results = StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
+report = JacobianChecker(model).check_solution(results)
+assert report.passed, report.summary()
+# solution check: 57 plastic steps — 1 row off
+#   ok   [stress]: 3.100e-13 (tol 1e-08, worst at point 12)
+#   ok   [dlambda]: 8.000e-14 (tol 1e-08, worst at point 12)
+#   FAIL [theta]: 2.400e-02 (tol 1e-08, worst at point 31)
+#   ok   [beta]: 1.200e-13 (tol 1e-08, worst at point 30)
+#   ok   R (explicit state): 0.000e+00 (tol 1e-08, worst at point 0)
 ```
+
+   手書きの残差の行が自動微分側と食い違っていると、その行だけが 0 にならないので、**どの行が原因かが分かる**。各ステップを個別に判定するので、誤差の累積に左右されない。比べるのは根だけなので、行のスケールを変えた正しい書き換えは合格する。残差ベクトルを持たない閉形式解にも使える。explicit 状態は、報告された値を `update_state` の結果と比べる。履歴中に一度も動かなかった状態は `not exercised` として一覧に出る (その更新式は検査されていない)。
+
+   誤差は「行を構成する項の大きさ」に対する相対値で、ソルバ自身が報告した残差ノルムの 10 倍までは許容する (ソルバが止まった許容値を誤りとは判定しない)。
+
+5. **実装同士のクロスチェック** — 閉形式 vs NR、または Python vs Fortran を、同じ載荷履歴で別々に進めてステップごとに比べる:
+
+```python
+from manforge.verification import crosscheck, generate_strain_history
+
+load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
+result = crosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model), load)
+assert result.passed, result.summary()
+# crosscheck: 40 steps — all agree
+#   ok   stress: 2.100e-13 (tol 1e-06)
+#   ok   state[ep]: 1.100e-16 (tol 1e-06)
+#   ok   tangent: 3.400e-12 (tol 1e-05)
+```
+
+   driver は載荷履歴から決まる (ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`)。それ以外は `driver_factory` で渡す — 3D モデルの単軸応力なら `driver_factory=lambda i: MixedDriver(i, prescribed_strain_idx=[0])`。driver 自身の設定 (外側 NR の許容値など) も factory が持つ。食い違ったときは `result.first_failure` が最初のステップで、両方の生の結果 (`.result_a` / `.result_b`) を持つ。
+
+   2 つの経路は独立に進むので、最初の食い違いの後はすべてのステップがずれる。手書きの解のどの行が原因かを知りたいときは 4 の `check_solution` を使う。
 
 通しの実例: `examples/example_custom_model_workflow.py`

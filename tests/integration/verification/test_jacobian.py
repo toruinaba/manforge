@@ -241,3 +241,151 @@ class TestCheckHandBlocks:
         assert hand.source["stress"]["stress"] == "ad"
         assert float(hand.part["ep"]["dlambda"]) == +1.0       # the wrong hand value
         assert float(ref.part["ep"]["dlambda"]) == -1.0
+
+
+class TestCheckSolution:
+    """The solutions of a hand-written return mapping, substituted into the
+    framework residual."""
+
+    @staticmethod
+    def _results(model, n=14):
+        from manforge.simulation import (
+            FieldHistory, FieldType, PythonAnalyticalIntegrator, StrainDriver,
+        )
+
+        t = np.linspace(0.0, 1.0, n + 1)[1:]
+        data = np.zeros((n, model.ntens))
+        data[:, 0] = 5e-3 * t
+        if model.ntens > 1:
+            data[:, model.ntens - 1] = 6e-3 * np.sin(np.pi * t)
+        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        return StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
+
+    def test_closed_form_solution_satisfies_every_row(self, model):
+        report = JacobianChecker(model).check_solution(self._results(model))
+        assert report.passed, report.summary()
+        assert set(report.rows) == {"stress", "dlambda", "ep"}
+        assert report.rows["ep"].kind == "state"
+        assert max(r.worst_err for r in report.rows.values()) < 1e-12
+        assert report.n_points > 5
+
+    def test_hand_newton_solution_satisfies_every_row(self):
+        from manforge.models import YUKinematic3D
+        from tests.benchmarks.yu_kinematic.conftest import PARAMS
+
+        m = YUKinematic3D(**PARAMS)
+        report = JacobianChecker(m).check_solution(self._results(m))
+        assert report.passed, report.summary()
+        assert {"stress", "dlambda", "theta", "beta"} <= set(report.rows)
+        assert {"R", "q", "r", "eps_eq", "theta_max"} <= set(report.rows)
+
+    def test_a_wrong_hand_row_is_the_only_row_reported(self):
+        """A coefficient off by 2 % in the hand residual's θ row."""
+        import autograd.numpy as anp
+        from manforge.models import YUKinematic3D
+        from tests.benchmarks.yu_kinematic.conftest import PARAMS
+
+        class _WrongTheta(YUKinematic3D):
+            def calc_residual(self, state_new, state_n, stress_trial, dlambda):
+                r = super().calc_residual(state_new, state_n, stress_trial, dlambda)
+                d_theta = state_new["theta"] - state_n["theta"]
+                extra = anp.concatenate(
+                    [anp.zeros(7), 0.02 * d_theta, anp.zeros(6)])
+                return r + extra
+
+        m = _WrongTheta(**PARAMS)
+        report = JacobianChecker(m).check_solution(self._results(m))
+        assert not report.passed
+        assert [r.name for r in report.failed] == ["theta"]
+        assert report.rows["theta"].worst_err > 1e-4
+        assert "FAIL [theta]" in report.summary()
+        assert "1 row off" in report.summary()
+
+    def test_a_wrong_closed_form_is_caught(self, model):
+        """There is no hand residual to compare here — only the solution."""
+        from manforge.core import ReturnMappingResult
+
+        class _Overshoot(type(model)):
+            def user_defined_return_mapping(self, inc):
+                rm = super().user_defined_return_mapping(inc)
+                stress = inc.trial["stress"] + 1.001 * (rm.stress - inc.trial["stress"])
+                return ReturnMappingResult(
+                    stress=stress, state={**rm.state, "stress": stress},
+                    dlambda=rm.dlambda, n_iterations=0,
+                    residual_history=[], converged=True,
+                )
+
+        m = _Overshoot(**model.params)
+        report = JacobianChecker(m).check_solution(self._results(m))
+        assert not report.passed
+        assert {r.name for r in report.failed} == {"stress", "dlambda"}
+
+    def test_a_wrong_explicit_update_is_reported_as_a_state(self, model):
+        from manforge.core import ReturnMappingResult
+
+        class _WrongEp(type(model)):
+            def user_defined_return_mapping(self, inc):
+                rm = super().user_defined_return_mapping(inc)
+                state = {**rm.state, "ep": inc.state_n["ep"] + 1.01 * rm.dlambda}
+                return ReturnMappingResult(
+                    stress=rm.stress, state=state, dlambda=rm.dlambda,
+                    n_iterations=0, residual_history=[], converged=True,
+                )
+
+        m = _WrongEp(**model.params)
+        report = JacobianChecker(m).check_solution(self._results(m)[:6])
+        assert [r.name for r in report.failed] == ["ep"]
+        assert "ep (explicit state)" in report.summary()
+
+    def test_autodiff_solutions_pass_at_their_own_solver_tolerance(self):
+        """A solution is not faulted for the tolerance its solver stopped at."""
+        from manforge.models import OWKinematic3D
+        from manforge.simulation import (
+            FieldHistory, PythonNumericalIntegrator, StrainDriver,
+        )
+        from tests.fixtures.hand_block_models import OW_PARAMS
+
+        m = OWKinematic3D(**OW_PARAMS)
+        load = FieldHistory.cyclic_strain([4e-3, -4e-3], n_per_segment=10, ntens=6)
+        results = StrainDriver(PythonNumericalIntegrator(m)).run(load).step_results
+        report = JacobianChecker(m).check_solution(results)
+        assert report.passed, report.summary()
+        assert max(r.worst_err for r in report.rows.values()) < 1e-9
+
+    def test_a_state_that_never_moves_is_listed_not_passed(self):
+        """An explicit state that stays at zero says nothing about its update."""
+        from manforge.core import SCALAR, Explicit
+        from manforge.models import J2Isotropic
+        from manforge.simulation import FieldHistory, StrainDriver
+
+        class _WithIdleState(J2Isotropic):
+            idle = Explicit(shape=SCALAR, doc="a mechanism this history never triggers")
+
+            def update_state(self, new, dlambda, inc):
+                return [*super().update_state(new, dlambda, inc),
+                        self.idle(inc.state_n["idle"])]
+
+        m = _WithIdleState(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
+        load = FieldHistory.cyclic_strain([4e-3], n_per_segment=10, ntens=6)
+        results = StrainDriver(PythonNumericalIntegrator(m)).run(load).step_results
+        report = JacobianChecker(m).check_solution(results)
+        assert report.passed, report.summary()
+        assert report.not_exercised == ["idle"]
+        assert "idle" not in report.rows and "ep" in report.rows
+        assert "not exercised: idle" in report.summary()
+
+    def test_nothing_checked_is_an_error_not_a_pass(self, model):
+        from manforge.simulation import FieldHistory, FieldType, StrainDriver
+
+        data = np.zeros((3, 6))
+        data[:, 0] = np.linspace(1e-5, 3e-5, 3)        # elastic only
+        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        results = StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
+        with pytest.raises(ValueError, match="no plastic step"):
+            JacobianChecker(model).check_solution(results)
+
+    def test_tol_follows_the_checker_and_can_be_overridden(self, model):
+        results = self._results(model)
+        strict = JacobianChecker(model, tol=1e-30)
+        assert not strict.check_solution(results).passed
+        assert strict.check_solution(results, tol=1e-8).passed

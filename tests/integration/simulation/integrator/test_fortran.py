@@ -193,3 +193,92 @@ class TestUnderStressDriver:
         # Elastic steps solve in one iteration; the first plastic one cannot.
         assert result.failed_step is not None and result.failed_step > 0
         assert len(result.step_results) == result.failed_step
+
+
+# ---------------------------------------------------------------------------
+# The UMAT's own convergence report
+# ---------------------------------------------------------------------------
+
+class _ReportingUmat(_FakeUmat):
+    """Appends (converged, fail_code) to the return, as a ported NR driver does.
+
+    ``fail_above``: steps whose axial strain increment exceeds it are reported
+    as failed, with the stress left at a non-solution.
+    """
+
+    def __init__(self, fail_above):
+        super().__init__()
+        self.fail_above = fail_above
+
+    def call(self, name, *args):
+        stress, ep, ddsdde = super().call(name, *args)
+        failed = abs(float(args[-1][0])) > self.fail_above
+        if failed:
+            stress = stress + 1.0e3          # what a non-converged iterate looks like
+        return stress, ep, ddsdde, 0 if failed else 1, 7 if failed else 0
+
+
+def _failure(ret):
+    return None if ret[3] else f"fail_code={int(ret[4])}"
+
+
+class TestUmatFailure:
+    def test_without_the_hook_a_failed_umat_looks_converged(self, model):
+        """The reason the hook exists: the iterate is returned as a solution."""
+        integ = FortranIntegrator.from_model(_ReportingUmat(fail_above=1e-3), "j2", model)
+        deps = np.zeros(6)
+        deps[0] = 5e-3
+        r = integ.stress_update(deps, np.zeros(6), model.initial_state())
+        assert r.converged is True
+
+    def test_failure_raises_with_the_umats_description(self, model):
+        integ = FortranIntegrator.from_model(
+            _ReportingUmat(fail_above=1e-3), "j2", model, parse_umat_failure=_failure)
+        deps = np.zeros(6)
+        deps[0] = 5e-3
+        with pytest.raises(RuntimeError, match=r"'j2' reported that it did not converge: fail_code=7"):
+            integ.stress_update(deps, np.zeros(6), model.initial_state())
+
+    def test_converged_call_is_unaffected(self, model):
+        integ = FortranIntegrator.from_model(
+            _ReportingUmat(fail_above=1e-3), "j2", model, parse_umat_failure=_failure)
+        deps = np.zeros(6)
+        deps[0] = 5e-4
+        r = integ.stress_update(deps, np.zeros(6), model.initial_state())
+        assert r.converged is True
+
+    def test_failure_is_a_value_when_asked(self, model):
+        integ = FortranIntegrator.from_model(
+            _ReportingUmat(fail_above=1e-3), "j2", model,
+            parse_umat_failure=_failure, raise_on_nonconverged=False)
+        deps = np.zeros(6)
+        deps[0] = 5e-3
+        r = integ.stress_update(deps, np.zeros(6), model.initial_state())
+        assert r.converged is False
+
+    def test_driver_stops_at_the_failed_step(self, model):
+        from manforge.simulation import StrainDriver
+
+        integ = FortranIntegrator.from_model(
+            _ReportingUmat(fail_above=1e-3), "j2", model,
+            parse_umat_failure=_failure, raise_on_nonconverged=False)
+        eps = np.zeros((4, 6))
+        eps[:, 0] = [5e-4, 1e-3, 3e-3, 4e-3]      # the third increment is 2e-3
+        result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, "Strain", eps))
+        assert result.converged is False and result.failed_step == 2
+        assert len(result.step_results) == 2
+
+    def test_crosscheck_does_not_compare_a_failed_iterate_as_a_solution(self, model):
+        from manforge.verification import crosscheck
+
+        integ = FortranIntegrator.from_model(
+            _ReportingUmat(fail_above=1e-3), "j2", model,
+            parse_umat_failure=_failure, raise_on_nonconverged=False)
+        eps = np.zeros((4, 6))
+        eps[:, 0] = [5e-4, 1e-3, 3e-3, 4e-3]
+        result = crosscheck(
+            PythonIntegrator(model), integ, FieldHistory(FieldType.STRAIN, "Strain", eps))
+        assert not result.passed
+        assert result.first_failure.index == 2
+        assert result.first_failure.b_converged is False
+        assert result.n_b_nonconverged == 1

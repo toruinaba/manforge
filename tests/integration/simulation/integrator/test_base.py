@@ -7,7 +7,6 @@ Covers:
 - TestDlambdaOverride: self.dlambda(R) user-overridable Δλ residual
 - TestSolverNonconverged: raise_on_nonconverged=False behaviour
 - TestInadmissibleRoot: a tightly converged root with Δλ < 0 is rejected
-- TestCaseResultBaseConverged: CaseResult / ComparisonResult converged flags
 """
 
 import autograd.numpy as anp
@@ -15,7 +14,6 @@ import autograd
 import numpy as np
 import pytest
 
-import manforge  # noqa: F401 — enables float64
 from manforge.core import (
     MaterialModel, Implicit, Explicit, NTENS, PLANE_STRAIN, PLANE_STRESS, SOLID_3D,
 )
@@ -26,10 +24,7 @@ from manforge.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
     PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import (
-    TangentChecker, CaseResult, ComparisonResult, CrosscheckStrainDriver,
-    generate_strain_history, make_increment,
-)
+from manforge.verification import TangentChecker, make_increment
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )
@@ -860,57 +855,6 @@ class TestInadmissibleRoot:
         )
         assert r.is_plastic is False
         assert r.converged is True
-
-
-# ===========================================================================
-# TestCaseResultBaseConverged
-# — from tests/unit/test_case_result_base_converged.py
-# ===========================================================================
-
-class TestCaseResultBaseConverged:
-
-    @pytest.fixture
-    def j2_model(self):
-        return J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-
-    def test_default_converged_true(self):
-        cr = CaseResult(index=0)
-        assert cr.a_converged is True
-        assert cr.b_converged is True
-
-    def test_can_set_false(self):
-        cr = CaseResult(index=0, a_converged=False, b_converged=False)
-        assert cr.a_converged is False
-        assert cr.b_converged is False
-
-    def test_default_counters_zero(self):
-        cr = ComparisonResult(passed=True, n_cases=0, n_passed=0)
-        assert cr.n_a_nonconverged == 0
-        assert cr.n_b_nonconverged == 0
-
-    def test_stress_update_crosscheck_all_converged(self, j2_model):
-        py_a = PythonNumericalIntegrator(j2_model)
-        py_b = PythonAnalyticalIntegrator(j2_model)
-        cc = CrosscheckStrainDriver(py_a, py_b)
-        history = generate_strain_history(j2_model)
-        load = FieldHistory(FieldType.STRAIN, "eps", history)
-        result = cc.run(load)
-        assert result.n_a_nonconverged == 0
-        assert result.n_b_nonconverged == 0
-
-    def test_base_run_counts_nonconverged_via_stub(self):
-        from manforge.verification import Comparator
-
-        class _Stub(Comparator):
-            def iter_run(self):
-                yield CaseResult(index=0, passed=True, a_converged=False, b_converged=True)
-                yield CaseResult(index=1, passed=True, a_converged=True, b_converged=False)
-                yield CaseResult(index=2, passed=True, a_converged=False, b_converged=False)
-
-        result = _Stub().run()
-        assert result.n_a_nonconverged == 2
-        assert result.n_b_nonconverged == 2
-        assert result.n_cases == 3
 
 
 # ---------------------------------------------------------------------------

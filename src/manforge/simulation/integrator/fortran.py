@@ -35,6 +35,12 @@ class ParseUmatDdsddeFn(Protocol):
     def __call__(self, ret: tuple[Any, ...]) -> Stiffness: ...
 
 
+class ParseUmatFailureFn(Protocol):
+    """``parse_umat_failure(ret) -> None | str`` — ``None`` if the UMAT converged,
+    otherwise a short description of its failure (e.g. ``"fail_code=3"``)."""
+    def __call__(self, ret: tuple[Any, ...]) -> "str | None": ...
+
+
 class ParamFn(Protocol):
     """``param_fn() -> (p1, p2, ...)`` — returns material parameters in UMAT positional order."""
     def __call__(self) -> tuple[Any, ...]: ...
@@ -72,8 +78,7 @@ class FortranIntegrator:
         ``model.initial_state``) or the dict value directly.
     param_fn : callable
         ``param_fn() -> tuple`` — material parameters in UMAT positional order.
-        Note: unlike ``CrosscheckStrainDriver`` / ``CrosscheckStressDriver``,
-        this takes *no* ``model`` argument — parameters are fully captured at
+        It takes no ``model`` argument: the parameters are captured at
         construction time.
     state_names : list[str]
         Ordered list of state-variable names, used by the default hooks.
@@ -106,11 +111,20 @@ class FortranIntegrator:
         the first 2-D array found in the trailing returns.  If extraction fails
         and ``elastic_stiffness_fn`` is provided, the elastic stiffness is used
         as a fallback; otherwise the exception propagates.
+    parse_umat_failure : callable, optional
+        ``parse_umat_failure(ret) -> None | str`` reads the UMAT's own
+        convergence report from the f2py return tuple: ``None`` when it
+        converged, otherwise a short description of the failure (it goes into
+        the error message), e.g.
+        ``lambda ret: None if ret[12] else f"fail_code={int(ret[14])}"``.
+        Without it a UMAT's own failure is invisible and every call counts as
+        converged — a subroutine that returns a non-converged iterate would
+        then be compared as if it were a solution.
     raise_on_nonconverged : bool, optional
-        The UMAT call itself always reports ``converged=True`` — a UMAT's own
-        failure is not visible through this interface.  This setting (default
-        ``True``) is what drivers apply to their outer Newton-Raphson loop:
-        raise ``RuntimeError``, or yield a step with ``converged=False``.
+        What to do when the UMAT reports a failure through
+        ``parse_umat_failure`` (default ``True``): raise ``RuntimeError``, or
+        return a result with ``converged=False``.  Drivers apply the same
+        setting to their outer Newton-Raphson loop.
 
     Notes
     -----
@@ -137,6 +151,7 @@ class FortranIntegrator:
         state_to_args: StateToArgsFn | None = None,
         parse_umat_return: ParseUmatReturnFn | None = None,
         parse_umat_ddsdde: ParseUmatDdsddeFn | None = None,
+        parse_umat_failure: ParseUmatFailureFn | None = None,
         raise_on_nonconverged: bool = True,
     ) -> None:
         if elastic_stiffness_fn is not None and elastic_stiffness_subroutine is not None:
@@ -174,6 +189,7 @@ class FortranIntegrator:
             if parse_umat_ddsdde is not None
             else lambda ret: _default_parse_umat_ddsdde(ret, n_state)
         )
+        self._puf: ParseUmatFailureFn | None = parse_umat_failure
 
     @classmethod
     def from_model(
@@ -191,6 +207,7 @@ class FortranIntegrator:
         state_to_args: StateToArgsFn | None = None,
         parse_umat_return: ParseUmatReturnFn | None = None,
         parse_umat_ddsdde: ParseUmatDdsddeFn | None = None,
+        parse_umat_failure: ParseUmatFailureFn | None = None,
         raise_on_nonconverged: bool = True,
     ) -> "FortranIntegrator":
         """Build a FortranIntegrator from a MaterialModel.
@@ -271,6 +288,7 @@ class FortranIntegrator:
             state_to_args=state_to_args,
             parse_umat_return=parse_umat_return,
             parse_umat_ddsdde=parse_umat_ddsdde,
+            parse_umat_failure=parse_umat_failure,
             raise_on_nonconverged=raise_on_nonconverged,
         )
 
@@ -317,6 +335,13 @@ class FortranIntegrator:
             strain_inc,
         )
 
+        failure = self._puf(ret) if self._puf is not None else None
+        if failure is not None and self._raise_on_nonconverged:
+            raise RuntimeError(
+                f"Fortran subroutine {self._subroutine!r} reported that it did "
+                f"not converge: {failure}"
+            )
+
         f_stress, f_state = self._pur(ret)
         f_stress = np.asarray(f_stress, dtype=np.float64)
         try:
@@ -336,7 +361,7 @@ class FortranIntegrator:
             dlambda=np.array(_NAN),
             n_iterations=0,
             residual_history=[],
-            converged=True,
+            converged=failure is None,
         )
         return StressUpdateResult(
             return_mapping=rm,
@@ -347,7 +372,7 @@ class FortranIntegrator:
 
 
 # ---------------------------------------------------------------------------
-# Default hook helpers (mirrors those in crosscheck_driver.py)
+# Default hook helpers
 # ---------------------------------------------------------------------------
 
 def _default_state_to_args(state: StateDict, state_names: list[str]) -> tuple[Any, ...]:

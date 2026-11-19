@@ -6,16 +6,13 @@ Checks only.  What they check is declared elsewhere: ``hand_block`` and
 (:mod:`manforge.simulation`).
 """
 
-from manforge.verification.comparator_base import (
-    Comparator,
-    CaseResult,
-    ComparisonResult,
-)
 from manforge.verification.jacobian import (
     JacobianComparisonResult,
     JacobianChecker,
     HandBlockCheck,
     HandBlockReport,
+    SolutionRowCheck,
+    SolutionReport,
 )
 from manforge.verification.tangent import TangentChecker, TangentCheckResult
 from manforge.verification.test_cases import (
@@ -24,23 +21,20 @@ from manforge.verification.test_cases import (
     make_increment,
 )
 from manforge.verification.fortran_check import check_bindings
-from manforge.verification.crosscheck_driver import (
-    CrosscheckCaseResult,
+from manforge.verification.crosscheck import (
+    crosscheck,
     CrosscheckResult,
-    CrosscheckStrainDriver,
-    CrosscheckStressDriver,
+    CrosscheckStep,
 )
 
 __all__ = [
-    # Comparator base
-    "Comparator",
-    "CaseResult",
-    "ComparisonResult",
     # Jacobian comparison and hand-block checks
     "JacobianComparisonResult",
     "JacobianChecker",
     "HandBlockCheck",
     "HandBlockReport",
+    "SolutionRowCheck",
+    "SolutionReport",
     # Finite-difference tangent check
     "TangentChecker",
     "TangentCheckResult",
@@ -50,9 +44,8 @@ __all__ = [
     "make_increment",
     # Fortran binding check
     "check_bindings",
-    # Multi-step crosscheck harness
-    "CrosscheckCaseResult",
+    # Two integrators over one loading history
+    "crosscheck",
     "CrosscheckResult",
-    "CrosscheckStrainDriver",
-    "CrosscheckStressDriver",
+    "CrosscheckStep",
 ]

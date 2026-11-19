@@ -34,7 +34,7 @@ from manforge.simulation import (
     FortranModule, PythonNumericalIntegrator, PythonAnalyticalIntegrator,
     FortranIntegrator, FieldHistory, FieldType,
 )
-from manforge.verification import CrosscheckStrainDriver
+from manforge.verification import crosscheck
 from manforge.models import YUKinematic3D
 
 from .conftest import PARAMS
@@ -444,14 +444,10 @@ class TestCrosscheckTrajectory:
         py_int = PythonAnalyticalIntegrator(model)
         load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
 
-        cc = CrosscheckStrainDriver(py_int, fc_int, stress_tol=1e-6, tangent_tol=1e-5, state_tol=1e-6)
-        result = cc.run(load)
+        result = crosscheck(
+            py_int, fc_int, load, stress_tol=1e-6, tangent_tol=1e-5, state_tol=1e-6)
 
-        assert result.passed, (
-            f"CrosscheckStrainDriver failed: "
-            f"max_stress_rel_err={result.max_stress_rel_err:.2e}, "
-            f"n_passed={result.n_passed}/{result.n_cases}"
-        )
+        assert result.passed, result.summary()
         assert result.max_stress_rel_err < 1e-6
 
 

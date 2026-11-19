@@ -537,6 +537,29 @@ def _plastic_steps(model, peaks, n_per_segment, driven_idx=0):
             yield dict(step.state), dict(result.step_results[i - 1].state), step
 
 
+def test_hand_solution_satisfies_framework_residual():
+    """The hand NR's solutions are roots of the residual the autodiff path solves.
+
+    ``calc_residual`` is the hand copy of ``state_residual`` that the Fortran
+    port follows; substituting each solution into the framework residual
+    checks it row by row, and the hand loop's explicit-state update with it.
+    Direct and shear strain are driven together.
+    """
+    model = YUKinematicPS(**PARAMS)
+    t = np.linspace(0.0, 1.0, 41)[1:]
+    data = np.zeros((40, 3))
+    data[:, 0] = 5e-3 * t
+    data[:, 2] = 8e-3 * np.sin(np.pi * t)
+    load = FieldHistory(FieldType.STRAIN, "Strain", data)
+    results = StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
+
+    report = JacobianChecker(model).check_solution(results)
+
+    assert report.passed, report.summary()
+    assert report.not_exercised == []
+    assert {"stress", "dlambda", "theta", "beta"} <= set(report.rows)
+
+
 @pytest.mark.parametrize("peaks,driven_idx", [
     ([5e-3], 0),
     ([1e-2], 2),
