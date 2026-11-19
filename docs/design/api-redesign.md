@@ -261,7 +261,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 同じ名前が 2〜3 通りのパスから取れていた(`Implicit` は `manforge.core` と `manforge.core.state`、`FortranModule` は `manforge.simulation.integrator` と `manforge.verification`)。README、例、manforge-internal のあいだでも書き方が揃っていなかった。
 
 - **公開の import 元はパッケージ単位の 7 つとする。** `manforge.core` / `.models` / `.simulation` / `.fitting` / `.verification` / `.service` / `.utils`。
-- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は `ParamMeta` だけである(モデル上で宣言する側の `core` と、`ModelDescriptor` から読む配備側の `service`)。
+- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `manforge.service` からも取れていたが、モデル上で宣言するものなので `manforge.core` だけにした。配備側(manforge-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `manforge.core` から取る。
 - **`manforge.core` はモデル定義に要るもの全部を持つ。** `MaterialModel`、`ParamMeta`、`hand_block`、`verified_against_fortran` を `core.material` から引き上げた。
 - **`manforge.verification` は検査だけを持つ。** 検査される側の宣言は、定義されている場所に置く。`FortranModule` と `JacobianBlocks` は `manforge.simulation`、`verified_against_fortran` と `FortranBinding` は `manforge.core`。`verification` からの再エクスポートは削除した(互換シムは置かない)。
 - **`manforge.utils` は smooth 近似と主値分解の関数を公開する。** これまで `__init__` は空で、`manforge.utils.smooth` から取るしかなかった。

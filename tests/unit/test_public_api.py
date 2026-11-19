@@ -15,10 +15,6 @@ import pytest
 
 PACKAGES = ["core", "models", "simulation", "fitting", "verification", "service", "utils"]
 
-# Listed by two packages on purpose: declared on the model (core), read off a
-# ModelDescriptor by a deployment that imports nothing but the service layer.
-SHARED = {"ParamMeta": {"core", "service"}}
-
 
 def _exports(package):
     return importlib.import_module(f"manforge.{package}").__all__
@@ -38,7 +34,7 @@ def test_each_name_has_one_home():
         for name in _exports(package):
             homes.setdefault(name, set()).add(package)
     shared = {name: pkgs for name, pkgs in homes.items() if len(pkgs) > 1}
-    assert shared == SHARED
+    assert shared == {}
 
 
 @pytest.mark.parametrize("package, names", [
@@ -65,6 +61,15 @@ def test_checks_do_not_re_export_what_they_check():
     assert verification.isdisjoint(
         {"FortranModule", "JacobianBlocks", "verified_against_fortran", "FortranBinding"}
     )
+
+
+def test_service_does_not_re_export_the_model_declarations():
+    """ParamMeta is declared on the model, so it is imported from manforge.core.
+
+    A deployment reads it off ``ModelDescriptor.param_meta`` and needs the
+    class itself only for type annotations.
+    """
+    assert "ParamMeta" not in _exports("service")
 
 
 @pytest.mark.parametrize("package", PACKAGES)
