@@ -18,6 +18,9 @@ from manforge.core.material import MaterialModel
 from manforge.core.state import NTENS
 from manforge.core.dimension import SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D
 from manforge.models.j2_isotropic import J2Isotropic3D, J2IsotropicPS, J2Isotropic1D
+from manforge.models import (
+    J2IsotropicDamage3D, J2IsotropicDamageCrackClosure3D, J2IsotropicDamageUnilateral3D,
+)
 from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 
 
@@ -26,13 +29,13 @@ from tests.fixtures.stubs import _Stub3D, _StubPS, _Stub1D, _StubWithParams
 # ---------------------------------------------------------------------------
 
 def test_stub3d_accepts_solid_3d():
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     assert m.dimension is SOLID_3D
     assert m.ntens == 6
 
 
 def test_stub3d_accepts_plane_strain():
-    m = _Stub3D(PLANE_STRAIN)
+    m = _Stub3D(dimension=PLANE_STRAIN)
     assert m.dimension is PLANE_STRAIN
     assert m.ntens == 4
 
@@ -44,7 +47,7 @@ def test_stub3d_accepts_plane_strain():
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_hydrostatic_isotropic(ss):
     """Hydrostatic stress of isotropic state p*delta equals p."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     p = 150.0
     stress = anp.array([p, p, p] + [0.0] * (ss.ntens - 3))
     np.testing.assert_allclose(float(m.hydrostatic(stress)), p)
@@ -53,7 +56,7 @@ def test_hydrostatic_isotropic(ss):
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_hydrostatic_uniaxial(ss):
     """Uniaxial stress σ11=σ gives p = σ/3."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     sigma = 300.0
     stress = (lambda _a: (_a.__setitem__(0, sigma), _a)[1])(np.zeros(ss.ntens))
     np.testing.assert_allclose(float(m.hydrostatic(stress)), sigma / 3.0)
@@ -61,7 +64,7 @@ def test_hydrostatic_uniaxial(ss):
 
 def test_hydrostatic_shear_only():
     """Pure shear contributes nothing to hydrostatic pressure."""
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     stress = anp.array([0.0, 0.0, 0.0, 100.0, 50.0, 25.0])
     np.testing.assert_allclose(float(m.hydrostatic(stress)), 0.0)
 
@@ -73,7 +76,7 @@ def test_hydrostatic_shear_only():
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_dev_trace_zero(ss):
     """Trace of deviatoric stress must be zero."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
     s = m.dev(stress)
     # Trace = sum of direct components
@@ -83,14 +86,14 @@ def test_dev_trace_zero(ss):
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_dev_shape(ss):
     """_dev returns a vector of the same shape as the input."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     stress = anp.ones(ss.ntens)
     assert m.dev(stress).shape == (ss.ntens,)
 
 
 def test_dev_isotropic_stress_is_zero():
     """Deviatoric of an isotropic stress p*delta is zero."""
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     p = 200.0
     stress = anp.array([p, p, p, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(np.asarray(m.dev(stress)), 0.0, atol=1e-12)
@@ -102,7 +105,7 @@ def test_dev_isotropic_stress_is_zero():
 
 def test_vonmises_uniaxial_solid_3d():
     """Uniaxial σ11: von Mises = σ11."""
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
@@ -110,7 +113,7 @@ def test_vonmises_uniaxial_solid_3d():
 
 def test_vonmises_pure_shear_solid_3d():
     """Pure shear σ12: von Mises = √3 · σ12."""
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     tau = 100.0
     stress = anp.array([0.0, 0.0, 0.0, tau, 0.0, 0.0])
     expected = float(anp.sqrt(3.0) * tau)
@@ -119,7 +122,7 @@ def test_vonmises_pure_shear_solid_3d():
 
 def test_vonmises_plane_strain_uniaxial():
     """Uniaxial loading in PLANE_STRAIN: von Mises = σ11."""
-    m = _Stub3D(PLANE_STRAIN)
+    m = _Stub3D(dimension=PLANE_STRAIN)
     sigma = 300.0
     stress = anp.array([sigma, 0.0, 0.0, 0.0])
     np.testing.assert_allclose(float(m.vonmises(stress)), sigma, rtol=1e-6)
@@ -128,7 +131,7 @@ def test_vonmises_plane_strain_uniaxial():
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_vonmises_nonnegative(ss):
     """Von Mises stress is always non-negative."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     stress = anp.array([-200.0, 100.0, 50.0] + [-30.0] * (ss.ntens - 3))
     assert float(m.vonmises(stress)) >= 0.0
 
@@ -138,13 +141,13 @@ def test_vonmises_nonnegative(ss):
 # ---------------------------------------------------------------------------
 
 def test_isotropic_C_shape_solid_3d():
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     C = m.isotropic_C(lam=121153.8, mu=80769.2)
     assert C.shape == (6, 6)
 
 
 def test_isotropic_C_shape_plane_strain():
-    m = _Stub3D(PLANE_STRAIN)
+    m = _Stub3D(dimension=PLANE_STRAIN)
     C = m.isotropic_C(lam=121153.8, mu=80769.2)
     assert C.shape == (4, 4)
 
@@ -152,7 +155,7 @@ def test_isotropic_C_shape_plane_strain():
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_isotropic_C_symmetry(ss):
     """Stiffness tensor must be symmetric."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     C = m.isotropic_C(lam=121153.8, mu=80769.2)
     np.testing.assert_allclose(np.asarray(C), np.asarray(C.T), atol=1e-10)
 
@@ -162,7 +165,7 @@ def test_isotropic_C_solid_3d_diagonal():
     E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
-    m = _Stub3D(SOLID_3D)
+    m = _Stub3D(dimension=SOLID_3D)
     C = m.isotropic_C(lam, mu)
     np.testing.assert_allclose(float(C[0, 0]), lam + 2 * mu, rtol=1e-8)
     np.testing.assert_allclose(float(C[0, 1]), lam, rtol=1e-8)
@@ -174,8 +177,8 @@ def test_isotropic_C_plane_strain_is_submatrix():
     E, nu = 210000.0, 0.3
     lam = E * nu / ((1 + nu) * (1 - 2 * nu))
     mu = E / (2 * (1 + nu))
-    C3d = _Stub3D(SOLID_3D).isotropic_C(lam, mu)
-    Cpe = _Stub3D(PLANE_STRAIN).isotropic_C(lam, mu)
+    C3d = _Stub3D(dimension=SOLID_3D).isotropic_C(lam, mu)
+    Cpe = _Stub3D(dimension=PLANE_STRAIN).isotropic_C(lam, mu)
     np.testing.assert_allclose(np.asarray(Cpe), np.asarray(C3d[:4, :4]), atol=1e-10)
 
 
@@ -186,14 +189,14 @@ def test_isotropic_C_plane_strain_is_submatrix():
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_I_vol_plus_I_dev_equals_identity(ss):
     """P_vol + P_dev must equal the ntens×ntens identity."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     np.testing.assert_allclose(np.asarray(m.I_vol() + m.I_dev()), np.eye(ss.ntens), atol=1e-12)
 
 
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_I_vol_projects_to_hydrostatic(ss):
     """P_vol @ σ must equal p δ (volumetric part only)."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
     p = m.hydrostatic(stress)
     vol_part = m.I_vol() @ stress
@@ -204,7 +207,7 @@ def test_I_vol_projects_to_hydrostatic(ss):
 @pytest.mark.parametrize("ss", [SOLID_3D, PLANE_STRAIN])
 def test_I_dev_projects_to_deviatoric(ss):
     """P_dev @ σ must equal _dev(σ)."""
-    m = _Stub3D(ss)
+    m = _Stub3D(dimension=ss)
     stress = anp.array([100.0, -50.0, 30.0] + [20.0] * (ss.ntens - 3))
     np.testing.assert_allclose(np.asarray(m.I_dev() @ stress), np.asarray(m.dev(stress)), atol=1e-10)
 
@@ -218,7 +221,7 @@ def test_I_dev_projects_to_deviatoric(ss):
 # ---------------------------------------------------------------------------
 
 def test_stubps_accepts_plane_stress():
-    m = _StubPS(PLANE_STRESS)
+    m = _StubPS()
     assert m.dimension is PLANE_STRESS
     assert m.ntens == 3
 
@@ -303,7 +306,7 @@ def test_ps_vonmises_pure_shear():
 def test_ps_vonmises_matches_3d_reference():
     """PLANE_STRESS _vonmises must match the equivalent full 3D computation."""
     m_ps = _StubPS()
-    m_3d = _Stub3D(SOLID_3D)
+    m_3d = _Stub3D(dimension=SOLID_3D)
     # A stress that is valid in both: [σ11, σ22, σ12] plane-stress = [σ11, σ22, 0, σ12, 0, 0]
     sigma = anp.array([200.0, -100.0, 50.0])
     sigma_3d = anp.array([200.0, -100.0, 0.0, 50.0, 0.0, 0.0])
@@ -364,7 +367,7 @@ def test_ps_I_dev_projects_to_deviatoric():
 # ---------------------------------------------------------------------------
 
 def test_stub1d_accepts_uniaxial_1d():
-    m = _Stub1D(UNIAXIAL_1D)
+    m = _Stub1D()
     assert m.dimension is UNIAXIAL_1D
     assert m.ntens == 1
 
@@ -422,7 +425,7 @@ def test_1d_vonmises_equals_abs_stress():
 def test_1d_vonmises_matches_3d_reference():
     """UNIAXIAL_1D _vonmises must match the equivalent full 3D computation."""
     m_1d = _Stub1D()
-    m_3d = _Stub3D(SOLID_3D)
+    m_3d = _Stub3D(dimension=SOLID_3D)
     sigma = 350.0
     stress_1d = anp.array([sigma])
     stress_3d = anp.array([sigma, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -590,6 +593,162 @@ def test_j2_isotropic3d_params_contains_all_param_names(model):
     assert set(model.params.keys()) == set(model.param_names)
     assert model.params["E"] == 210000.0
     assert model.params["sigma_y0"] == 250.0
+
+
+# ---------------------------------------------------------------------------
+# Constructor: parameters are bound from param_names, all of them required
+# ---------------------------------------------------------------------------
+
+_DMG = dict(E=210000.0, nu=0.3, sigma_y0=250.0, H=1500.0, S=0.5, s=1.0)
+
+
+def test_constructor_binds_every_param_name():
+    m = _StubWithParams(a=1.0, b=2.0)
+    assert (m.a, m.b) == (1.0, 2.0)
+
+
+def test_missing_parameter_is_named():
+    with pytest.raises(TypeError, match=r"_StubWithParams: missing parameters \['b'\]"):
+        _StubWithParams(a=1.0)
+
+
+def test_unexpected_parameter_is_named():
+    with pytest.raises(TypeError, match=r"_StubWithParams: unexpected \['c'\]"):
+        _StubWithParams(a=1.0, b=2.0, c=3.0)
+
+
+def test_misspelt_parameter_reports_both_sides():
+    with pytest.raises(
+        TypeError, match=r"missing parameters \['b'\]; unexpected \['B'\]"
+    ):
+        _StubWithParams(a=1.0, B=2.0)
+
+
+def test_parameters_are_keyword_only():
+    with pytest.raises(TypeError):
+        _StubWithParams(1.0, 2.0)
+
+
+def test_reference_models_have_no_default_parameters():
+    """p_D and h used to default; a default is a value PROPS never sees."""
+    with pytest.raises(TypeError, match=r"missing parameters \['p_D'\]"):
+        J2IsotropicDamage3D(**_DMG)
+    with pytest.raises(TypeError, match=r"missing parameters \['h'\]"):
+        J2IsotropicDamageCrackClosure3D(**_DMG, p_D=0.0)
+
+
+def test_non_parameter_setting_goes_through_an_init_override():
+    """The unilateral model's Heaviside value is a setting, not a parameter."""
+    m = J2IsotropicDamageUnilateral3D(c=0.25, **_DMG, p_D=0.0, h=0.2)
+    assert m.c == 0.25
+    assert "c" not in m.params
+    assert J2IsotropicDamageUnilateral3D(**_DMG, p_D=0.0, h=0.2).c == 0.5
+    with pytest.raises(TypeError, match=r"missing parameters \['h'\]"):
+        J2IsotropicDamageUnilateral3D(c=0.25, **_DMG, p_D=0.0)
+
+
+@pytest.mark.parametrize("names, match", [
+    (["E", "E"], "more than once"),
+    ("E", "must be a list of str"),
+    (["E", 1], "must be a list of str"),
+    (["E", "sigma-y0"], "not valid attribute names"),
+    (["E", "ep"], "collide"),            # a state field of the model
+    (["E", "dimension"], "collide"),     # MaterialModel attributes
+    (["E", "flow"], "collide"),
+], ids=["duplicate", "bare-str", "non-str", "non-identifier",
+        "state-field", "dimension", "method"])
+def test_param_names_are_validated_at_class_creation(names, match):
+    from manforge.core.state import Explicit, SCALAR
+
+    with pytest.raises(TypeError, match=match):
+        class _Bad(MaterialModel):
+            param_names = names
+            ep = Explicit(shape=SCALAR)
+
+            def yield_function(self, state):
+                return 0.0
+
+            def update_state(self, new, dlambda, inc):
+                return []
+
+
+def test_param_names_must_be_declared():
+    with pytest.raises(TypeError, match="param_names is not declared"):
+        class _Bad(MaterialModel):
+            def yield_function(self, state):
+                return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Constructor: dimension — open unless a class body fixes it
+# ---------------------------------------------------------------------------
+
+def test_open_class_defaults_to_3d():
+    assert _Stub3D().dimension is SOLID_3D
+    assert _Stub3D._fixed_dimension is None
+
+
+def test_class_body_dimension_fixes_the_class():
+    assert _StubPS().dimension is PLANE_STRESS
+    # Its own dimension is accepted, so a model can always be rebuilt with
+    # type(m)(dimension=m.dimension, **m.params).
+    assert _StubPS(dimension=PLANE_STRESS).dimension is PLANE_STRESS
+    with pytest.raises(
+        TypeError, match="_StubPS is fixed to PLANE_STRESS; got dimension=3D_SOLID"
+    ):
+        _StubPS(dimension=SOLID_3D)
+
+
+def test_fixed_dimension_is_inherited():
+    class _Child(_StubPS):
+        pass
+
+    assert _Child().dimension is PLANE_STRESS
+    with pytest.raises(TypeError, match="_Child is fixed to PLANE_STRESS"):
+        _Child(dimension=UNIAXIAL_1D)
+
+
+def test_subclass_fixes_an_open_family():
+    class _PE(_Stub3D):
+        dimension = PLANE_STRAIN
+
+    assert _PE().ntens == 4
+    with pytest.raises(TypeError, match="_PE is fixed to PLANE_STRAIN"):
+        _PE(dimension=SOLID_3D)
+    # The parent stays open.
+    assert _Stub3D(dimension=UNIAXIAL_1D).ntens == 1
+
+
+def test_dimension_must_be_a_stress_dimension():
+    with pytest.raises(TypeError, match="dimension must be a StressDimension"):
+        _Stub3D(dimension="3d")
+    with pytest.raises(TypeError, match="dimension must be a StressDimension"):
+        class _Bad(_Stub3D):
+            dimension = "3d"
+
+
+def test_dimension_is_keyword_only():
+    with pytest.raises(TypeError):
+        _Stub3D(PLANE_STRAIN)
+
+
+def test_reference_models_fix_the_dimension_their_name_says():
+    """Family parents are open; every ``*3D`` / ``*PS`` / ``*1D`` class is fixed."""
+    import manforge.models as models
+
+    for name in models.__all__:
+        cls = getattr(models, name)
+        suffix = next((s for s in ("3D", "PS", "1D") if name.endswith(s)), None)
+        if suffix is None:
+            assert cls._fixed_dimension is None, name
+        else:
+            assert cls._fixed_dimension is not None, name
+            assert cls._fixed_dimension.ntens == {"3D": 6, "PS": 3, "1D": 1}[suffix], name
+
+
+def test_closed_form_model_rejects_a_dimension_it_does_not_hold_in():
+    with pytest.raises(TypeError, match="J2Isotropic3D is fixed to 3D_SOLID"):
+        J2Isotropic3D(dimension=PLANE_STRESS, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 
 # ---------------------------------------------------------------------------
@@ -762,8 +921,7 @@ class _GuardBase(MaterialModel):
     param_names = ["E", "nu"]
 
     def __init__(self):
-        super().__init__()
-        self.E, self.nu = 210000.0, 0.3
+        super().__init__(E=210000.0, nu=0.3)
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - 250.0

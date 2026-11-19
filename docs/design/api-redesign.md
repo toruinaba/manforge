@@ -209,7 +209,7 @@ def calc_ft_fl(self, state, dlambda, state_n): ...
 - **モジュールの移動は今回しない**(方針 5)。`manforge.verification` のパスは残し、中身の役割だけを整理する。
 
 ### 4.10 パラメータ宣言と `dimension`
-`param_names` から属性を設定する処理を基底に持たせ、次元はクラス属性で固定する。
+`param_names` から属性を設定する処理を基底に持たせ、次元はクラス属性で固定する(段 4 で実施)。
 
 ```python
 class ChabocheKinematic(MaterialModel):
@@ -218,11 +218,30 @@ class ChabocheKinematic(MaterialModel):
 
 class ChabocheKinematic3D(ChabocheKinematic):
     dimension = SOLID_3D
+
+ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...)
 ```
 
-- manforge-internal では、`self.X = X` の 144 行と、次元別クラスのコンストラクタ 23 個が不要になる。`SatoKinematic` は 53 個のパラメータを 3 回書き写している。
-- `fitting/objective.py:124` の `inspect.signature` による判定が不要になる。
-- 4.1〜4.9 と独立に進められる。
+**パラメータ**
+
+- **`param_names` が唯一の宣言である。** 基底の `__init__(*, dimension=None, **params)` が、その名前のキーワード引数を受け取り、同名の属性に入れる。モデルは `__init__` を書かない。
+- **全パラメータが必須で、既定値は持てない。** UMAT の `PROPS` に既定値は無く、`service.run_simulation` も全キーを必須にしていた。コンストラクタだけが既定値を持つと、入口ごとに規則が違ってしまう。後から足したパラメータに既定値を付けて既存の呼び出しを黙って通す、という使い方もできなくなる。`ParamMeta.default` は入力フォームの初期値で、意味が違うので残す。
+- **不足と余分は名前を挙げて `TypeError` にする。** 綴り違いは両方に出る(`missing ['b']; unexpected ['B']`)。
+- **`param_names` はクラス定義時に検査する**(str の列、重複なし、属性名として有効、状態変数や `MaterialModel` の属性と衝突しない)。
+- **パラメータ以外の属性にフックは足さない。** 定数はクラス属性、パラメータから導く値は `property` に書く。パラメータではない設定が要るモデルだけ `__init__` を override し、残りを `super().__init__(**params)` に渡す(`J2IsotropicDamageUnilateral` の `c`)。
+
+**次元**
+
+- **クラス本体に `dimension = X` と書いたクラスと、その子クラスは固定である。** 別の `dimension=` を渡すと `TypeError` になる。同じ値は通す。
+- **書いていないクラスは、構築時の `dimension=` で選ぶ**(省略時は 3D)。`J2Isotropic(dimension=PLANE_STRAIN, ...)` はそのまま使える。
+- 同じ値を通すので、モデルの再構築は `type(m)(dimension=m.dimension, **m.params)` の 1 形式になる。`fitting/objective.py` の `inspect.signature` による判定は削除した。
+
+**実施結果**
+
+- manforge: モデルの `__init__` 28 個を削除した(残るのは `J2IsotropicDamageUnilateral` の 1 個)。既定値 `p_D=0.0`、`h=0.2` を削除した。
+- manforge-internal: `__init__` 32 個、約 500 行を削除した。`ContinuousYUKinematic` の既定値(`H`、`k_0`、`k_mc`、`eps_f`、`damage_law`)を削除した。
+- 数値は変わらない。公開 66 ケース、manforge-internal 57 ケースとも、段 3 の結果とビット単位で一致した。
+- **`param_names` の誤りが 1 件見つかった。** `ChabocheKinematicMulti` と `TeranishiKinematic` で、カンマが抜けて `"gamma3" "Qinf1"` が 1 つの名前になり、`C3` も抜けていた。コンストラクタが別に引数を持っていたので構築はでき、`model.params` を読むまで分からなかった。宣言が 1 箇所になったので、今後は構築時に分かる。
 
 ### 4.11 入口と命名の整理
 - **`fit_params`**: `fit_params(model, targets, space, *, driver_factory=...)` の 1 形式にする。dict の省略形は明示的なコンストラクタに移す。
@@ -240,7 +259,7 @@ class ChabocheKinematic3D(ChabocheKinematic):
 | 1 | 残骸の削除(#103)、非収束スイッチの一本化、`DriverResult.converged`、`StressIntegrator` の Protocol 化 | なし(未使用)。internal のテストは変更前後で同じ結果 |
 | 2 | `Increment`、フック署名、`elastic_tangent`、`isotropic_stiffness`、結果が `increment` を持つ | フック 29 定義の書き換え、剛性の override 4 つを削除 |
 | 3 | 手導出ブロックの宣言、`integrator.jacobian`、照合の補助 | Continuous YU の 3 次元と `YUKinematicPS` に宣言を付け、テストの対応表を削除 |
-| 4 | パラメータ宣言と `dimension` | 次元別コンストラクタ 23 個の削除 |
+| 4 | パラメータ宣言と `dimension` | コンストラクタ 32 個の削除、既定値に頼っていた呼び出しの明示、`param_names` の誤り 1 件の修正 |
 | 5 | 入口と命名の整理 | なし(fitting 未使用) |
 | 6 | ドキュメント基盤、公開範囲の絞り込み | import の書き換え |
 
@@ -253,9 +272,9 @@ class ChabocheKinematic3D(ChabocheKinematic):
 
 1. ~~文脈オブジェクトの名前~~ → `Increment`、引数名 `inc` に決定(4.1)。
 2. ~~無損傷剛性の取り方~~ → `isotropic_stiffness()` に決定(4.4)。
-3. **パラメータの既定値。** `ContinuousYUKinematic` は `H=0.0` などの既定値を持つ。`ParamMeta.default` は入力フォーム用の値で意味が違う。宣言方法を決める必要がある。
-4. **派生属性の初期化。** YU の PS 版が持つ `P` / `T` のように、パラメータから導く属性をどこで作るか。
-5. **次元を固定するクラスの判定。** `J2Isotropic3D` の閉形式解は 3D と平面ひずみでしか成り立たない。別の次元を渡したときに拒否する規則が要る。
+3. ~~パラメータの既定値~~ → 持たない。全パラメータ必須に決定(4.10)。
+4. ~~派生属性の初期化~~ → フックは足さない。定数はクラス属性、導出値は `property`、パラメータではない設定だけ `__init__` を override する(4.10)。調べた時点で、`__init__` でパラメータから計算している属性は無かった(YU の `P` / `T` は `dimension` から取る形になっていた)。
+5. ~~次元を固定するクラスの判定~~ → クラス本体に `dimension` を書いたクラスとその子は固定、に決定(4.10)。
 6. **手導出の残差も宣言するか。** 現在の `calc_residual` は explicit 状態を凍結した形で、フレームワークの残差と構造が違う。
 7. **Crosscheck ドライバの扱い。** manforge-internal では使われていない。段 3 の試験移行の結果を見て、残すか形を変えるかを決める。
 8. **ドキュメントのツールと言語。** Sphinx + MyST を候補としているが未決定である。

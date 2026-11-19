@@ -155,6 +155,10 @@ from manforge.core.dimension import PLANE_STRAIN
 model_pe = J2Isotropic(dimension=PLANE_STRAIN, E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 ```
 
+`*3D` / `*PS` / `*1D` は次元を固定したクラスで、別の `dimension=` を渡すと `TypeError` になる (`J2Isotropic3D` の閉形式解のように、その次元でしか成り立たない代数を持つため)。
+
+**パラメータはすべて必須で、既定値は無い。** コンストラクタの引数は `param_names` そのもので、キーワードで渡す。不足や綴り違いは名前を挙げて `TypeError` になる。UMAT の `PROPS` に既定値が無いのと同じ規則で、`p_D=0.0` のような「機能を切る値」も明示する。
+
 #### 損傷モデル (有効断面低下)
 
 3 段階の J2 + Lemaitre 延性損傷。いずれも**弱連成** — 塑性は有効応力空間に閉じて D を見ないので、有効応力 σ̃ と ep は損傷なし J2 と一致し、D は公称応力 σ との写像と剛性にだけ効く。D は塑性増分でのみ進む (ΔD = (Y/S)^s·Δp、p > p_D)。
@@ -311,21 +315,36 @@ UMAT の構造と同じ並びになっている — 冒頭で試行状態を計�
 ```python
 from manforge.core import Explicit, SCALAR
 from manforge.core.material import MaterialModel
-from manforge.core.dimension import SOLID_3D, StressDimension
 
 class MyModel(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "H"]
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0, H):
-        super().__init__(dimension=dimension)
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
 
     def yield_function(self, state):
         return self.vonmises(state["stress"]) - (self.sigma_y0 + self.H * state["ep"])
 
     def update_state(self, new, dlambda, inc):
         return [self.ep(inc.state_n["ep"] + dlambda)]
+
+model = MyModel(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)   # 3D
+```
+
+**`__init__` は書かない。** `param_names` がパラメータの宣言で、基底クラスがその名前のキーワード引数を受け取り、同名の属性 (`self.E` など) に入れる。並び順は UMAT の `PROPS` の順。全パラメータが必須で、既定値は持てない。
+
+- 定数はクラス属性 (`ae = 0.5`)、パラメータから導く値は `@property` に書く。
+- パラメータではない設定 (数値的な正則化の係数など) が要るときだけ `__init__` を override し、残りを `super().__init__(**params)` に渡す — 例: `J2IsotropicDamageUnilateral` の `c`。
+
+**次元は 2 通りで決まる。** クラス本体に `dimension` を書かなければ、構築時の `dimension=` で選ぶ (省略時は 3D)。クラス本体に書くと、そのクラスと子クラスはその次元に固定され、別の次元を渡すと `TypeError` になる。閉形式のリターンマッピングや手導出ブロックのように、代数が特定の次元でしか成り立たないクラスは固定する:
+
+```python
+from manforge.core.dimension import PLANE_STRAIN, PLANE_STRESS
+
+class MyModelPS(MyModel):
+    dimension = PLANE_STRESS          # 固定
+
+MyModel(dimension=PLANE_STRAIN, E=...)       # 可変: 任意の次元
+MyModelPS(E=...)                             # 固定
+MyModelPS(dimension=PLANE_STRAIN, E=...)     # TypeError
 ```
 
 `elastic_stiffness(state)` の既定は `self.E`/`self.nu` から作る等方剛性 `isotropic_stiffness()`。剛性が状態で変わるモデルだけ override し、等方剛性を掛けて書く:
@@ -335,7 +354,7 @@ def elastic_stiffness(self, state):                    # 損傷
     return (1.0 - state["D"]) * self.isotropic_stiffness()
 ```
 
-物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスはデフォルト `dimension` の指定のみを担う — 参照実装: `src/manforge/models/j2_isotropic.py`。
+物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスは `dimension` の固定のみを担う — 参照実装: `src/manforge/models/j2_isotropic.py`。
 
 ### 5.2 Implicit 型 (Ohno-Wang 型) — 後方 Euler 残差
 

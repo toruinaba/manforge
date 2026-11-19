@@ -131,12 +131,6 @@ class _CustomStressResidual(MaterialModel):
     stress = Implicit(shape=NTENS, doc="Cauchy stress (explicit NR unknown)")
     ep = Implicit(shape=())
 
-    def __init__(self, *, E, nu, sigma_y0, H):
-        super().__init__(dimension=SOLID_3D)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.H = H
 
     def yield_function(self, state):
         sigma_y = self.sigma_y0 + self.H * state["ep"]

@@ -25,7 +25,6 @@ import numpy.testing as npt
 import manforge  # noqa: F401 — enables float64
 from manforge.core import Explicit, SCALAR
 from manforge.core.material import MaterialModel
-from manforge.core.dimension import SOLID_3D, StressDimension
 from manforge.simulation.driver import StrainDriver
 from manforge.simulation.integrator import PythonIntegrator, PythonNumericalIntegrator
 from manforge.simulation.types import FieldHistory
@@ -41,10 +40,6 @@ from manforge.verification import JacobianChecker, TangentChecker
 class J2Voce(MaterialModel):
     param_names = ["E", "nu", "sigma_y0", "Q", "b"]
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *, E, nu, sigma_y0, Q, b):
-        super().__init__(dimension=dimension)
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.Q = Q; self.b = b
 
     def yield_function(self, state):
         sigma_y = self.sigma_y0 + self.Q * (1.0 - anp.exp(-self.b * state["ep"]))

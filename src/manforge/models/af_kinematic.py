@@ -53,15 +53,15 @@ Notes
 
 from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import Explicit, NTENS, SCALAR
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 
 
 class AFKinematic(MaterialModel):
     """J2 + Armstrong-Frederick kinematic hardening — common physics across stress states.
 
-    Subclass and pass ``dimension=`` to select the stress state, or use one of the
+    Pass ``dimension=`` to select the stress state, or use one of the
     pre-built concrete classes (:class:`AFKinematic3D`, :class:`AFKinematicPS`,
-    :class:`AFKinematic1D`) which set appropriate defaults.
+    :class:`AFKinematic1D`), which fix it.
 
     Parameters
     ----------
@@ -85,15 +85,6 @@ class AFKinematic(MaterialModel):
     }
     alpha = Explicit(shape=NTENS, doc="backstress tensor (deviatoric)")
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.C_k = C_k
-        self.gamma = gamma
 
     def yield_function(self, state):
         s_xi = self.dev(state["stress"]) - state["alpha"]
@@ -121,9 +112,6 @@ class AFKinematic3D(AFKinematic):
 
     dimension = SOLID_3D
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
-
 
 class AFKinematicPS(AFKinematic):
     """J2 + Armstrong-Frederick kinematic hardening for plane-stress elements.
@@ -137,9 +125,6 @@ class AFKinematicPS(AFKinematic):
     """
 
     dimension = PLANE_STRESS
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)
 
 
 class AFKinematic1D(AFKinematic):
@@ -157,6 +142,3 @@ class AFKinematic1D(AFKinematic):
     """
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, C_k: float, gamma: float):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, C_k=C_k, gamma=gamma)

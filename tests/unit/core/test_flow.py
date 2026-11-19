@@ -173,14 +173,8 @@ def test_unwrapped_flow_return_raises():
     """Returning a bare ndarray from flow() must fail at the framework boundary."""
 
     class _BadFlowModel(MaterialModel):
-        param_names = ["sigma_y0"]
+        param_names = ["E", "nu", "sigma_y0"]
         ep = Explicit(shape=SCALAR, doc="eq plastic strain")
-
-        def __init__(self, *, sigma_y0):
-            super().__init__(dimension=SOLID_3D)
-            self.E = 210000.0
-            self.nu = 0.3
-            self.sigma_y0 = sigma_y0
 
         def yield_function(self, state):
             return self.vonmises(state["stress"]) - self.sigma_y0
@@ -192,7 +186,7 @@ def test_unwrapped_flow_return_raises():
             s = self.dev(state["stress"])
             return 1.5 * s / self.vonmises(state["stress"])  # missing the wrapper
 
-    m = _BadFlowModel(sigma_y0=250.0)
+    m = _BadFlowModel(E=210000.0, nu=0.3, sigma_y0=250.0)
     state = m.make_state(stress=SIG_3D, ep=0.0)
 
     # The check lives on the override itself, so it fires wherever flow is

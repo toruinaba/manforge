@@ -77,7 +77,7 @@ from manforge.core.material import MaterialModel, ParamMeta
 from manforge.core.state import (
     Explicit, Implicit, Increment, NTENS, SCALAR, State, StateResidual, StateUpdate,
 )
-from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D, StressDimension
+from manforge.core.dimension import SOLID_3D, PLANE_STRESS, UNIAXIAL_1D
 from manforge.utils.smooth import smooth_macaulay
 from manforge.utils.spectral import negative_part_sq, positive_part_sq
 from manforge._typing import Scalar as ScalarType, Stiffness, StressVec, StateDict
@@ -124,18 +124,6 @@ class J2IsotropicDamage(MaterialModel):
     stress = Implicit(shape=NTENS, doc="nominal Cauchy stress σ = (1 − D) σ̃")
     ep = Explicit(shape=SCALAR, doc="equivalent plastic strain")
     D = Implicit(shape=SCALAR, doc="scalar damage (0 = intact)")
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0):
-        super().__init__(dimension=dimension)
-        self.E = E
-        self.nu = nu
-        self.sigma_y0 = sigma_y0
-        self.H = H
-        self.S = S
-        self.s = s
-        self.p_D = p_D
 
     # ------------------------------------------------------------------
     # Effective-space helpers
@@ -210,32 +198,17 @@ class J2IsotropicDamage3D(J2IsotropicDamage):
 
     dimension = SOLID_3D
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D)
-
 
 class J2IsotropicDamagePS(J2IsotropicDamage):
     """Plane-stress variant of :class:`J2IsotropicDamage`."""
 
     dimension = PLANE_STRESS
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0):
-        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D)
-
 
 class J2IsotropicDamage1D(J2IsotropicDamage):
     """Uniaxial (1D) variant of :class:`J2IsotropicDamage`."""
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D)
 
 
 # ===========================================================================
@@ -272,7 +245,7 @@ class J2IsotropicDamageCrackClosure(J2IsotropicDamage):
     Parameters
     ----------
     h : float
-        Crack-closure parameter (default 0.2, a typical metal value).
+        Crack-closure parameter (0.2 is a typical metal value).
     Other parameters as in :class:`J2IsotropicDamage`.
     """
 
@@ -282,13 +255,6 @@ class J2IsotropicDamageCrackClosure(J2IsotropicDamage):
         "h": ParamMeta(doc="Crack-closure parameter (compression/tension damage ratio)",
                        default=0.2, bounds=(0.0, 1.0)),
     }
-
-    def __init__(self, dimension: StressDimension = SOLID_3D, *,
-                 E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
-        super().__init__(dimension=dimension, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D)
-        self.h = h
 
     def energy_release_rate(self, stress_eff: StressVec) -> ScalarType:
         """Crack-closure Y from the principal split of σ̃."""
@@ -307,29 +273,14 @@ class J2IsotropicDamageCrackClosure3D(J2IsotropicDamageCrackClosure):
 
     dimension = SOLID_3D
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
-        super().__init__(dimension=SOLID_3D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D, h=h)
-
 
 class J2IsotropicDamageCrackClosurePS(J2IsotropicDamageCrackClosure):
     """Plane-stress variant of :class:`J2IsotropicDamageCrackClosure`."""
 
     dimension = PLANE_STRESS
 
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
-        super().__init__(dimension=PLANE_STRESS, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D, h=h)
-
 
 class J2IsotropicDamageCrackClosure1D(J2IsotropicDamageCrackClosure):
     """Uniaxial (1D) variant of :class:`J2IsotropicDamageCrackClosure`."""
 
     dimension = UNIAXIAL_1D
-
-    def __init__(self, *, E: float, nu: float, sigma_y0: float, H: float,
-                 S: float, s: float, p_D: float = 0.0, h: float = 0.2):
-        super().__init__(dimension=UNIAXIAL_1D, E=E, nu=nu, sigma_y0=sigma_y0, H=H,
-                         S=S, s=s, p_D=p_D, h=h)

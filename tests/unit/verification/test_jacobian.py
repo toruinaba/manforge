@@ -164,9 +164,6 @@ class _ResidualNameModel(MaterialModel):
     alpha  = Implicit(shape=NTENS, doc="backstress", residual_name="R_alpha")
     ep     = Implicit(shape=SCALAR, doc="eqv. plastic strain", residual_name="R_ep")
 
-    def __init__(self, E, nu, sigma_y0, H):
-        self.E = E; self.nu = nu; self.sigma_y0 = sigma_y0; self.H = H
-
     def yield_function(self, state):
         return self.vonmises(state["stress"] - state["alpha"]) - (self.sigma_y0 + self.H * state["ep"])
 
