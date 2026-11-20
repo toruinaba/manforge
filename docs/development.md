@@ -16,7 +16,16 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 ### モデルのテスト
 
-ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
+ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、検証の宣言 (`verification.py`)、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
+
+| 名前 | 役割 |
+|---|---|
+| `verification.py` | 検証の宣言。`MODELS` (検査にかけるモデル) と、必要なら `histories(model)` (標準の履歴に足す載荷履歴) |
+| `tests/test_verification.py` | 共通の検査 `check_model` を `MODELS` に回す。どのファミリも同じ数行で、**この名前は共通の検査専用** |
+| `tests/test_model.py` | モデルの関数ごとの確認 (integrator を使わない) |
+| `tests/test_<確かめること>.py` | そのモデルに固有の確認 |
+
+「このモデルは検証されているか」は `test_verification.py` を見れば分かる。何が検査されるかは、モデルが宣言しているものから決まる ([検証ワークフロー](guide/verification.md) の `check_model`)。共通の検査は 1 モデルあたり 0.1〜4 秒で、`make test` に入る (YU の 3D と平面応力は 5〜10 秒かかるので `slow`)。
 
 2 つの独立した実装を比べるテスト (手書きの経路と自動微分、Python と UMAT) は、次の名前と基準値に揃える。外れるものは、そのモジュールの docstring に理由を書く。
 

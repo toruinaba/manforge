@@ -29,6 +29,30 @@ src/returnmap/models/yu_kinematic/
   (`"tests/test_numerical_vs_fortran.py::..."`)。ファミリのディレクトリを動かしても切れない。リポジトリ直下からの
   パスも従来どおり使える。
 
+**共通の検査 `check_model` を足した。** モデルが宣言しているものに応じて、当てはまる検査を全部走らせ、何を検査したかを
+報告する。Python のモデルだけ(自動微分で解くだけ)なら「収束」と「接線」で合格し、`@hand_block` や手書きの
+リターンマッピングを足すと、その検査が加わる。
+
+```python
+report = check_model(YUKinematic1D.at_defaults())
+assert report.passed, report.summary()
+```
+
+- **`MaterialModel.at_defaults()`** — `param_meta` の目安の値でモデルを作る(`Model.at_defaults(gamma=50.0)` のように
+  一部を置き換えられる)。コンストラクタが全パラメータを要求するのは変わらない。
+- **検証の宣言 `verification.py`** — 各ファミリのディレクトリに置く。`MODELS`(検査にかけるモデル)と、必要なら
+  `histories(model)`(標準の載荷履歴に足すもの)。`check_model` が名前で見つける。
+- **`tests/test_verification.py`** — 各ファミリで `check_model` を回す。全参照モデル 21 個が対象。
+- **`standard_histories(model)`** — 検査に使う標準の載荷履歴(単軸と、直応力・せん断を同時に動かす多軸)。
+- `estimate_yield_strain` は、降伏関数が応力以外の状態を見るモデル(準片側損傷)でも降伏ひずみを返す。これまでは
+  単位を持つ値(剛性の逆数)に落ちていて、`generate_strain_history` の履歴が降伏に届かなかった。
+
+**この検査で分かったこと — YU の 3D と平面応力。** 手導出のヤコビアンと手書きの接線が、停留曲面のゲート
+(`smooth_heaviside(g_stag)`)を定数として扱っている。ゲートが 0 か 1 のステップでは厳密だが、収束点の `g_stag` が
+平滑化の幅に入ったステップ(ゲートが中間の値)では、接線が最大 4 % ずれ、平面応力の `[theta][beta]` ブロックが
+自動微分と合わない。応力と状態はそのステップでも自動微分と 1e-11 で一致する。この 2 つのモデルの
+`test_verification.py` は、理由を書いた `xfail(strict)` にしてある。
+
 ## 0.2.1(2026-11-20)
 
 既存のモデルを使う人のための入口を整えた。0.2.0 からの非互換は無い。

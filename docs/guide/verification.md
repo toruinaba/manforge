@@ -8,6 +8,7 @@ assert report.passed, report.summary()
 
 | 関数 | 比べるもの |
 |---|---|
+| `check_model(model)` | 下の検査のうち、そのモデルに当てはまるもの全部 |
 | `check_hand_blocks(model, results)` | 手導出したヤコビアンのブロック ↔ 自動微分 |
 | `check_solution(model, results)` | 手書きのリターンマッピングの解 ↔ 自動微分側の残差 |
 | `check_tangent(integrator, strain_inc, stress_n, state_n)` | consistent tangent ↔ 中心差分 |
@@ -16,6 +17,57 @@ assert report.passed, report.summary()
 | `check_bindings(model, fortran, cases)` | Fortran に対応づけたメソッド ↔ そのサブルーチン |
 
 **誤差の測り方は全検査で同じ** — 配列 (ブロック、接線、応力ベクトル) 全体の最大差を、参照側の最大値で割る: `max|候補 − 参照| / max|参照|`。合格は `誤差 <= tol`。成分ごとに割らないので、厳密には 0 の成分に乗った丸め誤差を 100 % の誤差とは数えない。分母に単位を持つ定数を置かないので、モデルを MPa で書いても Pa で書いても同じ許容値が同じ意味を持つ。 `check_solution` の残差の行だけは、比べる相手の配列が無いので、行を構成する項の大きさに対して測る (手順 4)。
+
+## まとめて検査する — `check_model`
+
+`check_model` は、モデルが持っているものに応じて当てはまる検査を全部走らせ、何を検査したかを報告する。
+
+```python
+from returnmap.verification import check_model
+
+report = check_model(YUKinematic1D.at_defaults())     # at_defaults: param_meta の目安の値で作る
+assert report.passed, report.summary()
+print(report.summary())
+# YUKinematic1D: every check that applies passes
+#   ok   converges                 71 steps over 2 histories, 57 plastic
+#   ok   tangent                   4.0e-09 (tol 1e-05) at 8 plastic steps
+#   —    hand blocks               no @hand_block on the model
+#   —    hand-written solution     no user_defined_return_mapping on the model
+#   —    hand-written vs autodiff  no user_defined_return_mapping on the model
+#   —    hand-written tangent      no user_defined_return_mapping on the model
+#   histories: uniaxial (24 plastic steps), reversed 2 % (33 plastic steps)
+```
+
+| 行 | 検査するもの | 対象になる条件 |
+|---|---|---|
+| `converges` | 自動微分の経路が、どの載荷履歴でも最後まで収束する (Δλ ≥ 0、有限の値、塑性ステップがある) | 常に |
+| `tangent` | その接線 ↔ 中心差分 (`check_tangent`、履歴ごとに数ステップ) | 常に |
+| `hand blocks` | 手導出ブロック ↔ 自動微分 (`check_hand_blocks`) | `@hand_block` がある |
+| `hand-written solution` | 手書きの解 ↔ 自動微分側の残差 (`check_solution`) | `user_defined_return_mapping` がある |
+| `hand-written vs autodiff` | 手書きの経路 ↔ 自動微分の経路。応力・状態・接線を全ステップで (`crosscheck`) | 同上 |
+| `hand-written tangent` | 手書きの接線 ↔ 中心差分 | `user_defined_tangent` がある |
+
+- **Python のモデルだけで止まってよい。** 自動微分で解くだけのモデルは上の 2 行で検査され、それで合格する。`—` の行は「宣言していない」で、不合格ではない。手導出や手書きの解法を足すと、その行が検査されるようになる。
+- **失敗した行の内訳** は `report["hand blocks"].reports` などから取れる (元の検査の報告が入っている)。
+- **この検査で分からないこと**: 定式化そのものが意図どおりか。どの行も「同じモデルの 2 つの導出」を比べているので、両方が共有する仮定 (単位、符号の規約、定式化) は素通りする。UMAT との突き合わせ (`crosscheck`、`check_bindings`) は、モジュールのビルドが要るので別に行う。
+
+**載荷履歴** — 何も渡さなければ、モデルの降伏ひずみに合わせた標準の履歴 2 本を使う: 単軸の引張 → 除荷 → 圧縮と、直応力成分とせん断成分を同時に動かして途中で向きを変える多軸の履歴 (転置した外積やせん断の ×2 の誤りは、単軸では見えない)。
+
+そのモデルの機構が標準の履歴では働かないときは、ファミリの `verification.py` に `histories(model)` を書いて履歴を足す。`check_model` は、モデルのモジュールの隣にあるその名前のモジュールを自分で見つける (登録は要らない):
+
+```python
+# src/returnmap/models/yu_kinematic/verification.py
+MODELS = [YUKinematic3D.at_defaults(), YUKinematicPS.at_defaults(), YUKinematic1D.at_defaults()]
+
+def histories(model):
+    """2 % の反転繰返し — C_1 → C_2 の切り替えと停留曲面は、降伏ひずみの 5 倍では働かない。"""
+    return {"reversed 2 %": FieldHistory.cyclic_strain(
+        [0.02, -0.02, 0.02], n_per_segment=12, ntens=model.ntens)}
+```
+
+`MODELS` は、そのファミリのテスト (`tests/test_verification.py`) が `check_model` にかけるモデルの一覧。`check_model(model, histories)` と履歴を渡したときは、渡したものだけを使う。
+
+## 検査を 1 つずつ使う
 
 新しいモデルを実装するときの推奨手順:
 

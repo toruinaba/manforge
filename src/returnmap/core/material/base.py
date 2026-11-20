@@ -338,6 +338,47 @@ class MaterialModel(ABC):
         """Material parameters as a dict keyed by ``param_names``."""
         return {name: getattr(self, name) for name in self.param_names}
 
+    @classmethod
+    def at_defaults(cls, *, dimension: StressDimension | None = None, **params) -> Self:
+        """A model at the ``default`` of each ``param_meta`` entry.
+
+        The defaults are the typical values a model documents for its
+        parameters — a set known to run — so this is the model to reach for
+        when the particular values do not matter: a template for a registry or
+        a fit, a subject for a check.  Parameters given by keyword replace
+        their defaults; ``dimension`` is passed on as in the constructor::
+
+            model = AFKinematic1D.at_defaults()
+            model = AFKinematic.at_defaults(dimension=PLANE_STRAIN, gamma=50.0)
+
+        Nothing is defaulted silently: the constructor still requires every
+        parameter, and this is a separate, named way of asking for the
+        documented ones.
+
+        Raises
+        ------
+        TypeError
+            A parameter has no ``param_meta`` entry or no ``default`` in it,
+            and no value was given for it.
+        """
+        values = {
+            name: cls.param_meta[name].default
+            for name in cls.param_names
+            if name in cls.param_meta and name not in params
+        }
+        values.update(params)
+        missing = [n for n in cls.param_names if values.get(n) is None]
+        if missing:
+            raise TypeError(
+                f"{cls.__name__}.at_defaults: no default declared for {missing} "
+                "(param_meta[name].default); pass them by keyword"
+            )
+        # The keys are parameter names, none of which is the constructor's
+        # other keyword (_check_param_names refuses a parameter called dimension).
+        if dimension is not None:
+            return cls(dimension=dimension, **values)  # pyright: ignore[reportArgumentType]
+        return cls(**values)  # pyright: ignore[reportArgumentType]
+
     def with_params(self, **params) -> Self:
         """This model with some parameter values replaced.
 
