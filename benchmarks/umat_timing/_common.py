@@ -39,7 +39,7 @@ def plastic_point(model_cls, ntens):
 
     state_n = None
     for step in driver.iter_run(data):
-        if step.i == STEP:
+        if step.index == STEP:
             assert step.result.is_plastic, "bench point fell on the elastic branch"
             return model, state_n, data[STEP] - data[STEP - 1], step.result
         state_n = step.result.state

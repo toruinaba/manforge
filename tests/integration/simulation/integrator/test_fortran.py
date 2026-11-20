@@ -59,7 +59,7 @@ def _without_hook(fake, model, **kwargs):
 def _stress_load(model, peak):
     sigma = np.zeros((6, model.ntens))
     sigma[:, 0] = np.linspace(50.0, peak, 6)
-    return FieldHistory(FieldType.STRESS, "Stress", sigma)
+    return FieldHistory(FieldType.STRESS, sigma)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ def test_stress_history_of_a_fortran_run(model):
     eps = np.zeros((4, 6))
     eps[:, 0] = np.linspace(5e-4, 3e-3, 4)
     integ = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
-    result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, "Strain", eps))
+    result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, eps))
     np.testing.assert_array_equal(result.history("stress"), result.stress)
     assert result.history("ep").shape == (4,)
 
@@ -277,7 +277,7 @@ class TestUmatFailure:
             parse_umat_failure=_failure, raise_on_nonconverged=False)
         eps = np.zeros((4, 6))
         eps[:, 0] = [5e-4, 1e-3, 3e-3, 4e-3]      # the third increment is 2e-3
-        result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, "Strain", eps))
+        result = StrainDriver(integ).run(FieldHistory(FieldType.STRAIN, eps))
         assert result.converged is False and result.failed_step == 2
         assert len(result.step_results) == 2
 
@@ -290,7 +290,7 @@ class TestUmatFailure:
         eps = np.zeros((4, 6))
         eps[:, 0] = [5e-4, 1e-3, 3e-3, 4e-3]
         result = crosscheck(
-            PythonIntegrator(model), integ, FieldHistory(FieldType.STRAIN, "Strain", eps))
+            PythonIntegrator(model), integ, FieldHistory(FieldType.STRAIN, eps))
         assert not result.passed
         assert result.first_failure.index == 2
         assert result.first_failure.b_converged is False

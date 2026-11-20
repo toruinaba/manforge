@@ -46,7 +46,7 @@ def _macaulay(x):
 @pytest.mark.parametrize("dmg_cls,ref_cls,direction", CASES)
 def test_matches_undamaged_history_times_one_minus_d(dmg_cls, ref_cls, direction):
     dmg, ref = dmg_cls(**P, **DP), ref_cls(**P)
-    load = FieldHistory(FieldType.STRAIN, "Strain", _path(direction))
+    load = FieldHistory(FieldType.STRAIN, _path(direction))
     r_dmg = StrainDriver(PythonNumericalIntegrator(dmg)).run(load)
     r_ref = StrainDriver(PythonNumericalIntegrator(ref)).run(load)
 

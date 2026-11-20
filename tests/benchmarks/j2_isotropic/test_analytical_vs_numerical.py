@@ -338,7 +338,7 @@ class TestAnalyticalPath:
 
         model = J2Isotropic3D(E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
         strain_data = generate_strain_history(model)
-        load = FieldHistory(FieldType.STRAIN, "eps", strain_data)
+        load = FieldHistory(FieldType.STRAIN, strain_data)
 
         r_num = StrainDriver(PythonNumericalIntegrator(model)).run(load)
         r_an = StrainDriver(PythonAnalyticalIntegrator(model)).run(load)

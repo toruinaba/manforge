@@ -20,6 +20,15 @@ ALL_SS = [SOLID_3D, PLANE_STRAIN, PLANE_STRESS, UNIAXIAL_1D]
 # ---------------------------------------------------------------------------
 
 
+def test_name_is_the_name_it_is_imported_by():
+    """``dimension.name`` appears in error messages; it must be the name to type."""
+    import returnmap.core as core
+    from returnmap.core import PLANE_STRESS_P
+
+    for ss in ALL_SS + [PLANE_STRESS_P]:
+        assert getattr(core, ss.name) is ss
+
+
 @pytest.mark.parametrize("ss", ALL_SS)
 def test_ntens_equals_ndi_plus_nshr(ss):
     assert ss.ntens == ss.ndi + ss.nshr

@@ -13,11 +13,12 @@ Usage
 
 import numpy as np
 
-from returnmap.models import OWKinematic1D
 from returnmap.service import default_registry, run_simulation
 
 # ---------------------------------------------------------------------------
-# 1. Registry — explicit name → class mapping (what a deployment exposes)
+# 1. Registry — explicit name → template-model mapping (what a deployment
+#    exposes).  A template fixes the class, the dimension and any setting
+#    that is not a parameter; each run puts its own parameters into it.
 # ---------------------------------------------------------------------------
 reg = default_registry()
 
@@ -35,8 +36,8 @@ for name in reg.names():
 
 # A private-model package would plug in the same way:
 #     from returnmap_internal import MODELS
-#     for name, cls in MODELS.items():
-#         reg.register(name, cls)
+#     for name, model in MODELS.items():
+#         reg.register(name, model)
 
 # ---------------------------------------------------------------------------
 # 2. Run — defaults from the descriptor form a runnable parameter set
@@ -71,7 +72,7 @@ print(f"  progress calls   : {len(progress_log)} (last: {progress_log[-1]})")
 #    returns the partial history so the UI can plot it with a marker.
 # ---------------------------------------------------------------------------
 bad_params = dict(E=206e3, nu=0.3, sigma_y0=250.0, C_k=1e9, gamma=1e12)
-out_bad = run_simulation(OWKinematic1D, bad_params, np.linspace(0.0, 0.05, 10))
+out_bad = run_simulation(reg.get("ow_kinematic"), bad_params, np.linspace(0.0, 0.05, 10))
 
 print()
 print("=" * 60)

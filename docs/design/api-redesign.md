@@ -1,6 +1,6 @@
 # API 再設計 設計メモ
 
-- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15、名前の変更は 4.16 にある。
+- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15、名前の変更は 4.16、残っていた小さな不統一の解消は 4.17 にある。
 - 基準点: returnmap `v0.1.0`(`10c586c`)、returnmap-internal `99bc291`。本文中の `file:line` はこの基準点のもの。
 - 名前: このメモを書いた時点のパッケージ名は `manforge` だった。2026-11-20 に `returnmap` に改名した(4.16)。本文のパッケージ名と import パスは新しい名前に置き換えてある。基準点のタグ `v0.1.0` の中身は `manforge` のままである。
 - 対象読者: returnmap と returnmap-internal の両方を触る人。
@@ -262,7 +262,7 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 同じ名前が 2〜3 通りのパスから取れていた(`Implicit` は `returnmap.core` と `returnmap.core.state`、`FortranModule` は `returnmap.simulation.integrator` と `returnmap.verification`)。README、例、returnmap-internal のあいだでも書き方が揃っていなかった。
 
 - **公開の import 元はパッケージ単位の 7 つとする。** `returnmap.core` / `.models` / `.simulation` / `.fitting` / `.verification` / `.service` / `.utils`。
-- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `returnmap.service` からも取れていたが、モデル上で宣言するものなので `returnmap.core` だけにした。配備側(manforge-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `returnmap.core` から取る。
+- **どの名前も 1 つのパッケージの `__all__` にだけ載せる。** 例外は置かない。`ParamMeta` は `returnmap.service` からも取れていたが、モデル上で宣言するものなので `returnmap.core` だけにした。配備側(returnmap-api)は `ModelDescriptor.param_meta` から値を読むので、クラス自体は通常要らない。要る場合は `returnmap.core` から取る。
 - **`returnmap.core` はモデル定義に要るもの全部を持つ。** `MaterialModel`、`ParamMeta`、`hand_block`、`verified_against_fortran` を `core.material` から引き上げた。
 - **`returnmap.verification` は検査だけを持つ。** 検査される側の宣言は、定義されている場所に置く。`FortranModule` と `JacobianBlocks` は `returnmap.simulation`、`verified_against_fortran` と `FortranBinding` は `returnmap.core`。`verification` からの再エクスポートは削除した(互換シムは置かない)。
 - **`returnmap.utils` は smooth 近似と主値分解の関数を公開する。** これまで `__init__` は空で、`returnmap.utils.smooth` から取るしかなかった。
@@ -342,7 +342,8 @@ ChabocheKinematic3D(E=..., nu=..., sig_y0=..., C=..., gamma=..., Qinf=..., b=...
 **残っているもの**
 
 - Python 3.10 / 3.11 では動作を確認していない(確認済みは 3.12 と 3.13)。
-- 小さな不統一: `run_simulation(model_cls, params)` は次元とパラメータ以外の設定を渡せない。Python の integrator が 3 クラスある(違いは経路の選び方だけ)。`DriverStep.i` と `CrosscheckStep.index`。`FitResult.n_iter` の中身は評価回数。
+- 小さな不統一: `run_simulation(model_cls, params)` は次元とパラメータ以外の設定を渡せない。`DriverStep.i` と `CrosscheckStep.index`。`FitResult.n_iter` の中身は評価回数。→ 4.17 で解消した。
+- Python の integrator が 3 クラスある(違いは経路の選び方だけ)。これはそのままにしている。
 
 ### 4.15 検査の形と誤差の測り方
 
@@ -407,6 +408,33 @@ assert report.passed, report.summary()
 **名前。** A・B・C のどれも、中身はリターンマッピングを解いて結果を見ることなので、`returnmap` にした。`umat` を含む名前(`umatproof` など)は、到達点 A が多数派である実態より狭い。`matforge`(元の名前の誤植を直した形)は、「mat」が material / matrix / MATLAB のどれとも読め、「forge」が生成する道具と読めるので採らなかった。
 
 **変えたもの。** 配布名、import パス(`returnmap.*`)、CLI(`returnmap build`)、Docker イメージ名(`returnmap-fortran`)、f2py の試験用モジュール名、文書。非公開リポジトリは `returnmap-internal`(import は `returnmap_internal`)。機能と計算結果は変わらない。
+
+### 4.17 残っていた小さな不統一
+
+全体レビュー(4.14)の「残っているもの」に挙げた不統一を解消した。どれも、同じものを指す名前や作り方が場所によって違っていたものである。
+
+**service もテンプレートのモデルを受け取る。** `run_simulation(model_cls, params)` はクラスを受け取り、`model_cls(**params)` で構築していた。これでは、次元を固定していないクラスは既定の次元でしか走らず、パラメータ以外の設定(`J2IsotropicDamageUnilateral` の `c`)は既定値にしかならない。`fit_params` が 4.11 で解消したのと同じ問題である。同じ形にした:
+
+- `run_simulation(model, params, load)` はテンプレートのモデルを受け取り、`model.with_params(**params)` で走らせる。テンプレートは書き換えない。
+- `ModelRegistry.register(name, model)` はテンプレートを登録する。同じクラスを、別の名前で別の次元や設定として登録できる。`ModelDescriptor.ntens` は登録したモデルの次元から取る。
+- **`params` は従来どおり `param_names` の全部を要求する。** テンプレートの値を既定値として使う形(渡した名前だけ置き換える)にすると、リクエストが名指ししていない値で計算が走る。パラメータに既定値を置かない(4.10)のと同じ理由で採らなかった。したがって、テンプレートが持つパラメータの値は構築のための仮の値である。`default_registry()` は `param_meta` の `default` を入れている。
+- 非公開パッケージの `MODELS` は `dict[str, MaterialModel]` になる。
+
+**名前を揃えた。**
+
+| これまで | これから | 揃える相手 |
+|---|---|---|
+| `DriverStep.i` | `DriverStep.index` | `CrosscheckStep.index` |
+| `FitResult.n_iter` | `FitResult.n_evaluations` | 中身(scipy の `nfev`)。反復回数ではない |
+| `Observation(field="Stress")`、`x_field="Strain"` | `"stress"`、`"strain"` | `DriverResult.history("stress")`、状態量のキー、`control="strain"` |
+| `SOLID_3D.name == "3D_SOLID"` | `"SOLID_3D"` | import する名前。他の 4 つの次元は元から一致していた |
+
+- `Observation` の名前を揃えたのに合わせて、`DriverResult.history("strain")` を足した。`Observation.field` が受け取る名前と `history` が受け取る名前が、同じ 1 つの集合になった。`"strain"` が状態量のキーと同じ名前空間に入るので、状態量に `strain` という名前を付けるとクラス定義時に `TypeError` になるようにした(付けられると、名前で読む側で黙って全ひずみに置き換わる)。両リポジトリに該当するモデルは無い。
+- 次元の `name` はエラーメッセージ(「`X` is fixed to ...」)に出るので、そのまま書ける名前にした。全次元について `returnmap.core` の同名の定数と一致することを、テストで確認している。
+
+**`FieldHistory` のラベルを省略できるようにした。** `FieldHistory(type, name, data)` の `name` は必須の位置引数だったが、フレームワークはこれを読まない(両リポジトリの呼び出し 108 箇所は、`"Strain"`、`"eps"` などを形だけ渡していた)。`FieldHistory(type, data, *, name="")` にした。`name` をキーワード専用にしたのは、古い書き方(2 番目にラベル)がラベルを `data` として黙って受け取らず、`TypeError` になるようにするためである。
+
+**そのままにしたもの。** Python の integrator の 3 クラス(`PythonIntegrator` / `PythonNumericalIntegrator` / `PythonAnalyticalIntegrator`)は、今回の対象にしていない。
 
 ## 5. 移行計画
 各段で returnmap と returnmap-internal の PR を対にし、両方のテストが通る状態で終える。returnmap-internal は editable 依存で CI が無いので、returnmap 側の PR ごとに internal のテストを手元で走らせる。

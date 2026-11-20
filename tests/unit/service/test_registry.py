@@ -2,53 +2,64 @@
 
 import pytest
 
-from returnmap.core import ParamMeta
-from returnmap.models import J2Isotropic1D, J2Isotropic3D
+from returnmap.core import PLANE_STRESS, ParamMeta
+from returnmap.models import J2Isotropic, J2Isotropic1D, J2Isotropic3D
 from returnmap.service import ModelRegistry, ModelDescriptor, default_registry
+
+J2 = dict(E=210e3, nu=0.3, sigma_y0=250.0, H=1e3)
+J2_1D = J2Isotropic1D(**J2)
+J2_3D = J2Isotropic3D(**J2)
 
 
 class TestRegister:
     def test_register_and_get(self):
         reg = ModelRegistry()
-        reg.register("j2", J2Isotropic1D)
-        assert reg.get("j2") is J2Isotropic1D
+        reg.register("j2", J2_1D)
+        assert reg.get("j2") is J2_1D
 
     def test_duplicate_name_raises(self):
         reg = ModelRegistry()
-        reg.register("j2", J2Isotropic1D)
-        with pytest.raises(ValueError, match="already registered"):
-            reg.register("j2", J2Isotropic3D)
+        reg.register("j2", J2_1D)
+        with pytest.raises(ValueError, match="already registered.*J2Isotropic1D"):
+            reg.register("j2", J2_3D)
 
-    def test_non_model_class_raises(self):
+    def test_non_model_raises(self):
         reg = ModelRegistry()
-        with pytest.raises(ValueError, match="MaterialModel subclass"):
+        with pytest.raises(ValueError, match="MaterialModel instance"):
             reg.register("x", dict)
 
-    def test_instance_rejected(self):
+    def test_class_rejected(self):
+        """A class cannot say which dimension or settings to run with."""
         reg = ModelRegistry()
-        model = J2Isotropic1D(E=210e3, nu=0.3, sigma_y0=250.0, H=1e3)
-        with pytest.raises(ValueError, match="MaterialModel subclass"):
-            reg.register("x", model)
+        with pytest.raises(ValueError, match="MaterialModel instance.*construct the class"):
+            reg.register("x", J2Isotropic1D)
+
+    def test_one_class_under_two_names(self):
+        reg = ModelRegistry()
+        reg.register("j2_3d", J2Isotropic(**J2))
+        reg.register("j2_ps", J2Isotropic(dimension=PLANE_STRESS, **J2))
+        assert reg.describe("j2_3d").ntens == 6
+        assert reg.describe("j2_ps").ntens == 3
 
 
 class TestGet:
     def test_unknown_name_lists_registered(self):
         reg = ModelRegistry()
-        reg.register("j2", J2Isotropic1D)
+        reg.register("j2", J2_1D)
         with pytest.raises(KeyError, match=r"unknown model 'nope'.*j2"):
             reg.get("nope")
 
     def test_names_sorted(self):
         reg = ModelRegistry()
-        reg.register("b", J2Isotropic1D)
-        reg.register("a", J2Isotropic3D)
+        reg.register("b", J2_1D)
+        reg.register("a", J2_3D)
         assert reg.names() == ["a", "b"]
 
 
 class TestDescribe:
     def test_descriptor_contents(self):
         reg = ModelRegistry()
-        reg.register("j2", J2Isotropic1D)
+        reg.register("j2", J2_1D)
         d = reg.describe("j2")
         assert isinstance(d, ModelDescriptor)
         assert d.name == "j2"
@@ -59,15 +70,15 @@ class TestDescribe:
 
     def test_descriptor_param_meta(self):
         reg = ModelRegistry()
-        reg.register("j2", J2Isotropic1D)
+        reg.register("j2", J2_1D)
         d = reg.describe("j2")
         assert set(d.param_meta) == set(d.param_names)
         assert isinstance(d.param_meta["E"], ParamMeta)
         assert d.param_meta["E"].unit == "MPa"
 
-    def test_ntens_reflects_registered_class(self):
+    def test_ntens_reflects_registered_model(self):
         reg = ModelRegistry()
-        reg.register("j2_3d", J2Isotropic3D)
+        reg.register("j2_3d", J2_3D)
         assert reg.describe("j2_3d").ntens == 6
 
     def test_model_without_meta_describes_empty(self):
@@ -86,7 +97,7 @@ class TestDescribe:
                 return [self.ep(inc.state_n["ep"] + dlambda)]
 
         reg = ModelRegistry()
-        reg.register("bare", Bare)
+        reg.register("bare", Bare(E=210e3, nu=0.3, sigma_y0=250.0))
         assert reg.describe("bare").param_meta == {}
 
 
@@ -106,7 +117,15 @@ class TestDefaultRegistry:
             d = reg.describe(name)
             assert set(d.param_meta) == set(d.param_names), name
 
+    def test_templates_hold_the_meta_defaults(self):
+        reg = default_registry()
+        for name in reg.names():
+            model = reg.get(name)
+            assert model.params == {
+                k: m.default for k, m in reg.describe(name).param_meta.items()
+            }, name
+
     def test_independent_instances(self):
         a, b = default_registry(), default_registry()
-        a.register("extra", J2Isotropic3D)
+        a.register("extra", J2_3D)
         assert "extra" not in b.names()

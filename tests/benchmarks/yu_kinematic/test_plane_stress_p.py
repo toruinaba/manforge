@@ -265,7 +265,7 @@ def _multiaxial_path(waypoints, n_per_segment):
         for t in np.linspace(0.0, 1.0, n_per_segment, endpoint=False)[1:]:
             rows.append(a + (b - a) * t)
         rows.append(b)
-    return FieldHistory(FieldType.STRAIN, "eps", np.array(rows))
+    return FieldHistory(FieldType.STRAIN, np.array(rows))
 
 
 _MONOTONIC = [np.zeros(3), np.array([6e-3, -3e-3, 4e-3])]
@@ -405,10 +405,10 @@ def test_cyclic_convergence(peaks):
     n_steps = 0
     for step in driver.iter_run(history):
         n_steps += 1
-        assert step.converged, f"outer NR failed at step {step.i}"
+        assert step.converged, f"outer NR failed at step {step.index}"
         if step.result.is_plastic:
             assert step.result.return_mapping.converged, (
-                f"return mapping failed at step {step.i}: "
+                f"return mapping failed at step {step.index}: "
                 f"residual_history={step.result.residual_history}"
             )
     assert n_steps == len(history.data)
@@ -550,7 +550,7 @@ def test_hand_solution_satisfies_framework_residual():
     data = np.zeros((40, 3))
     data[:, 0] = 5e-3 * t
     data[:, 2] = 8e-3 * np.sin(np.pi * t)
-    load = FieldHistory(FieldType.STRAIN, "Strain", data)
+    load = FieldHistory(FieldType.STRAIN, data)
     results = StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
 
     report = check_solution(model, results)

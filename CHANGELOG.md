@@ -74,11 +74,17 @@ converged=True` と書く。
 | `integrator.elastic_stiffness(...)` | `integrator.elastic_tangent(stress_n, state_n)` |
 | `result._state_n` | `result.increment.state_n`(`result.stress_trial` はそのまま使える) |
 | `StressDriver` に `(N,)` や `(N, 1)` の履歴(全成分に同じ値が入って走っていた) | `ValueError`。`(N, ntens)` で渡す |
+| `FieldHistory(FieldType.STRAIN, "Strain", data)` | `FieldHistory(FieldType.STRAIN, data)`(ラベルは省略できる。付けるなら `name="..."`) |
+| `FieldHistory.cyclic_strain(...).name == "Strain"` | `""`(付けるなら `name="..."`) |
+| `step.i`(`iter_run` が返す `DriverStep`) | `step.index`(`CrosscheckStep.index` と同じ名前) |
+| `SOLID_3D.name == "3D_SOLID"` | `"SOLID_3D"`(import する名前と同じ。エラーメッセージに出る) |
 
 - `StressIntegrator` は `typing.Protocol` になった。自作の integrator は `dimension` / `ntens` /
   `raise_on_nonconverged` / `initial_state` / `increment` / `elastic_tangent` / `stress_update` を持つ。
 - `nr_jacobian` の既定値は全層で `"exact"`。**`service.run_simulation` の既定は `"broyden"` から変わった**
   (速度を優先するなら明示する)。
+- `result.history("strain")` が使える(`result.strain` と同じ。`"stress"` と同様)。そのため、状態量に `strain` という
+  名前は付けられない(クラス定義時に `TypeError`)。
 
 ### フィッティング
 
@@ -89,6 +95,8 @@ converged=True` と書く。
 | `fit_config={...}` と `fixed_params={...}` | `ParameterSpace(free={...}, fixed={...})` |
 | `build_objective(model, driver_factory, targets, space, failures)` | `build_objective(model, targets, space, *, driver_factory=..., failures=...)` |
 | `Model(**{k: result.params[k] for k in Model.param_names})` | `result.model`(パラメータだけなら `result.model_params`) |
+| `result.n_iter` | `result.n_evaluations`(中身は以前から目的関数の評価回数) |
+| `Observation(field="Stress")`、`x_field="Strain"` | `field="stress"`、`x_field="strain"`(`result.history(...)` が受け取る名前と同じ) |
 
 - `driver_factory` は省略できる。省略すると載荷履歴から決まる(ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`。
   `crosscheck` と同じ規則)。
@@ -96,6 +104,23 @@ converged=True` と書く。
   (0.1.0 では設定が既定値に戻っていた)。
 - `FitResult.params` は探索空間のすべての名前を持つ(比で探索するときの補助変数も含む)。モデルのパラメータは
   `FitResult.model_params`、それを入れたモデルは `FitResult.model`。
+
+### サービス
+
+レジストリに登録するものと `run_simulation` が受け取るものは、モデルのクラスではなく**テンプレートのモデル**
+(インスタンス)になった。クラスだけでは、次元を固定していないクラスの次元と、パラメータ以外の設定を選べなかった。
+
+| 0.1.0 | 0.2.0 |
+|---|---|
+| `reg.register("j2", J2Isotropic1D)` | `reg.register("j2", J2Isotropic1D(E=..., nu=..., ...))` |
+| `reg.get(name)` がクラスを返す | テンプレートのモデルを返す |
+| `run_simulation(model_cls, params, load)` | `run_simulation(model, params, load)`(`model.with_params(**params)` で走る) |
+| `ModelDescriptor.ntens` は登録したクラスの既定の次元のもの | 登録したモデルの次元のもの |
+| 非公開パッケージの `MODELS: dict[str, type[MaterialModel]]` | `MODELS: dict[str, MaterialModel]` |
+
+- `params` は従来どおり `param_names` の全部を過不足なく持つ(過不足は `ValueError`)。テンプレートが持つ
+  パラメータの値は使われない。
+- `default_registry()` のテンプレートは、各クラスの `param_meta` の `default` を持つ。
 
 ### 検証
 

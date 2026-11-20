@@ -219,7 +219,7 @@ class TestCheckHandBlocks:
         data = np.zeros((n, 6))
         data[:, 0] = 4e-3 * t
         data[:, 3] = 6e-3 * np.sin(np.pi * t)
-        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        load = FieldHistory(FieldType.STRAIN, data)
         return StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
 
     def test_exact_blocks_pass_and_the_rest_are_listed(self):
@@ -425,7 +425,7 @@ class TestCheckSolution:
         data[:, 0] = 5e-3 * t
         if model.ntens > 1:
             data[:, model.ntens - 1] = 6e-3 * np.sin(np.pi * t)
-        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        load = FieldHistory(FieldType.STRAIN, data)
         return StrainDriver(PythonAnalyticalIntegrator(model)).run(load).step_results
 
     def test_closed_form_solution_satisfies_every_row(self, model):
@@ -546,7 +546,7 @@ class TestCheckSolution:
 
         data = np.zeros((3, 6))
         data[:, 0] = np.linspace(1e-5, 3e-5, 3)        # elastic only
-        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        load = FieldHistory(FieldType.STRAIN, data)
         results = StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
         with pytest.raises(ValueError, match="no plastic step"):
             check_solution(model, results)
@@ -571,7 +571,7 @@ class TestCheckSolution:
         data = np.zeros((3, 6))
         data[:, 0] = np.linspace(3e-3, 8e-3, 3)
         weak = PythonNumericalIntegrator(m, max_iter=2, raise_on_nonconverged=False)
-        steps = list(StrainDriver(weak).iter_run(FieldHistory(FieldType.STRAIN, "eps", data)))
+        steps = list(StrainDriver(weak).iter_run(FieldHistory(FieldType.STRAIN, data)))
         iterate = [s.result for s in steps if not s.converged]
         assert iterate, "the premise: max_iter=2 leaves a step unsolved"
 
@@ -612,7 +612,7 @@ class TestCheckSolution:
         data[:, 0] = 1.2e-2 * t
         data[:, 5] = 1.0e-2 * np.sin(np.pi * t)
         sub = SubSteppingIntegrator(PythonNumericalIntegrator(m, max_iter=5))
-        results = StrainDriver(sub).run(FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+        results = StrainDriver(sub).run(FieldHistory(FieldType.STRAIN, data)).step_results
         n_sub = sum(r.n_substeps > 1 for r in results if r.is_plastic)
         assert 0 < n_sub < len(results), "the premise: some steps divided, some not"
 
@@ -634,7 +634,7 @@ class TestCheckSolution:
         data = np.zeros((4, 6))
         data[:, 0] = np.linspace(1e-3, 4e-3, 4)
         umat = FortranIntegrator.from_model(_FakeUmat(), "j2", model)
-        results = StrainDriver(umat).run(FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+        results = StrainDriver(umat).run(FieldHistory(FieldType.STRAIN, data)).step_results
         with pytest.raises(ValueError, match="carries no increment"):
             check_solution(model, results)
 
@@ -664,7 +664,7 @@ class TestCheckSolution:
         data = np.zeros((6, 6))
         data[:, 0] = np.linspace(1.5e-3, 1.9e-3, 6)        # just past yield
         results = StrainDriver(PythonAnalyticalIntegrator(m)).run(
-            FieldHistory(FieldType.STRAIN, "eps", data)).step_results
+            FieldHistory(FieldType.STRAIN, data)).step_results
         assert float(results[-1].state["ep"]) < 1e-3
 
         report = check_solution(m, results)

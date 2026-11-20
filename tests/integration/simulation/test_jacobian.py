@@ -17,7 +17,7 @@ def _multiaxial(n=12):
     data = np.zeros((n, 6))
     data[:, 0] = 4e-3 * t
     data[:, 3] = 6e-3 * np.sin(np.pi * t)
-    return FieldHistory(FieldType.STRAIN, "Strain", data)
+    return FieldHistory(FieldType.STRAIN, data)
 
 
 @pytest.fixture

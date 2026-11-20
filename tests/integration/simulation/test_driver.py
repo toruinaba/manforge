@@ -43,39 +43,39 @@ def integ_1d(model_1d):
 
 def _strain_load(n_steps=20, max_strain=3e-3):
     strains = np.linspace(0, max_strain, n_steps)
-    return FieldHistory(FieldType.STRAIN, "Strain", strains)
+    return FieldHistory(FieldType.STRAIN, strains)
 
 
 def _multiaxial_strain_load(integrator, n_steps=20, max_strain=3e-3):
     data = np.zeros((n_steps, integrator.ntens))
     data[:, 0] = np.linspace(0, max_strain, n_steps)
-    return FieldHistory(FieldType.STRAIN, "Strain", data)
+    return FieldHistory(FieldType.STRAIN, data)
 
 
 def _stress_load_1d(integrator, n_steps=20, max_stress=300.0):
     data = np.zeros((n_steps, integrator.ntens))
     data[:, 0] = np.linspace(0, max_stress, n_steps)
-    return FieldHistory(FieldType.STRESS, "Stress", data)
+    return FieldHistory(FieldType.STRESS, data)
 
 
 def _uniaxial_strain_load(n_steps=20, max_strain=3e-3):
     strains = np.linspace(0, max_strain, n_steps)
-    return FieldHistory(FieldType.STRAIN, "Strain", strains)
+    return FieldHistory(FieldType.STRAIN, strains)
 
 
 def _uniaxial_stress_load(model, n_steps=20):
     max_stress = 300.0
     stresses = np.zeros((n_steps, model.ntens))
     stresses[:, 0] = np.linspace(0, max_stress, n_steps)
-    return FieldHistory(FieldType.STRESS, "Stress", stresses)
+    return FieldHistory(FieldType.STRESS, stresses)
 
 
 def stress_load(data):
-    return FieldHistory(FieldType.STRESS, "Stress", data)
+    return FieldHistory(FieldType.STRESS, data)
 
 
-def strain_load(data, name="Strain"):
-    return FieldHistory(FieldType.STRAIN, name, data)
+def strain_load(data):
+    return FieldHistory(FieldType.STRAIN, data)
 
 
 # ===========================================================================
@@ -90,7 +90,7 @@ class TestStrainDriverIterRun:
 
     def test_step_index_sequential(self, model):
         driver = StrainDriver(PythonNumericalIntegrator(model))
-        indices = [s.i for s in driver.iter_run(_strain_load(n_steps=10))]
+        indices = [s.index for s in driver.iter_run(_strain_load(n_steps=10))]
         assert indices == list(range(10))
 
     def test_strain_shape(self, model):
@@ -133,7 +133,7 @@ class TestStrainDriverIterRun:
         plastic_steps = []
         for step in driver.iter_run(load):
             if step.result.is_plastic:
-                plastic_steps.append(step.i)
+                plastic_steps.append(step.index)
                 break
         assert len(plastic_steps) == 1
 
@@ -141,10 +141,10 @@ class TestStrainDriverIterRun:
         n = 15
         max_strain = 3e-3
         strains = np.linspace(0, max_strain, n)
-        load = FieldHistory(FieldType.STRAIN, "Strain", strains)
+        load = FieldHistory(FieldType.STRAIN, strains)
         driver = StrainDriver(PythonNumericalIntegrator(model))
         for step in driver.iter_run(load):
-            np.testing.assert_allclose(step.strain[0], strains[step.i], rtol=1e-12)
+            np.testing.assert_allclose(step.strain[0], strains[step.index], rtol=1e-12)
 
     def test_state_accessible_from_step(self, model):
         load = _strain_load(n_steps=20, max_strain=5e-3)
@@ -154,7 +154,7 @@ class TestStrainDriverIterRun:
 
     def test_rejects_stress_typed_load(self, model):
         """A STRESS-typed history must not be silently read as strain."""
-        load = FieldHistory(FieldType.STRESS, "Stress", np.linspace(0, 1e-3, 5))
+        load = FieldHistory(FieldType.STRESS, np.linspace(0, 1e-3, 5))
         driver = StrainDriver(PythonNumericalIntegrator(model))
         with pytest.raises(ValueError, match="StrainDriver expects"):
             list(driver.iter_run(load))
@@ -188,7 +188,7 @@ class TestStressDriverIterRun:
     def test_step_index_sequential(self, model):
         integrator = PythonNumericalIntegrator(model)
         driver = StressDriver(integrator)
-        indices = [s.i for s in driver.iter_run(_stress_load_1d(integrator, n_steps=10))]
+        indices = [s.index for s in driver.iter_run(_stress_load_1d(integrator, n_steps=10))]
         assert indices == list(range(10))
 
     def test_n_outer_iter_positive(self, model):
@@ -225,7 +225,7 @@ class TestStressDriverIterRun:
         integrator = PythonNumericalIntegrator(model)
         sigma = np.zeros((5, model.ntens))
         sigma[:, 0] = np.linspace(300.0, 500.0, 5)  # past yield (250)
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         driver = StressDriver(integrator, max_iter=1)
         with pytest.raises(RuntimeError, match="NR did not converge"):
             list(driver.iter_run(load))
@@ -234,7 +234,7 @@ class TestStressDriverIterRun:
         integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
         sigma = np.zeros((5, model.ntens))
         sigma[:, 0] = np.linspace(300.0, 500.0, 5)
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         driver = StressDriver(integrator, max_iter=1)
         steps = list(driver.iter_run(load))
         assert len(steps) == 1
@@ -253,7 +253,7 @@ class TestStressDriverIterRun:
         model_pa = J2Isotropic3D(E=210e9, nu=0.3, sigma_y0=250e6, H=1e9)
         sigma = np.zeros((5, 6))
         sigma[:, 0] = np.linspace(100e6, 300e6, 5)  # crosses yield
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         driver = StressDriver(PythonNumericalIntegrator(model_pa))
         result = driver.run(load)
         np.testing.assert_allclose(
@@ -262,8 +262,7 @@ class TestStressDriverIterRun:
 
     def test_rejects_strain_typed_load(self, model):
         """A STRAIN-typed history must not be silently read as stress."""
-        load = FieldHistory(FieldType.STRAIN, "Strain",
-                            np.zeros((5, model.ntens)))
+        load = FieldHistory(FieldType.STRAIN, np.zeros((5, model.ntens)))
         driver = StressDriver(PythonNumericalIntegrator(model))
         with pytest.raises(ValueError, match="StressDriver expects"):
             list(driver.iter_run(load))
@@ -281,7 +280,7 @@ class TestStressDriverIterRun:
         )
         sigma = np.zeros((5, model.ntens))
         sigma[:, 0] = np.linspace(100.0, 2.0 * model.sigma_y0, 5)
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         driver = StressDriver(integrator)
 
         steps = list(driver.iter_run(load))
@@ -352,6 +351,11 @@ class TestStrainDriverStepResults:
             np.array(result.history("stress")), np.array(result.stress), rtol=1e-14
         )
 
+    def test_history_of_strain_matches_strain_property(self, model):
+        load = _uniaxial_strain_load(n_steps=10, max_strain=5e-3)
+        result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
+        np.testing.assert_array_equal(result.history("strain"), result.strain)
+
     def test_step_n_minus_1_state_is_previous_step(self, model):
         load = _uniaxial_strain_load(n_steps=15, max_strain=5e-3)
         result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
@@ -416,7 +420,7 @@ class TestRunReportsNonConvergence:
         """The outer NR has no switch of its own — it reads the integrator's."""
         sigma = np.zeros((5, model.ntens))
         sigma[:, 0] = np.linspace(300.0, 500.0, 5)  # past yield (250)
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
 
         raising = StressDriver(PythonNumericalIntegrator(model), max_iter=1)
         with pytest.raises(RuntimeError, match="NR did not converge"):
@@ -445,7 +449,7 @@ class TestRunReportsNonConvergence:
     def test_history_with_no_completed_step(self, model):
         sigma = np.zeros((3, model.ntens))
         sigma[:, 0] = np.linspace(300.0, 500.0, 3)
-        load = FieldHistory(FieldType.STRESS, "Stress", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
         result = StressDriver(integrator, max_iter=1).run(load)
         assert result.failed_step == 0
@@ -596,7 +600,7 @@ class TestStressDriver:
         strain_history[:, 0] = np.linspace(0.0, 3 * sigma_y0 / E, N)
 
         result = StrainDriver(PythonNumericalIntegrator(model_3d)).run(
-            FieldHistory(FieldType.STRAIN, "Strain", strain_history),
+            FieldHistory(FieldType.STRAIN, strain_history),
         )
 
         assert result.history("ep").shape == (N,)
@@ -638,7 +642,7 @@ class TestStressDriver:
         N = 20
         strain6 = np.zeros((N, 6))
         strain6[:, 0] = np.linspace(0.0, 5e-3, N)
-        load = FieldHistory(FieldType.STRAIN, "Strain", strain6)
+        load = FieldHistory(FieldType.STRAIN, strain6)
         result = StrainDriver(PythonNumericalIntegrator(model)).run(load)
         assert result.stress.shape == (N, 6)
         assert result.stress[-1, 0] > model.sigma_y0
@@ -795,7 +799,7 @@ class TestMixedDriver:
         load_mixed = strain_load(eps_hist.reshape(-1, 1))
         res_3d = MixedDriver(integ_3d, prescribed_strain_idx=[0]).run(load_mixed)
 
-        res_1d = StrainDriver(integ_1d).run(FieldHistory(FieldType.STRAIN, "Strain", eps_hist))
+        res_1d = StrainDriver(integ_1d).run(FieldHistory(FieldType.STRAIN, eps_hist))
 
         np.testing.assert_allclose(res_3d.stress[:, 0], res_1d.stress[:, 0], rtol=1e-4)
         np.testing.assert_allclose(res_3d.history("ep"), res_1d.history("ep"), rtol=1e-4)
@@ -826,7 +830,7 @@ class TestMixedDriver:
         strain6[:, 0] = np.linspace(0, 3.0 * sigma_y0 / E, N)
 
         load_mixed = strain_load(strain6)
-        load_strain = FieldHistory(FieldType.STRAIN, "Strain", strain6)
+        load_strain = FieldHistory(FieldType.STRAIN, strain6)
 
         res_mixed = MixedDriver(integ_3d, prescribed_strain_idx=[0, 1, 2, 3, 4, 5]).run(load_mixed)
         res_strain = StrainDriver(integ_3d).run(load_strain)
@@ -856,7 +860,7 @@ class TestMixedDriver:
         assert len(steps) >= 1
         non_converged = [s for s in steps if not s.converged]
         assert len(non_converged) == 1
-        assert non_converged[0].i < N
+        assert non_converged[0].index < N
         assert steps[-1] is non_converged[0], "driver must stop at the failed step"
 
     def test_initial_stress_zero_increment_preserves_prestress(self, model_3d, integ_3d):
@@ -924,8 +928,7 @@ class TestStrainDriverInitialState:
     def test_default_equals_zero_initial(self, model):
         integrator = PythonIntegrator(model)
         load = _strain_load()
-        load_explicit = FieldHistory(FieldType.STRAIN, "Strain",
-                                     np.array([[3e-3, 0, 0, 0, 0, 0]]))
+        load_explicit = FieldHistory(FieldType.STRAIN, np.array([[3e-3, 0, 0, 0, 0, 0]]))
         d = StrainDriver(integrator)
         steps_default = list(d.iter_run(load_explicit))
         steps_explicit = list(d.iter_run(load_explicit, initial_stress=np.zeros(6),
@@ -936,7 +939,7 @@ class TestStrainDriverInitialState:
     def test_initial_stress_shifts_trial(self, model):
         integrator = PythonIntegrator(model)
         prestress = np.array([100.0, 0, 0, 0, 0, 0])
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.array([[0, 0, 0, 0, 0, 0]]))
+        load = FieldHistory(FieldType.STRAIN, np.array([[0, 0, 0, 0, 0, 0]]))
         d = StrainDriver(integrator)
         steps = list(d.iter_run(load, initial_stress=prestress))
         np.testing.assert_allclose(steps[0].result.stress_trial, prestress, atol=1e-12)
@@ -946,7 +949,7 @@ class TestStrainDriverInitialState:
         large_ep = anp.array(0.1)
         initial_state = {"ep": large_ep}
         eps_y = model.sigma_y0 / model.E
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.array([[eps_y * 1.5, 0, 0, 0, 0, 0]]))
+        load = FieldHistory(FieldType.STRAIN, np.array([[eps_y * 1.5, 0, 0, 0, 0, 0]]))
         d = StrainDriver(integrator)
         step_fresh = list(d.iter_run(load))[0]
         step_hardened = list(d.iter_run(load, initial_state=initial_state))[0]
@@ -956,7 +959,7 @@ class TestStrainDriverInitialState:
     def test_run_forwards_kwargs(self, model):
         integrator = PythonIntegrator(model)
         prestress = np.array([50.0, 0, 0, 0, 0, 0])
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.array([[0, 0, 0, 0, 0, 0]]))
+        load = FieldHistory(FieldType.STRAIN, np.array([[0, 0, 0, 0, 0, 0]]))
         d = StrainDriver(integrator)
         result = d.run(load, initial_stress=prestress)
         np.testing.assert_allclose(result.stress[0], prestress, atol=1e-12)
@@ -965,7 +968,7 @@ class TestStrainDriverInitialState:
 class TestStressDriverInitialState:
     def test_default_equals_zero_initial(self, model):
         integrator = PythonIntegrator(model)
-        load = FieldHistory(FieldType.STRESS, "Stress", np.array([[100.0, 0, 0, 0, 0, 0]]))
+        load = FieldHistory(FieldType.STRESS, np.array([[100.0, 0, 0, 0, 0, 0]]))
         d = StressDriver(integrator)
         steps_default = list(d.iter_run(load))
         steps_explicit = list(d.iter_run(load, initial_stress=np.zeros(6),
@@ -976,7 +979,7 @@ class TestStressDriverInitialState:
     def test_initial_stress_changes_starting_point(self, model):
         integrator = PythonIntegrator(model)
         target = np.array([200.0, 0, 0, 0, 0, 0])
-        load = FieldHistory(FieldType.STRESS, "Stress", np.array([target]))
+        load = FieldHistory(FieldType.STRESS, np.array([target]))
         d = StressDriver(integrator)
         step_zero = list(d.iter_run(load))[0]
         step_pre = list(d.iter_run(load, initial_stress=target * 0.5))[0]
@@ -984,7 +987,7 @@ class TestStressDriverInitialState:
 
     def test_run_forwards_kwargs(self, model):
         integrator = PythonIntegrator(model)
-        load = FieldHistory(FieldType.STRESS, "Stress", np.array([[100.0, 0, 0, 0, 0, 0]]))
+        load = FieldHistory(FieldType.STRESS, np.array([[100.0, 0, 0, 0, 0, 0]]))
         d = StressDriver(integrator)
         result = d.run(load, initial_stress=np.zeros(6))
         assert len(result.step_results) == 1
@@ -1009,7 +1012,7 @@ class TestLoadShape:
         np.zeros((4, 3)),                            # another dimension's width
     ], ids=["1d", "one-column", "three-columns"])
     def test_stress_driver_rejects_a_history_of_the_wrong_width(self, integ, data):
-        load = FieldHistory(FieldType.STRESS, "Stress", data)
+        load = FieldHistory(FieldType.STRESS, data)
         with pytest.raises(ValueError, match=r"StressDriver expects load.data of shape \(N, 6\)"):
             StressDriver(integ).run(load)
 
@@ -1020,7 +1023,7 @@ class TestLoadShape:
 
     def test_stress_driver_takes_a_1d_history_for_a_1d_model(self):
         m = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
-        load = FieldHistory(FieldType.STRESS, "Stress", np.linspace(50.0, 300.0, 5))
+        load = FieldHistory(FieldType.STRESS, np.linspace(50.0, 300.0, 5))
         result = StressDriver(PythonNumericalIntegrator(m)).run(load)
         np.testing.assert_allclose(result.stress[:, 0], np.linspace(50.0, 300.0, 5), rtol=1e-8)
 
@@ -1029,12 +1032,12 @@ class TestLoadShape:
         np.zeros((4, 3)),
     ], ids=["one-column", "three-columns"])
     def test_strain_driver_rejects_a_history_of_the_wrong_width(self, integ, data):
-        load = FieldHistory(FieldType.STRAIN, "Strain", data)
+        load = FieldHistory(FieldType.STRAIN, data)
         with pytest.raises(ValueError, match=r"StrainDriver expects load.data of shape \(N, 6\)"):
             StrainDriver(integ).run(load)
 
     def test_strain_driver_keeps_the_1d_shorthand(self, integ):
         """A 1-D strain history is ε11 only, the other strains held at zero."""
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 6))
+        load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 6))
         result = StrainDriver(integ).run(load)
         np.testing.assert_array_equal(result.strain[:, 1:], 0.0)

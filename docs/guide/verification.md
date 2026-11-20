@@ -97,7 +97,7 @@ assert report.passed, report.summary()
 ```python
 from returnmap.verification import crosscheck, generate_strain_history
 
-load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
+load = FieldHistory(FieldType.STRAIN, generate_strain_history(model))
 report = crosscheck(PythonNumericalIntegrator(model), PythonAnalyticalIntegrator(model), load)
 assert report.passed, report.summary()
 # crosscheck: 35 steps — all agree

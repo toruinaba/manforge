@@ -647,6 +647,22 @@ def test_non_parameter_setting_goes_through_an_init_override():
         J2IsotropicDamageUnilateral3D(c=0.25, **_DMG, p_D=0.0)
 
 
+def test_state_cannot_be_named_strain():
+    """history("strain") is the run's total strain; a state of that name would be shadowed."""
+    from returnmap.core import Explicit, NTENS
+
+    with pytest.raises(TypeError, match="cannot be named 'strain'"):
+        class _Bad(MaterialModel):
+            param_names = []
+            strain = Explicit(shape=NTENS)
+
+            def yield_function(self, state):
+                return 0.0
+
+            def update_state(self, new, dlambda, inc):
+                return []
+
+
 @pytest.mark.parametrize("names, match", [
     (["E", "E"], "more than once"),
     ("E", "must be a list of str"),
@@ -735,7 +751,7 @@ def test_class_body_dimension_fixes_the_class():
     # type(m)(dimension=m.dimension, **m.params).
     assert _StubPS(dimension=PLANE_STRESS).dimension is PLANE_STRESS
     with pytest.raises(
-        TypeError, match="_StubPS is fixed to PLANE_STRESS; got dimension=3D_SOLID"
+        TypeError, match="_StubPS is fixed to PLANE_STRESS; got dimension=SOLID_3D"
     ):
         _StubPS(dimension=SOLID_3D)
 
@@ -754,7 +770,7 @@ def test_fixed_dimension_cannot_be_changed_in_a_subclass():
     inherits the algebra.  This used to be accepted, and the 3D closed-form
     return mapping then ran in plane stress."""
     with pytest.raises(TypeError, match=r"_Re sets dimension = PLANE_STRESS, but it "
-                                        r"inherits from J2Isotropic3D, which is fixed to 3D_SOLID"):
+                                        r"inherits from J2Isotropic3D, which is fixed to SOLID_3D"):
         class _Re(J2Isotropic3D):
             dimension = PLANE_STRESS
 
@@ -803,7 +819,7 @@ def test_reference_models_fix_the_dimension_their_name_says():
 
 
 def test_closed_form_model_rejects_a_dimension_it_does_not_hold_in():
-    with pytest.raises(TypeError, match="J2Isotropic3D is fixed to 3D_SOLID"):
+    with pytest.raises(TypeError, match="J2Isotropic3D is fixed to SOLID_3D"):
         J2Isotropic3D(dimension=PLANE_STRESS, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
 
 

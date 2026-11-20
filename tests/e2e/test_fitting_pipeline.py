@@ -36,7 +36,7 @@ def driver_factory():
 def synthetic_target(model, driver_factory):
     """One target: a uniaxial strain history and the model's own σ11 response."""
     strain = np.linspace(0.0, 5e-3, 40)
-    load = FieldHistory(FieldType.STRAIN, "Strain", strain)
+    load = FieldHistory(FieldType.STRAIN, strain)
     result = driver_factory(PythonIntegrator(model)).run(load)
     return FitTarget.stress_strain(strain, result.stress[:, 0])
 
@@ -61,7 +61,7 @@ def test_max_iter_bounds_work(model, driver_factory, synthetic_target, method):
     result = fit_params(model, [synthetic_target], space,
                         driver_factory=driver_factory, method=method, max_iter=1)
 
-    assert result.n_iter > 0
+    assert result.n_evaluations > 0
     assert set(result.params) == {"E", "nu", "sigma_y0", "H"}
 
 
@@ -121,7 +121,7 @@ def test_derived_ratio_enforces_ordering(model, driver_factory, synthetic_target
 
 def _strain_target(model, peak, n=20, **kwargs):
     """Strain-driven target whose curve is this model's own response."""
-    load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, peak, n))
+    load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, peak, n))
     computed = StrainDriver(PythonIntegrator(model)).run(load).stress[:, 0]
     return FitTarget(
         load=load,
@@ -156,12 +156,12 @@ def test_stress_driven_target(model):
     """A target may be driven by stress, with its own driver_factory."""
     stress_hist = np.zeros((15, 6))
     stress_hist[:, 0] = np.linspace(0.0, 300.0, 15)
-    load = FieldHistory(FieldType.STRESS, "Stress", stress_hist)
+    load = FieldHistory(FieldType.STRESS, stress_hist)
     strain_computed = StressDriver(PythonIntegrator(model)).run(load).strain[:, 0]
 
     target = FitTarget(
         load=load,
-        observations=[Observation(values=strain_computed, field="Strain", component=0)],
+        observations=[Observation(values=strain_computed, field="strain", component=0)],
         driver_factory=lambda i: StressDriver(i),
         name="ratchetting",
     )
@@ -180,7 +180,7 @@ def test_mixed_strain_and_stress_driven_targets(model, driver_factory):
     """Strain- and stress-driven targets coexist in one objective."""
     stress_hist = np.zeros((15, 6))
     stress_hist[:, 0] = np.linspace(0.0, 300.0, 15)
-    stress_load = FieldHistory(FieldType.STRESS, "Stress", stress_hist)
+    stress_load = FieldHistory(FieldType.STRESS, stress_hist)
     strain_computed = StressDriver(PythonIntegrator(model)).run(stress_load).strain[:, 0]
 
     targets = [
@@ -188,7 +188,7 @@ def test_mixed_strain_and_stress_driven_targets(model, driver_factory):
         FitTarget(
             load=stress_load,
             observations=[
-                Observation(values=strain_computed, field="Strain", component=0)
+                Observation(values=strain_computed, field="strain", component=0)
             ],
             driver_factory=lambda i: StressDriver(i),
             name="stress-controlled",
@@ -207,7 +207,7 @@ def test_mixed_strain_and_stress_driven_targets(model, driver_factory):
 
 def test_stress_and_state_observations_share_one_run(model, driver_factory):
     """σ11 and ep from the same run are both fitted."""
-    load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 8e-3, 25))
+    load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 8e-3, 25))
     run = StrainDriver(PythonIntegrator(model)).run(load)
     ep_computed = np.array([r.state["ep"] for r in run.step_results])
 
@@ -256,7 +256,7 @@ def test_fit_result_structure(model, driver_factory, synthetic_target):
     assert isinstance(result.params, dict)
     assert isinstance(result.residual, float)
     assert isinstance(result.success, bool)
-    assert isinstance(result.n_iter, int)
+    assert isinstance(result.n_evaluations, int)
     assert isinstance(result.message, str)
     assert isinstance(result.history, list)
     # All free + fixed params present

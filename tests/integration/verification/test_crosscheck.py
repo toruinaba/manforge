@@ -24,7 +24,7 @@ def model():
 
 @pytest.fixture
 def strain_load(model):
-    return FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
+    return FieldHistory(FieldType.STRAIN, generate_strain_history(model))
 
 
 def _pair(model):
@@ -74,7 +74,7 @@ class TestAgreement:
         assert "ok   stress" in text and "ok   state[ep]" in text and "ok   tangent" in text
 
     def test_no_step_compared_is_not_a_pass(self, model):
-        empty = FieldHistory(FieldType.STRAIN, "eps", np.zeros((0, 6)))
+        empty = FieldHistory(FieldType.STRAIN, np.zeros((0, 6)))
         result = crosscheck(*_pair(model), empty)
         assert not result.passed
         assert result.summary() == "crosscheck: no step was compared"
@@ -88,7 +88,7 @@ class TestDrivers:
     def test_stress_history_uses_the_stress_driver(self, model):
         sigma = np.zeros((12, 6))
         sigma[:, 0] = np.linspace(0.0, 320.0, 12)
-        load = FieldHistory(FieldType.STRESS, "sigma", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         result = crosscheck(*_pair(model), load)
         assert result.passed, result.summary()
         np.testing.assert_allclose(result.steps[-1].result_a.stress[0], 320.0, rtol=1e-8)
@@ -96,7 +96,7 @@ class TestDrivers:
     def test_driver_settings_travel_with_the_factory(self, model):
         sigma = np.zeros((6, 6))
         sigma[:, 0] = np.linspace(0.0, 320.0, 6)
-        load = FieldHistory(FieldType.STRESS, "sigma", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         seen = []
 
         def factory(integrator):
@@ -126,7 +126,7 @@ class TestDrivers:
         one = np.zeros((1, 6))
         one[0, 0] = 1e-3
         result = crosscheck(
-            *_pair(model), FieldHistory(FieldType.STRAIN, "eps", one),
+            *_pair(model), FieldHistory(FieldType.STRAIN, one),
             initial_stress=prestress, initial_state=state,
         )
         assert result.passed and result.n_steps == 1
@@ -174,12 +174,12 @@ class TestDisagreement:
 
         elastic = np.zeros((1, 6))
         elastic[0, 0] = 1e-7
-        result = crosscheck(weak, ok, FieldHistory(FieldType.STRAIN, "eps", elastic))
+        result = crosscheck(weak, ok, FieldHistory(FieldType.STRAIN, elastic))
         assert result.passed and result.n_a_nonconverged == 0
 
         plastic = np.zeros((1, 6))
         plastic[0, 0] = 5e-3
-        result = crosscheck(weak, ok, FieldHistory(FieldType.STRAIN, "eps", plastic))
+        result = crosscheck(weak, ok, FieldHistory(FieldType.STRAIN, plastic))
         assert not result.passed
         assert result.steps[0].a_converged is False and result.steps[0].b_converged is True
         assert result.n_a_nonconverged == 1 and result.n_b_nonconverged == 0
@@ -243,7 +243,7 @@ class TestLockstep:
         the increment it found."""
         sigma = np.zeros((10, 6))
         sigma[:, 0] = np.linspace(0.0, 320.0, 10)
-        load = FieldHistory(FieldType.STRESS, "sigma", sigma)
+        load = FieldHistory(FieldType.STRESS, sigma)
         result = crosscheck(*_pair(model), load, lockstep=True)
         assert result.passed, result.summary()
         assert any(s.result_b.is_plastic for s in result.steps)
@@ -254,7 +254,7 @@ class TestLockstep:
         one = np.zeros((1, 6))
         one[0, 0] = 1e-3
         result = crosscheck(
-            *_pair(model), FieldHistory(FieldType.STRAIN, "eps", one),
+            *_pair(model), FieldHistory(FieldType.STRAIN, one),
             initial_stress=np.array([200.0, 0, 0, 0, 0, 0.0]), initial_state=state,
             lockstep=True,
         )

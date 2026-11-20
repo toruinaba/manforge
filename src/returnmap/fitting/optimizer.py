@@ -51,7 +51,7 @@ class FitResult:
         Objective function value at the optimum.
     success : bool
         ``True`` if the optimiser reported convergence.
-    n_iter : int
+    n_evaluations : int
         Number of objective function evaluations.
     message : str
         Optimiser status message.
@@ -62,7 +62,7 @@ class FitResult:
         Evaluations the model could not complete, scored with the finite
         penalty ``FAILURE_PENALTY`` so the optimiser avoids that region.  A nonzero count is not itself a problem
         — the parameter box can legitimately include unsolvable values — but a
-        large fraction of ``n_iter`` means the search spent its budget there,
+        large fraction of ``n_evaluations`` means the search spent its budget there,
         so tighten the bounds or revisit the initial values.
     failure_message : str
         The first failure's exception text, empty when none occurred.
@@ -76,7 +76,7 @@ class FitResult:
     model: "MaterialModel"
     residual: float
     success: bool
-    n_iter: int
+    n_evaluations: int
     message: str = ""
     history: list[dict[str, float]] = field(default_factory=list)
     n_failed: int = 0
@@ -315,7 +315,7 @@ def fit_params(
         model=model.with_params(**model_params),
         residual=float(result.fun),
         success=bool(result.success),
-        n_iter=int(result.nfev),
+        n_evaluations=int(result.nfev),
         message=result.message if hasattr(result, "message") else "",
         history=history,
         n_failed=failures.n_failed,

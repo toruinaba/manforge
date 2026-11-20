@@ -442,7 +442,7 @@ class TestCrosscheckTrajectory:
         model, strain_history = yu_3d_scenario
         fc_int = _make_fc_int(fortran_mod, model)
         py_int = PythonAnalyticalIntegrator(model)
-        load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
+        load = FieldHistory(FieldType.STRAIN, strain_history)
 
         result = crosscheck(
             py_int, fc_int, load, stress_tol=1e-6, tangent_tol=1e-5, state_tol=1e-6)
