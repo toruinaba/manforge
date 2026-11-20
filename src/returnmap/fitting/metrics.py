@@ -25,6 +25,17 @@ MetricName: TypeAlias = Literal["mse", "pcm"]
 PCM_N_OFFSETS = 200
 """Number of candidate arc-length offsets, following Witowski & Stander."""
 
+PCM_RULER_PER_NOISE = 10.0
+"""Length of the ruler the experimental curve is measured with, in units of
+its estimated noise amplitude.
+
+Ten is where both errors of the measured length are small.  Shorter, and the
+noise still lengthens the curve; longer, and the ruler steps across the tips
+of load reversals.  Measured on a 20 000-point cyclic curve with noise of
+1.2 % of the stress range, the length came out +15 % at six noise amplitudes,
+−0.8 % at ten and −5 % at twenty.
+"""
+
 
 class PointwiseMetric(Protocol):
     """``metric(computed, expected, weights) -> float`` — needs matched sampling."""
@@ -68,6 +79,73 @@ def _arc_length(xy: FloatArray) -> tuple[FloatArray, FloatArray]:
     return seg, np.cumsum(seg)
 
 
+def _noise_amplitude(xy: FloatArray) -> FloatArray:
+    """Standard deviation of the point-to-point noise in x and in y.
+
+    Estimated from fourth differences along the curve.  A fourth difference
+    cancels any locally cubic trend, so on a smooth curve it is the noise
+    alone, with standard deviation ``sqrt(70) * sigma`` (the squared binomial
+    coefficients 1, 4, 6, 4, 1 sum to 70).  The median absolute deviation is
+    used rather than the variance so that the few points where the curve is
+    not smooth — the yield corner, a load reversal — do not count as noise.
+    A curve without noise gives zero, up to round-off.
+    """
+    if len(xy) < 9:
+        return np.zeros(2)
+    d4 = np.diff(xy, n=4, axis=0)
+    mad = np.median(np.abs(d4 - np.median(d4, axis=0)), axis=0)
+    return 1.4826 * mad / np.sqrt(70.0)
+
+
+def _measured_arc_length(xy: FloatArray) -> FloatArray:
+    """Cumulative arc length of a measured curve, with its noise taken out.
+
+    The polyline through noisy points is longer than the curve they were
+    measured on, and by an amount that grows with the sampling rate: every
+    point steps sideways by the noise amplitude, however short the step
+    along the curve.  Summing the segments of a densely sampled test curve
+    can give several times its real length.
+
+    The length is therefore taken with a ruler instead (the divider method):
+    walk along the points, and place the next mark at the first point at
+    least one ruler away from the last mark.  With the ruler
+    :data:`PCM_RULER_PER_NOISE` noise amplitudes long, the sideways steps no
+    longer matter.  What is left — each chord is still the distance between
+    two noisy points, so its square is too large by twice the noise variance
+    across it — is subtracted.
+
+    Only the *parameterisation* changes.  The points themselves are kept, so
+    the curve is compared at full resolution; each point between two marks is
+    placed between them in proportion to its index.  A curve without noise
+    has a ruler of zero length and gets its plain arc length.
+    """
+    seg = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+    sd = _noise_amplitude(xy)
+    ruler = PCM_RULER_PER_NOISE * float(np.hypot(sd[0], sd[1]))
+    if ruler <= 0.0 or ruler <= float(np.min(seg, initial=np.inf)):
+        # Every segment is already a ruler long: nothing to take out.
+        return np.concatenate([[0.0], np.cumsum(seg)])
+
+    marks = [0]
+    last = xy[0]
+    for i in range(1, len(xy)):
+        if np.hypot(xy[i, 0] - last[0], xy[i, 1] - last[1]) >= ruler:
+            marks.append(i)
+            last = xy[i]
+    if marks[-1] != len(xy) - 1:
+        marks.append(len(xy) - 1)
+
+    step = np.diff(xy[marks], axis=0)
+    chord = np.linalg.norm(step, axis=1)
+    direction = step / np.where(chord > 0.0, chord, 1.0)[:, None]
+    # Variance of the noise across the chord: x noise acts across a vertical
+    # chord, y noise across a horizontal one.
+    across = sd[0] ** 2 * direction[:, 1] ** 2 + sd[1] ** 2 * direction[:, 0] ** 2
+    chord = np.sqrt(np.maximum(chord ** 2 - 2.0 * across, 0.0))
+    at_marks = np.concatenate([[0.0], np.cumsum(chord)])
+    return np.interp(np.arange(len(xy)), marks, at_marks)
+
+
 def partial_curve_mapping(computed: FloatArray, expected: FloatArray) -> float:
     """Normalised area between two curves, minimised over arc-length offset.
 
@@ -76,9 +154,10 @@ def partial_curve_mapping(computed: FloatArray, expected: FloatArray) -> float:
     (AIAA 2012-5580).  Both arguments are ``(N, 2)`` arrays of (x, y) points;
     ``N`` need not match between them.
 
-    Both curves are min-max normalised against the *experimental* ranges, so
-    the measure is asymmetric by construction — that is the published
-    intent, not an accident.  The shorter curve (by arc length) is swept along
+    ``expected`` is the measured curve and may be noisy; ``computed`` is taken
+    to be exact.  Both curves are min-max normalised against the
+    *experimental* ranges, so the measure is asymmetric by construction — that
+    is the published intent, not an accident.  The shorter curve (by arc length) is swept along
     the longer one and the smallest enclosed area is returned, which is what
     makes the comparison "partial": a computed curve extending beyond the
     experimental range is not penalised for the excess.
@@ -90,6 +169,23 @@ def partial_curve_mapping(computed: FloatArray, expected: FloatArray) -> float:
     length.  That makes its return value scale linearly with the point count
     rather than converging to an area.  This implementation uses the segment
     length, so the result is invariant to resampling.
+
+    Measurement noise.  The two curves are matched at equal arc length, and
+    the polyline through noisy points is longer than the curve itself — the
+    more densely it is sampled, the longer.  Taken at face value that
+    mismatch decides the result: against a 2000-point cyclic test curve with
+    noise of 0.4 % of the stress range, the plain arc length is half as long
+    again (ten times as long at 20 000 points), the computed curve is matched
+    to the wrong part of the test, and a model with the yield stress at
+    nearly twice its true value scores *better* than the true one.  The experimental arc length is therefore measured
+    with a ruler ten noise amplitudes long (``_measured_arc_length``); the
+    noise amplitude is estimated from the curve itself.  A curve without
+    noise is unaffected.  The price is resolution at the scale of the ruler,
+    which steps across yield corners and the tips of load reversals: with
+    noise of 0.4 % of the range the measured length comes out about 1 % short,
+    and a few per cent short once the noise exceeds 1 %.  The value at the
+    true parameters is then 0.01–0.05 rather than zero, and differences
+    between models smaller than that are not resolved.
 
     Because the comparison is geometric, a coarsely incremented simulation
     does not merely add a constant offset: where the response has a corner
@@ -124,13 +220,11 @@ def partial_curve_mapping(computed: FloatArray, expected: FloatArray) -> float:
     # [0, 1] and collapse the offset range to zero, silently removing the
     # partial match this metric exists to provide.
     long_curve, short_curve = norm_exp, norm_comp
-    seg_long, cum_long = _arc_length(long_curve)
-    seg_short, cum_short = _arc_length(short_curve)
+    cum_long = _measured_arc_length(long_curve)
+    _, cum_short = _arc_length(short_curve)
     if cum_short[-1] > cum_long[-1]:
         long_curve, short_curve = short_curve, long_curve
-        seg_long, cum_long, seg_short, cum_short = (
-            seg_short, cum_short, seg_long, cum_long,
-        )
+        cum_long, cum_short = cum_short, cum_long
     if cum_short[-1] == 0.0:
         raise ValueError("cannot compute arc length of a zero-length curve")
 
@@ -141,7 +235,7 @@ def partial_curve_mapping(computed: FloatArray, expected: FloatArray) -> float:
     # sub-portion of the longer one.  Weights are segment lengths -- the
     # trapezoid widths -- divided by the total so the result is a mean width,
     # invariant to how finely either curve is sampled.
-    weights = seg_short[1:] / cum_short[-1]
+    weights = np.diff(cum_short) / cum_short[-1]
 
     areas = []
     for offset in offsets:
