@@ -16,10 +16,6 @@ ALL = [getattr(models, name) for name in models.__all__]
 CONCRETE = [cls for cls in ALL if cls.__name__.endswith(("3D", "PS", "1D"))]
 
 
-def at_defaults(cls):
-    return cls(**{name: cls.param_meta[name].default for name in cls.param_names})
-
-
 @pytest.mark.parametrize("cls", ALL, ids=lambda cls: cls.__name__)
 def test_every_parameter_is_described(cls):
     assert list(cls.param_meta) == list(cls.param_names)
@@ -34,7 +30,7 @@ def test_every_parameter_is_described(cls):
 @pytest.mark.parametrize("cls", CONCRETE, ids=lambda cls: cls.__name__)
 def test_the_default_parameters_run(cls):
     """A tension-compression cycle at the defaults converges and goes plastic."""
-    model = at_defaults(cls)
+    model = cls.at_defaults()
     load = FieldHistory.cyclic_strain([0.01, -0.01], n_per_segment=10, ntens=model.ntens)
     result = StrainDriver(PythonIntegrator(model)).run(load)
     assert result.converged

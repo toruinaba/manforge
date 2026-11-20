@@ -132,13 +132,7 @@ def default_registry() -> ModelRegistry:
     from returnmap.models import J2Isotropic1D, AFKinematic1D, OWKinematic1D
 
     reg = ModelRegistry()
-    for name, cls in (
-        ("j2_isotropic", J2Isotropic1D),
-        ("af_kinematic", AFKinematic1D),
-        ("ow_kinematic", OWKinematic1D),
-    ):
-        defaults = {p: cls.param_meta[p].default for p in cls.param_names}
-        # The keys are param_names, so none of them is the constructor's other
-        # keyword (dimension); every reference model declares all its defaults.
-        reg.register(name, cls(**defaults))  # pyright: ignore[reportArgumentType]
+    reg.register("j2_isotropic", J2Isotropic1D.at_defaults())
+    reg.register("af_kinematic", AFKinematic1D.at_defaults())
+    reg.register("ow_kinematic", OWKinematic1D.at_defaults())
     return reg

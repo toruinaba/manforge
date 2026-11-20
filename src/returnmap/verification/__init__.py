@@ -5,6 +5,8 @@ verdict and ``report.summary()`` the table behind it, so a test reads
 ``assert report.passed, report.summary()`` whichever check it uses.
 
 ==========================  ====================================================
+:func:`check_model`         every check below that applies to a model, in one
+                            call
 :func:`check_hand_blocks`   hand-derived Jacobian blocks against autodiff
 :func:`check_solution`      a hand-written return mapping's solutions against
                             the framework residual
@@ -56,8 +58,19 @@ from returnmap.verification.crosscheck import (
     CrosscheckReport,
     CrosscheckStep,
 )
+from returnmap.verification.model import (
+    ModelCheck,
+    ModelReport,
+    check_model,
+    standard_histories,
+)
 
 __all__ = [
+    # Every check that applies to a model
+    "check_model",
+    "ModelReport",
+    "ModelCheck",
+    "standard_histories",
     # Hand-derived Jacobian blocks against autodiff
     "check_hand_blocks",
     "HandBlockReport",

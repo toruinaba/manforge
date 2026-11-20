@@ -647,6 +647,47 @@ def test_non_parameter_setting_goes_through_an_init_override():
         J2IsotropicDamageUnilateral3D(c=0.25, **_DMG, p_D=0.0)
 
 
+def test_at_defaults_builds_the_model_at_its_documented_values():
+    from returnmap.core import PLANE_STRAIN
+    from returnmap.models import AFKinematic, AFKinematic1D
+
+    model = AFKinematic1D.at_defaults()
+    assert type(model) is AFKinematic1D
+    assert model.params == {
+        name: meta.default for name, meta in AFKinematic1D.param_meta.items()
+    }
+    # Named parameters replace their defaults; the dimension is passed on.
+    other = AFKinematic.at_defaults(dimension=PLANE_STRAIN, gamma=50.0)
+    assert other.dimension is PLANE_STRAIN
+    assert other.gamma == 50.0 and other.C_k == model.C_k
+
+
+def test_at_defaults_names_the_parameters_without_a_default():
+    """Nothing is filled in silently: a parameter with no documented value
+    has to be given."""
+    from returnmap.core import Explicit, ParamMeta, SCALAR, UNIAXIAL_1D
+
+    class Partial(MaterialModel):
+        param_names = ["E", "nu", "sigma_y0", "H"]
+        param_meta = {"E": ParamMeta(doc="Young's modulus", default=200e3),
+                      "nu": ParamMeta(doc="Poisson's ratio")}
+        dimension = UNIAXIAL_1D
+        ep = Explicit(shape=SCALAR)
+
+        def yield_function(self, state):
+            return abs(state["stress"][0]) - self.sigma_y0
+
+        def update_state(self, new, dlambda, inc):
+            return [self.ep(inc.state_n["ep"] + dlambda)]
+
+    with pytest.raises(TypeError, match=r"no default declared for \['nu', 'sigma_y0', 'H'\]"):
+        Partial.at_defaults()
+    model = Partial.at_defaults(nu=0.3, sigma_y0=250.0, H=1e3)
+    assert model.params == {"E": 200e3, "nu": 0.3, "sigma_y0": 250.0, "H": 1e3}
+    with pytest.raises(TypeError, match="unexpected"):
+        Partial.at_defaults(nu=0.3, sigma_y0=250.0, H=1e3, bogus=1.0)
+
+
 def test_state_cannot_be_named_strain():
     """history("strain") is the run's total strain; a state of that name would be shadowed."""
     from returnmap.core import Explicit, NTENS

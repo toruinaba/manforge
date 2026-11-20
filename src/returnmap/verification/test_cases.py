@@ -90,8 +90,10 @@ def estimate_yield_strain(model) -> float:
             break
         eps_hi *= 10.0
     else:
-        C_diag_max = float(np.max(np.abs(np.diag(C))))
-        return 1.0 / C_diag_max
+        # The yield function does not read the stress that was set: the model
+        # yields on another state (an effective stress its elastic predictor
+        # advances).  Ask the integrator instead where a step turns plastic.
+        return _yield_strain_by_stress_update(model, e1)
 
     eps_lo = 0.0
     for _ in range(60):
@@ -105,6 +107,37 @@ def estimate_yield_strain(model) -> float:
 
     return (eps_lo + eps_hi) / 2.0
 
+
+
+def _yield_strain_by_stress_update(model, direction) -> float:
+    """Strain along ``direction`` at which one step from rest first turns plastic."""
+    from returnmap.simulation.integrator import PythonNumericalIntegrator
+
+    integrator = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
+    stress_0 = np.zeros(model.ntens)
+
+    def plastic(eps: float) -> bool:
+        result = integrator.stress_update(eps * direction, stress_0, model.initial_state())
+        return bool(result.is_plastic)
+
+    eps_hi = 1e-6
+    for _ in range(60):
+        if plastic(eps_hi):
+            break
+        eps_hi *= 10.0
+    else:
+        raise ValueError(
+            f"{type(model).__name__} does not yield along the first strain "
+            "component at any strain up to 1e54; give eps_y explicitly"
+        )
+    eps_lo = eps_hi / 10.0 if eps_hi > 1e-6 else 0.0
+    for _ in range(60):
+        eps_mid = 0.5 * (eps_lo + eps_hi)
+        if plastic(eps_mid):
+            eps_hi = eps_mid
+        else:
+            eps_lo = eps_mid
+    return 0.5 * (eps_lo + eps_hi)
 
 
 def generate_strain_history(model, eps_y=None) -> np.ndarray:
