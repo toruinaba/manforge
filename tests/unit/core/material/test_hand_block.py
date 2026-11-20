@@ -29,6 +29,65 @@ def test_approx_needs_a_reason():
         hand_block("ep", "ep", approx=1e-2, note="   ")
 
 
+def test_approx_when_needs_a_reason_too():
+    with pytest.raises(ValueError, match="needs a note"):
+        hand_block("ep", "ep", approx_when="going_back")
+    record = hand_block("ep", "ep", approx_when="going_back", note="why")(lambda self: 1.0)
+    assert record.__hand_block__.approx_when == "going_back"
+    assert record.__hand_block__.approx is None
+
+
+def test_approx_when_names_a_method_of_the_model():
+    """Checked when the class is created, like the block's own arguments."""
+    with pytest.raises(TypeError, match="approx_when='no_such' names no method of _Missing"):
+        class _Missing(OWKinematic3D):
+            @hand_block("ep", "ep", approx_when="no_such", note="why")
+            def dRep_dep(self):
+                return 1.0
+
+    with pytest.raises(TypeError, match=r"_BadArgs.when: an approx_when condition takes \['step'\]"):
+        class _BadArgs(OWKinematic3D):
+            def when(self, step):
+                return False
+
+            @hand_block("ep", "ep", approx_when="when", note="why")
+            def dRep_dep(self):
+                return 1.0
+
+
+def test_hand_tangent_declares_an_approximate_tangent():
+    from returnmap.core import HandTangent, hand_tangent
+
+    class _Declared(J2Isotropic3D):
+        def going_back(self, inc):
+            return inc.strain_inc[0] < 0.0
+
+        @hand_tangent(approx=1e-2, approx_when="going_back", note="why")
+        def user_defined_tangent(self, new, dlambda, inc):
+            return super().user_defined_tangent(new, dlambda, inc)
+
+    record = _Declared.user_defined_tangent.__hand_tangent__
+    assert record == HandTangent(approx=1e-2, approx_when="going_back", note="why")
+    # Undeclared means exact: the parent makes no claim.
+    assert not hasattr(J2Isotropic3D.user_defined_tangent, "__hand_tangent__")
+
+
+def test_hand_tangent_is_validated():
+    from returnmap.core import hand_tangent
+
+    with pytest.raises(ValueError, match="an exact tangent needs no declaration"):
+        hand_tangent(note="why")
+    with pytest.raises(ValueError, match="needs a note"):
+        hand_tangent(approx=1e-2)
+    with pytest.raises(ValueError, match="approx must be > 0"):
+        hand_tangent(approx=-1.0, note="why")
+    with pytest.raises(TypeError, match="approx_when='no_such' names no method"):
+        class _Missing(J2Isotropic3D):
+            @hand_tangent(approx_when="no_such", note="why")
+            def user_defined_tangent(self, new, dlambda, inc):
+                return super().user_defined_tangent(new, dlambda, inc)
+
+
 def test_approx_must_be_positive():
     with pytest.raises(ValueError, match="approx must be > 0"):
         hand_block("ep", "ep", approx=0.0, note="x")

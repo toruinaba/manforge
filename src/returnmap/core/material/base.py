@@ -21,6 +21,8 @@ from returnmap.core.dimension import SOLID_3D, StressDimension
 from returnmap.core.material.fortran_binding import collect_bindings as _collect_bindings
 from returnmap.core.material.hand_block import (
     collect_hand_blocks as _collect_hand_blocks,
+    hand_tangent_record as _hand_tangent_record,
+    validate_condition as _validate_condition,
     validate_hand_blocks as _validate_hand_blocks,
 )
 from returnmap.core.material.meta import ParamMeta
@@ -520,6 +522,10 @@ class MaterialModel(ABC):
         )
         cls._hand_blocks = _collect_hand_blocks(cls)
         _validate_hand_blocks(cls, cls._hand_blocks, rows, unknowns)
+        tangent = _hand_tangent_record(cls)
+        if tangent is not None:
+            _validate_condition(
+                cls, tangent.approx_when, f"{cls.__name__}.user_defined_tangent")
 
     @property
     def ntens(self) -> int:

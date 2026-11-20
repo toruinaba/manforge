@@ -75,3 +75,35 @@ class OWWithApproxBlock(OWWithHandBlocks):
     @hand_block("ep", "ep", approx=1e-2, note="deliberately off by 1e-3 for the test")
     def dRep_dep(self):
         return 1.0 + 1e-3
+
+
+class OWWithConditionalBlock(OWWithHandBlocks):
+    """A block that is off only while the first strain component decreases,
+    and declares exactly that."""
+
+    def going_back(self, inc):
+        return inc.strain_inc[0] < 0.0
+
+    @hand_block("ep", "ep", approx_when="going_back",
+                note="deliberately off by half while going back, for the test")
+    def dRep_dep(self, inc):
+        return 1.5 if self.going_back(inc) else 1.0
+
+
+class OWWithConditionalBlockHeldTo(OWWithConditionalBlock):
+    """The same block, with the deviation on those steps bounded as well."""
+
+    @hand_block("ep", "ep", approx=0.6, approx_when="going_back",
+                note="deliberately off by half while going back, for the test")
+    def dRep_dep(self, inc):
+        return 1.5 if self.going_back(inc) else 1.0
+
+
+class OWWithConditionTooNarrow(OWWithConditionalBlock):
+    """Off on every step, but declared approximate only while going back."""
+
+    @hand_block("ep", "ep", approx_when="going_back",
+                note="deliberately off by half while going back, for the test")
+    def dRep_dep(self):
+        return 1.5
+

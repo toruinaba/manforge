@@ -307,6 +307,77 @@ class TestCheckHandBlocks:
         report = check_hand_blocks(m, self._results(m))
         assert [b.method for b in report.failed] == ["dRep_dep"]
 
+    @staticmethod
+    def _there_and_back(model, n=8):
+        """ε11 up and down again, with shear, so some plastic steps go back."""
+        from returnmap.simulation import StrainDriver, FieldHistory, FieldType
+
+        up = np.linspace(0.0, 1.0, n + 1)[1:]
+        t = np.concatenate([up, 1.0 - up])
+        data = np.zeros((2 * n, 6))
+        data[:, 0] = 4e-3 * t
+        data[:, 3] = 3e-3 * np.linspace(0.0, 1.0, 2 * n)
+        load = FieldHistory(FieldType.STRAIN, data)
+        return StrainDriver(PythonNumericalIntegrator(model)).run(load).step_results
+
+    def test_a_block_approximate_on_some_steps_is_exact_on_the_others(self):
+        """approx_when: those steps are left out and counted, the rest held exact."""
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithConditionalBlock
+
+        m = OWWithConditionalBlock(**OW_PARAMS)
+        results = self._there_and_back(m)
+        n_back = sum(bool(r.is_plastic) and r.increment.strain_inc[0] < 0 for r in results)
+        report = check_hand_blocks(m, results)
+
+        block = report.blocks[("ep", "ep")]
+        assert 0 < n_back < report.n_points
+        assert block.n_approx_points == n_back
+        assert block.approx_err == pytest.approx(0.5)      # off by half there
+        assert block.approx_tol is None                     # and held to nothing there
+        assert block.worst_err < 1e-12 and block.tol == 1e-8   # exact everywhere else
+        assert block.approx and report.passed, report.summary()
+        assert (f"(approx at {n_back} of {report.n_points} points, 5.0e-01 there: "
+                "deliberately off by half") in report.summary()
+        # The other blocks have no condition and are not touched by it.
+        assert all(b.n_approx_points == 0 for key, b in report.blocks.items()
+                   if key != ("ep", "ep"))
+
+    def test_the_condition_is_not_a_blanket(self):
+        """Off on every step but declared only for some: the others fail."""
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithConditionTooNarrow
+
+        m = OWWithConditionTooNarrow(**OW_PARAMS)
+        report = check_hand_blocks(m, self._there_and_back(m))
+        assert [b.method for b in report.failed] == ["dRep_dep"]
+        assert report.blocks[("ep", "ep")].worst_err == pytest.approx(0.5)
+
+    @pytest.mark.parametrize("approx, passes", [(0.6, True), (0.1, False)])
+    def test_with_approx_the_declared_steps_are_held_to_it(self, approx, passes):
+        from returnmap.core import hand_block
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithConditionalBlock
+
+        class _HeldTo(OWWithConditionalBlock):
+            @hand_block("ep", "ep", approx=approx, approx_when="going_back", note="for the test")
+            def dRep_dep(self, inc):
+                return 1.5 if self.going_back(inc) else 1.0
+
+        m = _HeldTo(**OW_PARAMS)
+        report = check_hand_blocks(m, self._there_and_back(m))
+        block = report.blocks[("ep", "ep")]
+        assert block.approx_tol == approx and block.tol == 1e-8
+        assert block.passed is passes
+        if passes:
+            assert f"held to {approx:.0e}" in report.summary()
+
+    def test_a_condition_that_never_holds_changes_nothing(self):
+        from tests.fixtures.hand_block_models import OW_PARAMS, OWWithConditionalBlock
+
+        m = OWWithConditionalBlock(**OW_PARAMS)
+        report = check_hand_blocks(m, self._results(m))     # ε11 only increases
+        block = report.blocks[("ep", "ep")]
+        assert block.n_approx_points == 0 and block.worst_err < 1e-12
+        assert report.passed
+
     def test_nothing_checked_is_an_error_not_a_pass(self, model):
         from tests.fixtures.hand_block_models import OW_PARAMS, OWWithHandBlocks
 

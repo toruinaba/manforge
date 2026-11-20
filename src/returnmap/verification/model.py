@@ -54,6 +54,9 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from returnmap.core.material import MaterialModel
+from returnmap.core.material.hand_block import (
+    HandTangent, condition_holds, hand_block_record, hand_tangent_record,
+)
 from returnmap.simulation.driver import StrainDriver
 from returnmap.simulation.integrator import (
     PythonAnalyticalIntegrator, PythonNumericalIntegrator,
@@ -120,11 +123,16 @@ class ModelReport:
     histories : dict[str, int]
         The loading histories used, with the number of plastic steps the
         autodiff path took on each.
+    approximations : list[str]
+        The reasons the model gives for the approximations it declares
+        (``hand_block(..., note=)``, ``hand_tangent(..., note=)``) — listed
+        whether or not a step of these histories fell under them.
     """
 
     model: str
     checks: list[ModelCheck]
     histories: dict[str, int]
+    approximations: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -154,6 +162,7 @@ class ModelReport:
                 f"{name} ({n} plastic steps)" for name, n in self.histories.items()
             )
         )
+        lines += [f"  declared approximate: {note}" for note in self.approximations]
         return "\n".join(lines)
 
     def __str__(self) -> str:
@@ -226,23 +235,72 @@ def _tangent_points(results: list["StressUpdateResult"], n: int) -> list["Stress
     return [plastic[i] for i in picks]
 
 
+def _declared_approximate(
+    model: MaterialModel, declared: HandTangent | None, result: "StressUpdateResult",
+) -> bool:
+    """Whether the model declares its hand-written tangent approximate at this step."""
+    if declared is None or declared.approx_when is None:
+        return False
+    return condition_holds(
+        model, declared.approx_when,
+        state=result.state, dlambda=result.dlambda, inc=result.increment,
+    )
+
+
+def _approx_note(n: int, declared: HandTangent | None) -> str:
+    return f"; {n} step(s) declared approximate" if n and declared else ""
+
+
 def _check_tangents(
     integrator: "StressIntegrator", runs: Mapping[str, list], n_points: int, tol: float,
+    model: MaterialModel | None = None, declared: HandTangent | None = None,
 ) -> tuple[Status, str, dict]:
+    """Difference the tangent at a few plastic steps of each history.
+
+    ``declared`` is the model's ``hand_tangent`` declaration when the tangent
+    being checked is the hand-written one: an ``approx`` without a condition
+    is the tolerance at every step; with ``approx_when``, the steps the
+    condition holds on are held to ``approx`` — or left out, if none is given
+    — and the rest to ``tol``.
+    """
+    exact_tol = tol
+    if declared is not None and declared.approx_when is None and declared.approx is not None:
+        exact_tol = declared.approx             # approximate at every step
     reports = {}
+    n_approx = 0
+    ok = True
     for name, results in runs.items():
         for k, r in enumerate(_tangent_points(results, n_points)):
             inc = r.increment
             assert inc is not None, "a Python integrator's result carries its increment"
             state_n = dict(inc.state_n.as_dict())
-            reports[f"{name}[{k}]"] = check_tangent(
-                integrator, inc.strain_inc, state_n["stress"], state_n, tol=tol,
+            approximate = model is not None and _declared_approximate(model, declared, r)
+            step_tol = exact_tol
+            if approximate:
+                n_approx += 1
+                assert declared is not None
+                if declared.approx is None:
+                    continue                    # left out of the judgement
+                step_tol = declared.approx
+            report = check_tangent(
+                integrator, inc.strain_inc, state_n["stress"], state_n, tol=step_tol,
             )
+            reports[f"{name}[{k}]"] = report
+            ok = ok and report.passed
     if not reports:
+        if n_approx:
+            return "failed", (
+                f"all {n_approx} sampled steps are declared approximate — "
+                "the tangent was held to nothing"
+            ), reports
         return "failed", "no plastic step to check a tangent at", reports
-    worst = _worst([r.max_rel_err for r in reports.values()])
-    status: Status = "passed" if all(r.passed for r in reports.values()) else "failed"
-    return status, f"{worst:.1e} (tol {tol:.0e}) at {len(reports)} plastic steps", reports
+    exact = [r.max_rel_err for r in reports.values() if r.tol == exact_tol]
+    worst = _worst(exact) if exact else 0.0
+    detail = (
+        f"{worst:.1e} (tol {exact_tol:.0e}) at {len(exact)} plastic steps"
+        + _approx_note(n_approx, declared)
+    )
+    return ("passed" if ok else "failed"), detail, reports
 
 
 def check_model(
@@ -304,6 +362,13 @@ def check_model(
             "for a class, check cls.at_defaults()"
         )
     cls = type(model)
+    notes = [
+        hand_block_record(cls, name).note for name in getattr(cls, "_hand_blocks", {}).values()
+    ]
+    tangent_record = hand_tangent_record(cls)
+    if tangent_record is not None:
+        notes.append(tangent_record.note)
+    approximations = list(dict.fromkeys(note for note in notes if note))
     if histories is None:
         histories = {**standard_histories(model), **_declared_histories(model)}
     if not histories:
@@ -355,13 +420,16 @@ def check_model(
         plastic = [r for rs in runs.values() for r in rs if r.is_plastic]
         if plastic:
             report = check_hand_blocks(model, plastic, tol=block_tol)
-            exact = [b.worst_err for b in report.blocks.values() if not b.approx]
+            exact = [b.worst_err for b in report.blocks.values() if b.tol == block_tol]
             worst = _worst(exact) if exact else 0.0
-            n_approx = sum(bool(b.approx) for b in report.blocks.values())
+            everywhere = sum(b.approx and b.tol != block_tol for b in report.blocks.values())
+            on_steps = [b for b in report.blocks.values() if b.n_approx_points]
             detail = (
                 f"{worst:.1e} (tol {block_tol:.0e}) over {len(report.blocks)} blocks "
                 f"at {report.n_points} plastic steps"
-                + (f"; {n_approx} declared approximate" if n_approx else "")
+                + (f"; {everywhere} declared approximate" if everywhere else "")
+                + (f"; {len(on_steps)} declared approximate on "
+                   f"{max(b.n_approx_points for b in on_steps)} step(s)" if on_steps else "")
             )
             checks.append(ModelCheck(
                 "hand blocks", "passed" if report.passed else "failed", detail,
@@ -381,7 +449,7 @@ def check_model(
             ModelCheck("hand-written vs autodiff", "not declared", reason),
             ModelCheck("hand-written tangent", "not declared", reason),
         ]
-        return ModelReport(cls.__name__, checks, n_plastic)
+        return ModelReport(cls.__name__, checks, n_plastic, approximations)
 
     analytical = PythonAnalyticalIntegrator(model, raise_on_nonconverged=False)
     hand_runs: dict[str, list] = {}
@@ -402,20 +470,51 @@ def check_model(
         checks.append(ModelCheck(
             "hand-written solution", "failed", "the hand-written path took no plastic step"))
 
+    # The hand-written tangent may be declared an approximation (hand_tangent):
+    # everywhere, to a tolerance; or on the steps a condition names.
+    declared = hand_tangent_record(cls)
+    cc_tangent_tol = 10.0 * stress_tol
+    if declared is not None and declared.approx_when is None and declared.approx is not None:
+        cc_tangent_tol = declared.approx
     reports = {
         name: crosscheck(
             numerical, analytical, load,
-            stress_tol=stress_tol, state_tol=stress_tol, tangent_tol=10.0 * stress_tol,
+            stress_tol=stress_tol, state_tol=stress_tol, tangent_tol=cc_tangent_tol,
         )
         for name, load in histories.items()
     }
+
+    def only_the_declared_tangent_is_off(step) -> bool:
+        """A step that disagrees in nothing but a tangent declared approximate there."""
+        if not (step.a_converged and step.b_converged):
+            return False
+        if step.stress_rel_err > stress_tol or any(
+            e > stress_tol for e in step.state_rel_err.values()
+        ):
+            return False
+        if not _declared_approximate(model, declared, step.result_b):
+            return False
+        assert declared is not None
+        return declared.approx is None or step.tangent_rel_err <= declared.approx
+
+    excused = {
+        name: [s for s in r.steps if not s.passed and only_the_declared_tangent_is_off(s)]
+        for name, r in reports.items()
+    }
+    n_excused = sum(len(steps) for steps in excused.values())
+    all_agree = all(
+        r.n_steps > 0 and r.n_steps - r.n_passed == len(excused[name])
+        for name, r in reports.items()
+    )
     stress = _worst([r.max_stress_rel_err for r in reports.values()])
     state = _worst([e for r in reports.values() for e in r.max_state_rel_err.values()] or [0.0])
-    tangents = [r.max_tangent_rel_err for r in reports.values()
-                if r.max_tangent_rel_err is not None]
+    tangents = [
+        s.tangent_rel_err for name, r in reports.items() for s in r.steps
+        if s.tangent_rel_err is not None and s not in excused[name]
+    ]
     detail = f"stress {stress:.1e}, state {state:.1e} (tol {stress_tol:.0e})"
     if tangents:
-        detail += f", tangent {_worst(tangents):.1e} (tol {10.0 * stress_tol:.0e})"
+        detail += f", tangent {_worst(tangents):.1e} (tol {cc_tangent_tol:.0e})"
     stopped_at = [
         f"{name} step {r.first_failure.index}" for name, r in reports.items()
         if r.first_failure is not None
@@ -425,18 +524,18 @@ def check_model(
         detail += f"; not converged at {', '.join(stopped_at)}"
     checks.append(ModelCheck(
         "hand-written vs autodiff",
-        "passed" if all(r.passed for r in reports.values()) else "failed",
-        detail + f" over {len(reports)} histories",
+        "passed" if all_agree else "failed",
+        detail + f" over {len(reports)} histories" + _approx_note(n_excused, declared),
         reports,
     ))
 
     if cls.user_defined_tangent is not MaterialModel.user_defined_tangent:
         status, detail, reports = _check_tangents(
-            analytical, hand_runs, n_tangent_points, tangent_tol)
+            analytical, hand_runs, n_tangent_points, tangent_tol, model, declared)
         checks.append(ModelCheck("hand-written tangent", status, detail, reports))
     else:
         checks.append(ModelCheck(
             "hand-written tangent", "not declared",
             "no user_defined_tangent on the model (the tangent is the autodiff one)",
         ))
-    return ModelReport(cls.__name__, checks, n_plastic)
+    return ModelReport(cls.__name__, checks, n_plastic, approximations)

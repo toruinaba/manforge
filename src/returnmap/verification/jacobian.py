@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from returnmap.core.material.hand_block import hand_block_record
+from returnmap.core.material.hand_block import condition_holds, hand_block_record
 from returnmap.core.result import StressUpdateResult
 from returnmap.simulation.jacobian import (
     JacobianBlocks,
@@ -55,12 +55,22 @@ class HandBlockCheck:
         Index, in the checked sequence, of the point with the largest
         difference.
     tol : float
-        What the block is held to: the declared ``approx`` for a deliberate
-        approximation, otherwise the tolerance of the check.
+        What the block is held to: the declared ``approx`` for a block that
+        is an approximation at every step, otherwise the tolerance of the
+        check.
     approx : bool
-        Whether the block is declared an approximation.
+        Whether the block is declared an approximation (at every step, or on
+        the steps its ``approx_when`` condition names).
     note : str
         The declared reason for the approximation.
+    n_approx_points : int
+        Steps on which the block's ``approx_when`` condition held.  They are
+        not part of ``worst_err``.
+    approx_err : float
+        The largest error over those steps (0 if there were none).
+    approx_tol : float or None
+        What those steps are held to: the declared ``approx``, or ``None``
+        when they are left out of the judgement.
     """
 
     row: str
@@ -71,9 +81,14 @@ class HandBlockCheck:
     tol: float
     approx: bool
     note: str
+    n_approx_points: int = 0
+    approx_err: float = 0.0
+    approx_tol: float | None = None
 
     @property
     def passed(self) -> bool:
+        if self.approx_tol is not None and not self.approx_err <= self.approx_tol:
+            return False
         return self.worst_err <= self.tol
 
 
@@ -123,7 +138,15 @@ class HandBlockReport:
         ]
         for b in sorted(self.blocks.values(), key=lambda b: -b.worst_err):
             mark = "ok  " if b.passed else "FAIL"
-            tail = f"  (approx: {b.note})" if b.approx else ""
+            tail = ""
+            if b.n_approx_points:
+                held = "" if b.approx_tol is None else f", held to {b.approx_tol:.0e}"
+                tail = (
+                    f"  (approx at {b.n_approx_points} of {self.n_points} points, "
+                    f"{b.approx_err:.1e} there{held}: {b.note})"
+                )
+            elif b.approx:
+                tail = f"  (approx: {b.note})"
             lines.append(
                 f"  {mark} [{b.row}][{b.col}] {b.method}: "
                 f"{b.worst_err:.3e} (tol {b.tol:.0e}, worst at point {b.worst_at}){tail}"
@@ -291,6 +314,10 @@ def check_hand_blocks(
     diff: dict[tuple[str, str], float] = {}
     at: dict[tuple[str, str], int] = {}
     own: dict[tuple[str, str], float] = {}
+    # The same, over the steps a block's approx_when condition holds on.
+    records = {key: hand_block_record(type(model), name) for key, name in declared.items()}
+    approx_diff: dict[tuple[str, str], float] = {}
+    n_approx: dict[tuple[str, str], int] = {}
     row_size: dict[str, float] = {}
     col_size: dict[str, float] = {}
     rows: tuple[str, ...] = ()
@@ -312,22 +339,39 @@ def check_hand_blocks(
         for key, got in hand.items():
             ref = np.asarray(reference.part[key[0]][key[1]], dtype=float)
             d = as_error(max_abs(got - ref))
+            own[key] = float(np.fmax(own.get(key, 0.0), max_abs(ref)))
+            if condition_holds(
+                model, records[key].approx_when,
+                state=result.state, dlambda=result.dlambda, inc=inc,
+            ):
+                # Declared an approximation on this step: kept apart from the
+                # steps the block is exact on.
+                n_approx[key] = n_approx.get(key, 0) + 1
+                approx_diff[key] = float(np.fmax(approx_diff.get(key, 0.0), d))
+                continue
             if key not in diff or d > diff[key]:
                 diff[key], at[key] = d, i
-            own[key] = float(np.fmax(own.get(key, 0.0), max_abs(ref)))
     if n_points == 0:
         raise ValueError("no plastic step in results — no hand block was evaluated")
 
     checks = {}
     for key, name in declared.items():
-        record = hand_block_record(type(model), name)
+        record = records[key]
+        scale = _block_scale(own[key], row_size[key[0]], col_size[key[1]])
+        conditional = record.approx_when is not None
         checks[key] = HandBlockCheck(
             row=key[0], col=key[1], method=name,
-            worst_err=rel_err(
-                diff[key], _block_scale(own[key], row_size[key[0]], col_size[key[1]])),
-            worst_at=at[key],
-            tol=tol if record.approx is None else record.approx,
-            approx=record.approx is not None, note=record.note,
+            # No step outside the condition means nothing was held to the
+            # exact tolerance; the summary says so (approx at n of n points).
+            worst_err=rel_err(diff[key], scale) if key in diff else 0.0,
+            worst_at=at.get(key, -1),
+            # approx alone applies everywhere; with a condition it applies
+            # only where the condition holds, and the rest stays exact.
+            tol=tol if record.approx is None or conditional else record.approx,
+            approx=record.approx is not None or conditional, note=record.note,
+            n_approx_points=n_approx.get(key, 0),
+            approx_err=rel_err(approx_diff[key], scale) if key in approx_diff else 0.0,
+            approx_tol=record.approx if conditional else None,
         )
     undeclared = [(r, c) for r in rows for c in cols if (r, c) not in declared]
     return HandBlockReport(blocks=checks, undeclared=undeclared, n_points=n_points)

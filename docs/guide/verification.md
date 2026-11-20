@@ -96,7 +96,35 @@ class MyModel(MaterialModel):
     def dRa_dl(self, state, dlambda, state_n): ...
 ```
 
-   引数は名前で埋められる (`state` = 評価点の状態、`dlambda`、`state_n`、`inc`)。Fortran の引数リストに合わせた手書きのまま宣言できる。宣言済みブロックは履歴全体で AD と照合する:
+   引数は名前で埋められる (`state` = 評価点の状態、`dlambda`、`state_n`、`inc`)。Fortran の引数リストに合わせた手書きのまま宣言できる。
+
+   **意図した近似は、モデル上で宣言する** (テストの許容値を緩めない — 理由が残らないため)。宣言の仕方は 2 つある:
+
+   | 宣言 | 意味 | 向く場合 |
+   |---|---|---|
+   | `approx=2e-2` | 全ステップで、自動微分との差がこの値まで | 導出から落とした項が、どのステップにもある |
+   | `approx_when="メソッド名"` | そのメソッドが真を返すステップだけ近似。ほかのステップは厳密な許容値のまま | 切り替えを定数として微分している (切り替わるステップだけ合わない) |
+
+   `approx_when` のステップは比較から外して数える (報告に「78 ステップ中 3 ステップは近似」と出る)。`approx=` も付けると、外さずにその値で判定する。どちらも `note=` (理由) が必須。条件のメソッドは、ブロックと同じく引数を名前で受け取り、真偽を返す。手書きの接線 (`user_defined_tangent`) は `hand_tangent` で同じように宣言する:
+
+```python
+from returnmap.core import hand_block, hand_tangent
+
+class MyModel(MaterialModel):
+    def gate_in_transition(self, state, state_n):       # 条件: ゲートが 0 でも 1 でもない
+        ...
+
+    @hand_block("theta", "beta", approx_when="gate_in_transition",
+                note="ゲートを定数として微分している")
+    def dRt_db(self, state, dlambda, state_n): ...
+
+    @hand_tangent(approx_when="gate_in_transition", note="同上")
+    def user_defined_tangent(self, new, dlambda, inc): ...
+```
+
+   組み込みの YU (3D と平面応力) がこの形で、停留曲面のゲートが切り替わるステップを宣言している。接線の宣言を読むのは `check_model` で、`check_tangent` と `crosscheck` は渡された許容値で判定する (integrator を受け取るので、モデルの宣言を知らない)。
+
+   宣言済みブロックは履歴全体で AD と照合する:
 
 ```python
 from returnmap.verification import check_hand_blocks
