@@ -22,6 +22,8 @@ print(result.model_params, result.residual)
 fitted = result.model           # フィット結果を入れたモデル (テンプレートと同じクラス・次元・設定)
 ```
 
+**範囲は探索の物差しでもある。** `"L-BFGS-B"` と `"Nelder-Mead"` は、各自由変数を範囲 (上下限) の幅で割った変数で探索する。硬化係数 (1e4 台) と回復係数 (1e2 台) のように桁の違うパラメータを同じ重みで動かすためで、結果や履歴は書いた単位のまま返る。範囲は「ありうる値の幅」を有限の上下限で書く (上下限の無い変数は、初期値の大きさで割る)。
+
 呼び出しの形は 1 つ — モデル、ターゲットの列、`ParameterSpace`。`space` はモデルの全パラメータを (free / fixed / derived のどれかで) 与える。`model` はテンプレートで、クラス・次元・パラメータ以外の設定 (`J2IsotropicDamageUnilateral` の `c` など) を与える。各評価のモデルは `model.with_params(**params)` で作られ、テンプレート自身のパラメータ値は使われない。`max_iter` / `tol` は最適化器の設定で、return mapping の NR のものではない。
 
 **driver** — `driver_factory` を省略すると、ターゲットの載荷履歴から決まる (ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`。`crosscheck` と同じ規則)。それ以外は渡す — 3D モデルで単軸応力の実験に合わせるなら `driver_factory=lambda i: MixedDriver(i, prescribed_strain_idx=[0])`。優先順位は、ターゲット自身の `driver_factory`、`fit_params` に渡したもの、載荷履歴から決まるもの、の順。
