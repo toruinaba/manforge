@@ -18,6 +18,8 @@ make test-all    # 全スイート
 | `examples/example_j2_damage_crack_closure.py` | crack closure 係数 h による引張/圧縮の違い |
 | `examples/example_j2_damage_unilateral.py` | 準片側モデル: 圧縮での剛性回復 |
 | `examples/example_fit_j2.py` | パラメータフィッティング (基本 / ParameterSpace / 複数ターゲット / PCM) |
+| `examples/example_identification.py` | 試験データへの合わせ込み: 手で調整 → フィット → 全点で仕上げ → パラメータを振る (約 50 秒) |
+| `examples/notebook_tuning.py` | 同じ調整をスライダーで行う marimo ノートブック (`uv sync --extra notebook`) |
 | `examples/example_compare_models.py` | 複数モデルの比較: 応答 / 計算コスト / フィットの良さ / 非収束 |
 | `examples/example_custom_model_workflow.py` | 自作モデルの定義 → 検証の通しワークフロー |
 | `examples/example_fortran_crosscheck.py` | Fortran UMAT のビルド → 実行 → クロス検証 (要 gfortran) |

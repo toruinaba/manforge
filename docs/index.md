@@ -9,6 +9,7 @@
 :caption: ガイド
 :maxdepth: 1
 
+guide/tutorial
 concepts
 guide/models
 guide/simulation

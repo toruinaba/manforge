@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "returnmap"
-version = "0.2.0"
+version = "0.2.1"
 description = "Framework for validating Fortran UMAT constitutive models with autodiff"
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "pyright>=1.1.380"]
 examples = ["matplotlib"]
+notebook = ["marimo>=0.20", "matplotlib"]
 docs = ["sphinx>=7.3", "myst-parser>=3.0", "furo>=2024.5"]
 fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 
