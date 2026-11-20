@@ -64,6 +64,7 @@ from returnmap.verification.model import (
     check_model,
     standard_histories,
 )
+from returnmap.verification.umat import Umat
 
 __all__ = [
     # Every check that applies to a model
@@ -71,6 +72,8 @@ __all__ = [
     "ModelReport",
     "ModelCheck",
     "standard_histories",
+    # The Fortran UMAT that belongs to a model
+    "Umat",
     # Hand-derived Jacobian blocks against autodiff
     "check_hand_blocks",
     "HandBlockReport",

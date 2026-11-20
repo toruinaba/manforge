@@ -11,7 +11,7 @@ kinematic hardening model (`YUKinematic3D / YUKinematicPS / YUKinematic1D`).
 
 | ファイル | 内容 |
 |---|---|
-| `test_verification.py` | 共通の検査 (`check_model`) を 3D / PS / 1D に回す。3D と PS の手導出は、停留曲面のゲートが切り替わるステップだけ近似と宣言してある (冒頭の docstring) |
+| `test_verification.py` | 共通の検査 (`check_model`) を 3D / PS / 1D に回す。3D と PS の手導出は、停留曲面のゲートが切り替わるステップだけ近似と宣言してある (冒頭の docstring)。UMAT をビルドしてあれば、同じ履歴で Python と突き合わせる |
 | `test_model.py` | モデル単体: 親クラスと次元別クラスの一致、停留曲面の更新、残差とヤコビアンの部品 |
 | `test_analytical_vs_numerical.py` | 3D: 手書きの経路 vs autograd NR (応力・状態・接線・反復数)。1D は収束と単調性の smoke |
 | `test_jacobian_fd.py` | 3D: `calc_jacobian` vs 差分 (停留曲面の状態を毎回再計算した全微分) |

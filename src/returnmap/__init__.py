@@ -21,4 +21,4 @@ from importlib.metadata import version as _get_version
 try:
     __version__ = _get_version("returnmap")
 except Exception:
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"

@@ -1,7 +1,7 @@
 # returnmap Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-models test-models-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-all fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-models test-models-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- uv run returnmap build --abaqus-stubs archives/fortran_fixed_form/yu_kinematic_3d_fixed.for --name yu_kinematic_3d_fixed --link lapack --link blas
 
@@ -21,21 +21,23 @@ PY ?= uv run python
 MODELS = src/returnmap/models
 BUILD = $(PY) -m returnmap build
 
-## Compile fortran/test_basic.f90 into a Python extension via f2py
+## Compile fortran/test_basic.f90 (a smoke test of the build itself)
 fortran-build:
 	$(BUILD) fortran/test_basic.f90 --name returnmap_test_basic
 
-## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
+# The UMATs are built from what each family declares in its verification.py
+# (UMATS: sources, libraries to link); the ABAQUS stubs are compiled in.
+## Compile the J2 UMAT (j2_isotropic_3d)
 fortran-build-umat:
-	$(BUILD) --abaqus-stubs $(MODELS)/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+	$(BUILD) --family returnmap.models.j2_isotropic
 
-## Compile YU Kinematic UMAT (abaqus_stubs + yu_kinematic_3d) into a Python extension via f2py
+## Compile the YU UMATs (yu_kinematic_3d and yu_kinematic_ps)
 fortran-build-yu:
-	$(BUILD) --abaqus-stubs $(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d --link lapack --link blas
+	$(BUILD) --family returnmap.models.yu_kinematic
 
-## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
-fortran-build-yu-ps:
-	$(BUILD) --abaqus-stubs $(MODELS)/yu_kinematic/fortran/yu_kinematic_ps.f90 --name yu_kinematic_ps --link lapack --link blas
+## Compile the smoke-test module and every UMAT the reference models declare
+fortran-build-all: fortran-build
+	$(BUILD) --family returnmap.models
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -102,7 +104,6 @@ docker-test:
 ## Build both YU Fortran modules and run the YU Python-vs-UMAT tests in Docker
 docker-test-yu:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
-		make PY=python fortran-build-yu-ps && \
 		python -m pytest $(MODELS)/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------

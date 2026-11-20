@@ -7,7 +7,7 @@
 ## 1. インストール
 
 ```bash
-pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.2.1"
+pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.3.0"
 ```
 
 `[examples]` は図を描くための matplotlib を足す。計算だけなら要らない。
