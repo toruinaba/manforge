@@ -64,6 +64,25 @@ assert report.passed, report.summary()
 自動微分と一致する。導出は変えず、そのステップだけ近似であること(`stagnation_gate_in_transition`)を宣言した。
 標準の履歴では 80 ステップ中 1〜3 ステップが該当する。
 
+**UMAT のビルドとテストに要るものを、パッケージが配るようにした。** returnmap を入れてあれば、モデルを置く
+リポジトリに要るのは UMAT のソースとテストだけになる。
+
+- **`abaqus_stubs.f90` がパッケージに入った**(`fortran/abaqus_stubs.f90` → `src/returnmap/fortran/`)。
+  `returnmap build --abaqus-stubs <source.f90> --name <module>` が一緒にコンパイルする。`returnmap stubs` は
+  そのパスを出す(f2py やコンパイラを直接呼ぶとき用)。
+- **`returnmap build --link <lib>`** — リンクするライブラリを渡す(`--link lapack --link blas`)。これまでは
+  渡せなかったので、LAPACK を呼ぶ UMAT(YU)は Makefile から f2py を直接呼んでいた。`make fortran-build-*` は
+  すべて `returnmap build` を使うようになった。
+- **pytest のプラグイン**(`returnmap.pytest_plugin`)— returnmap を入れてあれば自動で効く。`fortran` / `slow`
+  マーカーを登録し、プロジェクト直下の `fortran/`(ビルド先)を `sys.path` に足す。`conftest.py` と
+  `pyproject.toml` に同じことを書かなくてよい。pip で入れた先で `pytest --pyargs returnmap.models` を実行しても、
+  未登録マーカーの警告が出なくなった。
+
+| これまで | これから |
+|---|---|
+| `returnmap build fortran/abaqus_stubs.f90 <source.f90> --name <module>` | `returnmap build --abaqus-stubs <source.f90> --name <module>` |
+| `python -m numpy.f2py -c abaqus_stubs.f90 <source.f90> -m <module> -llapack -lblas` | `returnmap build --abaqus-stubs <source.f90> --name <module> --link lapack --link blas` |
+
 ## 0.2.1(2026-11-20)
 
 既存のモデルを使う人のための入口を整えた。0.2.0 からの非互換は無い。

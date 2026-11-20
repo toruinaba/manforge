@@ -3,36 +3,39 @@
 
 .PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-models test-models-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
-#   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
+#   fortran-build-yu-fixed  -- uv run returnmap build --abaqus-stubs archives/fortran_fixed_form/yu_kinematic_3d_fixed.for --name yu_kinematic_3d_fixed --link lapack --link blas
 
 # ---------------------------------------------------------------------------
 # Fortran build (host)
 # ---------------------------------------------------------------------------
 
-# PY selects the interpreter that drives f2py.  Inside the Docker image the venv
+# PY selects the interpreter that drives the build.  Inside the Docker image the venv
 # is read-only and lives outside the bind-mounted tree, so `uv run` would try to
 # re-sync it and fail; override with `make PY=python fortran-build-yu` there.
 PY ?= uv run python
 
 # Each model family keeps its UMAT sources next to the model.  The compiled
 # modules are all built into fortran/, which the tests put on sys.path.
+# `returnmap build --abaqus-stubs` compiles in the abaqus_stubs.f90 the
+# package ships (src/returnmap/fortran/).
 MODELS = src/returnmap/models
+BUILD = $(PY) -m returnmap build
 
 ## Compile fortran/test_basic.f90 into a Python extension via f2py
 fortran-build:
-	cd fortran && $(PY) -m numpy.f2py -c test_basic.f90 -m returnmap_test_basic
+	$(BUILD) fortran/test_basic.f90 --name returnmap_test_basic
 
 ## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/j2_isotropic/fortran/j2_isotropic_3d.f90 -m j2_isotropic_3d
+	$(BUILD) --abaqus-stubs $(MODELS)/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 
 ## Compile YU Kinematic UMAT (abaqus_stubs + yu_kinematic_3d) into a Python extension via f2py
 fortran-build-yu:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
+	$(BUILD) --abaqus-stubs $(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d --link lapack --link blas
 
 ## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
 fortran-build-yu-ps:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/yu_kinematic/fortran/yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
+	$(BUILD) --abaqus-stubs $(MODELS)/yu_kinematic/fortran/yu_kinematic_ps.f90 --name yu_kinematic_ps --link lapack --link blas
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -115,7 +118,7 @@ BENCH_DIR = benchmarks/umat_timing
 ## Measure absolute us/call for the 3D UMAT inside Docker
 docker-bench-yu-3d:
 	$(DOCKER_RUN) bash -c "cd $(BENCH_DIR) && \
-		python -m numpy.f2py -c ../../fortran/abaqus_stubs.f90 \
+		python -m numpy.f2py -c \$$(python -m returnmap stubs) \
 			../../$(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 yu_3d_bench.f90 \
 			-m yu_3d_bench -llapack -lblas && \
 		PYTHONPATH=/workspace/src:\$$PWD python bench_3d.py"
