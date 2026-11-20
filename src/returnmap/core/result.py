@@ -53,19 +53,28 @@ class ReturnMappingResult:
         index 0, then one entry per update, with the final entry being the
         converged residual (< ``tol`` for ``numerical_newton``, 0.0 for
         closed-form ``user_defined``).  Closed-form implementations should
-        therefore supply ``[float(f_trial), 0.0]``.
+        therefore supply ``[float(f_trial), 0.0]``.  A restarted step holds
+        both attempts, the second after the first.
     converged : bool
         Whether the solver reached its tolerance.  A closed form passes
         ``True``; a hand-written Newton-Raphson passes whether its loop
         ended on the tolerance or on the iteration limit.
+    n_restarts : int
+        How many times the numerical return mapping started over after its
+        attempt from the trial point failed: ``0`` or ``1`` (a subdivided
+        increment adds up its substeps).  With a restart, ``n_iterations``
+        counts the updates of both attempts.  Set by the integrator
+        (``nr_restart``); a hand-written return mapping leaves it at ``0``.
 
     Notes
     -----
-    Every field is required.  A default of ``converged=True`` would let a
-    hand-written Newton-Raphson that ran out of iterations report success
-    simply by not mentioning the flag — the same reason model parameters
-    have no defaults.  The integrator additionally treats Δλ < 0 and
-    non-finite values as non-converged whatever the flag says.
+    Every field a solver answers for is required.  A default of
+    ``converged=True`` would let a hand-written Newton-Raphson that ran out
+    of iterations report success simply by not mentioning the flag — the
+    same reason model parameters have no defaults.  The integrator
+    additionally treats Δλ < 0 and non-finite values as non-converged
+    whatever the flag says.  ``n_restarts`` is the framework's own record,
+    not a claim of the solver, which is why it alone has a default.
     """
 
     stress: StressVec
@@ -74,6 +83,7 @@ class ReturnMappingResult:
     n_iterations: int
     residual_history: list[float]
     converged: bool
+    n_restarts: int = 0
 
 
 @dataclass
@@ -173,6 +183,17 @@ class StressUpdateResult:
         if self.return_mapping is None:
             return 0
         return self.return_mapping.n_iterations
+
+    @property
+    def n_restarts(self) -> int:
+        """Restarts of the numerical return mapping (0 for elastic steps).
+
+        Also ``0`` from an integrator that does not restart: a hand-written
+        return mapping, a Fortran UMAT.
+        """
+        if self.return_mapping is None:
+            return 0
+        return self.return_mapping.n_restarts
 
     @property
     def residual_history(self) -> list[float]:

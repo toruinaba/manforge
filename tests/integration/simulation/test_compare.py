@@ -6,6 +6,7 @@ import pytest
 from returnmap.fitting import FitTarget, Observation, ParameterSpace, fit_params
 from returnmap.models import (
     AFKinematic1D, AFKinematic3D, J2Isotropic1D, J2Isotropic3D, OWKinematic1D,
+    YUKinematic1D,
 )
 from returnmap.simulation import (
     FieldHistory, FieldType, FortranIntegrator, MixedDriver, ModelComparisonResult,
@@ -181,6 +182,55 @@ class TestIntegratorsAndDrivers:
         np.testing.assert_array_equal(run.strain, alone.strain)
         np.testing.assert_allclose(run.stress[-1, 0], 300.0, atol=1e-6)
         assert run.n_outer_iterations > 10
+
+
+# ---------------------------------------------------------------------------
+# Restarts of the numerical return mapping
+# ---------------------------------------------------------------------------
+
+class TestRestarts:
+    """With and without the restart, side by side — the comparison the
+    ``nr_restart`` switch is kept for."""
+
+    YU = YUKinematic1D.at_defaults()
+    # One step of five yield strains each way: Newton from Δλ = 0 lands on the
+    # root with Δλ < 0 at the first step.
+    COARSE = FieldHistory.cyclic_strain([5 * YU.Y / YU.E, -5 * YU.Y / YU.E], n_per_segment=1)
+
+    @pytest.fixture(scope="class")
+    def both(self):
+        return compare_models(
+            {"no restart": PythonNumericalIntegrator(
+                self.YU, nr_restart=False, raise_on_nonconverged=False),
+             "restart": self.YU},
+            self.COARSE,
+        )
+
+    def test_the_restart_completes_what_the_plain_solver_does_not(self, both):
+        plain, restarted = both.runs["no restart"], both.runs["restart"]
+        assert not plain.converged and plain.failed_step == 0
+        assert restarted.converged
+        assert plain.n_restarts == 0
+        assert restarted.n_restarts >= 1
+
+    def test_the_table_counts_them(self, both):
+        header, plain, restarted = both.summary().splitlines()
+        assert header.split()[:5] == ["model", "steps", "plastic", "NR", "it/plastic"]
+        assert "restarts" in header
+        column = header.split().index("restarts") - 1       # "NR it/plastic" is two words
+        assert restarted.split()[column] == str(both.runs["restart"].n_restarts)
+
+    def test_no_column_when_nothing_restarted(self, comparison):
+        assert all(run.n_restarts == 0 for run in comparison.runs.values())
+        assert "restarts" not in comparison.summary().splitlines()[0]
+
+    def test_unknown_for_an_integrator_that_reports_no_iterations(self):
+        model = J2Isotropic3D(**BASE, H=1000.0)
+        load = FieldHistory.cyclic_strain([6e-3, -6e-3], n_per_segment=15, ntens=6)
+        run = compare_models(
+            {"umat": FortranIntegrator.from_model(_FakeUmat(), "j2", model)}, load,
+        ).runs["umat"]
+        assert run.n_restarts is None
 
 
 # ---------------------------------------------------------------------------

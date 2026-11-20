@@ -110,6 +110,17 @@ class _PythonIntegratorBase:
         recomputing the exact Jacobian whenever the residual norm fails to
         decrease.  Typically a few times faster at the cost of 1–2 extra
         iterations; the *consistent tangent* is unaffected (always exact).
+    nr_restart : bool
+        What the numerical return mapping does when its iteration from the
+        trial point fails — it converged on a root with Δλ < 0, ran out of
+        iterations, or met a singular Jacobian.  ``True`` (default): solve
+        the step once more, from the trial stress and a plastic estimate of
+        Δλ (see ``_plastic_start``).  ``False``: report the failure of the
+        first attempt, with no second one — the solver as it was before
+        0.3.2, kept so that the two can be compared on the same history.
+        A step the first attempt solves is computed identically either way,
+        and a hand-written ``user_defined_return_mapping`` is never
+        restarted: it is the model's own solver.
     """
 
     _method: str = "auto"
@@ -122,16 +133,22 @@ class _PythonIntegratorBase:
         tol: float = 1e-10,
         raise_on_nonconverged: bool = True,
         nr_jacobian: NRJacobian = "exact",
+        nr_restart: bool = True,
     ) -> None:
         if nr_jacobian not in ("exact", "broyden"):
             raise ValueError(
                 f"nr_jacobian must be 'exact' or 'broyden', got {nr_jacobian!r}"
+            )
+        if not isinstance(nr_restart, bool):
+            raise TypeError(
+                f"nr_restart must be True or False, got {nr_restart!r}"
             )
         self._model = model
         self._max_iter = max_iter
         self._tol = tol
         self._raise_on_nonconverged = raise_on_nonconverged
         self._nr_jacobian = nr_jacobian
+        self._nr_restart = nr_restart
 
     @property
     def dimension(self) -> StressDimension:
@@ -329,33 +346,8 @@ class _PythonIntegratorBase:
     # Numerical return mapping and consistent tangent
     # ------------------------------------------------------------------
 
-    def _numerical_newton(self, inc: Increment) -> tuple:
-        """Unified NR return mapping.
-
-        Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
-        Every unknown starts from its trial value (σ_trial, and for an implicit
-        state the value the elastic predictor returned, else its step-n value).
-        """
-        model = self._model
-        residual_fn, layout = build_residual(model, inc)
-        stress_trial = inc.trial["stress"]
-
-        x = layout.pack(
-            stress_trial, 0.0,
-            {k: inc.trial[k] for k in layout.implicit_keys}
-        )
-
-        # The residual rows carry stress units (R_σ and R_Δλ = f both scale
-        # with σ), so a purely absolute tolerance is unit-dependent: at Pa
-        # scale (σ ~ 1e8) the default 1e-10 sits below float64 round-off and
-        # NR can never satisfy it.  Scale by the trial-stress magnitude —
-        # not the initial residual, which is tiny whenever NR starts near the
-        # solution — floored at 1 to keep the absolute reading for O(1) units.
-        tol_eff = self._tol * max(
-            1.0, float(np.max(np.abs(np.asarray(stress_trial, dtype=float))))
-        )
-
-        jac_fn = autograd.jacobian(residual_fn)  # type: ignore[call-arg]
+    def _newton_iterations(self, residual_fn, jac_fn, x, tol_eff: float) -> tuple:
+        """Newton iterations from ``x``: ``(x, residual_history, n_iterations, converged)``."""
         use_broyden = self._nr_jacobian == "broyden"
 
         residual_history = []
@@ -388,25 +380,156 @@ class _PythonIntegratorBase:
             R_prev, dx_prev = R, -dx
             n_iterations += 1
 
-        if not converged and self._raise_on_nonconverged:
-            raise RuntimeError(
-                f"_numerical_newton: NR did not converge in {self._max_iter} "
-                f"iterations (||R||_2 = "
-                f"{float(np.linalg.norm(np.array(residual_fn(x)))):.3e}, "
-                f"tol = {tol_eff:.3e})"
-            )
+        return x, residual_history, n_iterations, converged
 
-        state_new = build_state_from_x(model, x, inc, layout)
-        sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
+    def _plastic_start(self, residual_fn, jac_fn, layout, inc: Increment):
+        """Start of the second attempt: σ_trial with a plastic estimate of Δλ.
+
+        The estimate is the Δλ of one Newton step of the ``(σ, Δλ)`` block
+        alone at the trial point, the implicit states held at their trial
+        values.  Where the implicit states carry the hardening, it does not
+        take part, and the estimate is what a perfectly plastic material
+        would need to bring σ_trial back to the yield surface: hardening
+        makes the true Δλ smaller, so the iteration starts on the far side of
+        the admissible root, where the first attempt started below it, at
+        Δλ = 0.  (Explicit states follow Δλ inside the residual, so hardening
+        they carry is in the block and the estimate is smaller.)
+
+        It is read off the residual's own Jacobian: nothing model-specific,
+        and it carries whatever units the model gives Δλ.
+
+        Returns ``None`` when there is no such estimate — the block is
+        singular, or the estimate is not a positive finite number.
+        """
+        ntens = self._model.ntens
+        implicit = {k: inc.trial[k] for k in layout.implicit_keys}
+        stress_trial = inc.trial["stress"]
+        x0 = layout.pack(stress_trial, 0.0, implicit)
+        try:
+            R0 = np.array(residual_fn(x0))
+            J0 = np.array(jac_fn(x0))
+            step = np.linalg.solve(J0[: ntens + 1, : ntens + 1], R0[: ntens + 1])
+        except np.linalg.LinAlgError:
+            return None
+        dlambda0 = -float(step[ntens])
+        if not np.isfinite(dlambda0) or dlambda0 <= 0.0:
+            return None
+        return layout.pack(stress_trial, dlambda0, implicit)
+
+    def _numerical_newton(self, inc: Increment) -> tuple:
+        """Unified NR return mapping.
+
+        Unknown vector: x = [σ (ntens), Δλ (1), q_implicit_non_stress (declaration order)].
+        Every unknown starts from its trial value (σ_trial, and for an implicit
+        state the value the elastic predictor returned, else its step-n value),
+        with Δλ = 0.
+
+        If that attempt fails and ``nr_restart`` is on, the step is solved once
+        more from ``_plastic_start``.  The equations are the same, so a second
+        attempt that converges has found a root of the same step — not a
+        different integration of it, as subdividing the increment would be.
+
+        Returns ``(stress, state, dlambda, n_iterations, residual_history,
+        converged, n_restarts)``.  With a restart, ``n_iterations`` counts the
+        updates of both attempts and ``residual_history`` holds both, the
+        second after the first.
+        """
+        model = self._model
+        residual_fn, layout = build_residual(model, inc)
+        stress_trial = inc.trial["stress"]
+
+        x = layout.pack(
+            stress_trial, 0.0,
+            {k: inc.trial[k] for k in layout.implicit_keys}
+        )
+
+        # The residual rows carry stress units (R_σ and R_Δλ = f both scale
+        # with σ), so a purely absolute tolerance is unit-dependent: at Pa
+        # scale (σ ~ 1e8) the default 1e-10 sits below float64 round-off and
+        # NR can never satisfy it.  Scale by the trial-stress magnitude —
+        # not the initial residual, which is tiny whenever NR starts near the
+        # solution — floored at 1 to keep the absolute reading for O(1) units.
+        tol_eff = self._tol * max(
+            1.0, float(np.max(np.abs(np.asarray(stress_trial, dtype=float))))
+        )
+
+        jac_fn = autograd.jacobian(residual_fn)  # type: ignore[call-arg]
+
+        def dlambda_of(x_) -> float:
+            return float(layout.unpack(np.asarray(x_))[1])
 
         # A small residual only says NR found *a* root of f = 0 and the flow
         # rule.  That system has roots with Δλ < 0, which violate KKT loading /
         # unloading: plastic strain cannot run backwards.  Large Δε can push
         # σ_trial past the admissible branch, and NR then converges tightly
         # (||R|| ~ 1e-14) onto a non-physical root, so the residual norm alone
-        # cannot reject it.  Subdividing the increment recovers the admissible
-        # branch, which is why this is reported as non-convergence rather than
-        # returned as a solution.
+        # cannot reject it.
+        def solved(x_, converged_) -> bool:
+            return converged_ and dlambda_of(x_) >= 0.0
+
+        # A singular Jacobian is one more way for the first attempt to fail.
+        # It is raised as before unless a second attempt takes its place; the
+        # second attempt's own LinAlgError propagates.
+        singular: "np.linalg.LinAlgError | None" = None
+        try:
+            x, residual_history, n_iterations, converged = self._newton_iterations(
+                residual_fn, jac_fn, x, tol_eff)
+        except np.linalg.LinAlgError as exc:
+            if not self._nr_restart:
+                raise
+            singular = exc
+            residual_history, n_iterations, converged = [], 0, False
+
+        n_restarts = 0
+        first = None  # what the first attempt ended on, for the error message
+        if self._nr_restart and not solved(x, converged):
+            # The second attempt is an extra: it may solve the step, and it
+            # must not turn a failure that was reported into one that is
+            # raised.  If it cannot be started, or raises on the way (a
+            # singular Jacobian, or the model refusing an iterate), the step
+            # is left as the first attempt left it.
+            second = None
+            try:
+                x_start = self._plastic_start(residual_fn, jac_fn, layout, inc)
+                if x_start is not None:
+                    second = self._newton_iterations(residual_fn, jac_fn, x_start, tol_eff)
+            except Exception:  # noqa: BLE001 — see the comment above
+                second = None
+            if second is not None:
+                first = (
+                    f"Δλ = {dlambda_of(x):.3e} < 0" if converged
+                    else "a singular Jacobian" if singular is not None
+                    else f"no convergence, ||R||_2 = {residual_history[-1]:.3e}"
+                    if residual_history else "no convergence"
+                )
+                x, history_2, n_2, converged = second
+                residual_history = residual_history + history_2
+                n_iterations += n_2
+                n_restarts = 1
+            elif singular is not None:
+                raise singular
+
+        restart_note = (
+            f"  The first attempt, from Δλ = 0, ended on {first}; this is the "
+            "second, from the plastic estimate of Δλ."
+            if first is not None else ""
+        )
+
+        if not converged and self._raise_on_nonconverged:
+            raise RuntimeError(
+                f"_numerical_newton: NR did not converge in {self._max_iter} "
+                f"iterations (||R||_2 = "
+                f"{float(np.linalg.norm(np.array(residual_fn(x)))):.3e}, "
+                f"tol = {tol_eff:.3e}){restart_note}"
+            )
+
+        state_new = build_state_from_x(model, x, inc, layout)
+        sigma, dlambda_val, _ = layout.unpack(np.asarray(x))
+
+        # Reported as non-convergence rather than returned as a solution: a
+        # root with Δλ < 0 is not one (see ``solved`` above).  Starting from
+        # the plastic estimate, or subdividing the increment, recovers the
+        # admissible branch.
         if converged and float(dlambda_val) < 0.0:
             converged = False
             if self._raise_on_nonconverged:
@@ -415,6 +538,7 @@ class _PythonIntegratorBase:
                     f"(Δλ = {float(dlambda_val):.3e} < 0 violates KKT; "
                     f"||R||_2 = {residual_history[-1]:.3e}).  The strain "
                     f"increment is likely too large for the admissible branch."
+                    f"{restart_note}"
                 )
 
         return (
@@ -424,6 +548,7 @@ class _PythonIntegratorBase:
             n_iterations,
             residual_history,
             converged,
+            n_restarts,
         )
 
     def _consistent_tangent(self, rm: ReturnMappingResult, inc: Increment) -> Stiffness:
@@ -518,7 +643,9 @@ class _PythonIntegratorBase:
                 return dataclasses.replace(rm, converged=False)
             return rm
 
-        stress, state_new, dlambda, n_iter, res_hist, converged = self._numerical_newton(inc)
+        stress, state_new, dlambda, n_iter, res_hist, converged, n_restarts = (
+            self._numerical_newton(inc)
+        )
         return ReturnMappingResult(
             stress=stress,
             state=state_new,
@@ -526,6 +653,7 @@ class _PythonIntegratorBase:
             n_iterations=n_iter,
             residual_history=res_hist,
             converged=converged,
+            n_restarts=n_restarts,
         )
 
     def stress_update(

@@ -15,9 +15,9 @@ Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレーム�
 **使う** — PyPI には未公開なので、GitHub のタグから入れる (依存は numpy / scipy / autograd):
 
 ```bash
-pip install "git+https://github.com/toruinaba/returnmap@v0.3.1"
+pip install "git+https://github.com/toruinaba/returnmap@v0.3.2"
 # 図も描くなら matplotlib を足す:
-pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.3.1"
+pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.3.2"
 ```
 
 **開発する** — リポジトリを取ってきて、テストや Fortran のビルドまで含めた環境を作る:

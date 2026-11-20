@@ -158,6 +158,20 @@ class ModelRun:
         return sum(r.n_iterations for r in self.result.step_results)
 
     @property
+    def n_restarts(self) -> int | None:
+        """Steps the numerical return mapping solved on its second attempt.
+
+        Summed over the completed steps.  A restart is the solver starting a
+        step over from a plastic estimate of Δλ after its attempt from the
+        trial point failed (``nr_restart`` of the Python integrators); its
+        iterations are in :attr:`n_iterations`.  ``None`` when the integrator
+        does not report iterations (a Fortran UMAT).
+        """
+        if self.n_plastic_steps is None:
+            return None
+        return sum(r.n_restarts for r in self.result.step_results)
+
+    @property
     def iterations_per_plastic_step(self) -> float | None:
         """Mean Newton updates per plastic step.
 
@@ -201,12 +215,15 @@ class ModelComparisonResult:
         """A table with one row per model: steps, cost, and fit if evaluated."""
         runs = list(self.runs.values())
         show_outer = any(r.n_outer_iterations != r.n_steps for r in runs)
+        show_restarts = any(r.n_restarts for r in runs)
         show_fit = any(r.fit_residual is not None or r.fit_error for r in runs)
 
         def num(value: float | None, fmt: str) -> str:
             return "—" if value is None else format(value, fmt)
 
         header = ["model", "steps", "plastic", "NR it/plastic"]
+        if show_restarts:
+            header.append("restarts")
         if show_outer:
             header.append("outer it/step")
         header.append("ms/step")
@@ -222,6 +239,8 @@ class ModelComparisonResult:
                 num(r.n_plastic_steps, "d"),
                 num(r.iterations_per_plastic_step, ".2f"),
             ]
+            if show_restarts:
+                row.append(num(r.n_restarts, "d"))
             if show_outer:
                 row.append(
                     num(r.n_outer_iterations / r.n_steps if r.n_steps else None, ".2f")

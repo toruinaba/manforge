@@ -100,6 +100,7 @@ class SubSteppingIntegrator:
         n_iterations = 0
         residual_history: list[float] = []
         dlambda_total = 0.0
+        n_restarts = 0
         any_plastic = False
         last: "StressUpdateResult | None" = None
 
@@ -115,6 +116,7 @@ class SubSteppingIntegrator:
 
             n_iterations += res.n_iterations
             residual_history.extend(res.residual_history)
+            n_restarts += res.n_restarts
             dlambda_total = dlambda_total + float(res.dlambda)
             any_plastic = any_plastic or bool(res.is_plastic)
             stress_cur = res.stress
@@ -137,6 +139,7 @@ class SubSteppingIntegrator:
             n_iterations=n_iterations,
             residual_history=residual_history,
             converged=True,
+            n_restarts=n_restarts,
         )
         return StressUpdateResult(
             return_mapping=rm,
