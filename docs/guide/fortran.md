@@ -1,5 +1,39 @@
 # Fortran UMAT クロス検証
 
+## モデルに UMAT を宣言する
+
+UMAT まで行ったモデルは、ファミリの `verification.py` に UMAT を宣言する。ビルドも検査も、この宣言を読む。
+
+```python
+# src/returnmap/models/yu_kinematic/verification.py
+from returnmap.verification import Umat
+
+UMATS = [
+    Umat(YUKinematic3D, module="yu_kinematic_3d",
+         sources=["fortran/yu_kinematic_3d.f90"],        # モデルのモジュールがあるディレクトリから
+         libraries=["lapack", "blas"],
+         integrator_options={"parse_umat_failure": ...}), # UMAT 自身の収束フラグを読む
+]
+```
+
+```bash
+uv run returnmap build --family returnmap.models.yu_kinematic    # そのファミリの UMAT を全部
+uv run returnmap build --family returnmap.models                 # 全ファミリ
+```
+
+```python
+from returnmap.verification import check_model
+
+report = check_model(YUKinematic3D.at_defaults())
+print(report.summary())
+# ...
+#   ok   UMAT   stress 2.5e-15, state 1.9e-15 (tol 1e-06), tangent 6.5e-15 (tol 1e-05) over 3 histories (yu_kinematic_3d)
+```
+
+`check_model` は、Python のモデルを検査したのと同じ載荷履歴で UMAT を走らせ、全ステップで応力・状態・接線を比べる。ビルドしていなければ `not built` と出るだけで、不合格にはならない。引数の規約は `FortranIntegrator.from_model` と同じ: パラメータを `param_names` の順、応力、状態変数を宣言の順、ひずみ増分。
+
+## 1 つずつ行う
+
 **Build → Load → Integrate → Crosscheck**:
 
 ```bash

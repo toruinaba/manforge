@@ -3,7 +3,10 @@
 このファイルは、利用者から見える変更を版ごとにまとめる。設計の経緯と理由は
 [`docs/design/api-redesign.md`](docs/design/api-redesign.md) にある。
 
-## 未リリース
+## 0.3.0(2026-11-20)
+
+モデルの置き方と検証の仕方を整えた。公開の import パスと計算結果は 0.2.1 から変わらない。変わるのは、
+リポジトリの中のファイルの場所、`returnmap build` の書き方、Makefile のターゲット名である。
 
 **モデルを 1 ファミリ 1 ディレクトリにまとめた。** 1 つのモデルに属するものが 5 箇所に散っていた(モデル本体、
 `tests/unit/models/`、`tests/integration/models/`、`tests/benchmarks/<model>/`、`fortran/`)のを、
@@ -82,6 +85,17 @@ assert report.passed, report.summary()
 |---|---|
 | `returnmap build fortran/abaqus_stubs.f90 <source.f90> --name <module>` | `returnmap build --abaqus-stubs <source.f90> --name <module>` |
 | `python -m numpy.f2py -c abaqus_stubs.f90 <source.f90> -m <module> -llapack -lblas` | `returnmap build --abaqus-stubs <source.f90> --name <module> --link lapack --link blas` |
+
+**UMAT を宣言する。** UMAT まで行ったモデルは、ファミリの `verification.py` に `UMATS` を書く。
+
+- **`Umat(model, module=, sources=, libraries=, ...)`**(`returnmap.verification`)— モデルのクラスと、その UMAT の
+  ソース・リンクするライブラリの対応。
+- **`returnmap build --family <package>`** — 宣言された UMAT を全部ビルドする(`--family returnmap.models` で
+  全ファミリ)。`make fortran-build-umat` / `fortran-build-yu` はこれを呼ぶ。`fortran-build-yu-ps` は
+  `fortran-build-yu` に含めた。`fortran-build-all` を足した。
+- **`check_model` に `UMAT` の行** — ビルド済みの UMAT を、Python のモデルと同じ載荷履歴で走らせて全ステップで
+  比べる。未ビルドなら `not built` で、不合格にはしない。
+
 
 ## 0.2.1(2026-11-20)
 

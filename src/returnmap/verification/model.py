@@ -14,12 +14,18 @@ hand-written return         its solutions are roots of the framework residual
 mapping                     (:func:`check_solution`), its trajectory agrees
                             with the autodiff one (:func:`crosscheck`), and
                             its tangent agrees with central differences
+a UMAT declared and built   the compiled UMAT agrees with the Python model
+                            step by step over the same histories
+                            (:func:`crosscheck`)
 ==========================  ===================================================
 
 A model that is only a Python model — a yield function and evolution laws,
 solved by autodiff — is checked for the first row and passes on it: stopping
 there is a legitimate place for a model to be.  The rest is checked as soon
-as the model declares it.
+as the model declares it.  A UMAT is declared in the family's
+``verification.py`` (:class:`Umat`) and compared once its module has been
+built (``returnmap build --family <package>``); until then its row reads
+"not built", which does not count against the model either.
 
 ::
 
@@ -59,7 +65,7 @@ from returnmap.core.material.hand_block import (
 )
 from returnmap.simulation.driver import StrainDriver
 from returnmap.simulation.integrator import (
-    PythonAnalyticalIntegrator, PythonNumericalIntegrator,
+    PythonAnalyticalIntegrator, PythonIntegrator, PythonNumericalIntegrator,
 )
 from returnmap.simulation.types import FieldHistory, FieldType
 from returnmap.verification.crosscheck import crosscheck
@@ -67,12 +73,13 @@ from returnmap.verification.jacobian import check_hand_blocks
 from returnmap.verification.solution import check_solution
 from returnmap.verification.tangent import check_tangent
 from returnmap.verification.test_cases import estimate_yield_strain, generate_strain_history
+from returnmap.verification.umat import umat_of
 
 if TYPE_CHECKING:
     from returnmap.core.result import StressUpdateResult
     from returnmap.simulation.integrator import StressIntegrator
 
-Status = Literal["passed", "failed", "not declared"]
+Status = Literal["passed", "failed", "not declared", "not built"]
 
 # Direction of the multiaxial history, as (direct, shear) components: every
 # component is driven, none of them in proportion to another after the turn.
@@ -88,10 +95,11 @@ class ModelCheck:
     ----------
     name : str
         What was checked.
-    status : {"passed", "failed", "not declared"}
+    status : {"passed", "failed", "not declared", "not built"}
         ``"not declared"`` means the model does not have the thing the check
-        is about (no hand-written return mapping, no hand-derived block); it
-        does not count against the model.
+        is about (no hand-written return mapping, no hand-derived block, no
+        UMAT); ``"not built"`` that its UMAT is declared but the compiled
+        module is not there to compare.  Neither counts against the model.
     detail : str
         The largest error and its tolerance, or the reason for the status.
     reports : dict
@@ -152,7 +160,7 @@ class ModelReport:
             "every check that applies passes" if not failed
             else f"{len(failed)} check(s) failed — {', '.join(failed)}"
         )
-        marks = {"passed": "ok  ", "failed": "FAIL", "not declared": "—   "}
+        marks = {"passed": "ok  ", "failed": "FAIL", "not declared": "—   ", "not built": "—   "}
         width = max(len(c.name) for c in self.checks)
         lines = [head] + [
             f"  {marks[c.status]} {c.name.ljust(width)}  {c.detail}" for c in self.checks
@@ -303,6 +311,52 @@ def _check_tangents(
     return ("passed" if ok else "failed"), detail, reports
 
 
+def _check_umat(
+    model: MaterialModel, histories: Mapping[str, FieldHistory], stress_tol: float,
+) -> ModelCheck:
+    """The model's UMAT against the Python model, over the same histories."""
+    umat = umat_of(model)
+    package = type(model).__module__.rpartition(".")[0]
+    if umat is None:
+        return ModelCheck(
+            "UMAT", "not declared",
+            f"no UMAT declared for {type(model).__name__}"
+            + (f" in {package}.verification" if package else ""),
+        )
+    if not umat.is_built():
+        return ModelCheck(
+            "UMAT", "not built",
+            f"module {umat.module} is not built — returnmap build --family {package}",
+        )
+    python = PythonIntegrator(model, raise_on_nonconverged=False)
+    fortran = umat.integrator(model, raise_on_nonconverged=False)
+    reports = {
+        name: crosscheck(
+            python, fortran, load,
+            stress_tol=stress_tol, state_tol=stress_tol, tangent_tol=10.0 * stress_tol,
+        )
+        for name, load in histories.items()
+    }
+    stress = _worst([r.max_stress_rel_err for r in reports.values()])
+    state = _worst([e for r in reports.values() for e in r.max_state_rel_err.values()] or [0.0])
+    tangents = [r.max_tangent_rel_err for r in reports.values()
+                if r.max_tangent_rel_err is not None]
+    detail = f"stress {stress:.1e}, state {state:.1e} (tol {stress_tol:.0e})"
+    if tangents:
+        detail += f", tangent {_worst(tangents):.1e} (tol {10.0 * stress_tol:.0e})"
+    stopped_at = [
+        f"{name} step {r.first_failure.index}" for name, r in reports.items()
+        if r.first_failure is not None
+        and not (r.first_failure.a_converged and r.first_failure.b_converged)
+    ]
+    if stopped_at:
+        detail += f"; not converged at {', '.join(stopped_at)}"
+    return ModelCheck(
+        "UMAT", "passed" if all(r.passed for r in reports.values()) else "failed",
+        detail + f" over {len(reports)} histories ({umat.module})", reports,
+    )
+
+
 def check_model(
     model: MaterialModel,
     histories: Mapping[str, FieldHistory] | None = None,
@@ -350,11 +404,15 @@ def check_model(
     -----
     What this does not check: that the formulation is the one intended.
     Every check here compares two derivations of the same model — autodiff
-    against finite differences, a hand derivation against autodiff — so an
-    assumption both share (a unit, a sign convention, the formulation
-    itself) passes unnoticed.  The comparison with a compiled UMAT
-    (:func:`crosscheck`, :func:`check_bindings`) is a separate step, because
-    it needs the module built.
+    against finite differences, a hand derivation against autodiff, the UMAT
+    against the Python model — so an assumption all of them share (a unit, a
+    sign convention, the formulation itself) passes unnoticed.
+
+    The UMAT is compared with ``PythonIntegrator(model)``: the hand-written
+    return mapping when the model has one — that is what the UMAT is a port
+    of — and the autodiff one otherwise.  The individual subroutines a model
+    binds with ``verified_against_fortran`` need hand-written inputs and are
+    checked separately (:func:`check_bindings`).
     """
     if not isinstance(model, MaterialModel):
         raise TypeError(
@@ -449,6 +507,7 @@ def check_model(
             ModelCheck("hand-written vs autodiff", "not declared", reason),
             ModelCheck("hand-written tangent", "not declared", reason),
         ]
+        checks.append(_check_umat(model, histories, stress_tol))
         return ModelReport(cls.__name__, checks, n_plastic, approximations)
 
     analytical = PythonAnalyticalIntegrator(model, raise_on_nonconverged=False)
@@ -538,4 +597,5 @@ def check_model(
             "hand-written tangent", "not declared",
             "no user_defined_tangent on the model (the tangent is the autodiff one)",
         ))
+    checks.append(_check_umat(model, histories, stress_tol))
     return ModelReport(cls.__name__, checks, n_plastic, approximations)

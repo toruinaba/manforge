@@ -67,6 +67,7 @@ class TestWhatApplies:
             "converges": "passed", "tangent": "passed",
             "hand blocks": "not declared",
             **{name: "not declared" for name in HAND_WRITTEN},
+            "UMAT": "not declared",
         }
 
     def test_a_hand_written_return_mapping_is_checked_three_ways(self):
@@ -280,7 +281,11 @@ class TestReport:
     def test_summary_has_one_row_per_check_and_names_the_histories(self, report):
         lines = report.summary().splitlines()
         assert lines[0] == "J2Isotropic3D: every check that applies passes"
-        assert [line.split()[0] for line in lines[1:-1]] == ["ok", "ok", "—", "ok", "ok", "ok"]
+        # Seven rows; the last is the UMAT, declared for this model and
+        # compared only where its module has been built.
+        marks = [line.split()[0] for line in lines[1:-1]]
+        assert marks[:6] == ["ok", "ok", "—", "ok", "ok", "ok"]
+        assert lines[-2].split()[1] == "UMAT" and marks[6] in ("ok", "—")
         assert lines[-1].strip().startswith("histories: uniaxial (")
         assert str(report) == report.summary()
 

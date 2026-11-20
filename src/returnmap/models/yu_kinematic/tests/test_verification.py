@@ -20,7 +20,7 @@ import functools
 
 import pytest
 
-from returnmap.models.yu_kinematic.verification import MODELS
+from returnmap.models.yu_kinematic.verification import MODELS, UMATS
 from returnmap.verification import check_model
 
 BY_NAME = {type(model).__name__: model for model in MODELS}
@@ -69,3 +69,13 @@ def test_the_declared_approximation_covers_only_the_gate_switching(name):
         # On those steps the block is off by its own size; elsewhere it is exact.
         assert blocks[("theta", "beta")].approx_err > 0.5
         assert blocks[("theta", "beta")].worst_err < 1e-12
+
+
+@pytest.mark.fortran
+@pytest.mark.parametrize("umat", UMATS, ids=lambda umat: umat.module)
+def test_the_umat_agrees_with_the_python_model(umat):
+    """The compiled UMAT, step by step over the same histories (needs the
+    module built: ``returnmap build --family returnmap.models.yu_kinematic``)."""
+    pytest.importorskip(umat.module, reason=f"{umat.module} is not built")
+    report = report_of(umat.model.__name__)
+    assert report["UMAT"].status == "passed", report.summary()

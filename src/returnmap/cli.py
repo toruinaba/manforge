@@ -3,6 +3,7 @@
 Usage:
   returnmap build <files...> --name <module_name> [--abaqus-stubs] [--link <lib>]...
                   [--output-dir <dir>] [--verbose]
+  returnmap build --family <package> [--output-dir <dir>] [--verbose]
   returnmap stubs
   returnmap clean [--dir <dir>] [--dry-run]
   returnmap list  [--dir <dir>]
@@ -32,7 +33,8 @@ def _find_project_root() -> Path:
     return current
 
 
-def _default_output_dir() -> Path:
+def build_dir() -> Path:
+    """Where compiled modules go by default: ``fortran/`` under the project root."""
     return _find_project_root() / "fortran"
 
 
@@ -129,49 +131,40 @@ def _extract_module_name(so_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def cmd_build(args: argparse.Namespace) -> None:
-    _check_gfortran()
-    _check_f2py()
-    _check_meson()
-
-    # Validate source files
-    sources: list[Path] = []
-    for f in args.files:
-        p = Path(f).resolve()
+def _build_module(
+    sources: list[Path], module_name: str, *, abaqus_stubs: bool,
+    link: list[str] | tuple[str, ...], output_dir: Path, verbose: bool,
+) -> None:
+    """Compile ``sources`` into the f2py module ``module_name``; exit on failure."""
+    for p in sources:
         if not p.exists():
-            print(f"Error: file not found: {f}")
+            print(f"Error: file not found: {p}")
             sys.exit(1)
         if p.suffix not in (".f90", ".f", ".F90", ".F"):
-            print(f"Error: not a Fortran source file: {f}")
+            print(f"Error: not a Fortran source file: {p}")
             print("Expected extensions: .f90, .f, .F90, .F")
             sys.exit(1)
-        sources.append(p)
 
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else _default_output_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    module_name: str = args.name
     source_names = ", ".join(
-        (["abaqus_stubs.f90"] if args.abaqus_stubs else []) + [s.name for s in sources]
+        (["abaqus_stubs.f90"] if abaqus_stubs else []) + [s.name for s in sources]
     )
     print(f"Building module '{module_name}' from: {source_names}")
-    if args.link:
-        print(f"Linking: {', '.join(args.link)}")
+    if link:
+        print(f"Linking: {', '.join(link)}")
     print(f"Output directory: {output_dir}")
     print()
 
-    cmd = f2py_command(
-        sources, module_name, abaqus_stubs=args.abaqus_stubs, link=args.link,
-    )
+    cmd = f2py_command(sources, module_name, abaqus_stubs=abaqus_stubs, link=link)
 
-    if args.verbose:
+    if verbose:
         result = subprocess.run(cmd, cwd=output_dir)
     else:
         result = subprocess.run(cmd, cwd=output_dir, capture_output=True, text=True)
 
     if result.returncode != 0:
         print("Build failed.")
-        if not args.verbose:
+        if not verbose:
             print()
             print("--- f2py output ---")
             if result.stdout:
@@ -189,12 +182,48 @@ def cmd_build(args: argparse.Namespace) -> None:
     for pat in patterns:
         built_files.extend(output_dir.glob(pat))
 
-    print(f"Build succeeded.")
+    print("Build succeeded.")
     if built_files:
-        so = built_files[0]
-        print(f"Module file: {so}")
-
+        print(f"Module file: {built_files[0]}")
     print()
+
+
+def cmd_build(args: argparse.Namespace) -> None:
+    if args.family and (args.files or args.name):
+        print("Error: give either source files with --name, or --family <package>.")
+        sys.exit(2)
+    if not args.family and not (args.files and args.name):
+        print("Error: give the source files and --name <module_name>, or --family <package>.")
+        sys.exit(2)
+
+    _check_gfortran()
+    _check_f2py()
+    _check_meson()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else build_dir()
+
+    if args.family:
+        # Every UMAT the package's models declare (verification.py: UMATS).
+        from returnmap.verification.umat import declared_umats
+
+        umats = declared_umats(args.family)
+        if not umats:
+            print(f"Error: {args.family} declares no UMAT "
+                  "(a UMATS list in a module named verification).")
+            sys.exit(1)
+        for umat in umats:
+            _build_module(
+                umat.source_paths(), umat.module, abaqus_stubs=True,
+                link=list(umat.libraries), output_dir=output_dir, verbose=args.verbose,
+            )
+        print(f"Built {len(umats)} module(s): {', '.join(u.module for u in umats)}")
+        return
+
+    module_name: str = args.name
+    _build_module(
+        [Path(f).resolve() for f in args.files], module_name,
+        abaqus_stubs=args.abaqus_stubs, link=args.link,
+        output_dir=output_dir, verbose=args.verbose,
+    )
     print("To use in Python:")
     print(f"  import sys")
     print(f"  sys.path.insert(0, '{output_dir}')")
@@ -211,7 +240,7 @@ def cmd_stubs(args: argparse.Namespace) -> None:
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
-    target_dir = Path(args.dir).resolve() if args.dir else _default_output_dir()
+    target_dir = Path(args.dir).resolve() if args.dir else build_dir()
 
     if not target_dir.exists():
         print(f"Nothing to clean (directory not found: {target_dir})")
@@ -242,7 +271,7 @@ def cmd_clean(args: argparse.Namespace) -> None:
 
 
 def cmd_list(args: argparse.Namespace) -> None:
-    target_dir = Path(args.dir).resolve() if args.dir else _default_output_dir()
+    target_dir = Path(args.dir).resolve() if args.dir else build_dir()
 
     if not target_dir.exists():
         print(f"No compiled modules found (directory not found: {target_dir})")
@@ -296,15 +325,26 @@ def main() -> None:
     )
     build_parser.add_argument(
         "files",
-        nargs="+",
+        nargs="*",
         metavar="<file.f90>",
         help="Fortran source file(s) to compile (.f90 or .f)",
     )
     build_parser.add_argument(
         "--name", "-n",
-        required=True,
+        default=None,
         metavar="<module_name>",
-        help="Python module name for the compiled extension",
+        help="Python module name for the compiled extension (required with source files)",
+    )
+    build_parser.add_argument(
+        "--family",
+        default=None,
+        metavar="<package>",
+        help=(
+            "Instead of source files: build every UMAT the models of this package "
+            "declare, e.g. --family returnmap.models.yu_kinematic, or a package of "
+            "families (--family returnmap.models).  Sources, the ABAQUS stubs and "
+            "the libraries to link are taken from the declarations"
+        ),
     )
     build_parser.add_argument(
         "--abaqus-stubs",

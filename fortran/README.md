@@ -61,11 +61,18 @@ uv run returnmap clean
 
 ```bash
 make fortran-build-umat   # J2 UMAT
-make fortran-build-yu     # YU 3D UMAT (fortran-build-yu-ps: plane stress)
+make fortran-build-yu     # YU UMATs (3D and plane stress)
 make fortran-build        # smoke-test module
+make fortran-build-all    # all of the above
 ```
 
-The targets call `returnmap build`.
+The targets call `returnmap build`; the UMAT ones use `--family`, which builds
+what a family declares in its `verification.py` (`UMATS`):
+
+```bash
+uv run returnmap build --family returnmap.models.yu_kinematic   # one family
+uv run returnmap build --family returnmap.models                # every family
+```
 
 ### Option C: f2py directly
 

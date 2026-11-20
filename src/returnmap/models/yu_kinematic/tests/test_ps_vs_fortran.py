@@ -1,7 +1,7 @@
 """Path B benchmarks: YUKinematicPS Python vs Fortran subroutines.
 
 Requires the compiled yu_kinematic_ps extension:
-    make fortran-build-yu-ps
+    make fortran-build-yu
 or, since the host has no gfortran:
     make docker-build && make docker-test-yu
 
