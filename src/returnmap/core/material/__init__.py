@@ -7,7 +7,7 @@ from returnmap.core.material.fortran_binding import (
     verified_against_fortran,
     collect_bindings,
 )
-from returnmap.core.material.hand_block import HandBlock, hand_block
+from returnmap.core.material.hand_block import HandBlock, HandTangent, hand_block, hand_tangent
 
 __all__ = [
     "MaterialModel",
@@ -17,4 +17,6 @@ __all__ = [
     "collect_bindings",
     "HandBlock",
     "hand_block",
+    "HandTangent",
+    "hand_tangent",
 ]

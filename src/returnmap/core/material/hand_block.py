@@ -43,6 +43,27 @@ vocabulary:
     The whole :class:`~returnmap.core.Increment`.
 
 Any other parameter name is rejected when the class is created.
+
+Deliberate approximations
+-------------------------
+A hand derivation is sometimes not meant to equal the autodiff one, and the
+model says so where it says what the block is — never by loosening a
+tolerance in a test, where the reason is lost.  There are two ways:
+
+``approx=0.05``
+    The block agrees with autodiff only to this relative deviation, at every
+    step.  For a term dropped from the derivation everywhere.
+``approx_when="method_name"``
+    The block is exact except on the steps where the named method of the
+    model returns true.  For a derivation that treats a switch as constant:
+    exact while the switch is off or on, and not on the step where it is
+    in between.  Those steps are left out of the comparison and counted in
+    the report; every other step is still held to the exact tolerance.  With
+    ``approx=`` as well, they are held to that deviation instead of left out.
+
+The condition method takes its arguments by name from the vocabulary above
+and returns a bool.  A hand-written tangent is declared the same way with
+:func:`hand_tangent`.
 """
 
 from __future__ import annotations
@@ -71,18 +92,42 @@ class HandBlock:
         — in the measure of :func:`~returnmap.verification.check_hand_blocks`,
         the largest difference over the block relative to the block's
         largest entry — with ``note`` saying why.
+    approx_when : str or None
+        Name of the model method that says on which steps the block is an
+        approximation.  ``None``: on every step (if ``approx`` is given) or
+        on none.
     note : str
-        Why the block deviates.  Required when ``approx`` is given.
+        Why the block deviates.  Required when ``approx`` or ``approx_when``
+        is given.
     """
 
     row: str
     col: str
     approx: float | None = None
+    approx_when: str | None = None
     note: str = ""
 
 
+def _check_approximation(
+    what: str, approx: float | None, approx_when: str | None, note: str,
+) -> None:
+    """Shared by hand_block and hand_tangent: a declared approximation has a reason."""
+    if approx is not None and not approx > 0.0:
+        raise ValueError(f"{what}: approx must be > 0, got {approx!r}")
+    if approx_when is not None and not (isinstance(approx_when, str) and approx_when):
+        raise ValueError(
+            f"{what}: approx_when is the name of a model method, got {approx_when!r}"
+        )
+    if (approx is not None or approx_when is not None) and not note.strip():
+        raise ValueError(
+            f"{what}: a declared approximation needs a note saying why the "
+            "hand derivation deviates from the autodiff one"
+        )
+
+
 def hand_block(
-    row: str, col: str, *, approx: float | None = None, note: str = "",
+    row: str, col: str, *, approx: float | None = None,
+    approx_when: str | None = None, note: str = "",
 ) -> Callable[[_F], _F]:
     """Declare a method as the hand-derived Jacobian block ``∂R_row / ∂col``.
 
@@ -96,19 +141,17 @@ def hand_block(
         Newton-Raphson that updates explicit states between iterations
         differentiates the residual with those states frozen, so some of its
         blocks differ from the framework residual's by construction.
+    approx_when : str, optional
+        Name of a method of the model that returns true on the steps where
+        the block is an approximation; elsewhere it is held to the exact
+        tolerance.  See the module docstring.
     note : str, optional
-        The reason for ``approx``.  Required with it: a tolerance without its
-        reason is indistinguishable from a bug that was waved through.
+        The reason for the approximation.  Required with ``approx`` or
+        ``approx_when``: a tolerance without its reason is indistinguishable
+        from a bug that was waved through.
     """
-    if approx is not None:
-        if not approx > 0.0:
-            raise ValueError(f"hand_block({row!r}, {col!r}): approx must be > 0, got {approx!r}")
-        if not note.strip():
-            raise ValueError(
-                f"hand_block({row!r}, {col!r}): approx={approx!r} needs a note "
-                "saying why the block deviates from the autodiff one"
-            )
-    record = HandBlock(row=row, col=col, approx=approx, note=note)
+    _check_approximation(f"hand_block({row!r}, {col!r})", approx, approx_when, note)
+    record = HandBlock(row=row, col=col, approx=approx, approx_when=approx_when, note=note)
 
     def decorator(fn: _F) -> _F:
         fn.__hand_block__ = record  # type: ignore[attr-defined]
@@ -189,3 +232,123 @@ def validate_hand_blocks(
                 f"framework cannot supply.  Arguments are filled by name from "
                 f"{list(HAND_BLOCK_ARGS)}."
             )
+        validate_condition(cls, hand_block_record(cls, name).approx_when, f"{cls.__name__}.{name}")
+
+
+def validate_condition(cls: type, condition: str | None, declared_on: str) -> None:
+    """Reject an ``approx_when`` naming no method, or one with unknown arguments."""
+    if condition is None:
+        return
+    method = getattr(cls, condition, None)
+    if not callable(method):
+        raise TypeError(
+            f"{declared_on}: approx_when={condition!r} names no method of {cls.__name__}"
+        )
+    params = tuple(inspect.signature(method).parameters)[1:]
+    unknown = [p for p in params if p not in HAND_BLOCK_ARGS]
+    if unknown:
+        raise TypeError(
+            f"{cls.__name__}.{condition}: an approx_when condition takes {unknown}, "
+            f"which the framework cannot supply.  Arguments are filled by name "
+            f"from {list(HAND_BLOCK_ARGS)}."
+        )
+
+
+def condition_holds(model, condition: str | None, *, state, dlambda, inc) -> bool:
+    """Whether the ``approx_when`` condition named ``condition`` holds at a step.
+
+    ``False`` when no condition is declared.
+    """
+    if condition is None:
+        return False
+    method = getattr(model, condition)
+    available = {"state": state, "dlambda": dlambda, "state_n": inc.state_n, "inc": inc}
+    kwargs = {p: available[p] for p in inspect.signature(method).parameters}
+    return bool(method(**kwargs))
+
+
+# ---------------------------------------------------------------------------
+# A hand-written tangent
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class HandTangent:
+    """Record attached to ``user_defined_tangent`` by :func:`hand_tangent`.
+
+    Attributes
+    ----------
+    approx : float or None
+        Largest relative deviation from the exact tangent that is by design.
+    approx_when : str or None
+        Name of the model method that says on which steps the tangent is an
+        approximation.
+    note : str
+        Why the tangent deviates.
+    """
+
+    approx: float | None = None
+    approx_when: str | None = None
+    note: str = ""
+
+
+def hand_tangent(
+    *, approx: float | None = None, approx_when: str | None = None, note: str = "",
+) -> Callable[[_F], _F]:
+    """Declare how exact a hand-written ``user_defined_tangent`` is meant to be.
+
+    A hand-written tangent without this declaration is taken to be exact: it
+    is checked against central differences, and against the autodiff
+    tangent, at the tolerance of the check.  Decorate it when it is not::
+
+        @hand_tangent(
+            approx_when="gate_in_transition",
+            note="the stagnation gate is differentiated as a constant",
+        )
+        def user_defined_tangent(self, new, dlambda, inc):
+            ...
+
+    Parameters
+    ----------
+    approx : float, optional
+        The tangent agrees with the exact one only to this relative
+        deviation (``max|difference| / max|reference|``).
+    approx_when : str, optional
+        Name of a method of the model that returns true on the steps where
+        the tangent is an approximation.  Those steps are left out of the
+        comparison and counted in the report — or held to ``approx``, if
+        that is given too — and every other step is held to the exact
+        tolerance.  The method takes its arguments by name from ``state``,
+        ``dlambda``, ``state_n``, ``inc``.
+    note : str
+        The reason.  Required.
+
+    Notes
+    -----
+    Read by :func:`~returnmap.verification.check_model`.  The single-step
+    checks (:func:`~returnmap.verification.check_tangent`,
+    :func:`~returnmap.verification.crosscheck`) take an integrator, not a
+    model, and judge by the tolerance they are given.
+    """
+    if approx is None and approx_when is None:
+        raise ValueError(
+            "hand_tangent: give approx= or approx_when= — an exact tangent "
+            "needs no declaration"
+        )
+    _check_approximation("hand_tangent", approx, approx_when, note)
+    record = HandTangent(approx=approx, approx_when=approx_when, note=note)
+
+    def decorator(fn: _F) -> _F:
+        fn.__hand_tangent__ = record  # type: ignore[attr-defined]
+        return fn
+
+    return decorator
+
+
+def hand_tangent_record(cls: type) -> HandTangent | None:
+    """The declaration on ``cls.user_defined_tangent``, or ``None`` if it has none.
+
+    Read off the method the class resolves to: an override without the
+    decorator is a different derivation and makes no claim.
+    """
+    record = getattr(getattr(cls, "user_defined_tangent", None), "__hand_tangent__", None)
+    return record if isinstance(record, HandTangent) else None

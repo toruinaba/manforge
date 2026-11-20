@@ -38,6 +38,17 @@ class _TangentOff(J2Isotropic3D):
         return 1.01 * super().user_defined_tangent(new, dlambda, inc)
 
 
+class _GoingBack(J2Isotropic3D):
+    """Hand-written tangent 1 % too stiff while the first strain component decreases."""
+
+    def going_back(self, inc):
+        return inc.strain_inc[0] < 0.0
+
+    def user_defined_tangent(self, new, dlambda, inc):
+        scale = 1.01 if self.going_back(inc) else 1.0
+        return scale * super().user_defined_tangent(new, dlambda, inc)
+
+
 def statuses(report):
     return {check.name: check.status for check in report.checks}
 
@@ -117,6 +128,97 @@ class TestWhatFails:
         assert not report.passed
         assert "does not reach yield" in report["converges"].detail
         assert report["tangent"].status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# A hand-written tangent declared approximate (hand_tangent)
+# ---------------------------------------------------------------------------
+
+class TestDeclaredTangent:
+    def test_undeclared_the_same_tangent_fails(self):
+        report = check_model(_GoingBack.at_defaults())
+        failed = [c.name for c in report.checks if c.status == "failed"]
+        assert failed == ["hand-written vs autodiff", "hand-written tangent"]
+
+    def test_declared_on_those_steps_they_are_left_out_and_counted(self):
+        from returnmap.core import hand_tangent
+
+        class Declared(_GoingBack):
+            @hand_tangent(approx_when="going_back", note="1 % stiff while going back")
+            def user_defined_tangent(self, new, dlambda, inc):
+                return super().user_defined_tangent(new, dlambda, inc)
+
+        report = check_model(Declared.at_defaults())
+        assert report.passed, report.summary()
+        assert report.approximations == ["1 % stiff while going back"]
+        assert "declared approximate: 1 % stiff while going back" in report.summary()
+
+        versus = report["hand-written vs autodiff"]
+        n_off = sum(r.n_steps - r.n_passed for r in versus.reports.values())
+        assert n_off > 0 and f"; {n_off} step(s) declared approximate" in versus.detail
+        # What is reported as the tangent error is that of the steps held exact.
+        assert "tangent 1.0e-02" not in versus.detail
+        assert "declared approximate" in report["hand-written tangent"].detail
+
+    def test_the_declaration_does_not_cover_other_steps(self):
+        """Declared approximate while going back, wrong while going forward."""
+        from returnmap.core import hand_tangent
+
+        class WrongWay(J2Isotropic3D):
+            def going_back(self, inc):
+                return inc.strain_inc[0] < 0.0
+
+            @hand_tangent(approx_when="going_back", note="1 % stiff while going back")
+            def user_defined_tangent(self, new, dlambda, inc):
+                scale = 1.0 if self.going_back(inc) else 1.01
+                return scale * super().user_defined_tangent(new, dlambda, inc)
+
+        report = check_model(WrongWay.at_defaults())
+        assert report["hand-written vs autodiff"].status == "failed"
+        assert report["hand-written tangent"].status == "failed"
+
+    @pytest.mark.parametrize("approx, passes", [(2e-2, True), (1e-3, False)])
+    def test_with_approx_the_declared_steps_are_held_to_it(self, approx, passes):
+        from returnmap.core import hand_tangent
+
+        class HeldTo(_GoingBack):
+            @hand_tangent(approx=approx, approx_when="going_back", note="1 % stiff")
+            def user_defined_tangent(self, new, dlambda, inc):
+                return super().user_defined_tangent(new, dlambda, inc)
+
+        report = check_model(HeldTo.at_defaults())
+        assert report["hand-written vs autodiff"].passed is passes
+        assert report["hand-written tangent"].passed is passes
+
+    @pytest.mark.parametrize("approx, passes", [(2e-2, True), (1e-3, False)])
+    def test_approx_alone_is_the_tolerance_on_every_step(self, approx, passes):
+        from returnmap.core import hand_tangent
+
+        class Everywhere(_TangentOff):
+            @hand_tangent(approx=approx, note="1 % stiff throughout")
+            def user_defined_tangent(self, new, dlambda, inc):
+                return super().user_defined_tangent(new, dlambda, inc)
+
+        report = check_model(Everywhere.at_defaults())
+        assert report["hand-written vs autodiff"].passed is passes
+        assert report["hand-written tangent"].passed is passes
+        if passes:
+            assert f"(tol {approx:.0e})" in report["hand-written tangent"].detail
+
+    def test_a_tangent_declared_approximate_everywhere_it_is_sampled_is_held_to_nothing(self):
+        from returnmap.core import hand_tangent
+
+        class Always(J2Isotropic3D):
+            def always(self):
+                return True
+
+            @hand_tangent(approx_when="always", note="never exact")
+            def user_defined_tangent(self, new, dlambda, inc):
+                return super().user_defined_tangent(new, dlambda, inc)
+
+        report = check_model(Always.at_defaults())
+        assert report["hand-written tangent"].status == "failed"
+        assert "held to nothing" in report["hand-written tangent"].detail
 
 
 # ---------------------------------------------------------------------------

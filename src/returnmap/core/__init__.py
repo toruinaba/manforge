@@ -25,7 +25,9 @@ from returnmap.core.material import (
     MaterialModel,
     ParamMeta,
     HandBlock,
+    HandTangent,
     hand_block,
+    hand_tangent,
     FortranBinding,
     verified_against_fortran,
 )
@@ -60,6 +62,8 @@ __all__ = [
     # declarations checked by returnmap.verification
     "HandBlock",
     "hand_block",
+    "HandTangent",
+    "hand_tangent",
     "FortranBinding",
     "verified_against_fortran",
 ]

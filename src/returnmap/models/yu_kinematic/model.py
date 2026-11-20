@@ -3,12 +3,18 @@ import numpy as np
 import autograd.numpy as anp
 from returnmap.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
 from returnmap.core.material import (
-    MaterialModel, ParamMeta, hand_block, verified_against_fortran,
+    MaterialModel, ParamMeta, hand_block, hand_tangent, verified_against_fortran,
 )
 from returnmap.core.result import ReturnMappingResult
 from returnmap.core.state import Explicit, Implicit, NTENS, SCALAR
 from returnmap.core.dimension import (
     SOLID_3D, PLANE_STRESS_P, UNIAXIAL_1D,
+)
+
+# What the hand derivations leave out, said once and attached to each of them.
+_GATE_NOTE = (
+    "the stagnation gate is differentiated as a constant; exact while it is 0 "
+    "or 1, not on the step where it switches"
 )
 
 class YUKinematic(MaterialModel):
@@ -114,6 +120,26 @@ class YUKinematic(MaterialModel):
         k_eff = self.k_eff
         delta_R = (R_n + k_eff * self.Rsat * dlambda) / (1 + k_eff * dlambda) - R_n
         return g_flag * delta_q, g_flag * delta_r, g_flag * delta_R
+
+    def stagnation_gate_in_transition(self, state, state_n):
+        """Whether the gate that switches the growth of ``R`` on is in between.
+
+        The gate is ``smooth_heaviside(g_stag)``: 0 while β is inside the
+        stagnation surface, 1 once it is outside, and smooth across a band of
+        about ±0.07 stress units around ``g_stag = 0``.  The hand-derived
+        Jacobian and tangent treat it as a constant — which is what a hard
+        switch would be — so they are exact wherever it is 0 or 1 and miss
+        its derivative on a step whose converged ``g_stag`` lies in the band.
+        This is the condition those derivations are declared approximate
+        under (``approx_when``).
+
+        The bounds are where the gate's derivative, ``500 · g · (1 − g)``,
+        stops mattering next to the tolerance the blocks are held to.
+        """
+        g_xi = state["beta"] - state_n["q"]
+        g_stag = self.vonmises_norm(g_xi) - state_n["r"]
+        gate = float(smooth_heaviside(g_stag + 1.0e-10))
+        return 1.0e-14 < gate < 1.0 - 1.0e-14
 
     def update_state(self, new, dlambda, inc):
         state_n = inc.state_n
@@ -241,6 +267,7 @@ class YUKinematic3D(YUKinematic):
             converged=converged,
         )
 
+    @hand_tangent(approx_when="stagnation_gate_in_transition", note=_GATE_NOTE)
     def user_defined_tangent(self, new, dlambda, inc):
         return self.calc_ddsdde(new, inc.state_n, inc.trial["stress"], dlambda)
 
@@ -638,6 +665,7 @@ class YUKinematicPS(YUKinematic):
             converged=converged
         )
 
+    @hand_tangent(approx_when="stagnation_gate_in_transition", note=_GATE_NOTE)
     def user_defined_tangent(self, new, dlambda, inc):
         return self.calc_ddsdde(new, inc.state_n, inc.trial["stress"], dlambda)
             
@@ -751,13 +779,15 @@ class YUKinematicPS(YUKinematic):
         dthb_dth = np.sqrt(1.5) * self.P @ theta / smooth_sqrt(self.deviatoric_inner_product(theta, theta))
         return f1 * np.eye(3) + f2 * np.outer(theta, dthb_dth)
 
-    @hand_block("theta", "beta")
+    @hand_block("theta", "beta",
+                approx_when="stagnation_gate_in_transition", note=_GATE_NOTE)
     def calc_ft_fb(self, state, dlambda, state_n):
         a = self.B + state["R"] - self.Y
         C_k = self._C_k(state_n)
         return 2 / 3 * C_k * a * dlambda * np.eye(3)
 
-    @hand_block("theta", "dlambda")
+    @hand_block("theta", "dlambda",
+                approx_when="stagnation_gate_in_transition", note=_GATE_NOTE)
     def calc_ft_fl(self, state, dlambda, state_n):
         stress = state["stress"]
         beta = state["beta"]
