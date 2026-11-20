@@ -22,8 +22,11 @@ class FortranBinding:
     subroutine:
         Exact subroutine name as passed to :meth:`~returnmap.simulation.FortranModule.call`.
     test:
-        Pytest node id of the test that verifies this binding
-        (e.g. ``"tests/integration/verification/test_fortran_check.py::test_check_bindings_elastic_stiffness"``).
+        Pytest node id of the test that verifies this binding, with its path
+        relative to the directory of the model's module
+        (``"tests/test_numerical_vs_fortran.py::TestHelpers::test_elastic_stiffness"``
+        for a test kept with the model, so the pointer survives the family
+        directory being moved) or, failing that, to the repository root.
         Not executed at runtime — recorded as a machine-readable pointer.
     notes:
         Free-form annotation (e.g. sign convention differences).

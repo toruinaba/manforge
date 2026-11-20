@@ -9,7 +9,7 @@ _prepare_Rtheta hard-if is the cause), or spread across all steps (Pattern B:
 smooth_heaviside β=50 structural difference)?
 
 Run with:
-    uv run python tests/benchmarks/yu_kinematic/_diagnose.py 2>&1 | tee /tmp/yu_diag.txt
+    uv run python src/returnmap/models/yu_kinematic/tests/_diagnose.py 2>&1 | tee /tmp/yu_diag.txt
 """
 
 import numpy as np

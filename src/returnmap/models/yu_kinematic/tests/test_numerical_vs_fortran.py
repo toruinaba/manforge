@@ -3,7 +3,7 @@
 Requires the compiled yu_kinematic_3d Fortran extension:
     make fortran-build-yu
 or:
-    uv run returnmap build fortran/abaqus_stubs.f90 fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d
+    uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90 --name yu_kinematic_3d
 
 Test classes:
     TestHelpers              -- elastic_stiffness, calc_norm_n_flow,

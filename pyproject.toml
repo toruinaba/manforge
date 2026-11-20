@@ -37,7 +37,7 @@ returnmap = "returnmap.cli:main"
 packages = ["src/returnmap"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src/returnmap/models"]
 addopts = "--strict-markers --import-mode=importlib"
 pythonpath = ["."]
 markers = [
@@ -47,6 +47,7 @@ markers = [
 
 [tool.pyright]
 include = ["src/returnmap"]
+exclude = ["**/tests"]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false

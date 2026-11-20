@@ -3,11 +3,33 @@
 ## テスト
 
 ```bash
-make test        # 高速テスト (unit + integration、slow/fortran 除く)
-make test-all    # 全スイート
+make test          # 高速テスト (フレームワークの unit + integration と全モデル、slow/fortran 除く)
+make test-models   # モデルのテストだけ (slow を含む)
+make test-all      # 全スイート
+uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファミリだけ
 ```
 
-その他のターゲット (e2e / slow / benchmarks / docker) は `Makefile` を参照。テストレイアウトは `tests/{unit,integration}` が `src/returnmap` のモジュール構成に対応し (モジュールごとに unit か integration のどちらか)、`tests/benchmarks/<model>/` が数値同値ハーネス。
+その他のターゲット (e2e / slow / docker) は `Makefile` を参照。テストは 2 箇所にある。
+
+- **フレームワークのテスト** — `tests/{unit,integration}` が `src/returnmap` のモジュール構成に対応する (モジュールごとに unit か integration のどちらか)。複数のモデルにまたがるテストもここ (`tests/integration/models/`)。
+- **モデルのテスト** — そのモデルのファミリの中、`src/returnmap/models/<family>/tests/` にある。pip で入れた先でも `pytest --pyargs returnmap.models.yu_kinematic` で実行できる。
+
+### モデルのテスト
+
+ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
+
+2 つの独立した実装を比べるテスト (手書きの経路と自動微分、Python と UMAT) は、次の名前と基準値に揃える。外れるものは、そのモジュールの docstring に理由を書く。
+
+| ファイル | 比べるもの |
+|---|---|
+| `test_analytical_vs_numerical.py` | 手書きのリターンマッピング vs フレームワークの NR |
+| `test_numerical_vs_fortran.py` | Python vs コンパイルした UMAT (`@pytest.mark.fortran`。モジュールが無ければ skip) |
+
+| 量 | 許容値 |
+|---|---|
+| 応力 | atol=1e-6 (絶対値、MPa) |
+| Δλ、ep | atol=1e-10 (絶対値) |
+| 接線 | 最大相対誤差 < 1e-5 |
 
 ## 例
 

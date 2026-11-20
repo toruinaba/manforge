@@ -3,10 +3,10 @@
 ## 概要
 
 このディレクトリには YU 動力学硬化 UMAT の固定形式（`.for`）版が保管されている。
-これらは `fortran/yu_kinematic_3d.f90`（自由形式）から派生したもので、
+これらは `src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90`（自由形式）から派生したもので、
 コンパイラの型定義の懸念から調査目的で作成された。
 
-**現在の正式採用ファイル**: `fortran/yu_kinematic_3d.f90`（自由形式、gfortran/ABAQUS 共用）
+**現在の正式採用ファイル**: `src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90`（自由形式、gfortran/ABAQUS 共用）
 
 ---
 
@@ -79,6 +79,6 @@ ABAQUS では通常 `.for` が固定形式として扱われるが、以下の�
 
 ```python
 # 自由形式 → 固定形式変換スクリプト（過去のセッションで使用）
-# free_to_fixed('fortran/yu_kinematic_3d.f90', 'archives/fortran_fixed_form/yu_kinematic_3d_fixed.for')
+# free_to_fixed('src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90', 'archives/fortran_fixed_form/yu_kinematic_3d_fixed.for')
 # その後 abaqus.for は fixed.for をベースに UMAT/UMAT_IMPL 構造に変換
 ```
