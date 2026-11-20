@@ -5,14 +5,17 @@ Main entry point: :func:`fit_params`.
 
 from __future__ import annotations
 
+import time
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import numpy as np
 from scipy.optimize import minimize, differential_evolution
 from typing_extensions import TypeAlias
 
+from returnmap.core.material import MaterialModel
 from returnmap.fitting.objective import (
     DriverFactoryFn,
     FAILURE_PENALTY,
@@ -23,10 +26,58 @@ from returnmap.fitting.space import ParameterSpace
 from returnmap.fitting.target import FitTarget, check_targets
 from returnmap._typing import FloatArray, NRJacobian
 
-if TYPE_CHECKING:
-    from returnmap.core.material import MaterialModel
-
 Method: TypeAlias = Literal["L-BFGS-B", "Nelder-Mead", "differential_evolution"]
+
+SLOW_EVALUATION_SECONDS = 0.5
+"""Time for one objective evaluation above which :func:`fit_params` warns.
+
+A fit evaluates the objective a few hundred times (45 to 412 over the fits
+this was measured on), so half a second each is where the wait turns from
+seconds into minutes.
+"""
+
+
+class SlowFitWarning(UserWarning):
+    """One objective evaluation is slow enough that the fit will take minutes.
+
+    Issued once by :func:`fit_params`, before the search starts, with the
+    measured time, the reason when the model is integrated by automatic
+    differentiation, and what would shorten it.  Silence it with
+    ``warnings.simplefilter("ignore", SlowFitWarning)``.
+    """
+
+
+def _slow_fit_message(
+    model: MaterialModel, targets: Sequence[FitTarget], seconds: float,
+    nr_jacobian: NRJacobian,
+) -> str:
+    n_steps = sum(len(np.asarray(t.load.data)) for t in targets)
+    autodiff = (
+        type(model).user_defined_return_mapping
+        is MaterialModel.user_defined_return_mapping
+    )
+    parts = [
+        f"one evaluation of the objective takes {seconds:.1f} s ({n_steps} load "
+        "steps) and a fit needs a few hundred of them, so expect minutes."
+    ]
+    remedies = []
+    if autodiff:
+        parts.append(
+            f"{type(model).__name__} has no hand-written return mapping: every "
+            "plastic step is solved by automatic differentiation, which costs "
+            "milliseconds where a closed form costs microseconds."
+        )
+        if nr_jacobian == "exact":
+            remedies.append('nr_jacobian="broyden"')
+    remedies.append(
+        'fewer load steps (metric="pcm" compares a coarse run against an '
+        "experiment sampled more finely)"
+    )
+    if autodiff:
+        remedies.append("a model that has a hand-written return mapping")
+    parts.append("To shorten it: " + "; ".join(remedies) + ".")
+    parts.append("progress=print shows each evaluation as it completes.")
+    return " ".join(parts)
 
 
 @dataclass
@@ -186,6 +237,24 @@ def _check_initial_point(
     raise RuntimeError(message)
 
 
+def _reporting(
+    obj_fn: Callable[[Sequence[float] | FloatArray], float],
+    progress: Callable[[int, float, float], None],
+) -> Callable[[Sequence[float] | FloatArray], float]:
+    """``obj_fn`` that calls ``progress(n, residual, best)`` after each evaluation."""
+    n_done, best = 0, float("inf")
+
+    def evaluate(x: Sequence[float] | FloatArray) -> float:
+        nonlocal n_done, best
+        value = obj_fn(x)
+        n_done += 1
+        best = min(best, value)
+        progress(n_done, value, best)
+        return value
+
+    return evaluate
+
+
 def fit_params(
     model: "MaterialModel",
     targets: Sequence[FitTarget],
@@ -197,6 +266,7 @@ def fit_params(
     tol: float | None = None,
     options: Mapping[str, Any] | None = None,
     nr_jacobian: NRJacobian = "exact",
+    progress: Callable[[int, float, float], None] | None = None,
 ) -> FitResult:
     """Fit material parameters to experimental curves.
 
@@ -270,10 +340,24 @@ def fit_params(
         ``"exact"`` to within the NR tolerance.  Opt-in because the extra
         1–2 NR iterations per step can matter near the edge of the solvable
         parameter region.
+    progress : callable or None
+        Called as ``progress(n_evaluations, residual, best_residual)`` after
+        every objective evaluation of the search — the residual of that
+        evaluation and the smallest one so far.  ``progress=print`` is enough
+        to see that a long fit is alive and whether it is still improving.
 
     Returns
     -------
     FitResult
+
+    Warns
+    -----
+    SlowFitWarning
+        When the first evaluation of the objective takes longer than
+        :data:`~returnmap.fitting.SLOW_EVALUATION_SECONDS` — typically a model
+        without a hand-written return mapping run over many load steps.  The
+        fit goes ahead; the message says how long one evaluation takes and
+        what would shorten it.
     """
     if not isinstance(space, ParameterSpace):
         raise TypeError(
@@ -295,7 +379,18 @@ def fit_params(
     # unsolvable the optimiser cannot compute a first gradient and every
     # evaluation fails -- a setup problem that reads very differently from
     # "the search wandered somewhere bad", so it gets its own diagnosis.
+    started = time.perf_counter()
     _check_initial_point(obj_fn, space, failures)
+    seconds = time.perf_counter() - started
+    if seconds > SLOW_EVALUATION_SECONDS:
+        warnings.warn(
+            _slow_fit_message(model, targets, seconds, nr_jacobian),
+            SlowFitWarning, stacklevel=2,
+        )
+
+    if progress is not None:
+        # After the probe above, so the count matches FitResult.n_evaluations.
+        obj_fn = _reporting(obj_fn, progress)
 
     history: list[dict[str, float]] = []
 

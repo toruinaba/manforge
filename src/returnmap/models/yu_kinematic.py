@@ -2,7 +2,9 @@ from copy import deepcopy
 import numpy as np
 import autograd.numpy as anp
 from returnmap.utils.smooth import smooth_sqrt, smooth_max, smooth_heaviside
-from returnmap.core.material import MaterialModel, hand_block, verified_against_fortran
+from returnmap.core.material import (
+    MaterialModel, ParamMeta, hand_block, verified_against_fortran,
+)
 from returnmap.core.result import ReturnMappingResult
 from returnmap.core.state import Explicit, Implicit, NTENS, SCALAR
 from returnmap.core.dimension import (
@@ -13,6 +15,34 @@ class YUKinematic(MaterialModel):
     """Yoshida-Uemori two-surface + stagnation-surface kinematic hardening model."""
 
     param_names = ["E", "nu", "Y", "B", "C_1", "C_2", "Rsat", "k", "b", "h", "Ea", "xi"]
+    param_meta = {
+        "E": ParamMeta(doc="Young's modulus (initial)", unit="MPa",
+                       default=206_000.0, bounds=(1e3, 1e6)),
+        "nu": ParamMeta(doc="Poisson's ratio", default=0.3, bounds=(0.0, 0.49)),
+        "Y": ParamMeta(doc="Yield stress (radius of the yield surface)", unit="MPa",
+                       default=360.0, bounds=(1.0, 5e3)),
+        "B": ParamMeta(doc="Initial size of the bounding surface (B > Y)", unit="MPa",
+                       default=435.0, bounds=(1.0, 5e3)),
+        "C_1": ParamMeta(doc="Kinematic hardening rate of the yield surface, until "
+                             "its backstress first reaches B - Y",
+                         default=2_000.0, bounds=(0.0, 1e5)),
+        "C_2": ParamMeta(doc="Kinematic hardening rate of the yield surface, after that",
+                         default=200.0, bounds=(0.0, 1e5)),
+        "Rsat": ParamMeta(doc="Saturated isotropic hardening of the bounding surface",
+                          unit="MPa", default=255.0, bounds=(0.0, 5e3)),
+        "k": ParamMeta(doc="Hardening rate of the bounding surface (isotropic and kinematic)",
+                       default=26.0, bounds=(0.0, 1e3)),
+        "b": ParamMeta(doc="Saturated backstress of the bounding surface", unit="MPa",
+                       default=66.0, bounds=(0.0, 5e3)),
+        "h": ParamMeta(doc="Expansion rate of the stagnation (non-isotropic-hardening) "
+                           "surface, between 0 and 1",
+                       default=0.4, bounds=(0.0, 1.0)),
+        "Ea": ParamMeta(doc="Young's modulus at large plastic strain", unit="MPa",
+                        default=159_000.0, bounds=(1e3, 1e6)),
+        "xi": ParamMeta(doc="Decay rate of Young's modulus with plastic strain "
+                            "(0 = constant modulus)",
+                        default=61.0, bounds=(0.0, 1e3)),
+    }
     stress = Implicit(shape=NTENS, doc="cauchy stress")
     theta = Implicit(shape=NTENS, doc="relative backstress tensor of yield surface(deviatoric)")
     beta = Implicit(shape=NTENS, doc="relative backstress tensor of boundary surface(deviatoric)")

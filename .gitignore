@@ -16,3 +16,4 @@ dist/
 *module.c
 # Sphinx build output
 docs/_build/
+__marimo__/

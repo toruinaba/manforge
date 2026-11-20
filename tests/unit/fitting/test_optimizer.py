@@ -1,18 +1,40 @@
-"""fit_params — how the search is set up.
+"""fit_params — how the search is set up, and what it tells the caller.
 
 Whether a fit recovers the right parameters is covered end to end in
 ``tests/e2e/test_fitting_pipeline.py``.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 
-from returnmap.fitting import FitTarget, ParameterSpace, fit_params
+import returnmap.fitting.optimizer as optimizer
+from returnmap.fitting import (
+    FitTarget, ParameterSpace, SLOW_EVALUATION_SECONDS, SlowFitWarning, fit_params,
+)
 from returnmap.fitting.optimizer import _SearchScale
 from returnmap.models import AFKinematic1D, J2Isotropic1D
 from returnmap.simulation import FieldHistory, FieldType, PythonIntegrator, StrainDriver
 
 ELASTIC = dict(E=206000.0, nu=0.3)
+J2 = J2Isotropic1D(**ELASTIC, sigma_y0=250.0, H=2000.0)
+AF = AFKinematic1D(**ELASTIC, sigma_y0=250.0, C_k=20000.0, gamma=100.0)
+
+STRAIN = np.linspace(0.0, 6e-3, 20)
+
+
+def target_of(model):
+    """The model's own response, as the curve to fit."""
+    result = StrainDriver(PythonIntegrator(model)).run(FieldHistory(FieldType.STRAIN, STRAIN))
+    return FitTarget.stress_strain(STRAIN, result.stress[:, 0])
+
+
+J2_SPACE = ParameterSpace(
+    free={"sigma_y0": (220.0, (100.0, 500.0)), "H": (1500.0, (0.0, 1e4))}, fixed=ELASTIC)
+AF_SPACE = ParameterSpace(
+    free={"C_k": (15000.0, (1000.0, 1e5))},
+    fixed=dict(ELASTIC, sigma_y0=250.0, gamma=100.0))
 
 
 def response(model, strain):
@@ -127,3 +149,86 @@ def test_the_optimum_does_not_depend_on_where_a_large_parameter_starts():
     # Better than the parameters the data was generated with, as a fit to
     # noisy data should be.
     assert near.residual < target.residual(PythonIntegrator(true), None)
+
+
+# ---------------------------------------------------------------------------
+# progress
+# ---------------------------------------------------------------------------
+
+def test_progress_is_called_after_every_evaluation_of_the_search():
+    calls = []
+    fit = fit_params(J2, [target_of(J2)], J2_SPACE,
+                     progress=lambda n, residual, best: calls.append((n, residual, best)))
+
+    assert [n for n, _, _ in calls] == list(range(1, fit.n_evaluations + 1))
+    best = [b for _, _, b in calls]
+    assert all(later <= earlier for earlier, later in zip(best, best[1:]))
+    assert all(b <= r for _, r, b in calls)
+    # The optimiser reports the point it settled on, which is one of the
+    # evaluations but not necessarily the smallest (a finite-difference probe
+    # next to it can come out a hair lower).
+    assert fit.residual in [r for _, r, _ in calls]
+    assert best[-1] <= fit.residual
+
+
+def test_progress_print_is_enough(capsys):
+    fit_params(J2, [target_of(J2)], J2_SPACE, max_iter=1, progress=print)
+    first = capsys.readouterr().out.splitlines()[0].split()
+    assert first[0] == "1" and float(first[1]) == float(first[2])
+
+
+def test_progress_does_not_change_the_fit():
+    plain = fit_params(J2, [target_of(J2)], J2_SPACE)
+    watched = fit_params(J2, [target_of(J2)], J2_SPACE, progress=lambda *a: None)
+    assert watched.model_params == plain.model_params
+    assert watched.n_evaluations == plain.n_evaluations
+
+
+# ---------------------------------------------------------------------------
+# SlowFitWarning
+# ---------------------------------------------------------------------------
+
+def test_a_quick_fit_does_not_warn():
+    assert SLOW_EVALUATION_SECONDS == 0.5
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SlowFitWarning)
+        fit_params(J2, [target_of(J2)], J2_SPACE, max_iter=1)
+
+
+def test_a_slow_evaluation_warns_once_before_the_search(monkeypatch):
+    monkeypatch.setattr(optimizer, "SLOW_EVALUATION_SECONDS", 0.0)
+    with pytest.warns(SlowFitWarning) as caught:
+        fit_params(AF, [target_of(AF)], AF_SPACE, max_iter=1)
+    assert len(caught) == 1
+    message = str(caught[0].message)
+    assert "one evaluation of the objective takes" in message
+    assert "(20 load steps)" in message
+    # Reported at the caller's line, not inside the library.
+    assert caught[0].filename == __file__
+
+
+def test_the_warning_names_automatic_differentiation_as_the_cause(monkeypatch):
+    monkeypatch.setattr(optimizer, "SLOW_EVALUATION_SECONDS", 0.0)
+    with pytest.warns(SlowFitWarning) as caught:
+        fit_params(AF, [target_of(AF)], AF_SPACE, max_iter=1)
+    message = str(caught[0].message)
+    assert "AFKinematic1D has no hand-written return mapping" in message
+    assert 'nr_jacobian="broyden"' in message
+    assert "a model that has a hand-written return mapping" in message
+
+
+def test_the_warning_does_not_suggest_what_is_already_in_use(monkeypatch):
+    monkeypatch.setattr(optimizer, "SLOW_EVALUATION_SECONDS", 0.0)
+    with pytest.warns(SlowFitWarning) as caught:
+        fit_params(AF, [target_of(AF)], AF_SPACE, max_iter=1, nr_jacobian="broyden")
+    assert "broyden" not in str(caught[0].message)
+
+
+def test_a_closed_form_model_is_not_blamed_on_automatic_differentiation(monkeypatch):
+    """Slow for another reason (a very long history): only that is suggested."""
+    monkeypatch.setattr(optimizer, "SLOW_EVALUATION_SECONDS", 0.0)
+    with pytest.warns(SlowFitWarning) as caught:
+        fit_params(J2, [target_of(J2)], J2_SPACE, max_iter=1)
+    message = str(caught[0].message)
+    assert "hand-written" not in message and "broyden" not in message
+    assert "fewer load steps" in message
