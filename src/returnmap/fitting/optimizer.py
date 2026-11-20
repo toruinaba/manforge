@@ -6,7 +6,7 @@ Main entry point: :func:`fit_params`.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -109,6 +109,56 @@ def _clipped_x0(space: ParameterSpace) -> FloatArray:
     return np.clip(space.x0, lo, hi)
 
 
+@dataclass(frozen=True)
+class _SearchScale:
+    """The free variables as the optimiser sees them: each about one unit wide.
+
+    Material parameters differ by orders of magnitude — a hardening modulus of
+    2e4 next to a recovery coefficient of 1e2.  Handed over as they are, a
+    gradient method takes steps sized for the small ones and leaves the large
+    ones where they started: measured on an Armstrong-Frederick fit, L-BFGS-B
+    reported convergence with ``C_k`` still at its initial value.  The search
+    therefore runs on ``u = (x - offset) / scale``, where ``scale`` is the
+    width of the variable's bounds, so that every variable crosses its range
+    as ``u`` goes from 0 to 1.  A variable without two finite bounds is scaled
+    by the magnitude of its initial value instead (by 1 if that is zero).
+
+    Only the optimiser's view changes; the objective, the bounds the caller
+    wrote and everything reported back are in the caller's units.
+    """
+
+    offset: FloatArray
+    scale: FloatArray
+    lower: FloatArray
+    upper: FloatArray
+
+    @classmethod
+    def of(cls, space: ParameterSpace) -> "_SearchScale":
+        lower, upper = np.array(space.bounds, dtype=float).T
+        x0 = _clipped_x0(space)
+        boxed = np.isfinite(lower) & np.isfinite(upper) & (upper > lower)
+        magnitude = np.where(x0 != 0.0, np.abs(x0), 1.0)
+        return cls(
+            offset=np.where(boxed, lower, 0.0),
+            scale=np.where(boxed, upper - lower, magnitude),
+            lower=lower,
+            upper=upper,
+        )
+
+    def to_search(self, x: Sequence[float] | FloatArray) -> FloatArray:
+        return (np.asarray(x, dtype=float) - self.offset) / self.scale
+
+    def to_params(self, u: Sequence[float] | FloatArray) -> FloatArray:
+        # Clipped: offset + scale * 1.0 can land one rounding step past the bound.
+        x = self.offset + self.scale * np.asarray(u, dtype=float)
+        return np.clip(x, self.lower, self.upper)
+
+    @property
+    def bounds(self) -> list[tuple[float, float]]:
+        lo, hi = self.to_search(self.lower), self.to_search(self.upper)
+        return list(zip(lo.tolist(), hi.tolist()))
+
+
 def _check_initial_point(
     obj_fn: Callable[[Sequence[float] | FloatArray], float],
     space: ParameterSpace,
@@ -197,6 +247,11 @@ def fit_params(
         - ``"L-BFGS-B"``              — bounded quasi-Newton, gradient by finite differences (default)
         - ``"Nelder-Mead"``           — simplex, no bounds
         - ``"differential_evolution"``— global stochastic (slow but robust)
+
+        The first two search on the free variables rescaled by the width of
+        their bounds, so parameters of very different magnitude are treated
+        alike; give every free variable a finite range that reflects where it
+        can plausibly lie.  Results are reported in the units you wrote.
     max_iter : int
         Maximum optimiser iterations.
     tol : float or None
@@ -276,17 +331,23 @@ def fit_params(
             if tol is not None:
                 opts["ftol"] = tol
         opts.update(extra)
+        search = _SearchScale.of(space)
+        if method == "Nelder-Mead":
+            # Run without bounds, as documented: scaled by them, not held to them.
+            search = replace(search, lower=-np.inf * np.ones_like(search.lower),
+                             upper=np.inf * np.ones_like(search.upper))
         # The clipped point, for every method: it is the one probed above.
         # L-BFGS-B clips by itself; Nelder-Mead is run without bounds and
         # would otherwise start from an out-of-range value nobody checked.
         result = minimize(
-            obj_fn,
-            _clipped_x0(space),
+            lambda u: obj_fn(search.to_params(u)),
+            search.to_search(_clipped_x0(space)),
             method=method,
-            bounds=bounds if method != "Nelder-Mead" else None,
-            callback=_callback,
+            bounds=search.bounds if method != "Nelder-Mead" else None,
+            callback=lambda u: _callback(search.to_params(u)),
             options=opts,
         )
+        result.x = search.to_params(result.x)
 
     # Every evaluation failing means no parameter set in the box was solvable,
     # so there is no optimum to report -- that is a setup problem, and silently
