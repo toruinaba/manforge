@@ -1,6 +1,6 @@
 # API 再設計 設計メモ
 
-- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15、名前の変更は 4.16、残っていた小さな不統一の解消は 4.17 にある。
+- 状態: 2026-11-18 に全体を合意。移行計画(5 章の段 0〜6)と未決事項(6 章)はすべて実施・決定済み。その後の全体レビューで見つかった点は 4.14、そこから決めた検査の形の統一は 4.15、名前の変更は 4.16、残っていた小さな不統一の解消は 4.17、モデルの比較は 4.18 にある。
 - 基準点: returnmap `v0.1.0`(`10c586c`)、returnmap-internal `99bc291`。本文中の `file:line` はこの基準点のもの。
 - 名前: このメモを書いた時点のパッケージ名は `manforge` だった。2026-11-20 に `returnmap` に改名した(4.16)。本文のパッケージ名と import パスは新しい名前に置き換えてある。基準点のタグ `v0.1.0` の中身は `manforge` のままである。
 - 対象読者: returnmap と returnmap-internal の両方を触る人。
@@ -435,6 +435,26 @@ assert report.passed, report.summary()
 **`FieldHistory` のラベルを省略できるようにした。** `FieldHistory(type, name, data)` の `name` は必須の位置引数だったが、フレームワークはこれを読まない(両リポジトリの呼び出し 108 箇所は、`"Strain"`、`"eps"` などを形だけ渡していた)。`FieldHistory(type, data, *, name="")` にした。`name` をキーワード専用にしたのは、古い書き方(2 番目にラベル)がラベルを `data` として黙って受け取らず、`TypeError` になるようにするためである。
 
 **そのままにしたもの。** Python の integrator の 3 クラス(`PythonIntegrator` / `PythonNumericalIntegrator` / `PythonAnalyticalIntegrator`)は、今回の対象にしていない。
+
+### 4.18 モデルの比較 `compare_models`
+
+到達点 A(4.16)のモデルは、Python のモデルを書いた時点で使い道がある: ほかの構成則と比べることである。比べたいのは応答の違い、計算コスト(収束回数、時間)、フィットの良さの 3 つで、毎回全部ではない。これまでは、モデルごとに driver を回して結果を集めるスクリプトを手で書いていた(returnmap-internal の `examples/compare_yu_variants.py`)。
+
+```python
+comparison = compare_models({"J2": j2, "AF": af, "OW": ow}, load)   # returnmap.simulation
+comparison.runs["AF"].stress        # 応答(ModelRun は DriverResult と同じ読み方ができる)
+print(comparison.summary())         # 1 モデル 1 行の表
+```
+
+- **載荷履歴だけで応答とコストが出る。フィットの良さは `targets=` を渡したときだけ。** 値は fitting の目的関数と同じもの(全ターゲットの残差の和)にした。フィットしたモデルでは `FitResult.residual` と一致するので、2 つの数字の関係を説明する必要がない。
+- **何もフィットしない。** フィットは `fit_params` の仕事のままで、比較は渡されたモデルを走らせるだけである。
+- **合否は付けない。** 計算の結果なので `ModelComparisonResult`(`*Report` ではない)。2 つの実装が一致するかを確かめるのは `crosscheck` である。
+- **解けなかったモデルは行として返す。** 1 つのモデルが途中で収束しなくなっても、ほかの比較は続ける。素のモデルは `raise_on_nonconverged=False` の `PythonIntegrator` で積分する。渡された integrator が raise した場合(既定の `raise_on_nonconverged=True`、特異なヤコビアン)も同じ行にし、例外の文面を `ModelRun.error` に残す。対象にする例外は fitting の目的関数と同じ集合で、それ以外(載荷履歴の形の不一致など)は呼び出しの誤りとしてそのまま上げる。
+- **反復数は塑性ステップで平均する。** 弾性ステップは 0 回なので、全ステップで平均すると降伏が遅いモデルほど安く見える。
+- **時間は 1 回測るだけにした。** 繰り返して最良値を取る形にはしていない。見たいのはモデル間の数倍の差で、表の値は目安である。ひずみ制御では整合接線を求めない(遅延評価)ので、時間に含まれない。その driver が実際に必要とした計算の時間、という定義にした。
+- **モデルの代わりに integrator を渡せる。** 当初の案は「名前 → モデル」だけだったが、解き方ごとのコスト(自動微分と手書き、`"exact"` と `"broyden"`、Python と UMAT)を比べるには integrator を選べる必要がある。UMAT は反復数と塑性の判定を報告しないので、その列は「不明」(`None`、表では `—`)にする。0 とは書かない。
+- **driver の決め方は `fit_params`、`crosscheck` と同じ規則。** `driver_factory` は integrator を受け取るので、次元の違うモデルを 1 つの軸方向の履歴で走らせる(1D は `StrainDriver`、3D は `MixedDriver`)ことは factory の中で書ける。モデルごとの driver の指定は足していない。
+- **`returnmap.simulation` に置いた。** `targets` の型(`FitTarget`)は `returnmap.fitting` のものだが、fitting は simulation の上に作られているので、import は関数の中で行う(パッケージの import の向きは変えていない)。
 
 ## 5. 移行計画
 各段で returnmap と returnmap-internal の PR を対にし、両方のテストが通る状態で終える。returnmap-internal は editable 依存で CI が無いので、returnmap 側の PR ごとに internal のテストを手元で走らせる。

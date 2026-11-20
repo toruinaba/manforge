@@ -46,7 +46,7 @@ returnmap is a framework for validating Fortran UMAT (Abaqus user material) cons
 
 1. **Material model** — `core/material/base.py`: `MaterialModel` ABC。状態変数は `Implicit` / `Explicit` のクラス属性で宣言し、`__init_subclass__` が `state_names` 等を導出・検証する。ユーザーが書くのは `yield_function`(必須)+ `update_state`(explicit 状態)/ `state_residual`(implicit 状態)。パラメータは `param_names` が唯一の宣言で、基底の `__init__` が同名のキーワード引数を受け取って属性に入れる(モデルは `__init__` を書かない。全パラメータ必須で既定値なし — UMAT の `PROPS` と同じ規則)。次元は、クラス本体に `dimension = X` と書いたクラスとその子は固定(別の `dimension=` は `TypeError`)、書かないクラスは構築時の `dimension=` で選ぶ。特殊フック(`elastic_predictor` / `elastic_tangent` / `elastic_check` / `elastic_update_state` / `user_defined_return_mapping` / `user_defined_tangent` / `flow` override / `dlambda` 行差し替え)の契約と設計理由はすべて base.py の docstring。予測子以外のフックは 1 ステップの入力をまとめた `Increment`(`inc.state_n` / `inc.strain_inc` / `inc.trial`、`core/state.py`)を受け取る。フックは位置引数で呼ばれるので、引数リストが違うとクラス定義時に `TypeError`。
 2. **Solver** — `simulation/integrator/`: `stress_update` = UMAT 1回分(弾性予測 → 分岐 → return mapping → consistent tangent)。結果(`StressUpdateResult`)は自分の `Increment` を持つので、ヤコビアンの内省は `integrator.jacobian(result)` だけで済む。NR の未知数は常に `[σ, Δλ, implicit 状態]`(explicit 状態は `update_state` で求め、未知数に入らない。σ を `Implicit` と宣言するのは σ 行の残差を自分で書くときで、宣言しなければ既定の関連流れの残差が使われる)。`nr_jacobian="broyden"` は初回のみ厳密ヤコビアン + Broyden 更新(接線は常に厳密)。既定は全層(integrator / fitting / service)で `"exact"`。NR 未知数ベクトルのレイアウトは `simulation/_layout.py`(`ResidualLayout`)、統一残差は `simulation/_residual.py` が単一の真実。
-3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`。状態量の履歴は要求せず `DriverResult.history(name)` で取る)、`fitting/`(`fit_params(model, targets, space, *, driver_factory=...)` の 1 形式 + `ParameterSpace` / `FitTarget` / `Observation` / metrics。各評価のモデルは `model.with_params(...)`、結果のモデルは `FitResult.model`)、`verification/`(検査はすべて「関数が報告を返す」形: `check_hand_blocks` / `check_solution` / `check_tangent` / `crosscheck` / `compare_jacobians` / `check_bindings`)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation`。レジストリに登録するのも `run_simulation(model, params, load)` が受け取るのもテンプレートのモデルで、`model.with_params(**params)` で走る。Web 依存ゼロ、plain I/O、非収束は値で返す)。
+3. **Application** — `simulation/driver.py`(`StrainDriver` / `StressDriver` / `MixedDriver`、`run` / `iter_run`。状態量の履歴は要求せず `DriverResult.history(name)` で取る)、`simulation/compare.py`(`compare_models(models, load, *, targets=...)`: 複数モデルの応答・計算コスト・フィットの良さを並べる。計算の結果なので `*Result`、非収束は行として返す)、`fitting/`(`fit_params(model, targets, space, *, driver_factory=...)` の 1 形式 + `ParameterSpace` / `FitTarget` / `Observation` / metrics。各評価のモデルは `model.with_params(...)`、結果のモデルは `FitResult.model`)、`verification/`(検査はすべて「関数が報告を返す」形: `check_hand_blocks` / `check_solution` / `check_tangent` / `crosscheck` / `compare_jacobians` / `check_bindings`)、`service/`(WebAPI 向け契約層: `ModelRegistry` / `run_simulation`。レジストリに登録するのも `run_simulation(model, params, load)` が受け取るのもテンプレートのモデルで、`model.with_params(**params)` で走る。Web 依存ゼロ、plain I/O、非収束は値で返す)。
 
 ### Voigt convention(横断契約 — 全層が従う)
 
@@ -69,12 +69,13 @@ returnmap is a framework for validating Fortran UMAT (Abaqus user material) cons
 - **Driver**: `iter_run` は非収束 step を yield して停止(非収束イテレートで状態を進めない)。`run` は完了した step だけを返し、`DriverResult.converged` / `failed_step` で知らせる(失敗した step は配列に入れない)。
 - **fitting**: 評価の非収束は有限ペナルティ(`FAILURE_PENALTY`)でスコアし続行。全評価失敗時のみ raise。設計理由は `fitting/objective.py`。
 - **service**: `run_simulation` は部分履歴 + `converged` / `failed_step` を値で返す(呼び出し側バグのみ `ValueError`)。
+- **compare_models**: 解けなかったモデルは `ModelRun.converged=False` / `failed_step` の行として返し、ほかのモデルの比較を続ける(integrator が raise した場合も同じ。呼び出し側バグのみ例外)。
 
 ### 検査の形と誤差の測り方(横断契約 — `verification/` の全検査が従う)
 
 - **検査は関数で、報告(`*Report`)を返す。** 報告は `.passed` と `.summary()` を持ち、テストはどの検査でも `assert report.passed, report.summary()`。検査用のクラス(`XxxChecker`)は作らない。計算の結果は `*Result`、検査の結果は `*Report`(`tests/unit/test_public_api.py` が確認する)。
 - **誤差は `max|候補 − 参照| / max|参照|`、合格は `<= tol`。** 配列(ブロック・接線・応力ベクトル)全体で測り、成分ごとに割らない。分母に単位を持つ定数(`+ 1e-2`、`max(·, 1)` など)を置かない — モデルを書いた単位で合否が変わるため。実装は `verification/_measure.py` の 1 箇所で、検査はそれを使う。NaN は最悪の誤差として扱う。割る相手が無い量(厳密に 0 のヤコビアンのブロック、0 から動いていない状態量)は、問題の大きさから決まる尺度より 12 桁以上小さいことで見分け(`NOISE_FLOOR`)、その尺度に対して測る — 素の数値とは比べない。
-- **driver を省略できる入口は同じ規則で決める**(`fit_params`、`crosscheck`): ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`(`simulation/driver.py` の `default_driver_for`)。
+- **driver を省略できる入口は同じ規則で決める**(`fit_params`、`crosscheck`、`compare_models`): ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`(`simulation/driver.py` の `default_driver_for`)。
 
 ### Test layout
 

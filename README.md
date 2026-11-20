@@ -62,6 +62,7 @@ load = FieldHistory.cyclic_strain(peaks=[5e-3, -5e-3, 5e-3], n_per_segment=25, n
 | [組み込みモデルと次元選択](docs/guide/models.md) | 参照モデル、次元の選び方、損傷モデル |
 | [シミュレーション実行](docs/guide/simulation.md) | ひずみ制御 / 応力制御 / 混合制御、状態量の履歴 |
 | [パラメータフィッティング](docs/guide/fitting.md) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
+| [モデルを比べる](docs/guide/comparing.md) | `compare_models`: 応答、計算コスト、フィットの良さ |
 | [モデルを作る](docs/guide/writing-models.md) | Explicit / Implicit、`flow`、弾性ステップのフック、閉形式ソルバ |
 | [検証ワークフロー](docs/guide/verification.md) | ヤコビアンの照合、手導出ブロック、FD tangent、クロスチェック |
 | [Fortran UMAT クロス検証](docs/guide/fortran.md) | ビルド → 読み込み → 比較 |

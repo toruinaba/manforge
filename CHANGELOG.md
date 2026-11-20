@@ -86,6 +86,14 @@ converged=True` と書く。
 - `result.history("strain")` が使える(`result.strain` と同じ。`"stress"` と同様)。そのため、状態量に `strain` という
   名前は付けられない(クラス定義時に `TypeError`)。
 
+追加:
+
+- `compare_models(models, load)`(`returnmap.simulation`)— 複数のモデルを同じ載荷履歴で走らせ、応答(各モデルの
+  `DriverResult`)、計算コスト(塑性ステップあたりの NR 反復数、ステップあたりの時間)、`targets=` を渡せば
+  フィットの良さを並べる。途中で解けなくなったモデルは例外にならず、表の 1 行になる。モデルの代わりに integrator を
+  渡せば、解き方(自動微分と手書き、`"exact"` と `"broyden"`、Python と UMAT)を比べられる。
+  ガイドは「モデルを比べる」。
+
 ### フィッティング
 
 | 0.1.0 | 0.2.0 |
