@@ -12,18 +12,24 @@ Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレーム�
 
 ## インストール
 
-現状は PyPI 未公開のため、ソースからの導入が正:
+**使う** — PyPI には未公開なので、GitHub のタグから入れる (依存は numpy / scipy / autograd):
 
 ```bash
-git clone <this-repo> && cd returnmap
+pip install "git+https://github.com/toruinaba/returnmap@v0.2.0"
+# 図も描くなら matplotlib を足す:
+pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.2.0"
+```
+
+**開発する** — リポジトリを取ってきて、テストや Fortran のビルドまで含めた環境を作る:
+
+```bash
+git clone https://github.com/toruinaba/returnmap && cd returnmap
 uv sync --extra dev          # テスト依存含む
-uv sync --all-extras         # matplotlib / Fortran ビルド依存含む
+uv sync --all-extras         # matplotlib / ドキュメント / Fortran ビルド依存含む
 
 # Fortran モジュールのビルド (gfortran 必須、無ければ Docker: make docker-build)
 uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 ```
-
-PyPI 公開後は `pip install returnmap` (+ extras: `[dev]` / `[examples]` / `[fortran]`)。
 
 ## クイックスタート
 
