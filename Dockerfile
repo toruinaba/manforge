@@ -8,7 +8,7 @@
 #
 # Run tests inside container:
 #   docker run --rm -v $(pwd):/workspace -w /workspace returnmap-fortran \
-#       bash -c "make fortran-build-umat && make test-benchmarks-fortran"
+#       bash -c "make fortran-build-umat && make test-models-fortran"
 
 FROM python:3.12-slim
 
@@ -36,4 +36,4 @@ WORKDIR /workspace
 COPY . .
 
 # Default: compile UMAT and run Fortran equivalence benchmarks
-CMD ["bash", "-c", "make fortran-build-umat && make test-benchmarks-fortran"]
+CMD ["bash", "-c", "make fortran-build-umat && make test-models-fortran"]

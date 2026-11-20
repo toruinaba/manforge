@@ -278,7 +278,7 @@ def test_param_names_match_fortran_arg_order(model_fn, module_name, subroutine):
     from returnmap.simulation import FortranModule
     pytest.importorskip(
         module_name,
-        reason=f"{module_name} not compiled -- run: uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
+        reason=f"{module_name} not compiled -- run: uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
     )
     model = model_fn()
     fortran = FortranModule(module_name)

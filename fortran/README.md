@@ -1,14 +1,15 @@
 # fortran/ — Fortran UMAT build guide
 
-This directory contains Fortran source files for implementing and validating
-ABAQUS UMAT constitutive subroutines that can be cross-validated against the
-Python `returnmap` implementation.
+This directory holds what every UMAT build shares, and is where the compiled
+f2py modules are built.  The UMAT sources themselves live with their model,
+in `src/returnmap/models/<family>/fortran/`.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `j2_isotropic_3d.f90` | J2 isotropic hardening UMAT — contains `j2_isotropic_3d` (f2py interface), `umat` (ABAQUS entry point), and `j2_isotropic_3d_elastic_stiffness` (component check) |
+| `../src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90` | J2 isotropic hardening UMAT — contains `j2_isotropic_3d` (f2py interface), `umat` (ABAQUS entry point), and `j2_isotropic_3d_elastic_stiffness` (component check) |
+| `../src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90`, `yu_kinematic_ps.f90` | Yoshida-Uemori UMATs (3D solid and plane stress) |
 | `abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution; future UMATs may call them directly |
 | `test_basic.f90` | Simple elastic subroutine for f2py smoke test |
 
@@ -39,7 +40,7 @@ python -m numpy.f2py --version
 uv sync --extra fortran
 
 # Compile the J2 UMAT
-uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 
 # Smoke-test module only
 uv run returnmap build fortran/test_basic.f90 --name returnmap_test_basic

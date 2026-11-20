@@ -55,7 +55,7 @@ def elastic_stiffness(self, state):                    # 損傷
     return (1.0 - state["D"]) * self.isotropic_stiffness()
 ```
 
-物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスは `dimension` の固定のみを担う — 参照実装: `src/returnmap/models/j2_isotropic.py`。
+物理ロジックは次元非依存に書けるので、親クラスに 1 度実装し、次元特化クラスは `dimension` の固定のみを担う — 参照実装: `src/returnmap/models/j2_isotropic/model.py`。
 
 ## Implicit 型 (Ohno-Wang 型) — 後方 Euler 残差
 
@@ -80,7 +80,7 @@ class MyImplicitModel(MaterialModel):
         return [self.stress(R_stress), self.alpha(R_alpha), self.ep(R_ep)]
 ```
 
-参照実装: `src/returnmap/models/ow_kinematic.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
+参照実装: `src/returnmap/models/ow_kinematic/model.py`。Explicit と Implicit の混在 (partial-implicit) も可。粘塑性などで Δλ 行の残差自体を差し替えたい場合は `self.dlambda(R_dl)` を返す (省略時は `yield_function = 0`)。
 
 `inc.trial` / `inc.strain_inc` は**どの残差行にどの係数で入れてもよい** — consistent tangent は dR/dΔε を両者を通して autodiff するので、`R_σ = σ − σ_trial + …` の形を仮定しない。同じ根を持つ残差なら行のスケールを変えても接線は同一 (例: 損傷の `(1−D_n)/(1−D_{n+1})·σ − σ_trial + …`)。
 

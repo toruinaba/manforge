@@ -54,7 +54,7 @@ class YUKinematic(MaterialModel):
 
     @verified_against_fortran(
         "yu_kinematic_3d_elastic_stiffness",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_elastic_stiffness",
+        test="tests/test_numerical_vs_fortran.py::TestHelpers::test_elastic_stiffness",
     )
     def elastic_stiffness(self, state):
         return self._calc_E_factor(state["eps_eq"]) * self.isotropic_stiffness()
@@ -185,7 +185,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_kinematic_3d",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestCrosscheckTrajectory::test_analytical_vs_fortran",
+        test="tests/test_numerical_vs_fortran.py::TestCrosscheckTrajectory::test_analytical_vs_fortran",
     )
     def user_defined_return_mapping(self, inc):
         # The hand NR below works on plain dicts, the way the Fortran port
@@ -246,7 +246,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_calc_norm_n_flow",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_calc_norm_n_flow",
+        test="tests/test_numerical_vs_fortran.py::TestHelpers::test_calc_norm_n_flow",
     )
     def calc_norm_n_flow(self, xi):
         xi_norm = self.vonmises_norm(xi)
@@ -255,7 +255,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_calc_residual",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
+        test="tests/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
     )
     def calc_residual(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
@@ -283,14 +283,14 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_prepare_rstress",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rstress",
+        test="tests/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rstress",
     )
     def _prepare_Rstress(self, xi):
         return self._dflow_dxi(xi) @ self.I_dev()
 
     @verified_against_fortran(
         "yu_prepare_rtheta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rtheta",
+        test="tests/test_numerical_vs_fortran.py::TestHelpers::test_prepare_rtheta",
     )
     def _prepare_Rtheta(self, theta, theta_max, R, R_n, dlambda, g_flag=None):
         theta_bar = self.vonmises_norm(theta)
@@ -305,7 +305,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drs_dstress",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dstress",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dstress",
     )
     def dRstress_dstress(self, C, xi, dlambda):
         dn_dsig = self._prepare_Rstress(xi)
@@ -313,7 +313,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drs_dbeta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dbeta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dbeta",
     )
     def dRstress_dbeta(self, C, xi, dlambda):
         # ∂ξ/∂β = -I (no dev projection), so use _dflow_dxi without I_dev
@@ -321,7 +321,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drs_dtheta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dtheta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dtheta",
     )
     def dRstress_dtheta(self, C, xi, dlambda):
         # ∂ξ/∂θ = -I (no dev projection), so use _dflow_dxi without I_dev
@@ -329,7 +329,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drs_dlambda",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dlambda",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRstress_dlambda",
     )
     def dRstress_dlambda(self, C, xi, eps_eq, dlambda):
         _, flow = self.calc_norm_n_flow(xi)
@@ -338,35 +338,35 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drb_dstress",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dstress",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dstress",
     )
     def dRbeta_dstress(self, dlambda):
         return -self.k * self.b * dlambda / self.Y * self.I_dev()
 
     @verified_against_fortran(
         "yu_drb_dbeta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dbeta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dbeta",
     )
     def dRbeta_dbeta(self, dlambda):
         return (1.0 + self.k * self.b / self.Y * dlambda + self.k * dlambda) * self.I
 
     @verified_against_fortran(
         "yu_drb_dtheta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dtheta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dtheta",
     )
     def dRbeta_dtheta(self, dlambda):
         return self.k * self.b * dlambda / self.Y * self.I
 
     @verified_against_fortran(
         "yu_drb_dlambda",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dlambda",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRbeta_dlambda",
     )
     def dRbeta_dlambda(self, xi, beta, dlambda):
         return -self.k * self.b / self.Y * xi + self.k * beta
 
     @verified_against_fortran(
         "yu_drt_dstress",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dstress",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dstress",
     )
     def dRtheta_dstress(self, theta, theta_max, R, R_n, dlambda):
         _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
@@ -374,7 +374,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drt_dbeta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dbeta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dbeta",
     )
     def dRtheta_dbeta(self, theta, theta_max, R, R_n, dlambda):
         _, _, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
@@ -382,7 +382,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drt_dtheta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dtheta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dtheta",
     )
     def dRtheta_dtheta(self, theta, theta_max, R, R_n, dlambda):
         theta_bar, theta_flow, C_k, _, a, _ = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
@@ -398,7 +398,7 @@ class YUKinematic3D(YUKinematic):
     
     @verified_against_fortran(
         "yu_drt_dlambda",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dlambda",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRtheta_dlambda",
     )
     def dRtheta_dlambda(self, xi, theta, theta_max, R, R_n, dlambda):
         theta_bar, _, C_k, _, a, a_prime = self._prepare_Rtheta(theta, theta_max, R, R_n, dlambda)
@@ -414,7 +414,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drl_dstress",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dstress",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dstress",
     )
     def dRyield_dstress(self, xi):
         _, flow = self.calc_norm_n_flow(xi)
@@ -422,7 +422,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drl_dbeta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dbeta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dbeta",
     )
     def dRyield_dbeta(self, xi):
         _, flow = self.calc_norm_n_flow(xi)
@@ -430,7 +430,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drl_dtheta",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dtheta",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dtheta",
     )
     def dRyield_dtheta(self, xi):
         _, flow = self.calc_norm_n_flow(xi)
@@ -438,14 +438,14 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_drl_dlambda",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dlambda",
+        test="tests/test_numerical_vs_fortran.py::TestJacobianBlocks::test_dRyield_dlambda",
     )
     def dRyield_dlambda(self):
         return np.array([0.0])
 
     @verified_against_fortran(
         "yu_calc_jacobian",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
+        test="tests/test_numerical_vs_fortran.py::TestResidualAndJacobian::test_residual_and_jacobian_match_fortran",
     )
     def calc_jacobian(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)
@@ -474,7 +474,7 @@ class YUKinematic3D(YUKinematic):
 
     @verified_against_fortran(
         "yu_calc_ddsdde",
-        test="tests/benchmarks/yu_kinematic/test_numerical_vs_fortran.py::TestReturnMapping::test_single_plastic_step_ddsdde",
+        test="tests/test_numerical_vs_fortran.py::TestReturnMapping::test_single_plastic_step_ddsdde",
     )
     def calc_ddsdde(self, state_new, state_n, stress_trial, dlambda):
         C = self.elastic_stiffness(state_new)

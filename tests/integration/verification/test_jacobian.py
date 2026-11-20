@@ -410,6 +410,11 @@ class TestCheckHandBlocks:
         assert float(ref.part["ep"]["dlambda"]) == -1.0
 
 
+def _defaults(cls):
+    """The model's documented typical values — a parameter set known to run."""
+    return {name: cls.param_meta[name].default for name in cls.param_names}
+
+
 class TestCheckSolution:
     """The solutions of a hand-written return mapping, substituted into the
     framework residual."""
@@ -438,9 +443,8 @@ class TestCheckSolution:
 
     def test_hand_newton_solution_satisfies_every_row(self):
         from returnmap.models import YUKinematic3D
-        from tests.benchmarks.yu_kinematic.conftest import PARAMS
 
-        m = YUKinematic3D(**PARAMS)
+        m = YUKinematic3D(**_defaults(YUKinematic3D))
         report = check_solution(m, self._results(m))
         assert report.passed, report.summary()
         assert {"stress", "dlambda", "theta", "beta"} <= set(report.rows)
@@ -450,7 +454,8 @@ class TestCheckSolution:
         """A coefficient off by 2 % in the hand residual's θ row."""
         import autograd.numpy as anp
         from returnmap.models import YUKinematic3D
-        from tests.benchmarks.yu_kinematic.conftest import PARAMS
+
+        PARAMS = _defaults(YUKinematic3D)
 
         class _WrongTheta(YUKinematic3D):
             def calc_residual(self, state_new, state_n, stress_trial, dlambda):

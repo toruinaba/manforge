@@ -1,6 +1,6 @@
 """Shared setup for the YU UMAT timing harnesses.
 
-PARAMS mirrors tests/benchmarks/yu_kinematic/conftest.py, duplicated on purpose:
+PARAMS mirrors src/returnmap/models/yu_kinematic/tests/conftest.py, duplicated on purpose:
 importing a pytest conftest from a standalone script is fragile, and these
 numbers only need to be a representative parameter set, not the same one the
 correctness tests use.

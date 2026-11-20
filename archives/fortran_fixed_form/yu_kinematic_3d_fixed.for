@@ -1,7 +1,7 @@
 ! ======================================================================
 ! returnmap -- YUKinematic3D UMAT (Yoshida-Uemori 2-surface + stagnation 
 !
-! Fortran port of YUKinematic3D (src/returnmap/models/yu_kinematic.py).
+! Fortran port of YUKinematic3D (src/returnmap/models/yu_kinematic/model.py).
 ! Algorithm: fully-implicit Newton-Raphson on [stress(6), dlambda(1),
 !            theta(6), beta(6)] = 19 unknowns.
 !

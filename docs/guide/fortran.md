@@ -3,7 +3,7 @@
 **Build → Load → Integrate → Crosscheck**:
 
 ```bash
-uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 uv run returnmap list   # 確認
 ```
 

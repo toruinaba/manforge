@@ -15,10 +15,10 @@ uv sync --all-extras         # All extras including matplotlib, meson/ninja
 make test                    # Fast tests: unit + integration, excluding slow/fortran
 make test-all                # Full suite including slow and fortran
 # その他のターゲット (unit/integration/e2e/slow/benchmarks/docker) は Makefile を参照
-uv run pytest tests/benchmarks/j2_isotropic/ -m "not fortran" -v  # Single benchmark dir
+uv run pytest src/returnmap/models/j2_isotropic -m "not fortran" -v  # One model family
 
 # Fortran compilation (requires gfortran; this host has none — use Docker)
-uv run returnmap build fortran/abaqus_stubs.f90 fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 uv run returnmap list / clean
 make docker-build && make docker-test
 
@@ -79,15 +79,15 @@ returnmap is a framework for validating Fortran UMAT (Abaqus user material) cons
 
 ### Test layout
 
-`tests/{unit,integration}/` follow the module layout of `src/returnmap/`: a module's tests live in `test_<module>.py` at the mirrored path, under `unit/` or `integration/` (most modules have one of the two, not both). A few test files have no single source module (`test_public_api.py`, `test_flow.py`, `test_kinematic_common.py`). `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. `tests/benchmarks/<model>/` is the home of numerical-equivalence harnesses (analytical-vs-numerical, Python-vs-Fortran). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases.
+Tests live in two places. **Framework tests** are in `tests/`: `tests/{unit,integration}/` follow the module layout of `src/returnmap/` — a module's tests live in `test_<module>.py` at the mirrored path, under `unit/` or `integration/` (most modules have one of the two, not both). A few test files have no single source module (`test_public_api.py`, `test_flow.py`), and tests that span several model families stay here too (`tests/integration/models/test_kinematic_common.py`, `test_reference_models.py`). `tests/e2e/` covers CLI subprocess tests and the fitting pipeline. **Model tests** live with the model, in `src/returnmap/models/<family>/tests/`, and are shipped in the wheel (`pytest --pyargs returnmap.models.<family>`). `@pytest.mark.fortran` auto-skips when the compiled `.so` is missing; `@pytest.mark.slow` is opt-in for >1s cases. The repository-root `conftest.py` puts `fortran/` (where the f2py modules are built) on `sys.path` for both.
 
 | directory | purpose |
 |---|---|
 | `tests/unit/` | Tests of one module's own logic. Most need no integrator or driver; `unit/fitting/` does run them (an objective cannot be evaluated otherwise) |
 | `tests/integration/` | Orchestration tests — integrator + driver in the loop |
 | `tests/e2e/` | CLI subprocess + fitting pipeline smoke |
-| `tests/benchmarks/` | Numerical equivalence harnesses only |
+| `src/returnmap/models/<family>/tests/` | Everything about that model: its own logic, its response, hand-written path vs autodiff (`test_analytical_vs_numerical.py`), Python vs UMAT (`test_numerical_vs_fortran.py`) |
 
 ### Models / Fortran
 
-参照実装は `src/returnmap/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。参照モデルは全パラメータの `param_meta`(説明・単位・目安の値・範囲)を持ち、目安の値で計算が通る(`tests/integration/models/test_reference_models.py` が確認する。service の入力フォーム、チュートリアル、marimo ノートブックのスライダーがこれを読む)。Fortran 側は `fortran/`(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。手導出したヤコビアンのブロックは `@hand_block(row, col)`(`core/material/hand_block.py`)でモデル上に宣言し、`check_hand_blocks(model, results)` が AD の残差ヤコビアン(`simulation/jacobian.py`)とブロックごとに照合する。手書きのリターンマッピング(`user_defined_return_mapping`)の解は `check_solution(model, results)` が AD 側の残差に代入して行ごとに検査する(残差そのものは宣言しない — 比べるのは根だけ)。2 つの実装を同じ載荷履歴で進めて比べるのは `crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)`(`verification/crosscheck.py`)。UMAT 自身の収束フラグは `FortranIntegrator(parse_umat_failure=...)` で読ませる。非公開モデルは別リポジトリ(`returnmap-internal`)に置き、`MODELS` dict で service 層に登録する。
+参照実装は `src/returnmap/models/`(J2 / J2 損傷 / AF / OW / YU — 各ファミリ親クラス + 3D/PS/1D 具象)。**1 ファミリ 1 ディレクトリ**(`models/<family>/`)で、モデル本体(`model.py` など)、UMAT のソース(`fortran/`、任意)、テスト(`tests/`、任意)をまとめて持つ。ファミリのテストは公開の import パスとそのファミリの中のものだけを import する(ディレクトリごと動かせるようにするため。非公開リポジトリから本体への格上げも移動で済む)。公開名は `returnmap.models` から import する形のまま。参照モデルは全パラメータの `param_meta`(説明・単位・目安の値・範囲)を持ち、目安の値で計算が通る(`tests/integration/models/test_reference_models.py` が確認する。service の入力フォーム、チュートリアル、marimo ノートブックのスライダーがこれを読む)。`fortran/` は全 UMAT が共有するもの(`abaqus_stubs.f90`)と f2py モジュールのビルド先(ビルド手順は `fortran/README.md`)。`@verified_against_fortran` / `FortranBinding` は `core/material/fortran_binding.py`、ランタイム比較 `check_bindings` は `verification/fortran_check.py`。手導出したヤコビアンのブロックは `@hand_block(row, col)`(`core/material/hand_block.py`)でモデル上に宣言し、`check_hand_blocks(model, results)` が AD の残差ヤコビアン(`simulation/jacobian.py`)とブロックごとに照合する。手書きのリターンマッピング(`user_defined_return_mapping`)の解は `check_solution(model, results)` が AD 側の残差に代入して行ごとに検査する(残差そのものは宣言しない — 比べるのは根だけ)。2 つの実装を同じ載荷履歴で進めて比べるのは `crosscheck(integrator_a, integrator_b, load, *, driver_factory=...)`(`verification/crosscheck.py`)。UMAT 自身の収束フラグは `FortranIntegrator(parse_umat_failure=...)` で読ませる。非公開モデルは別リポジトリ(`returnmap-internal`)に置き、`MODELS` dict で service 層に登録する。

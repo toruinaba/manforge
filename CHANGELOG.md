@@ -3,6 +3,32 @@
 このファイルは、利用者から見える変更を版ごとにまとめる。設計の経緯と理由は
 [`docs/design/api-redesign.md`](docs/design/api-redesign.md) にある。
 
+## 未リリース
+
+**モデルを 1 ファミリ 1 ディレクトリにまとめた。** 1 つのモデルに属するものが 5 箇所に散っていた(モデル本体、
+`tests/unit/models/`、`tests/integration/models/`、`tests/benchmarks/<model>/`、`fortran/`)のを、
+`src/returnmap/models/<family>/` に集めた。計算結果は変わらない。
+
+```
+src/returnmap/models/yu_kinematic/
+  __init__.py      # 公開するクラス
+  model.py         # モデル本体
+  fortran/         # UMAT のソース(持つモデルだけ)
+  tests/           # そのモデルのテスト
+```
+
+- **import は変わらない。** `from returnmap.models import YUKinematic3D` のまま。
+- **モデルのテストも配布物に入る。** pip で入れた先で `pytest --pyargs returnmap.models.yu_kinematic` を実行できる
+  (UMAT との比較は、コンパイルしたモジュールが無ければ skip される)。UMAT のソースも入る。
+- **UMAT のソースの場所**: `fortran/j2_isotropic_3d.f90` → `src/returnmap/models/j2_isotropic/fortran/`、
+  `fortran/yu_kinematic_{3d,ps}.f90` → `src/returnmap/models/yu_kinematic/fortran/`。`fortran/` には全 UMAT が共有する
+  `abaqus_stubs.f90` が残り、f2py モジュールのビルド先でもある(`make fortran-build-*` は従来どおり)。
+- **Makefile**: `make test` は全モデルのテスト(slow と fortran を除く)を含む。`test-benchmarks` /
+  `test-benchmarks-fortran` は `test-models` / `test-models-fortran` になった。`tests/benchmarks/` は無くなった。
+- **`@verified_against_fortran(test=...)`** のパスは、モデルのモジュールがあるディレクトリから見た相対パスで書ける
+  (`"tests/test_numerical_vs_fortran.py::..."`)。ファミリのディレクトリを動かしても切れない。リポジトリ直下からの
+  パスも従来どおり使える。
+
 ## 0.2.1(2026-11-20)
 
 既存のモデルを使う人のための入口を整えた。0.2.0 からの非互換は無い。

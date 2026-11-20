@@ -1,7 +1,7 @@
 ! =============================================================================
 ! returnmap -- YUKinematicPS UMAT (Yoshida-Uemori 2-surface + stagnation surface)
 !
-! Fortran port of YUKinematicPS (src/returnmap/models/yu_kinematic.py).
+! Fortran port of YUKinematicPS (src/returnmap/models/yu_kinematic/model.py).
 ! Plane stress under the P-metric convention (PLANE_STRESS_P), ntens = 3.
 ! Algorithm: fully-implicit Newton-Raphson on [stress(3), dlambda(1),
 !            theta(3), beta(3)] = 10 unknowns.

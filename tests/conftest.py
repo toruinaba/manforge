@@ -1,5 +1,3 @@
-import sys
-import os
 import pytest
 import autograd.numpy as anp
 
@@ -12,12 +10,6 @@ from returnmap.models import (
 from tests.fixtures.strain_vectors import (
     DEPS_UNIAXIAL_3D, DEPS_EQUIBIAXIAL_3D, DEPS_PURE_SHEAR_3D, DEPS_COMBINED_3D,
 )
-
-# Add fortran/ to sys.path so compiled modules are importable session-wide.
-# Harmless if the directory contains no compiled modules.
-_FORTRAN_DIR = os.path.join(os.path.dirname(__file__), "..", "fortran")
-sys.path.insert(0, os.path.abspath(_FORTRAN_DIR))
-
 
 @pytest.fixture
 def model():

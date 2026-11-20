@@ -1,6 +1,6 @@
-# tests/benchmarks/yu_kinematic/
+# yu_kinematic のテスト
 
-Numerical-equivalence harness for the Yoshida-Uemori two-surface + stagnation-surface
+Tests of the Yoshida-Uemori two-surface + stagnation-surface
 kinematic hardening model (`YUKinematic3D / YUKinematicPS / YUKinematic1D`).
 
 `YUKinematic3D` と `YUKinematicPS` は、autograd 経路に加えて手書きの経路
@@ -11,6 +11,7 @@ kinematic hardening model (`YUKinematic3D / YUKinematicPS / YUKinematic1D`).
 
 | ファイル | 内容 |
 |---|---|
+| `test_model.py` | モデル単体: 親クラスと次元別クラスの一致、停留曲面の更新、残差とヤコビアンの部品 |
 | `test_analytical_vs_numerical.py` | 3D: 手書きの経路 vs autograd NR (応力・状態・接線・反復数)。1D は収束と単調性の smoke |
 | `test_jacobian_fd.py` | 3D: `calc_jacobian` vs 差分 (停留曲面の状態を毎回再計算した全微分) |
 | `test_plane_stress_p.py` | PS: P 計量の規約、3D・1D との一致、手導出ブロック (`check_hand_blocks`)、手書きの解 (`check_solution`) |
@@ -24,7 +25,7 @@ kinematic hardening model (`YUKinematic3D / YUKinematicPS / YUKinematic1D`).
 ここには写しを置かない。以前この README にあった表は、2 経路の停留曲面ゲートが揃う前の
 ものだった (現在は応力・状態が機械精度で一致する)。
 
-親 `tests/benchmarks/README.md` の基準値から外れているものは、モジュールの docstring に理由を書く。
+2 つの実装を比べるテストの基準値 (`docs/development.md` の「モデルのテスト」) から外れているものは、モジュールの docstring に理由を書く。
 
 ## 診断スクリプト
 
@@ -33,13 +34,13 @@ stress / state / ddsdde の誤差を出し、`ddsdde` 誤差の大きい順に�
 許容値を見直すときや、`B − Y` 付近のパラメータを変えたときに使う。
 
 ```bash
-uv run python tests/benchmarks/yu_kinematic/_diagnose.py 2>&1 | tee /tmp/yu_diag.txt
+uv run python src/returnmap/models/yu_kinematic/tests/_diagnose.py 2>&1 | tee /tmp/yu_diag.txt
 ```
 
 ## 実行方法
 
 ```bash
-make test-benchmarks                                                         # Fortran 以外 (slow を含む)
-uv run pytest tests/benchmarks/yu_kinematic/ -m "not fortran and not slow" -v    # 速いものだけ
+uv run pytest src/returnmap/models/yu_kinematic -m "not fortran" -v             # Fortran 以外 (slow を含む)
+uv run pytest src/returnmap/models/yu_kinematic/tests/ -m "not fortran and not slow" -v    # 速いものだけ
 make docker-build && make docker-test-yu                                     # Fortran 比較 (ホストに gfortran が無い場合)
 ```

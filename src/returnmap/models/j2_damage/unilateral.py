@@ -64,7 +64,7 @@ from autograd.extend import defvjp, primitive
 from returnmap.core.dimension import PLANE_STRESS, SOLID_3D, UNIAXIAL_1D
 from returnmap.core.material import MaterialModel, ParamMeta
 from returnmap.core.state import Explicit, Implicit, NTENS, SCALAR
-from returnmap.models.j2_damage import J2IsotropicDamage
+from returnmap.models.j2_damage.damage import J2IsotropicDamage
 from returnmap.utils.smooth import smooth_macaulay
 from returnmap.utils.spectral import (
     DEFAULT_HEAVISIDE_AT_ZERO, macaulay_sq, neg_macaulay_sq, negative_part_sq,

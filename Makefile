@@ -1,7 +1,7 @@
 # returnmap Makefile
 # Provides shortcuts for Fortran compilation and test execution.
 
-.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-benchmarks test-benchmarks-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
+.PHONY: fortran-build fortran-build-umat fortran-build-yu fortran-build-yu-ps fortran-build-yu-3d-bench docker-bench-yu-3d test test-unit test-integration test-e2e test-e2e-slow test-slow test-models test-models-fortran test-all docker-build docker-test docker-test-yu docs docs-clean clean
 # Archived targets (fixed-form .for files moved to archives/fortran_fixed_form/):
 #   fortran-build-yu-fixed  -- cd fortran && uv run python -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d_fixed.for -m yu_kinematic_3d_fixed -llapack -lblas
 
@@ -14,21 +14,25 @@
 # re-sync it and fail; override with `make PY=python fortran-build-yu` there.
 PY ?= uv run python
 
+# Each model family keeps its UMAT sources next to the model.  The compiled
+# modules are all built into fortran/, which the tests put on sys.path.
+MODELS = src/returnmap/models
+
 ## Compile fortran/test_basic.f90 into a Python extension via f2py
 fortran-build:
 	cd fortran && $(PY) -m numpy.f2py -c test_basic.f90 -m returnmap_test_basic
 
 ## Compile UMAT sources (abaqus_stubs + j2_isotropic_3d) into a Python extension via f2py
 fortran-build-umat:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/j2_isotropic/fortran/j2_isotropic_3d.f90 -m j2_isotropic_3d
 
 ## Compile YU Kinematic UMAT (abaqus_stubs + yu_kinematic_3d) into a Python extension via f2py
 fortran-build-yu:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 -m yu_kinematic_3d -llapack -lblas
 
 ## Compile YU Kinematic plane-stress UMAT (abaqus_stubs + yu_kinematic_ps) via f2py
 fortran-build-yu-ps:
-	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
+	cd fortran && $(PY) -m numpy.f2py -c abaqus_stubs.f90 ../$(MODELS)/yu_kinematic/fortran/yu_kinematic_ps.f90 -m yu_kinematic_ps -llapack -lblas
 
 ## (archived) fortran-build-yu-fixed and fortran-build-yu-abaqus moved to archives/fortran_fixed_form/
 
@@ -36,9 +40,9 @@ fortran-build-yu-ps:
 # Test targets
 # ---------------------------------------------------------------------------
 
-## Run fast tests: unit + integration, excluding slow and fortran (default)
+## Run fast tests: framework unit + integration and every model family, excluding slow and fortran (default)
 test:
-	uv run pytest tests/unit tests/integration -m "not slow and not fortran" -v
+	uv run pytest tests/unit tests/integration $(MODELS) -m "not slow and not fortran" -v
 
 ## Run unit tests only (fastest)
 test-unit:
@@ -56,21 +60,22 @@ test-e2e:
 test-e2e-slow:
 	uv run pytest tests/e2e -m "slow" -v
 
-## Run all slow-marked tests across unit + integration + e2e
+## Run all slow-marked tests (framework and models)
 test-slow:
-	uv run pytest tests/unit tests/integration tests/e2e -m "slow and not fortran" -v
+	uv run pytest -m "slow and not fortran" -v
 
-## Run benchmark tests (Path A: analytical vs numerical; Fortran parts skipped)
-test-benchmarks:
-	uv run pytest tests/benchmarks -m "not fortran" -v
+## Run the tests of the model families (slow included; Fortran parts skipped).
+## One family: uv run pytest $(MODELS)/yu_kinematic -m "not fortran"
+test-models:
+	uv run pytest $(MODELS) -m "not fortran" -v
 
-## Run Fortran benchmark tests (Path B: Python NR vs Fortran UMAT; requires compiled .so)
-test-benchmarks-fortran:
-	uv run pytest tests/benchmarks -m "fortran" -v
+## Run the Python-vs-UMAT tests of the model families (requires compiled .so)
+test-models-fortran:
+	uv run pytest $(MODELS) -m "fortran" -v
 
 ## Run complete test suite (includes slow and fortran if modules present)
 test-all:
-	uv run pytest tests -v
+	uv run pytest -v
 
 # ---------------------------------------------------------------------------
 # Docker targets (requires Docker installed)
@@ -86,16 +91,16 @@ DOCKER_RUN = docker run --rm --user $$(id -u):$$(id -g) \
 	-v $$(pwd):/workspace -w /workspace -e HOME=/tmp \
 	-e PYTHONPATH=/workspace/src:/workspace/fortran returnmap-fortran
 
-## Run Fortran build and Fortran benchmark tests inside Docker container
+## Build the J2 UMAT and run the Python-vs-UMAT tests inside Docker
 docker-test:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-umat && \
-		python -m pytest tests/benchmarks -m fortran -v"
+		python -m pytest $(MODELS) -m fortran -v"
 
-## Build both YU Fortran modules and run the YU Fortran benchmarks in Docker
+## Build both YU Fortran modules and run the YU Python-vs-UMAT tests in Docker
 docker-test-yu:
 	$(DOCKER_RUN) bash -c "make PY=python fortran-build-yu && \
 		make PY=python fortran-build-yu-ps && \
-		python -m pytest tests/benchmarks/yu_kinematic -m fortran -v"
+		python -m pytest $(MODELS)/yu_kinematic -m fortran -v"
 
 # ---------------------------------------------------------------------------
 # UMAT timing harness (benchmarks/umat_timing, kept out of fortran/)
@@ -111,7 +116,7 @@ BENCH_DIR = benchmarks/umat_timing
 docker-bench-yu-3d:
 	$(DOCKER_RUN) bash -c "cd $(BENCH_DIR) && \
 		python -m numpy.f2py -c ../../fortran/abaqus_stubs.f90 \
-			../../fortran/yu_kinematic_3d.f90 yu_3d_bench.f90 \
+			../../$(MODELS)/yu_kinematic/fortran/yu_kinematic_3d.f90 yu_3d_bench.f90 \
 			-m yu_3d_bench -llapack -lblas && \
 		PYTHONPATH=/workspace/src:\$$PWD python bench_3d.py"
 
