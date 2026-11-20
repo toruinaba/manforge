@@ -125,6 +125,52 @@ class TestDeclaration:
 
 
 # ---------------------------------------------------------------------------
+# props: the order the UMAT takes the parameters in
+# ---------------------------------------------------------------------------
+
+REORDERED = '''
+import numpy as np
+from returnmap.models import J2Isotropic3D
+from returnmap.simulation import PythonIntegrator
+
+
+def j2(sigma_y0, H, E, stress_n, ep, dstran):          # no nu: fixed inside
+    model = J2Isotropic3D(E=E, nu=0.3, sigma_y0=sigma_y0, H=H)
+    state_n = {"stress": np.asarray(stress_n), "ep": np.array(ep)}
+    r = PythonIntegrator(model).stress_update(np.asarray(dstran), np.asarray(stress_n), state_n)
+    return np.asarray(r.stress), float(r.state["ep"]), np.asarray(r.ddsdde)
+'''
+
+
+class TestProps:
+    def test_parameters_are_passed_in_the_declared_order(self, family):
+        """A UMAT that takes (sigma_y0, H, E) and no nu."""
+        package, module, tmp_path = family
+        (tmp_path / f"{module}.py").write_text(textwrap.dedent(REORDERED))
+        PortedJ2 = models_of(package).PortedJ2
+        model = PortedJ2.at_defaults()
+        umat = Umat(PortedJ2, module=module, sources=[], subroutine="j2",
+                    props=["sigma_y0", "H", "E"])
+
+        from returnmap.simulation import PythonIntegrator
+        from returnmap.verification import crosscheck, standard_histories
+
+        load = standard_histories(model)["multiaxial"]
+        report = crosscheck(PythonIntegrator(model), umat.integrator(model), load)
+        assert report.passed, report.summary()
+        # In param_names order the same module is called with the wrong values.
+        with pytest.raises(Exception):
+            in_default_order = Umat(PortedJ2, module=module, sources=[], subroutine="j2")
+            crosscheck(PythonIntegrator(model), in_default_order.integrator(model), load)
+
+    def test_a_name_that_is_not_a_parameter_is_refused_at_declaration(self):
+        from returnmap.models import J2Isotropic3D
+
+        with pytest.raises(ValueError, match=r"props names \['yield_stress'\]"):
+            Umat(J2Isotropic3D, module="m", sources=[], props=["E", "yield_stress"])
+
+
+# ---------------------------------------------------------------------------
 # check_model
 # ---------------------------------------------------------------------------
 

@@ -246,3 +246,16 @@ def test_tangent_checker_tight_tol_can_fail(model):
     assert not result.passed
 
 
+def test_perfect_plasticity_in_one_dimension_has_a_zero_tangent():
+    """H = 0: the plastic tangent E·H/(E+H) is exactly zero, and the check
+    passes on it instead of comparing zero with round-off."""
+    from returnmap.models import J2Isotropic1D
+    from returnmap.simulation import PythonNumericalIntegrator
+
+    model = J2Isotropic1D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=0.0)
+    for integrator in (PythonIntegrator(model), PythonNumericalIntegrator(model)):
+        report = check_tangent(integrator, np.array([3e-3]), np.zeros(1), model.initial_state())
+        assert abs(float(report.ddsdde[0, 0])) < 1e-3
+        assert report.elastic_scale == pytest.approx(210_000.0)
+        assert report.passed, report.summary()
+

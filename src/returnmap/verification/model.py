@@ -47,7 +47,9 @@ second hardening branch of a two-surface model, say — by defining
 ``histories(model)`` in a module named ``verification`` next to the model
 (``returnmap.models.yu_kinematic.verification`` for a model defined in
 ``returnmap.models.yu_kinematic.model``).  :func:`check_model` finds it by
-that name; nothing has to be registered.
+that name; nothing has to be registered.  A history declared under one of the
+standard names replaces that one — for a model the standard scaling does not
+suit (:func:`standard_histories` takes the strain to scale by).
 """
 
 from __future__ import annotations
@@ -177,7 +179,9 @@ class ModelReport:
         return self.summary()
 
 
-def standard_histories(model: MaterialModel) -> dict[str, FieldHistory]:
+def standard_histories(
+    model: MaterialModel, eps_y: float | None = None,
+) -> dict[str, FieldHistory]:
     """The loading histories every model is checked on.
 
     ``"uniaxial"``
@@ -190,13 +194,28 @@ def standard_histories(model: MaterialModel) -> dict[str, FieldHistory]:
 
     Both are scaled by the model's own yield strain, so they reach
     plasticity whatever units and parameters the model has.
+
+    Parameters
+    ----------
+    model : MaterialModel
+    eps_y : float or None
+        The strain to scale the histories by.  ``None`` (default): the
+        model's yield strain (:func:`estimate_yield_strain`).  Give it for a
+        model that has no yield strain to find — one without an elastic
+        domain is plastic from the first increment — and declare the result
+        under the same names in the family's ``verification.py``, which
+        replaces the standard ones::
+
+            def histories(model):
+                return standard_histories(model, eps_y=model.F0 / model.E)
     """
+    if eps_y is None:
+        eps_y = estimate_yield_strain(model)
     histories = {
-        "uniaxial": FieldHistory(FieldType.STRAIN, generate_strain_history(model)),
+        "uniaxial": FieldHistory(FieldType.STRAIN, generate_strain_history(model, eps_y=eps_y)),
     }
     dim = model.dimension
     if dim.ntens > 1:
-        eps_y = estimate_yield_strain(model)
 
         def direction(leg):
             direct, shear = leg

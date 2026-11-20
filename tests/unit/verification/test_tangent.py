@@ -107,3 +107,45 @@ def test_nan_tangent_fails():
     assert not report.passed
     assert report.max_rel_err == np.inf
     assert "FAIL" in report.summary()
+
+
+# ---------------------------------------------------------------------------
+# A tangent that is zero: nothing of its own size to be relative to
+# ---------------------------------------------------------------------------
+
+def test_noise_against_a_zero_tangent_is_measured_against_the_elastic_stiffness():
+    """Central differences of a perfectly plastic step return round-off, and
+    round-off against a tangent of exactly zero is not a 100 % error."""
+    from returnmap.verification import TangentReport
+
+    zero = np.zeros((1, 1))
+    noise = np.array([[2.8e-7]])
+    plain = TangentReport(ddsdde=zero, ddsdde_fd=noise, tol=1e-5)
+    assert plain.max_rel_err == 1.0 and not plain.passed
+
+    scaled = TangentReport(ddsdde=zero, ddsdde_fd=noise, tol=1e-5, elastic_scale=2.0e5)
+    assert scaled.max_rel_err == pytest.approx(2.8e-7 / 2.0e5)
+    assert scaled.passed
+    np.testing.assert_allclose(scaled.rel_err_matrix, [[2.8e-7 / 2.0e5]])
+
+
+def test_an_ordinary_tangent_is_still_measured_against_itself():
+    from returnmap.verification import TangentReport
+
+    fd = np.array([[1000.0]])
+    report = TangentReport(ddsdde=1.01 * fd, ddsdde_fd=fd, tol=1e-5, elastic_scale=2.0e5)
+    assert report.max_rel_err == pytest.approx(0.01)      # not 10 / 2e5
+
+
+def test_a_wrong_tangent_on_a_plateau_still_fails():
+    """Measured against the elastic stiffness, an elastic tangent where zero
+    is right is off by 1."""
+    from returnmap.verification import TangentReport
+
+    report = TangentReport(
+        ddsdde=np.array([[2.0e5]]), ddsdde_fd=np.array([[2.8e-7]]), tol=1e-5,
+        elastic_scale=2.0e5,
+    )
+    assert report.max_rel_err == pytest.approx(1.0)
+    assert not report.passed
+
