@@ -8,7 +8,9 @@ correctness tests use.
 
 import numpy as np
 
-from returnmap.simulation import StrainDriver, PythonAnalyticalIntegrator
+from returnmap.simulation import (
+    FieldHistory, FieldType, PythonAnalyticalIntegrator, StrainDriver,
+)
 
 PARAMS = dict(
     E=206_000, nu=0.3, Y=360.0, C_1=2000.0, C_2=200.0,
@@ -38,7 +40,7 @@ def plastic_point(model_cls, ntens):
     data[:, 0] = np.linspace(0.0, 8e-3, N_STEPS)
 
     state_n = None
-    for step in driver.iter_run(data):
+    for step in driver.iter_run(FieldHistory(FieldType.STRAIN, data)):
         if step.index == STEP:
             assert step.result.is_plastic, "bench point fell on the elastic branch"
             return model, state_n, data[STEP] - data[STEP - 1], step.result
