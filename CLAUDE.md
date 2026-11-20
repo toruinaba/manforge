@@ -75,7 +75,7 @@ returnmap is a framework for validating Fortran UMAT (Abaqus user material) cons
 ### 検査の形と誤差の測り方(横断契約 — `verification/` の全検査が従う)
 
 - **検査は関数で、報告(`*Report`)を返す。** 報告は `.passed` と `.summary()` を持ち、テストはどの検査でも `assert report.passed, report.summary()`。検査用のクラス(`XxxChecker`)は作らない。計算の結果は `*Result`、検査の結果は `*Report`(`tests/unit/test_public_api.py` が確認する)。
-- **誤差は `max|候補 − 参照| / max|参照|`、合格は `<= tol`。** 配列(ブロック・接線・応力ベクトル)全体で測り、成分ごとに割らない。分母に単位を持つ定数(`+ 1e-2`、`max(·, 1)` など)を置かない — モデルを書いた単位で合否が変わるため。実装は `verification/_measure.py` の 1 箇所で、検査はそれを使う。NaN は最悪の誤差として扱う。割る相手が無い量(厳密に 0 のヤコビアンのブロック、0 から動いていない状態量)は、問題の大きさから決まる尺度より 12 桁以上小さいことで見分け(`NOISE_FLOOR`)、その尺度に対して測る — 素の数値とは比べない。
+- **誤差は `max|候補 − 参照| / max|参照|`、合格は `<= tol`。** 配列(ブロック・接線・応力ベクトル)全体で測り、成分ごとに割らない。分母に単位を持つ定数(`+ 1e-2`、`max(·, 1)` など)を置かない — モデルを書いた単位で合否が変わるため。実装は `verification/_measure.py` の 1 箇所で、検査はそれを使う。NaN は最悪の誤差として扱う。割る相手が無い量(厳密に 0 のヤコビアンのブロック、0 から動いていない状態量)は、問題の大きさから決まる尺度より 12 桁以上小さいことで見分け(`NOISE_FLOOR`)、その尺度に対して測る — 素の数値とは比べない。0 の接線(降伏棚)は、中心差分が弾性剛性の 1e-12 倍程度の丸め誤差を返すので、弾性剛性より 8 桁以上小さいことで見分け、弾性剛性に対して測る(`verification/tangent.py` の `ZERO_TANGENT`)。
 - **driver を省略できる入口は同じ規則で決める**(`fit_params`、`crosscheck`、`compare_models`): ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`(`simulation/driver.py` の `default_driver_for`)。
 
 ### Test layout

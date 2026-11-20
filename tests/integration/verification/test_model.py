@@ -247,6 +247,30 @@ class TestHistories:
         cosine = first @ second / np.linalg.norm(first) / np.linalg.norm(second)
         assert abs(cosine) < 0.9
 
+    def test_the_scale_can_be_given_for_a_model_without_a_yield_strain(self):
+        model = J2Isotropic3D.at_defaults()
+        from returnmap.verification import estimate_yield_strain
+
+        own = standard_histories(model)
+        doubled = standard_histories(model, eps_y=2.0 * estimate_yield_strain(model))
+        assert list(doubled) == list(own)
+        for name in own:
+            np.testing.assert_allclose(doubled[name].data, 2.0 * own[name].data, rtol=1e-6)
+
+    def test_a_declared_history_of_a_standard_name_replaces_it(self, monkeypatch):
+        """How a family swaps the standard histories for ones scaled its own way."""
+        import returnmap.verification.model as module
+
+        from returnmap.verification import estimate_yield_strain
+
+        model = J2Isotropic3D.at_defaults()
+        half = standard_histories(model, eps_y=0.5 * estimate_yield_strain(model))
+        monkeypatch.setattr(module, "_declared_histories", lambda model: half)
+        report = check_model(J2Isotropic3D.at_defaults())
+        assert list(report.histories) == ["uniaxial", "multiaxial"]
+        # Half the strain: fewer plastic steps than the standard histories give.
+        assert sum(report.histories.values()) < 47
+
     def test_a_one_component_model_has_only_the_uniaxial_history(self):
         assert list(standard_histories(J2Isotropic1D.at_defaults())) == ["uniaxial"]
 

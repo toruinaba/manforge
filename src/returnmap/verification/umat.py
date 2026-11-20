@@ -58,6 +58,11 @@ class Umat:
     subroutine : str or None
         The subroutine that does one stress update.  ``None`` (default): the
         one named like the module.
+    props : sequence of str or None
+        The model's parameter names in the order the UMAT takes them — its
+        ``PROPS``.  ``None`` (default): ``param_names``, in that order.  Give
+        it when the UMAT orders them differently or takes only some of them
+        (a parameter that selects a branch on the Python side, say).
     integrator_options : mapping
         Extra keyword arguments for
         :meth:`FortranIntegrator.from_model
@@ -66,9 +71,9 @@ class Umat:
 
     Notes
     -----
-    The argument convention is that of ``from_model``: the parameters in
-    ``param_names`` order, the stress, the state variables in declaration
-    order, the strain increment.
+    The argument convention is that of ``from_model``: the parameters
+    (``props``), the stress, the state variables in declaration order, the
+    strain increment.
     """
 
     model: "type[MaterialModel]"
@@ -76,7 +81,18 @@ class Umat:
     sources: Sequence[str]
     libraries: Sequence[str] = ()
     subroutine: str | None = None
+    props: Sequence[str] | None = None
     integrator_options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.props is not None:
+            unknown = [name for name in self.props if name not in self.model.param_names]
+            if unknown:
+                raise ValueError(
+                    f"Umat({self.model.__name__}, module={self.module!r}): props names "
+                    f"{unknown}, which are not parameters of the model "
+                    f"{list(self.model.param_names)}"
+                )
 
     def source_paths(self) -> list[Path]:
         """The sources as absolute paths."""
@@ -105,9 +121,13 @@ class Umat:
         from returnmap.simulation.integrator import FortranIntegrator, FortranModule
 
         _build_dir_on_path()
+        declared: dict[str, Any] = dict(self.integrator_options)
+        if self.props is not None:
+            names = tuple(self.props)
+            declared["param_fn"] = lambda: tuple(getattr(model, name) for name in names)
         return FortranIntegrator.from_model(
             FortranModule(self.module), self.subroutine or self.module, model,
-            **{**self.integrator_options, **options},
+            **{**declared, **options},
         )
 
 

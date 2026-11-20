@@ -15,10 +15,19 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from returnmap._typing import FloatArray, StateDict, Stiffness
-from returnmap.verification._measure import array_rel_err, max_abs
+from returnmap.verification._measure import max_abs, rel_err
 
 if TYPE_CHECKING:
     from returnmap.simulation.integrator import StressIntegrator
+
+#: A tangent this many orders below the elastic stiffness is below what
+#: central differences resolve: the differenced stresses carry round-off of
+#: about 1e-16 of their size, which a strain step of 1e-7 turns into a
+#: derivative of about 1e-12 of the stiffness.  A tangent that is zero — a
+#: yield plateau, perfect plasticity in one dimension — therefore comes back
+#: from the differences as noise of that size, and has nothing of its own to
+#: be relative to.  Such a tangent is measured against the elastic stiffness.
+ZERO_TANGENT = 1e-8
 
 
 @dataclass
@@ -33,16 +42,40 @@ class TangentReport:
         Central differences of the integrator's stress — the reference.
     tol : float
         The tolerance the tangent was judged against.
+    elastic_scale : float or None
+        Largest entry of the elastic tangent at the start of the step — what
+        a vanishing tangent is measured against (see :attr:`max_rel_err`).
+        ``None`` if the integrator could not give one.
     """
 
     ddsdde: Stiffness
     ddsdde_fd: Stiffness
     tol: float
+    elastic_scale: float | None = None
+
+    @property
+    def _scale(self) -> float:
+        """What the difference is relative to."""
+        own = max_abs(self.ddsdde_fd)
+        if self.elastic_scale is not None and own < ZERO_TANGENT * self.elastic_scale:
+            return self.elastic_scale
+        return own
 
     @property
     def max_rel_err(self) -> float:
-        """``max|ddsdde − ddsdde_fd| / max|ddsdde_fd|``."""
-        return array_rel_err(self.ddsdde, self.ddsdde_fd)
+        """``max|ddsdde − ddsdde_fd| / max|ddsdde_fd|``.
+
+        One case has no ``max|ddsdde_fd|`` to be relative to: a tangent that
+        is zero (a yield plateau).  Central differences return noise there,
+        and noise against noise is a 100 % error.  A reference tangent eight
+        orders below the elastic stiffness is taken to be that case, and the
+        difference is measured against the elastic stiffness instead.
+        """
+        with np.errstate(invalid="ignore"):
+            diff = max_abs(
+                np.asarray(self.ddsdde, dtype=float) - np.asarray(self.ddsdde_fd, dtype=float)
+            )
+        return rel_err(diff, self._scale)
 
     @property
     def rel_err_matrix(self) -> FloatArray:
@@ -51,7 +84,7 @@ class TangentReport:
         Its largest entry is :attr:`max_rel_err`; the position says which
         component of the tangent is off.
         """
-        scale = max_abs(self.ddsdde_fd)
+        scale = self._scale
         diff = np.abs(
             np.asarray(self.ddsdde, dtype=float) - np.asarray(self.ddsdde_fd, dtype=float)
         )
@@ -145,7 +178,13 @@ def check_tangent(
         plus = integrator.stress_update(strain_inc + eps * e_j, stress_n, state_n).stress
         minus = integrator.stress_update(strain_inc - eps * e_j, stress_n, state_n).stress
         ddsdde_fd[:, j] = (np.array(plus) - np.array(minus)) / (2.0 * eps)
-    return TangentReport(ddsdde=ddsdde, ddsdde_fd=ddsdde_fd, tol=tol)
+    try:
+        elastic_scale: float | None = max_abs(integrator.elastic_tangent(stress_n, state_n))
+    except Exception:
+        # Not every integrator can say (a UMAT without an elastic-stiffness
+        # hook); the tangent is then measured against itself only.
+        elastic_scale = None
+    return TangentReport(ddsdde=ddsdde, ddsdde_fd=ddsdde_fd, tol=tol, elastic_scale=elastic_scale)
 
 
 __all__ = ["TangentReport", "check_tangent"]

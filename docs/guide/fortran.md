@@ -14,6 +14,7 @@ UMATS = [
          libraries=["lapack", "blas"],
          integrator_options={"parse_umat_failure": ...}), # UMAT 自身の収束フラグを読む
 ]
+# PROPS の順が param_names と違う、または一部しか受け取らない UMAT は props=["E", "nu", ...] で宣言する
 ```
 
 ```bash
