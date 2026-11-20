@@ -13,6 +13,7 @@ concepts
 guide/models
 guide/simulation
 guide/fitting
+guide/comparing
 guide/writing-models
 guide/verification
 guide/fortran

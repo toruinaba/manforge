@@ -44,7 +44,7 @@ def test_each_name_has_one_home():
     ("simulation", ["PythonIntegrator", "StrainDriver", "StressDriver", "MixedDriver",
                     "FieldHistory", "FieldType", "DriverResult", "FortranIntegrator",
                     "FortranModule", "JacobianBlocks", "hand_jacobian",
-                    "SubSteppingIntegrator"]),
+                    "SubSteppingIntegrator", "compare_models"]),
     ("fitting", ["fit_params", "FitTarget", "Observation", "ParameterSpace", "FitResult"]),
     ("verification", ["check_hand_blocks", "check_solution", "check_tangent",
                       "crosscheck", "compare_jacobians", "check_bindings",

@@ -15,6 +15,7 @@ from returnmap.simulation.integrator import (
     SubSteppingIntegrator,
 )
 from returnmap.simulation.jacobian import JacobianBlocks, hand_jacobian
+from returnmap.simulation.compare import ModelComparisonResult, ModelRun, compare_models
 
 __all__ = [
     "FieldType",
@@ -34,4 +35,7 @@ __all__ = [
     "SubSteppingIntegrator",
     "JacobianBlocks",
     "hand_jacobian",
+    "compare_models",
+    "ModelComparisonResult",
+    "ModelRun",
 ]
