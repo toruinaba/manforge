@@ -3,13 +3,50 @@
 import numpy as np
 import pytest
 
-from returnmap.fitting.metrics import is_curve_metric, resolve_metric
+from returnmap.fitting.metrics import (
+    _arc_length, _measured_arc_length, _noise_amplitude, is_curve_metric,
+    resolve_metric,
+)
 from returnmap.fitting import mean_squared_error, partial_curve_mapping
 
 
 def hardening_curve(eps, E=210000.0, sy=250.0, H=1000.0):
     """Bilinear isotropic hardening σ(ε) — an analytic stand-in for a run."""
     return np.column_stack([eps, np.minimum(E * eps, (sy * E + H * E * eps) / (E + H))])
+
+
+def cyclic_curve(n_per_segment, sy=285.0, E=206000.0, H=5000.0,
+                 peaks=(0.015, -0.015, 0.015, -0.015, 0.015)):
+    """Bilinear kinematic hardening over a cyclic strain path — hysteresis loops."""
+    corners = (0.0,) + tuple(peaks)
+    eps = np.concatenate([
+        np.linspace(a, b, n_per_segment + 1)[1:] for a, b in zip(corners, corners[1:])
+    ])
+    sig = np.empty_like(eps)
+    stress = alpha = eps_prev = 0.0
+    for i, e in enumerate(eps):
+        trial = stress + E * (e - eps_prev)
+        f = abs(trial - alpha) - sy
+        if f > 0.0:
+            dlambda, sign = f / (E + H), np.sign(trial - alpha)
+            stress, alpha = trial - E * dlambda * sign, alpha + H * dlambda * sign
+        else:
+            stress = trial
+        sig[i], eps_prev = stress, e
+    return np.column_stack([eps, sig])
+
+
+def with_noise(curve, stress_sd, strain_sd=2e-6, seed=0):
+    """A test record: the curve as a load cell and an extensometer report it."""
+    rng = np.random.default_rng(seed)
+    return curve + np.column_stack([
+        rng.normal(0.0, strain_sd, len(curve)), rng.normal(0.0, stress_sd, len(curve)),
+    ])
+
+
+def normalised(curve, reference):
+    lo, span = reference.min(axis=0), reference.max(axis=0) - reference.min(axis=0)
+    return (curve - lo) / span
 
 
 @pytest.fixture
@@ -157,6 +194,86 @@ def test_pcm_handles_multi_valued_curves():
 
     assert same_loop < 1e-2
     assert wrong_loop > 10.0 * same_loop
+
+
+# ---------------------------------------------------------------------------
+# partial_curve_mapping — measurement noise
+# ---------------------------------------------------------------------------
+
+# Noise of 3 MPa on a 600 MPa range: an ordinary load cell.
+NOISE = 3.0
+
+
+@pytest.mark.parametrize("n_per_segment", [400, 4000], ids=["2000 points", "20000 points"])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_pcm_ranks_models_correctly_against_a_noisy_test_curve(n_per_segment, seed):
+    """Noise lengthens the polyline through the test points.  Matched at that
+    length, the 2000-point case used to score 0.56 / 0.55 / 0.48 for the three
+    models below — the true one worst."""
+    test = with_noise(cyclic_curve(n_per_segment), NOISE, seed=seed)
+
+    true = partial_curve_mapping(cyclic_curve(40), test)
+    off = partial_curve_mapping(cyclic_curve(40, sy=320.0), test)
+    far_off = partial_curve_mapping(cyclic_curve(40, sy=500.0), test)
+
+    assert true < off < far_off
+    assert true < 0.05
+    assert off > 2.0 * true
+    assert far_off > 10.0 * true
+
+
+@pytest.mark.parametrize("n_per_segment", [400, 4000], ids=["2000 points", "20000 points"])
+def test_pcm_of_the_true_model_barely_moves_with_noise(n_per_segment):
+    clean = cyclic_curve(n_per_segment)
+    computed = cyclic_curve(40)
+    without = partial_curve_mapping(computed, clean)
+    with_it = partial_curve_mapping(computed, with_noise(clean, NOISE))
+    # Noise costs a couple of per cent of the range — the measured length is
+    # good to 1–2 %, and the points compared against are themselves noisy —
+    # where the plain arc length cost half of it (0.56).
+    assert with_it - without < 0.03
+
+
+def test_noise_amplitude_is_read_off_the_curve():
+    clean = cyclic_curve(400)
+    span = clean.max(axis=0) - clean.min(axis=0)
+    noisy = normalised(with_noise(clean, NOISE, strain_sd=3e-5), clean)
+    sd = _noise_amplitude(noisy)
+    assert sd[0] == pytest.approx(3e-5 / span[0], rel=0.1)
+    assert sd[1] == pytest.approx(NOISE / span[1], rel=0.1)
+
+
+def test_a_curve_without_noise_has_none():
+    """Yield corners and load reversals are not noise."""
+    sd = _noise_amplitude(normalised(cyclic_curve(400), cyclic_curve(400)))
+    assert np.all(sd < 1e-12)
+
+
+@pytest.mark.parametrize("n_per_segment", [400, 4000], ids=["2000 points", "20000 points"])
+def test_measured_length_is_the_length_of_the_curve_not_of_the_noise(n_per_segment):
+    clean = cyclic_curve(n_per_segment)
+    noisy = normalised(with_noise(clean, NOISE), clean)
+    length = _arc_length(normalised(clean, clean))[1][-1]
+
+    plain = _arc_length(noisy)[1][-1]
+    measured = _measured_arc_length(noisy)
+
+    assert plain > 1.3 * length          # what the polyline says
+    assert measured[-1] == pytest.approx(length, rel=0.02)
+    assert measured[0] == 0.0
+    assert np.all(np.diff(measured) >= 0.0)
+
+
+def test_a_curve_without_noise_keeps_its_plain_arc_length(experiment):
+    for curve in (experiment, cyclic_curve(40), cyclic_curve(400)):
+        curve = normalised(curve, curve)
+        np.testing.assert_array_equal(_measured_arc_length(curve), _arc_length(curve)[1])
+
+
+def test_too_few_points_to_estimate_noise_from():
+    curve = np.column_stack([np.linspace(0.0, 1.0, 8), [0.0, 0.3, 0.1, 0.6, 0.4, 0.9, 0.7, 1.0]])
+    assert np.all(_noise_amplitude(curve) == 0.0)
+    np.testing.assert_array_equal(_measured_arc_length(curve), _arc_length(curve)[1])
 
 
 def test_pcm_is_asymmetric():
