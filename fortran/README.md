@@ -1,8 +1,9 @@
 # fortran/ — Fortran UMAT build guide
 
-This directory holds what every UMAT build shares, and is where the compiled
-f2py modules are built.  The UMAT sources themselves live with their model,
-in `src/returnmap/models/<family>/fortran/`.
+This directory is where the compiled f2py modules are built, and holds the
+smoke-test sources of the build itself.  The UMAT sources live with their
+model, in `src/returnmap/models/<family>/fortran/`, and the ABAQUS stubs every
+UMAT build needs are shipped inside the package.
 
 ## Files
 
@@ -10,7 +11,7 @@ in `src/returnmap/models/<family>/fortran/`.
 |------|-------------|
 | `../src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90` | J2 isotropic hardening UMAT — contains `j2_isotropic_3d` (f2py interface), `umat` (ABAQUS entry point), and `j2_isotropic_3d_elastic_stiffness` (component check) |
 | `../src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90`, `yu_kinematic_ps.f90` | Yoshida-Uemori UMATs (3D solid and plane stress) |
-| `abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution; future UMATs may call them directly |
+| `../src/returnmap/fortran/abaqus_stubs.f90` | Stubs for ABAQUS internal functions (SINV, SPRINC, ROTSIG) — linked for symbol resolution. Shipped with the package: `returnmap build --abaqus-stubs` compiles it in, `returnmap stubs` prints its path |
 | `test_basic.f90` | Simple elastic subroutine for f2py smoke test |
 
 ---
@@ -39,8 +40,12 @@ python -m numpy.f2py --version
 # Install build tools (meson/ninja) if not yet done
 uv sync --extra fortran
 
-# Compile the J2 UMAT
-uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+# Compile the J2 UMAT (--abaqus-stubs compiles in the stubs the package ships)
+uv run returnmap build --abaqus-stubs src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+
+# A UMAT that calls LAPACK names the libraries to link
+uv run returnmap build --abaqus-stubs src/returnmap/models/yu_kinematic/fortran/yu_kinematic_3d.f90 \
+    --name yu_kinematic_3d --link lapack --link blas
 
 # Smoke-test module only
 uv run returnmap build fortran/test_basic.f90 --name returnmap_test_basic
@@ -56,14 +61,18 @@ uv run returnmap clean
 
 ```bash
 make fortran-build-umat   # J2 UMAT
+make fortran-build-yu     # YU 3D UMAT (fortran-build-yu-ps: plane stress)
 make fortran-build        # smoke-test module
 ```
+
+The targets call `returnmap build`.
 
 ### Option C: f2py directly
 
 ```bash
 cd fortran/
-python -m numpy.f2py -c abaqus_stubs.f90 j2_isotropic_3d.f90 -m j2_isotropic_3d
+python -m numpy.f2py -c $(returnmap stubs) \
+    ../src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 -m j2_isotropic_3d
 ```
 
 All three options produce `j2_isotropic_3d.cpython-*.so` (Linux) or `.pyd` (Windows) in the `fortran/` directory.
@@ -92,7 +101,7 @@ docker build -t returnmap-fortran .
 
 # Compile and run Fortran tests inside the container
 docker run --rm -v $(pwd):/workspace -w /workspace returnmap-fortran \
-    bash -c "make fortran-build-umat && make fortran-test-umat"
+    bash -c "make PY=python fortran-build-umat && make test-models-fortran"
 ```
 
 ---

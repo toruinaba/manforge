@@ -1,13 +1,11 @@
 """Repository-wide pytest setup.
 
 The tests live in two places — ``tests/`` for the framework, and
-``src/returnmap/models/<family>/tests/`` for each model family — so what both
-need is set up here, at the root.
+``src/returnmap/models/<family>/tests/`` for each model family.  What both
+need (the ``fortran`` / ``slow`` markers, compiled f2py modules on the path)
+comes from the plugin the package ships.  An installed returnmap registers it
+by itself; naming it here covers a checkout that is on ``PYTHONPATH`` instead
+(the Docker image).
 """
 
-import os
-import sys
-
-# Compiled f2py modules are built into fortran/; make them importable for
-# every test.  Harmless if the directory holds none.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fortran"))
+pytest_plugins = ["returnmap.pytest_plugin"]

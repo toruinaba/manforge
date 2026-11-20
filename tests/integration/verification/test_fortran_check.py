@@ -32,7 +32,7 @@ def test_fortran_umat_bad_module():
 def test_elastic_stiffness_binding_registered():
     pytest.importorskip(
         "j2_isotropic_3d",
-        reason="j2_isotropic_3d not compiled -- run: uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
+        reason="j2_isotropic_3d not compiled -- run: uv run returnmap build --abaqus-stubs src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
     )
     from returnmap.models import J2Isotropic3D
     bindings = J2Isotropic3D._fortran_bindings
@@ -44,7 +44,7 @@ def test_elastic_stiffness_binding_registered():
 def test_check_bindings_elastic_stiffness(model):
     pytest.importorskip(
         "j2_isotropic_3d",
-        reason="j2_isotropic_3d not compiled -- run: uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
+        reason="j2_isotropic_3d not compiled -- run: uv run returnmap build --abaqus-stubs src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d",
     )
     from returnmap.verification import check_bindings
     fortran = FortranModule("j2_isotropic_3d")

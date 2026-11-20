@@ -28,7 +28,7 @@ uv sync --extra dev          # テスト依存含む
 uv sync --all-extras         # matplotlib / ドキュメント / Fortran ビルド依存含む
 
 # Fortran モジュールのビルド (gfortran 必須、無ければ Docker: make docker-build)
-uv run returnmap build fortran/abaqus_stubs.f90 src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
+uv run returnmap build --abaqus-stubs src/returnmap/models/j2_isotropic/fortran/j2_isotropic_3d.f90 --name j2_isotropic_3d
 ```
 
 ## クイックスタート

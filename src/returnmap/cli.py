@@ -1,7 +1,9 @@
 """returnmap CLI — Fortran build toolkit for Python users.
 
 Usage:
-  returnmap build <files...> --name <module_name> [--output-dir <dir>] [--verbose]
+  returnmap build <files...> --name <module_name> [--abaqus-stubs] [--link <lib>]...
+                  [--output-dir <dir>] [--verbose]
+  returnmap stubs
   returnmap clean [--dir <dir>] [--dry-run]
   returnmap list  [--dir <dir>]
 """
@@ -32,6 +34,33 @@ def _find_project_root() -> Path:
 
 def _default_output_dir() -> Path:
     return _find_project_root() / "fortran"
+
+
+def abaqus_stubs_path() -> Path:
+    """The ``abaqus_stubs.f90`` shipped with the package.
+
+    Stand-ins for the ABAQUS utility routines a UMAT may call (SINV, SPRINC,
+    ROTSIG), so that a UMAT source compiles and links outside ABAQUS.
+    """
+    return Path(__file__).parent / "fortran" / "abaqus_stubs.f90"
+
+
+def f2py_command(
+    sources: list[Path], module_name: str, *,
+    abaqus_stubs: bool = False, link: list[str] | tuple[str, ...] = (),
+) -> list[str]:
+    """The f2py invocation that builds ``module_name`` from ``sources``.
+
+    The stubs go first: they are a dependency of the UMAT sources, not the
+    interface of the module.
+    """
+    files = ([abaqus_stubs_path()] if abaqus_stubs else []) + list(sources)
+    return (
+        [sys.executable, "-m", "numpy.f2py", "-c"]
+        + [str(f) for f in files]
+        + ["-m", module_name]
+        + [f"-l{name}" for name in link]
+    )
 
 
 def _check_gfortran() -> None:
@@ -122,12 +151,18 @@ def cmd_build(args: argparse.Namespace) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     module_name: str = args.name
-    source_names = ", ".join(s.name for s in sources)
+    source_names = ", ".join(
+        (["abaqus_stubs.f90"] if args.abaqus_stubs else []) + [s.name for s in sources]
+    )
     print(f"Building module '{module_name}' from: {source_names}")
+    if args.link:
+        print(f"Linking: {', '.join(args.link)}")
     print(f"Output directory: {output_dir}")
     print()
 
-    cmd = [sys.executable, "-m", "numpy.f2py", "-c"] + [str(s) for s in sources] + ["-m", module_name]
+    cmd = f2py_command(
+        sources, module_name, abaqus_stubs=args.abaqus_stubs, link=args.link,
+    )
 
     if args.verbose:
         result = subprocess.run(cmd, cwd=output_dir)
@@ -169,6 +204,10 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(f"  from returnmap.simulation import FortranModule")
     print(f"  import sys; sys.path.insert(0, '{output_dir}')")
     print(f"  umat = FortranModule('{module_name}')")
+
+
+def cmd_stubs(args: argparse.Namespace) -> None:
+    print(abaqus_stubs_path())
 
 
 def cmd_clean(args: argparse.Namespace) -> None:
@@ -268,6 +307,22 @@ def main() -> None:
         help="Python module name for the compiled extension",
     )
     build_parser.add_argument(
+        "--abaqus-stubs",
+        action="store_true",
+        help=(
+            "Compile the package's abaqus_stubs.f90 in as well: stand-ins for the "
+            "ABAQUS utility routines (SINV, SPRINC, ROTSIG), which a UMAT source "
+            "needs in order to link outside ABAQUS"
+        ),
+    )
+    build_parser.add_argument(
+        "--link", "-l",
+        action="append",
+        default=[],
+        metavar="<lib>",
+        help="Library to link against, e.g. --link lapack --link blas (repeatable)",
+    )
+    build_parser.add_argument(
         "--output-dir", "-o",
         default=None,
         metavar="<dir>",
@@ -279,6 +334,17 @@ def main() -> None:
         help="Show full f2py / compiler output",
     )
     build_parser.set_defaults(func=cmd_build)
+
+    # --- stubs ---
+    stubs_parser = subparsers.add_parser(
+        "stubs",
+        help="Print the path of the abaqus_stubs.f90 shipped with the package",
+        description=(
+            "Print the path of abaqus_stubs.f90, for a build that calls f2py or a "
+            "compiler directly instead of `returnmap build --abaqus-stubs`."
+        ),
+    )
+    stubs_parser.set_defaults(func=cmd_stubs)
 
     # --- clean ---
     clean_parser = subparsers.add_parser(

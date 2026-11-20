@@ -33,6 +33,11 @@ Repository = "https://github.com/toruinaba/returnmap"
 [project.scripts]
 returnmap = "returnmap.cli:main"
 
+# Named after the module so that loading it again by that name (-p, or
+# pytest_plugins in a conftest) is recognised as the same plugin.
+[project.entry-points.pytest11]
+"returnmap.pytest_plugin" = "returnmap.pytest_plugin"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/returnmap"]
 
@@ -40,10 +45,7 @@ packages = ["src/returnmap"]
 testpaths = ["tests", "src/returnmap/models"]
 addopts = "--strict-markers --import-mode=importlib"
 pythonpath = ["."]
-markers = [
-    "slow: measured >1s (fitting, long cyclic loops) -- deselect with -m 'not slow'",
-    "fortran: requires compiled Fortran modules (f2py). Auto-skipped if module missing -- deselect with -m 'not fortran'",
-]
+# The slow / fortran markers are registered by returnmap.pytest_plugin.
 
 [tool.pyright]
 include = ["src/returnmap"]
