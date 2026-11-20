@@ -39,7 +39,7 @@ def _path(direction):
 @pytest.mark.parametrize("uni_cls,ref_cls,direction", CASES)
 def test_effective_history_is_undamaged_j2(uni_cls, ref_cls, direction):
     m, ref = uni_cls(**P, **DP), ref_cls(**P)
-    load = FieldHistory(FieldType.STRAIN, "Strain", _path(direction))
+    load = FieldHistory(FieldType.STRAIN, _path(direction))
     r_m = StrainDriver(PythonNumericalIntegrator(m)).run(load)
     r_ref = StrainDriver(PythonNumericalIntegrator(ref)).run(load)
     C0 = np.asarray(m.undamaged_stiffness())

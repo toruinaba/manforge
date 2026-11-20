@@ -10,8 +10,7 @@ from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory, F
 
 @pytest.fixture
 def strain_load():
-    return FieldHistory(
-        FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 10)
+    return FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 10)
     )
 
 
@@ -30,9 +29,15 @@ def driver_factory():
 # ---------------------------------------------------------------------------
 
 def test_extract_stress_and_strain(driver_result):
-    stress = _extract_field(driver_result, "Stress")
-    strain = _extract_field(driver_result, "Strain")
+    stress = _extract_field(driver_result, "stress")
+    strain = _extract_field(driver_result, "strain")
     assert stress.shape == strain.shape == (10, 6)
+
+
+def test_extract_names_are_lowercase(driver_result):
+    """The names are the ones DriverResult.history takes; "Stress" is not one."""
+    with pytest.raises(KeyError, match="neither 'stress'/'strain' nor a model state key"):
+        _extract_field(driver_result, "Stress")
 
 
 def test_extract_state_key_needs_no_request(driver_result):
@@ -126,8 +131,8 @@ def test_target_without_driver_factory_follows_its_load(strain_load):
         observations=[Observation(values=np.zeros(10), component=0)],
     )
     stress_target = FitTarget(
-        load=FieldHistory(FieldType.STRESS, "Stress", np.zeros((10, 6))),
-        observations=[Observation(values=np.zeros(10), field="Strain", component=0)],
+        load=FieldHistory(FieldType.STRESS, np.zeros((10, 6))),
+        observations=[Observation(values=np.zeros(10), field="strain", component=0)],
     )
     assert strain_target.resolve_driver_factory(None) is StrainDriver
     assert stress_target.resolve_driver_factory(None) is StressDriver
@@ -182,8 +187,8 @@ def test_observations_on_one_target_share_a_single_run(
 
 def test_normalisation_keeps_long_curve_from_dominating(model, driver_factory):
     """Two targets with the same error but different lengths weigh equally."""
-    short_load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 10))
-    long_load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 80))
+    short_load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 10))
+    long_load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 80))
     integrator = PythonIntegrator(model)
 
     residuals = []
@@ -207,7 +212,7 @@ def test_stress_strain_builds_a_strain_driven_target():
     assert target.load.type is FieldType.STRAIN
     assert len(target.observations) == 1
     obs = target.observations[0]
-    assert obs.field == "Stress"
+    assert obs.field == "stress"
     assert obs.component == 0  # 1-D stress → compare σ11 only
 
 

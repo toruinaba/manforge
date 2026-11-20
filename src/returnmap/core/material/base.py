@@ -393,6 +393,16 @@ class MaterialModel(ABC):
             object.__setattr__(stress_field, "name", "stress")
             # Insert stress at front of ordered dict.
             fields = {"stress": stress_field, **fields}
+        # "strain" names the total strain of a run wherever a history is read
+        # by name (DriverResult.history, Observation.field); a state of that
+        # name would be silently shadowed there.
+        if "strain" in fields:
+            raise TypeError(
+                f"{cls.__name__}: a state cannot be named 'strain' — that name "
+                "means the total strain of the run (DriverResult.history, "
+                "Observation.field).  Name the state for what it holds, e.g. "
+                "'eps_p'"
+            )
         _check_param_names(cls, fields)
         # param_meta keys must be a subset of param_names (models without
         # metadata remain valid).

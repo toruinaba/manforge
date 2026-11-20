@@ -43,20 +43,16 @@ if TYPE_CHECKING:
     from returnmap.simulation.integrator import StressIntegrator
     from returnmap.simulation.types import DriverResult
 
-STRESS_FIELD = "Stress"
-STRAIN_FIELD = "Strain"
+STRESS_FIELD = "stress"
+STRAIN_FIELD = "strain"
 
 
 def _extract_field(result: "DriverResult", name: str) -> FloatArray:
     """Pull a computed history out of a driver result by field name.
 
-    Accepts ``"Stress"``, ``"Strain"``, or any model state key (read with
-    :meth:`~returnmap.simulation.DriverResult.history`).
+    Accepts ``"stress"``, ``"strain"``, or any model state key — the names
+    :meth:`~returnmap.simulation.DriverResult.history` takes.
     """
-    if name == STRESS_FIELD:
-        return np.asarray(result.stress, dtype=float)
-    if name == STRAIN_FIELD:
-        return np.asarray(result.strain, dtype=float)
     try:
         return result.history(name)
     except KeyError:
@@ -78,8 +74,9 @@ class Observation:
         ``component`` selection — ``(N,)`` for a scalar or a single selected
         component, ``(N, ntens)`` for a full tensor history.
     field : str
-        What to compare: ``"Stress"``, ``"Strain"``, or a model state key
-        (e.g. ``"ep"``).
+        What to compare: ``"stress"``, ``"strain"``, or a model state key
+        (e.g. ``"ep"``) — the names
+        :meth:`~returnmap.simulation.DriverResult.history` takes.
     component : int or None
         Column of the computed history to compare.  ``None`` (default)
         compares every column, so ``values`` must then be 2-D.
@@ -107,7 +104,7 @@ class Observation:
         ``x_field``.
     x_field : str
         Which computed history supplies the x axis for a curve metric.
-        Defaults to ``"Strain"``.
+        Defaults to ``"strain"``.
     x_component : int or None
         Column of the computed x history.  ``None`` (default) means column 0
         when that history is 2-D.
@@ -291,7 +288,7 @@ class FitTarget:
         strain = np.asarray(strain, dtype=float)
         stress = np.asarray(stress, dtype=float)
         return cls(
-            load=FieldHistory(FieldType.STRAIN, STRAIN_FIELD, strain),
+            load=FieldHistory(FieldType.STRAIN, strain),
             observations=[
                 Observation(
                     values=stress,

@@ -1,7 +1,7 @@
 """Serializable-boundary simulation entry point.
 
-:func:`run_simulation` wraps model construction, integrator setup, and a
-driver run behind plain inputs (dict / ndarray) and a plain dataclass output,
+:func:`run_simulation` wraps putting the parameters into a template model,
+integrator setup, and a driver run behind plain inputs (dict / ndarray) and a plain dataclass output,
 so service consumers (web APIs, job workers) never touch framework objects.
 
 Non-convergence is a value, not an exception: a user exploring material
@@ -57,7 +57,7 @@ class SimulationOutput:
 
 
 def run_simulation(
-    model_cls: type[MaterialModel],
+    model: MaterialModel,
     params: dict[str, float],
     load: np.ndarray,
     *,
@@ -70,12 +70,16 @@ def run_simulation(
 
     Parameters
     ----------
-    model_cls : type[MaterialModel]
-        Concrete model class (typically from a
-        :class:`~returnmap.service.ModelRegistry`).
+    model : MaterialModel
+        Template model (typically from a
+        :class:`~returnmap.service.ModelRegistry`).  It supplies the class,
+        the dimension and every setting outside ``param_names``; the run uses
+        ``model.with_params(**params)`` and leaves the template untouched.
     params : dict[str, float]
-        Material parameters.  Keys must match ``model_cls.param_names``
-        exactly (missing or extra keys raise ``ValueError``).
+        Material parameters.  Keys must match ``model.param_names`` exactly
+        (missing or extra keys raise ``ValueError``) — the template's own
+        parameter values are never a fallback, so a request cannot run on a
+        value it did not name.
     load : array-like
         Cumulative load history.  Shape ``(N,)`` (uniaxial shorthand) or
         ``(N, ntens)``.  Interpreted per ``control``.
@@ -96,23 +100,27 @@ def run_simulation(
     Raises
     ------
     ValueError
-        Parameter-name mismatch, unknown ``include_fields`` entry, unknown
-        ``control``, or malformed ``load`` shape.
+        ``model`` is not a model instance, parameter-name mismatch, unknown
+        ``include_fields`` entry, unknown ``control``, or malformed ``load``
+        shape.
     """
-    expected = set(model_cls.param_names)
+    if not isinstance(model, MaterialModel):
+        raise ValueError(
+            "model must be a MaterialModel instance (a template to put the "
+            f"parameters into), got {model!r}"
+        )
+    expected = set(model.param_names)
     got = set(params)
     if got != expected:
         missing = sorted(expected - got)
         extra = sorted(got - expected)
         raise ValueError(
-            f"{model_cls.__name__}: parameter mismatch"
+            f"{type(model).__name__}: parameter mismatch"
             + (f" — missing {missing}" if missing else "")
             + (f" — unexpected {extra}" if extra else "")
         )
 
-    # The keys were just checked against param_names, so none of them is the
-    # constructor's other keyword (dimension).
-    model = model_cls(**params)  # pyright: ignore[reportArgumentType]
+    model = model.with_params(**params)
     unknown = sorted(set(include_fields) - set(model.state_names))
     if unknown:
         raise ValueError(
@@ -144,12 +152,12 @@ def run_simulation(
     n_total = data.shape[0]
     if control == "strain":
         driver = StrainDriver(integrator)
-        history = FieldHistory(FieldType.STRAIN, "Strain", data)
+        history = FieldHistory(FieldType.STRAIN, data)
         step_iter = driver.iter_run(history)
     elif control == "stress":
         driver = StressDriver(integrator)
         stress_data = data if data.ndim == 2 else data.reshape(-1, 1)
-        history = FieldHistory(FieldType.STRESS, "Stress", stress_data)
+        history = FieldHistory(FieldType.STRESS, stress_data)
         step_iter = driver.iter_run(history)
     else:
         raise ValueError(f"control must be 'strain' or 'stress', got {control!r}")
@@ -161,11 +169,11 @@ def run_simulation(
         for step in step_iter:
             if not step.converged:
                 converged = False
-                failed_step = step.i
+                failed_step = step.index
                 break
             completed.append(step)
             if progress is not None:
-                progress(step.i + 1, n_total)
+                progress(step.index + 1, n_total)
     except (np.linalg.LinAlgError, FloatingPointError, ZeroDivisionError):
         # A singular NR Jacobian or numerical blow-up means these parameters
         # are unsolvable at this step — same information as non-convergence.

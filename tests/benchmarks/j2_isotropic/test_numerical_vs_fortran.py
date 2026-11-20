@@ -75,7 +75,7 @@ def py_int_an(j2):
 
 def _j2_load(model):
     history = generate_strain_history(model)
-    return FieldHistory(FieldType.STRAIN, "eps", history)
+    return FieldHistory(FieldType.STRAIN, history)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ class TestCrosscheckTrajectory:
         model, strain_history = j2_3d_scenario
         fc_int = FortranIntegrator.from_model(fortran_mod, "j2_isotropic_3d", model)
         py_int = PythonNumericalIntegrator(model)
-        load = FieldHistory(FieldType.STRAIN, "eps", strain_history)
+        load = FieldHistory(FieldType.STRAIN, strain_history)
 
         result = crosscheck(py_int, fc_int, load)
 
@@ -225,7 +225,7 @@ class TestCrosscheckStressDriven:
         targets = np.array([0.5 * sigma_max, sigma_max, 0.8 * sigma_max, 0.0])
         stress_data = np.zeros((len(targets), j2.ntens))
         stress_data[:, 0] = targets
-        load = FieldHistory(FieldType.STRESS, "sigma", stress_data)
+        load = FieldHistory(FieldType.STRESS, stress_data)
 
         result = crosscheck(py_int, fc_int, load)
 
@@ -312,7 +312,7 @@ class TestSingleStepCrosscheck:
         failures = []
         for case in self._make_cases(model):
             data = case["deps"][np.newaxis]
-            load = FieldHistory(FieldType.STRAIN, "eps", data)
+            load = FieldHistory(FieldType.STRAIN, data)
             result = crosscheck(py_int, fc_int, load, initial_stress=case["stress_n"],
                                 initial_state=case["state_n"])
             failures.extend((case, step) for step in result.steps if not step.passed)

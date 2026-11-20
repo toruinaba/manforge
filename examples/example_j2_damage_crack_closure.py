@@ -62,7 +62,7 @@ for h, r in results.items():
 # Tangent check at the end of the last compressive half-cycle (h = 0.2)
 model = J2IsotropicDamageCrackClosure1D(**P, h=0.2)
 integ = PythonNumericalIntegrator(model)
-res = StrainDriver(integ).run(FieldHistory(load.type, load.name, load.data[:-N_SEG - 5]))
+res = StrainDriver(integ).run(FieldHistory(load.type, load.data[:-N_SEG - 5]))
 last = res.step_results[-1]
 deps = np.array([strain[len(res.step_results)] - strain[len(res.step_results) - 1]])
 tc = check_tangent(integ, deps, np.asarray(last.stress), last.state, eps=1e-8)

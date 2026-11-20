@@ -68,7 +68,6 @@ def _uniaxial_ramp(n_steps, deps11):
     """Monotonic ε11 ramp with a constant increment of *deps11*."""
     return FieldHistory(
         type=FieldType.STRAIN,
-        name="Strain",
         data=np.cumsum(np.full(n_steps, deps11)),
     )
 
@@ -537,7 +536,7 @@ class TestTangentApproximation:
         targets = np.linspace(0.0, 280.0, 12)
         data = np.zeros((len(targets), 6))
         data[:, 0] = targets
-        load = FieldHistory(type=FieldType.STRESS, name="Stress", data=data)
+        load = FieldHistory(type=FieldType.STRESS, data=data)
 
         steps = list(StressDriver(integrator).iter_run(load))
         assert len(steps) == len(targets)

@@ -95,7 +95,7 @@ print("  Results:")
 print(f"  Fitted sigma_y0 = {fitted_sigma_y0:.2f} MPa   (err {err_sy:.1f}%)")
 print(f"  Fitted H        = {fitted_H:.2f} MPa   (err {err_H:.1f}%)")
 print(f"  Residual        = {result.residual:.4f}")
-print(f"  Converged       = {result.success}  ({result.n_iter} func. evals)")
+print(f"  Converged       = {result.success}  ({result.n_evaluations} func. evals)")
 print()
 
 # ---------------------------------------------------------------------------

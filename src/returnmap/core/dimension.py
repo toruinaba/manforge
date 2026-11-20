@@ -385,7 +385,7 @@ class _Uniaxial1DDimension(StressDimension):
 _sqrt2 = math.sqrt(2.0)
 
 SOLID_3D = _Solid3DLikeDimension(
-    name="3D_SOLID",
+    name="SOLID_3D",
     ntens=6,
     ndi=3,
     nshr=3,

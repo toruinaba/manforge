@@ -289,7 +289,7 @@ def crosscheck(
                 driver_a.iter_run(load, **independent(run_kwargs)),
                 factory(integrator_b).iter_run(load, **independent(run_kwargs)),
             ):
-                yield sa.i, sa.result, bool(sa.converged), sb.result, bool(sb.converged)
+                yield sa.index, sa.result, bool(sa.converged), sb.result, bool(sb.converged)
             return
         # The inputs of each step are the reference's: the state it started
         # the step from and the strain increment its driver took.
@@ -308,7 +308,7 @@ def crosscheck(
             inc = sa.result.increment
             strain_inc = inc.strain_inc if inc is not None else strain - strain_n
             rb = integrator_b.stress_update(strain_inc, stress_n, state_n)
-            yield sa.i, sa.result, bool(sa.converged), rb, bool(rb.converged)
+            yield sa.index, sa.result, bool(sa.converged), rb, bool(rb.converged)
             strain_n, stress_n, state_n = strain, sa.result.stress, sa.result.state
 
     steps: list[CrosscheckStep] = []

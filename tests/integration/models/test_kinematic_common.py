@@ -240,7 +240,7 @@ def test_cyclic_loading_driver(km_model):
     history[:10, 0] = np.linspace(0, 4e-3, 10)
     history[10:, 0] = np.linspace(4e-3, -4e-3, 10)
 
-    load = FieldHistory(type=FieldType.STRAIN, name="Strain", data=history)
+    load = FieldHistory(type=FieldType.STRAIN, data=history)
     result = StrainDriver(PythonNumericalIntegrator(km_model)).run(load)
 
     assert result.stress.shape == (20, 6)
@@ -383,12 +383,12 @@ _PARAMS_OW_DIM = dict(E=210_000.0, nu=0.3, sigma_y0=250.0, C_k=10_000.0, gamma=1
 
 
 def _load_1d(n=20, eps_max=3e-3):
-    return FieldHistory(FieldType.STRAIN, "eps", np.linspace(0, eps_max, n).reshape(-1, 1))
+    return FieldHistory(FieldType.STRAIN, np.linspace(0, eps_max, n).reshape(-1, 1))
 
 
 def _load_1d_cyclic(n=40, eps_amp=3e-3):
     t = np.linspace(0, 1, n)
-    return FieldHistory(FieldType.STRAIN, "eps", (eps_amp * np.sin(2 * np.pi * t)).reshape(-1, 1))
+    return FieldHistory(FieldType.STRAIN, (eps_amp * np.sin(2 * np.pi * t)).reshape(-1, 1))
 
 
 def _run_1d_dim(model, load):

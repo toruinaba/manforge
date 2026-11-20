@@ -7,6 +7,24 @@ from returnmap.simulation import FieldHistory, FieldType
 
 
 # ---------------------------------------------------------------------------
+# FieldHistory(type, data, *, name="")
+# ---------------------------------------------------------------------------
+
+def test_name_is_optional():
+    fh = FieldHistory(FieldType.STRAIN, np.zeros(3))
+    assert fh.name == ""
+    assert FieldHistory.cyclic_strain([1e-3]).name == ""
+
+
+def test_name_is_keyword_only():
+    """A label in second position would land in ``data``; it is refused instead."""
+    assert FieldHistory(FieldType.STRAIN, np.zeros(3), name="eps").name == "eps"
+    assert FieldHistory.cyclic_stress([100.0], name="sigma").name == "sigma"
+    with pytest.raises(TypeError):
+        FieldHistory(FieldType.STRAIN, "Strain", np.zeros(3))
+
+
+# ---------------------------------------------------------------------------
 # cyclic_strain
 # ---------------------------------------------------------------------------
 

@@ -110,7 +110,7 @@ class DriverBase(ABC):
             driver = StrainDriver(PythonIntegrator(model))
             for step in driver.iter_run(load):
                 if step.result.is_plastic:
-                    print(f"Plasticity at step {step.i}")
+                    print(f"Plasticity at step {step.index}")
                     break
         """
 
@@ -163,7 +163,7 @@ class DriverBase(ABC):
         for step in steps:
             if not step.converged:
                 # Its result is a non-converged iterate, not a solution.
-                failed_step = step.i
+                failed_step = step.index
                 break
             step_results.append(step.result)
             strain_rows.append(step.strain)
@@ -267,12 +267,12 @@ class StrainDriver(DriverBase):
             # and stop, like StressDriver does.
             if not rm.converged:
                 yield DriverStep(
-                    i=i, strain=strain_cum.copy(), result=rm, converged=False
+                    index=i, strain=strain_cum.copy(), result=rm, converged=False
                 )
                 return
             stress_n = rm.stress
             state_n = rm.state
-            yield DriverStep(i=i, strain=strain_cum.copy(), result=rm)
+            yield DriverStep(index=i, strain=strain_cum.copy(), result=rm)
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +416,7 @@ class StressDriver(DriverBase):
                         f"tol = {step_tol:.3e})"
                     )
                 yield DriverStep(
-                    i=i,
+                    index=i,
                     strain=eps_total.copy(),
                     result=rm,
                     converged=False,
@@ -429,7 +429,7 @@ class StressDriver(DriverBase):
             stress_n = rm.stress
             state_n = rm.state
             yield DriverStep(
-                i=i,
+                index=i,
                 strain=eps_total.copy(),
                 result=rm,
                 converged=True,
@@ -684,7 +684,7 @@ class MixedDriver(DriverBase):
                         f"tol = {step_tol if nF else self.tol:.3e})"
                     )
                 yield DriverStep(
-                    i=i,
+                    index=i,
                     strain=eps_total.copy(),
                     result=rm,
                     converged=False,
@@ -697,7 +697,7 @@ class MixedDriver(DriverBase):
             stress_n = rm.stress
             state_n = rm.state
             yield DriverStep(
-                i=i,
+                index=i,
                 strain=eps_total.copy(),
                 result=rm,
                 converged=True,

@@ -57,8 +57,8 @@ def _make_driver(integrator, ntens):
 def _wrap_history(model, history_data):
     if model.ntens > 1:
         # MixedDriver expects (N, len(P)) — P=[0] so extract column 0
-        return FieldHistory(FieldType.STRAIN, "Strain", history_data[:, [0]])
-    return FieldHistory(FieldType.STRAIN, "Strain", history_data)
+        return FieldHistory(FieldType.STRAIN, history_data[:, [0]])
+    return FieldHistory(FieldType.STRAIN, history_data)
 
 
 def _run_and_compare(model, history):

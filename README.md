@@ -36,7 +36,7 @@ model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=1_000.0)
 
 strain_history = np.zeros((100, 6))
 strain_history[:, 0] = np.linspace(0.0, 5e-3, 100)  # ε11 を増加
-load = FieldHistory(FieldType.STRAIN, "Strain", strain_history)
+load = FieldHistory(FieldType.STRAIN, strain_history)
 
 result = StrainDriver(PythonIntegrator(model)).run(load)
 print(f"Final σ11: {result.stress[-1, 0]:.1f} MPa")

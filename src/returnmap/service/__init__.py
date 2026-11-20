@@ -1,6 +1,6 @@
 """Web-independent contract layer for service consumers (APIs, job workers).
 
-Exposes exactly what a deployment needs: a name→class registry with
+Exposes exactly what a deployment needs: a name→model registry with
 serializable descriptors, and a run function with plain inputs/outputs.
 """
 

@@ -15,7 +15,7 @@ from returnmap.simulation import StrainDriver, PythonIntegrator, FieldHistory, F
 
 @pytest.fixture
 def strain_load():
-    return FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 10))
+    return FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 10))
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_objective_rebuilds_the_model_in_its_own_dimension(driver_factory, space
         dimension=PLANE_STRAIN, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     data = np.zeros((10, 4))
     data[:, 0] = np.linspace(0.0, 5e-3, 10)
-    load = FieldHistory(FieldType.STRAIN, "Strain", data)
+    load = FieldHistory(FieldType.STRAIN, data)
     stress = StrainDriver(PythonIntegrator(template)).run(load).stress[:, 0]
     target = FitTarget(load=load, observations=[Observation(values=stress, component=0)])
 
@@ -92,7 +92,7 @@ def test_objective_keeps_the_templates_non_parameter_settings(driver_factory, sp
 
     template = _Scaled(scale=2.0, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     strain = np.linspace(0.0, 8e-3, 12)
-    load = FieldHistory(FieldType.STRAIN, "Strain", strain)
+    load = FieldHistory(FieldType.STRAIN, strain)
     stress = StrainDriver(PythonIntegrator(template)).run(load).stress[:, 0]
     assert stress[-1] > 400.0, "the path must yield at the scaled stress"
 
@@ -363,7 +363,7 @@ def test_fit_result_model_keeps_the_templates_settings(space):
 
     template = _Scaled(scale=2.0, E=210000.0, nu=0.3, sigma_y0=250.0, H=1000.0)
     strain = np.linspace(0.0, 8e-3, 12)
-    load = FieldHistory(FieldType.STRAIN, "Strain", strain)
+    load = FieldHistory(FieldType.STRAIN, strain)
     stress = StrainDriver(PythonIntegrator(template)).run(load).stress[:, 0]
 
     result = fit_params(template, [FitTarget.stress_strain(strain, stress)], space, max_iter=2)

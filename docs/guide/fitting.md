@@ -54,15 +54,15 @@ from returnmap.simulation import FieldHistory, FieldType
 
 targets = [
     FitTarget(                       # ひずみ制御: σ11 と ep を同じ解析から比較
-        load=FieldHistory(FieldType.STRAIN, "Strain", strain_hist),
+        load=FieldHistory(FieldType.STRAIN, strain_hist),
         observations=[
             Observation(values=sigma11_exp, component=0),
             Observation(values=ep_exp, field="ep", weight=1e8),  # スケール差は weight で調整
         ],
     ),
     FitTarget(                       # 応力制御実験: 応力履歴なので StressDriver で回る
-        load=FieldHistory(FieldType.STRESS, "Stress", stress_hist),
-        observations=[Observation(values=strain_exp, field="Strain", component=0)],
+        load=FieldHistory(FieldType.STRESS, stress_hist),
+        observations=[Observation(values=strain_exp, field="strain", component=0)],
     ),
 ]
 result = fit_params(model, targets, space)

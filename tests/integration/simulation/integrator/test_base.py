@@ -536,7 +536,7 @@ class TestConvergenceHistory:
                 )
 
     def test_driver_j2_analytical_history(self, j2_model):
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
+        load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 20))
         dr = StrainDriver(PythonIntegrator(j2_model)).run(load)
         for rm in dr.step_results:
             if rm.is_plastic:
@@ -548,7 +548,7 @@ class TestConvergenceHistory:
                 assert rm.residual_history == []
 
     def test_driver_j2_autodiff_has_history(self, j2_model):
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
+        load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 20))
         dr = StrainDriver(PythonNumericalIntegrator(j2_model)).run(load)
         for rm in dr.step_results:
             if rm.is_plastic:
@@ -560,7 +560,7 @@ class TestConvergenceHistory:
 
     @pytest.mark.slow
     def test_driver_ow_step_results_have_history(self, ow_model):
-        load = FieldHistory(FieldType.STRAIN, "Strain", np.linspace(0.0, 5e-3, 20))
+        load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 5e-3, 20))
         dr = StrainDriver(PythonIntegrator(ow_model)).run(load)
         for rm in dr.step_results:
             if rm.is_plastic:

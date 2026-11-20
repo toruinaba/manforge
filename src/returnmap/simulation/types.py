@@ -91,16 +91,17 @@ class FieldHistory:
     ----------
     type : FieldType
         Physical space of the quantity (STRESS or STRAIN).
-    name : str
-        Identifier (e.g. ``"Stress"``, ``"Strain"``, ``"ep"``).
     data : np.ndarray
         Array of shape ``(N, ntens)`` for tensor quantities or ``(N,)``
         for scalar quantities, where *N* is the number of steps.
+    name : str
+        Optional label, by keyword.  Nothing in the framework reads it; it
+        is there for the caller's own bookkeeping (plot legends, logs).
     """
 
     type: FieldType
-    name: str
     data: np.ndarray
+    name: str = field(default="", kw_only=True)
 
     # ------------------------------------------------------------------
     # Cyclic loading constructors
@@ -114,7 +115,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Strain",
+        name: str = "",
         start: float = 0.0,
     ) -> "FieldHistory":
         """Piecewise-linear strain history through a list of peak values.
@@ -132,13 +133,13 @@ class FieldHistory:
         ntens:
             Number of stress/strain components.
         name:
-            Label stored in the :class:`FieldHistory`.
+            Optional label stored in the :class:`FieldHistory`.
         start:
             Starting value (typically 0.0).
         """
         axial = _piecewise_linear(peaks, n_per_segment, start)
         data = _broadcast_to_tensor(axial, ntens, component)
-        return cls(FieldType.STRAIN, name, data)
+        return cls(FieldType.STRAIN, data, name=name)
 
     @classmethod
     def cyclic_stress(
@@ -148,7 +149,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Stress",
+        name: str = "",
         start: float = 0.0,
     ) -> "FieldHistory":
         """Piecewise-linear stress history through a list of peak values."""
@@ -160,7 +161,7 @@ class FieldHistory:
             name=name,
             start=start,
         )
-        return cls(FieldType.STRESS, name, fh.data)
+        return cls(FieldType.STRESS, fh.data, name=name)
 
     @classmethod
     def triangular_strain(
@@ -171,7 +172,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Strain",
+        name: str = "",
         mean: float = 0.0,
     ) -> "FieldHistory":
         """Symmetric triangular-wave strain history.
@@ -186,7 +187,7 @@ class FieldHistory:
             peaks.append(mean - amplitude)
         axial = _piecewise_linear(peaks, n_per_segment, mean)
         data = _broadcast_to_tensor(axial, ntens, component)
-        return cls(FieldType.STRAIN, name, data)
+        return cls(FieldType.STRAIN, data, name=name)
 
     @classmethod
     def triangular_stress(
@@ -197,7 +198,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Stress",
+        name: str = "",
         mean: float = 0.0,
     ) -> "FieldHistory":
         """Symmetric triangular-wave stress history."""
@@ -210,7 +211,7 @@ class FieldHistory:
             name=name,
             mean=mean,
         )
-        return cls(FieldType.STRESS, name, fh.data)
+        return cls(FieldType.STRESS, fh.data, name=name)
 
     @classmethod
     def sine_strain(
@@ -221,7 +222,7 @@ class FieldHistory:
         n_per_cycle: int = 80,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Strain",
+        name: str = "",
         mean: float = 0.0,
         phase: float = 0.0,
     ) -> "FieldHistory":
@@ -245,7 +246,7 @@ class FieldHistory:
         t = np.linspace(0.0, 2.0 * np.pi * n_cycles, N, endpoint=False)
         axial = mean + amplitude * np.sin(t + phase)
         data = _broadcast_to_tensor(axial, ntens, component)
-        return cls(FieldType.STRAIN, name, data)
+        return cls(FieldType.STRAIN, data, name=name)
 
     @classmethod
     def sine_stress(
@@ -256,7 +257,7 @@ class FieldHistory:
         n_per_cycle: int = 80,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Stress",
+        name: str = "",
         mean: float = 0.0,
         phase: float = 0.0,
     ) -> "FieldHistory":
@@ -271,7 +272,7 @@ class FieldHistory:
             mean=mean,
             phase=phase,
         )
-        return cls(FieldType.STRESS, name, fh.data)
+        return cls(FieldType.STRESS, fh.data, name=name)
 
     @classmethod
     def decaying_cyclic_strain(
@@ -283,7 +284,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Strain",
+        name: str = "",
     ) -> "FieldHistory":
         """Cyclic strain history with exponentially varying amplitude.
 
@@ -299,7 +300,7 @@ class FieldHistory:
             peaks.append(-a)
         axial = _piecewise_linear(peaks, n_per_segment, 0.0)
         data = _broadcast_to_tensor(axial, ntens, component)
-        return cls(FieldType.STRAIN, name, data)
+        return cls(FieldType.STRAIN, data, name=name)
 
     @classmethod
     def decaying_cyclic_stress(
@@ -311,7 +312,7 @@ class FieldHistory:
         n_per_segment: int = 20,
         component: int = 0,
         ntens: int = 1,
-        name: str = "Stress",
+        name: str = "",
     ) -> "FieldHistory":
         """Cyclic stress history with exponentially varying amplitude."""
         fh = cls.decaying_cyclic_strain(
@@ -323,7 +324,7 @@ class FieldHistory:
             ntens=ntens,
             name=name,
         )
-        return cls(FieldType.STRESS, name, fh.data)
+        return cls(FieldType.STRESS, fh.data, name=name)
 
 
 @dataclass
@@ -388,15 +389,17 @@ class DriverResult:
         Parameters
         ----------
         name : str
-            A model state key — ``"ep"``, ``"alpha"``, ... (``"stress"`` works
-            too and equals :attr:`stress`).
+            A model state key — ``"ep"``, ``"alpha"``, ... (``"stress"`` and
+            ``"strain"`` work too and equal :attr:`stress` and the ``strain``
+            field).
 
         Returns
         -------
         np.ndarray
             Shape ``(N,)`` for a scalar state, ``(N, ntens)`` for a tensor
             one.  With no completed step (the first one failed) the shape of
-            the variable is unknown and the result is an empty ``(0,)`` array.
+            a state variable is unknown and the result is an empty ``(0,)``
+            array.
 
         Raises
         ------
@@ -404,10 +407,12 @@ class DriverResult:
             ``name`` is not a state key of the model; the message lists the
             available ones.
         """
-        if not self.step_results:
-            return np.zeros((0,))
         if name == "stress":
             return self.stress
+        if name == "strain":
+            return np.asarray(self.strain, dtype=float)
+        if not self.step_results:
+            return np.zeros((0,))
         try:
             return np.stack(
                 [np.asarray(r.state[name], dtype=float) for r in self.step_results]
@@ -425,7 +430,7 @@ class DriverStep:
 
     Parameters
     ----------
-    i : int
+    index : int
         0-based step index.
     strain : np.ndarray, shape (ntens,)
         Cumulative strain at this step (copied — safe to retain across steps).
@@ -457,16 +462,16 @@ class DriverStep:
 
         for step in driver.iter_run(load):
             if step.result.is_plastic:
-                print(f"Plasticity onset at step {step.i}")
+                print(f"Plasticity onset at step {step.index}")
                 break
 
     Inspect NR convergence diagnostics (StressDriver / MixedDriver)::
 
         for step in driver.iter_run(load):
-            print(step.i, step.n_outer_iter, step.residual_inf)
+            print(step.index, step.n_outer_iter, step.residual_inf)
     """
 
-    i: int
+    index: int
     strain: np.ndarray
     result: StressUpdateResult
     converged: bool = True

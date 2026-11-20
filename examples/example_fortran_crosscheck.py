@@ -58,7 +58,7 @@ print("=" * 60)
 print("  Crosscheck: Python (numerical NR) vs Fortran UMAT")
 print("=" * 60)
 
-load = FieldHistory(FieldType.STRAIN, "eps", generate_strain_history(model))
+load = FieldHistory(FieldType.STRAIN, generate_strain_history(model))
 report = crosscheck(PythonNumericalIntegrator(model), fc_int, load)
 
 print(report.summary())

@@ -66,7 +66,7 @@ def test_stress_driver_uses_nominal_stress():
     """StressDriver targets nominal σ and converges with the damaged tangent."""
     m = J2IsotropicDamage1D(**P, **DP)
     sig = np.concatenate([np.linspace(0.0, 300.0, 11)[1:], np.linspace(300.0, 340.0, 9)[1:]])
-    load = FieldHistory(FieldType.STRESS, "sigma11", sig)
+    load = FieldHistory(FieldType.STRESS, sig)
     res = StressDriver(PythonNumericalIntegrator(m)).run(load)
     np.testing.assert_allclose(np.asarray(res.stress)[:, 0], sig, atol=1e-6)
 

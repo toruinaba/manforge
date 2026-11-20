@@ -15,7 +15,7 @@ result.history("alpha")    # np.ndarray (N, ntens)
 
 # 応力制御 (目標応力を外側 NR で満たすひずみを解く)
 result = StressDriver(PythonIntegrator(model)).run(
-    FieldHistory(FieldType.STRESS, "Stress", stress_target))
+    FieldHistory(FieldType.STRESS, stress_target))
 ```
 
 **混合制御** — 一部成分はひずみ指定・残りは応力指定 (例: 3D モデルで ε11 を駆動し σ22..σ23 = 0 の単軸応力試験を再現):
@@ -31,7 +31,7 @@ result = driver.run(load_eps11)   # load.data は (N, 1) — ε11 のみ
 ```python
 for step in StrainDriver(PythonIntegrator(model)).iter_run(load):
     if step.result.is_plastic:
-        print(f"Plasticity onset at step {step.i}")
+        print(f"Plasticity onset at step {step.index}")
         break
 ```
 
