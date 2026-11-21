@@ -1,7 +1,12 @@
 # returnmap
 
 <!-- docs:start -->
-Fortran UMAT (Abaqus) の検証・フィッティング用 Python フレームワーク。降伏関数と硬化則を実装するだけで、return mapping / consistent tangent (autograd 自動微分) / パラメータフィッティング / Fortran クロス検証がすべて使える。
+弾塑性の構成則を Python で書いて計算し、Abaqus の UMAT (Fortran) まで確かめながら進めるためのフレームワーク。降伏関数と硬化則を書くだけで、リターンマッピングと整合接線 (consistent tangent) は自動微分で解かれる。使い道は 2 つある。
+
+- **既存のモデルを使う** — 組み込みのモデルで応力-ひずみ応答を計算し、試験データに合わせ、モデルどうしを比べる。
+- **自分のモデルを UMAT にする** — Python のモデルを基準にして、手で導いたリターンマッピングと Fortran の UMAT を段階ごとに照合する。
+
+主な機能:
 
 - autograd による **consistent tangent 自動計算** — 手動でアルゴリズム接線を導出する必要なし
 - **汎用 NR ソルバ** — 未知数は `[σ, Δλ, implicit 状態]`。閉形式で更新できる状態 (explicit) は未知数に入らない。Broyden 更新 (`nr_jacobian="broyden"`) で数倍高速化
@@ -58,18 +63,30 @@ result.history("ep")                          # 状態量の履歴
 
 ガイドは [`docs/`](docs/) にある (日本語)。API リファレンスは docstring (英語) から生成する。
 
+**既存のモデルを使う**
+
 | ページ | 内容 |
 |---|---|
 | [チュートリアル](docs/guide/tutorial.md) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
-| [概念](docs/concepts.md) | 三層構造、import 元の 7 パッケージ、integrator の種類、Voigt 規約と `FlowVector`、非収束の扱い |
-| [組み込みモデルと次元選択](docs/guide/models.md) | 参照モデル、次元の選び方、損傷モデル |
-| [シミュレーション実行](docs/guide/simulation.md) | ひずみ制御 / 応力制御 / 混合制御、状態量の履歴 |
+| [組み込みモデルと次元選択](docs/guide/models.md) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
+| [シミュレーション実行](docs/guide/simulation.md) | ひずみ制御 / 応力制御 / 混合制御、載荷履歴の作り方、解けなかったとき |
 | [パラメータフィッティング](docs/guide/fitting.md) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
 | [モデルを比べる](docs/guide/comparing.md) | `compare_models`: 応答、計算コスト、フィットの良さ |
+
+**自分のモデルを UMAT にする**
+
+| ページ | 内容 |
+|---|---|
 | [新しいモデルを足す](docs/guide/adding-a-model.md) | Python のモデルから検証済みの UMAT までの手順: 置き場所、検証の宣言、手書きの解法、UMAT |
-| [モデルを作る](docs/guide/writing-models.md) | Explicit / Implicit、`flow`、弾性ステップのフック、閉形式ソルバ |
-| [検証ワークフロー](docs/guide/verification.md) | ヤコビアンの照合、手導出ブロック、FD tangent、クロスチェック |
-| [Fortran UMAT クロス検証](docs/guide/fortran.md) | ビルド → 読み込み → 比較 |
+| [モデルを作る](docs/guide/writing-models.md) | Explicit / Implicit、`flow`、滑らかな切り替え、弾性ステップのフック、閉形式ソルバ |
+| [検証ワークフロー](docs/guide/verification.md) | `check_model`、手導出ブロックの照合、接線の差分検査、2 つの実装の比較 |
+| [Fortran UMAT クロス検証](docs/guide/fortran.md) | UMAT の宣言 → ビルド → Python との比較 |
+
+**仕組みと、そのほか**
+
+| ページ | 内容 |
+|---|---|
+| [概念](docs/concepts.md) | 三層構造、import 元の 7 パッケージ、integrator の種類、Voigt 規約と `FlowVector`、非収束の扱い |
 | [サービスに組み込む](docs/guide/service.md) | `ModelRegistry`、`run_simulation` |
 | [開発](docs/development.md) | テスト、例、ドキュメントのビルド |
 | [変更履歴](CHANGELOG.md) | 版ごとの変更と、0.1.0 からの移行の対応表 |
