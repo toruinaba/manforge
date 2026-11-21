@@ -32,9 +32,11 @@ guide/comparing
 :maxdepth: 1
 
 guide/adding-a-model
+guide/model-python
+guide/model-hand-written
+guide/model-umat
 guide/writing-models
 guide/verification
-guide/fortran
 ```
 
 ```{toctree}

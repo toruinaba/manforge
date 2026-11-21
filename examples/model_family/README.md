@@ -8,6 +8,8 @@ The guide walks through it step by step (in Japanese):
 ```
 pyproject.toml                  returnmap pinned to a release tag
 conftest.py                     only for running from a returnmap checkout
+report.py                       prints the report of the common checks
+umat_crosscheck.py              compares the built UMAT step by step (needs the build below)
 src/mymodels/voce/
   README.md                     the formulation
   model.py                      J2Voce (the physics), J2Voce1D, J2Voce3D (+ hand-written solver)
@@ -22,8 +24,10 @@ Copy the directory out of the checkout and it is a project of its own:
 ```bash
 uv sync --extra dev
 uv run pytest                                  # 2 passed, 1 skipped (the UMAT is not built)
+uv run python report.py                        # what was checked, row by row
 
 uv sync --extra dev --extra fortran            # needs gfortran
 uv run returnmap build --family mymodels       # compiles what verification.py declares
 uv run pytest                                  # 3 passed
+uv run python umat_crosscheck.py               # the comparison with the UMAT, taken apart
 ```

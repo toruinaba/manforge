@@ -53,9 +53,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 | `examples/example_identification.py` | [試験データに合わせる](guide/tutorial.md) のコード: 候補の比較、フィッティング、全点での仕上げ (約 50 秒) |
 | `examples/notebook_tuning.py` | 同じ調整をスライダーで行う marimo のノートブック (`uv sync --extra notebook`) |
 | `examples/example_compare_models.py` | [モデルを比べる](guide/comparing.md) のコード: 応答、計算コスト、フィットの良さ、パラメータスタディ、解法の比較 |
-| `examples/example_custom_model_workflow.py` | 自作モデルの定義 → 検証の通しワークフロー |
-| `examples/model_family/` | モデルのリポジトリの雛形: J2 + Voce 硬化を、Python のモデル、手書きの解法、UMAT まで ([新しいモデルを足す](guide/adding-a-model.md)) |
-| `examples/example_fortran_crosscheck.py` | Fortran UMAT のビルド → 実行 → クロス検証 (要 gfortran) |
+| `examples/model_family/` | モデルのリポジトリの雛形: J2 + Voce 硬化を、Python のモデル、手書きの解法、UMAT まで ([新しいモデルを足す](guide/adding-a-model.md) と、それに続く 3 ページのコード)。`report.py` は検査の報告を表示し、`umat_crosscheck.py` は UMAT との比較を個別に実行する (要 gfortran) |
 | `examples/example_service.py` | service 層: registry → describe → run_simulation (非収束込み) |
 
 ## ドキュメント
