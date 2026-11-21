@@ -7,6 +7,7 @@ Covers:
 - TestDlambdaOverride: self.dlambda(R) user-overridable Δλ residual
 - TestSolverNonconverged: raise_on_nonconverged=False behaviour
 - TestInadmissibleRoot: a tightly converged root with Δλ < 0 is rejected
+- TestRestart: a failed attempt from Δλ = 0 is followed by one from a plastic estimate
 """
 
 import autograd.numpy as anp
@@ -18,13 +19,16 @@ from returnmap.core import (
     MaterialModel, Implicit, Explicit, NTENS, PLANE_STRAIN, PLANE_STRESS, SOLID_3D,
 )
 from returnmap.models import (
-    AFKinematic, AFKinematic3D, AFKinematicPS, J2Isotropic3D, OWKinematic3D,
+    AFKinematic, AFKinematic3D, AFKinematicPS, J2Isotropic3D,
+    J2IsotropicDamageUnilateral1D, J2IsotropicDamageUnilateral3D,
+    J2IsotropicDamageUnilateralPS, OWKinematic1D, OWKinematic3D,
+    YUKinematic1D, YUKinematic3D,
 )
 from returnmap.simulation import (
     StrainDriver, PythonIntegrator, PythonNumericalIntegrator,
     PythonAnalyticalIntegrator, FieldHistory, FieldType,
 )
-from returnmap.verification import check_tangent, make_increment
+from returnmap.verification import check_tangent, estimate_yield_strain, make_increment
 from tests.fixtures.implicit_models import (
     _AFKinematicImplicit3D, _AFKinematicImplicitPS, _AFKinematicImplicitPE,
 )
@@ -1348,6 +1352,188 @@ class TestBroydenJacobian:
         s_b = StrainDriver(broyden).run(load).stress
         np.testing.assert_allclose(np.asarray(s_b), np.asarray(s_e),
                                    rtol=1e-6, atol=1e-6)
+
+
+# ===========================================================================
+# TestRestart — a failed attempt from Δλ = 0 is followed by one from a plastic
+# estimate of Δλ (nr_restart, on by default)
+# ===========================================================================
+
+def _first_step(model, n_yield_strains, **kw):
+    """One axial strain step from the virgin state, in yield strains."""
+    integrator = PythonNumericalIntegrator(model, **kw)
+    deps = np.zeros(model.ntens)
+    deps[0] = n_yield_strains * estimate_yield_strain(model)
+    return integrator.stress_update(deps, np.zeros(model.ntens), integrator.initial_state())
+
+
+class TestRestart:
+    """The numerical return mapping starts a failed step over, once.
+
+    The cases are single steps of several yield strains from the virgin
+    state — the size an identification on a thinned record produces.
+
+    * ``YUKinematic1D``, 5 yield strains: Newton from Δλ = 0 converges
+      quadratically, on a root with Δλ < 0.  From the plastic estimate it
+      reaches the root with Δλ > 0 of the same equations.
+    * ``YUKinematic3D``, 5 yield strains: Newton from Δλ = 0 runs into
+      non-finite values.  So does the model's hand-written solver.
+    * ``OWKinematic1D`` with an absurd recovery term, and the damage model in
+      plane stress at 40 yield strains: neither attempt solves the step.
+    * The damage model in 3D at 20 yield strains: the second attempt raises.
+    * The damage model in 1D at 100 yield strains: the first attempt meets a
+      singular Jacobian and there is nothing to start a second one from.
+    """
+
+    YU = YUKinematic1D.at_defaults()
+    OFF = dict(nr_restart=False, raise_on_nonconverged=False)
+    ON = dict(raise_on_nonconverged=False)
+
+    # -- the step that only the second attempt solves ------------------------
+
+    def test_without_restart_the_step_ends_on_the_inadmissible_root(self):
+        r = _first_step(self.YU, 5, **self.OFF)
+        assert r.converged is False
+        assert float(r.dlambda) < 0.0
+        assert r.residual_history[-1] < 1e-6        # tightly converged, on the wrong root
+        assert r.n_restarts == 0
+
+    def test_with_restart_it_is_solved(self):
+        r = _first_step(self.YU, 5, **self.ON)
+        assert r.converged is True
+        assert float(r.dlambda) > 0.0
+        assert r.n_restarts == 1
+        # A root of the same residual, to the solver's own tolerance.
+        tol = 1e-10 * float(np.max(np.abs(np.asarray(r.stress_trial))))
+        assert r.residual_history[-1] < tol
+        assert np.all(np.isfinite(np.asarray(r.ddsdde)))
+
+    def test_restart_is_the_default_and_nothing_is_raised(self):
+        r = _first_step(self.YU, 5)
+        assert r.converged is True and r.n_restarts == 1
+
+    def test_both_attempts_are_in_the_record(self):
+        off = _first_step(self.YU, 5, **self.OFF)
+        on = _first_step(self.YU, 5, **self.ON)
+        n_first = len(off.residual_history)
+        assert on.residual_history[:n_first] == off.residual_history
+        second = on.residual_history[n_first:]
+        assert on.n_iterations == off.n_iterations + len(second) - 1
+        assert second[0] > second[-1]
+
+    def test_a_first_attempt_that_runs_into_non_finite_values(self):
+        model = YUKinematic3D.at_defaults()
+        with np.errstate(invalid="ignore"):
+            off = _first_step(model, 5, **self.OFF)
+            on = _first_step(model, 5, **self.ON)
+        assert off.converged is False and not np.isfinite(off.residual_history[-1])
+        assert on.converged is True and on.n_restarts == 1
+        assert float(on.dlambda) > 0.0
+        assert on.n_iterations > 50                 # the 50 spent on the first attempt count
+
+    def test_broyden_ends_on_the_same_root(self):
+        """Broyden takes another path from Δλ = 0 — here one that needs no
+        restart — and the root is the one the restarted exact Newton found."""
+        exact = _first_step(self.YU, 5, **self.ON)
+        broyden = _first_step(self.YU, 5, nr_jacobian="broyden", **self.ON)
+        assert broyden.converged is True
+        np.testing.assert_allclose(
+            np.asarray(broyden.stress), np.asarray(exact.stress), rtol=1e-8)
+        np.testing.assert_allclose(float(broyden.dlambda), float(exact.dlambda), rtol=1e-8)
+
+    # -- what the first attempt solves is not touched ------------------------
+
+    @pytest.mark.parametrize("model", [
+        AFKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=10000.0, gamma=100.0),
+        OWKinematic3D(E=210000.0, nu=0.3, sigma_y0=250.0, C_k=50000.0, gamma=300.0),
+        YUKinematic1D.at_defaults(),
+    ], ids=lambda m: type(m).__name__)
+    def test_a_history_the_first_attempt_solves_is_identical(self, model):
+        load = FieldHistory.cyclic_strain(
+            [6e-3, -6e-3, 6e-3], n_per_segment=12, ntens=model.ntens)
+        off = StrainDriver(PythonNumericalIntegrator(model, nr_restart=False)).run(load)
+        on = StrainDriver(PythonNumericalIntegrator(model)).run(load)
+        np.testing.assert_array_equal(on.stress, off.stress)
+        for a, b in zip(on.step_results, off.step_results):
+            assert a.n_restarts == 0
+            assert a.n_iterations == b.n_iterations
+            assert a.residual_history == b.residual_history
+
+    def test_an_elastic_step_reports_no_restart(self):
+        assert _first_step(self.YU, 0.5).n_restarts == 0
+
+    def test_the_hand_written_path_is_not_restarted(self):
+        """It is the model's own solver; the framework reports what it returned."""
+        model = YUKinematic3D.at_defaults()
+        deps = np.zeros(6)
+        deps[0] = 5 * estimate_yield_strain(model)
+        integrator = PythonAnalyticalIntegrator(model, raise_on_nonconverged=False)
+        with np.errstate(invalid="ignore"):
+            r = integrator.stress_update(deps, np.zeros(6), integrator.initial_state())
+        assert r.converged is False
+        assert r.n_restarts == 0
+
+    # -- when the second attempt does not help -------------------------------
+
+    UNSOLVABLE = OWKinematic1D(E=206e3, nu=0.3, sigma_y0=250.0, C_k=1e9, gamma=1e12)
+
+    def test_no_estimate_no_second_attempt(self):
+        """Softening past -3μ: the block step gives Δλ < 0, so there is no
+        positive estimate to start from, and the step is reported as before."""
+        model = J2Isotropic3D(E=210_000.0, nu=0.3, sigma_y0=250.0, H=-300_000.0)
+        off = _first_step(model, 2.5, **self.OFF)
+        on = _first_step(model, 2.5, **self.ON)
+        assert on.converged is False and on.n_restarts == 0
+        assert on.residual_history == off.residual_history
+        with pytest.raises(RuntimeError, match="inadmissible root") as err:
+            _first_step(model, 2.5)
+        assert "first attempt" not in str(err.value)
+
+    def test_both_attempts_failing_is_non_convergence(self):
+        off = _first_step(self.UNSOLVABLE, 1.3, **self.OFF)
+        on = _first_step(self.UNSOLVABLE, 1.3, **self.ON)
+        assert off.converged is False and off.n_restarts == 0
+        assert on.converged is False and on.n_restarts == 1
+        assert on.n_iterations > off.n_iterations
+
+    def test_the_error_says_there_were_two_attempts(self):
+        with pytest.raises(RuntimeError, match="first attempt, from Δλ = 0, ended on Δλ = "):
+            _first_step(self.UNSOLVABLE, 1.3)
+
+    def test_running_out_of_iterations_twice(self):
+        model = J2IsotropicDamageUnilateralPS.at_defaults()
+        with np.errstate(all="ignore"):
+            on = _first_step(model, 40, **self.ON)
+            assert on.converged is False and on.n_restarts == 1
+            assert on.n_iterations == 100
+            with pytest.raises(RuntimeError, match="ended on no convergence"):
+                _first_step(model, 40)
+
+    def test_a_second_attempt_that_raises_leaves_the_first_outcome(self):
+        """A reported failure must not become a raised one because of the extra attempt."""
+        model = J2IsotropicDamageUnilateral3D.at_defaults()
+        with np.errstate(all="ignore"):
+            off = _first_step(model, 20, **self.OFF)
+            on = _first_step(model, 20, **self.ON)
+        assert on.converged is False and on.n_restarts == 0
+        assert on.n_iterations == off.n_iterations
+        np.testing.assert_array_equal(
+            np.asarray(on.residual_history), np.asarray(off.residual_history))
+
+    @pytest.mark.parametrize("kw", [OFF, ON], ids=["off", "on"])
+    def test_a_singular_jacobian_with_nothing_to_restart_from_is_raised(self, kw):
+        model = J2IsotropicDamageUnilateral1D.at_defaults()
+        with np.errstate(all="ignore"), pytest.raises(np.linalg.LinAlgError):
+            _first_step(model, 100, **kw)
+
+    def test_zero_iterations_allowed(self):
+        """max_iter=0 leaves nothing in the record to quote; it must not trip."""
+        r = _first_step(self.YU, 5, max_iter=0, **self.ON)
+        assert r.converged is False
+
+    def test_the_flag_must_be_a_bool(self):
+        with pytest.raises(TypeError, match="nr_restart"):
+            PythonNumericalIntegrator(self.YU, nr_restart="plastic")
 
 
 # ===========================================================================

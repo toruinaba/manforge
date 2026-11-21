@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "returnmap"
-version = "0.3.1"
+version = "0.3.2"
 description = "Framework for validating Fortran UMAT constitutive models with autodiff"
 readme = "README.md"
 license = {text = "MIT"}

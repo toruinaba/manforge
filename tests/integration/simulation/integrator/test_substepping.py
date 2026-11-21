@@ -372,6 +372,56 @@ class TestSubdivision:
 # TestExhaustion
 # ===========================================================================
 
+class TestRestartsAreCounted:
+    """A substep the wrapped integrator solved on its second attempt
+    (``nr_restart``) is counted in the subdivided step's ``n_restarts``."""
+
+    class _RefusesLargeIncrements:
+        """The numerical integrator, refusing increments above a size — so
+        that the subdivision is forced, whatever the solver could do."""
+
+        def __init__(self, model, limit):
+            self._inner = PythonNumericalIntegrator(model, raise_on_nonconverged=False)
+            self._limit = limit
+            self.attempts: list[list[int]] = []
+            self._size = None
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def stress_update(self, strain_inc, stress_n, state_n):
+            size = float(np.max(np.abs(strain_inc)))
+            if size != self._size:                   # a new number of substeps
+                self._size = size
+                self.attempts.append([])
+            if size > self._limit:
+                raise RuntimeError("increment refused")
+            result = self._inner.stress_update(strain_inc, stress_n, state_n)
+            self.attempts[-1].append(result.n_restarts)
+            return result
+
+    def test_passes_a_restarted_step_through(self):
+        from returnmap.models import YUKinematic1D
+
+        model = YUKinematic1D.at_defaults()
+        inner = PythonNumericalIntegrator(model)
+        deps = np.array([5 * model.Y / model.E])
+        r = SubSteppingIntegrator(inner).stress_update(deps, np.zeros(1), inner.initial_state())
+        assert r.n_substeps == 1 and r.n_restarts == 1
+
+    def test_sums_the_restarts_of_its_substeps(self):
+        from returnmap.models import YUKinematic1D
+
+        model = YUKinematic1D.at_defaults()
+        eps_y = model.Y / model.E
+        inner = self._RefusesLargeIncrements(model, limit=6 * eps_y)
+        r = SubSteppingIntegrator(inner).stress_update(
+            np.array([10 * eps_y]), np.zeros(1), inner.initial_state())
+        assert r.converged is True and r.n_substeps == 2
+        assert inner.attempts[-1][0] == 1            # the first 5 εy substep restarts
+        assert r.n_restarts == sum(inner.attempts[-1])
+
+
 class TestExhaustion:
 
     @pytest.fixture

@@ -105,6 +105,37 @@ AF 3D, Broyden         120/120      111           3.24           2.85   14.247  
 
 `driver_factory` を省略すると載荷履歴から決まる (ひずみ履歴 → `StrainDriver`、応力履歴 → `StressDriver`。`fit_params`、`crosscheck` と同じ規則)。factory は integrator を受け取るので、上のように 1 つの軸方向の履歴で次元の違うモデルを走らせられる。素のモデルは `PythonIntegrator` で積分され、`compare_models(..., nr_jacobian="broyden")` はその全部に効く。
 
+### 解き直しの有無を比べる
+
+自動微分の NR は、試行点 (Δλ = 0) からの反復が失敗したステップを、Δλ の初期値を塑性側の見積もりに変えて 1 回解き直す ([基本概念](../concepts.md) の「非収束との付き合い方」)。`nr_restart=False` の integrator は解き直しをしないので、並べると解き直しが何を変えたかが分かる。
+
+```python
+from returnmap.models import YUKinematic1D
+from returnmap.simulation import FieldHistory, PythonIntegrator, compare_models
+
+model = YUKinematic1D.at_defaults()
+load = FieldHistory.cyclic_strain([0.02, -0.02, 0.02], n_per_segment=3)   # 1 ステップ 0.67 % 以上
+
+compare_models(
+    {
+        "no restart": PythonIntegrator(model, nr_restart=False, raise_on_nonconverged=False),
+        "restart (default)": model,
+    },
+    load,
+)
+```
+
+```text
+model              steps  plastic  NR it/plastic  restarts  ms/step  converged
+no restart           0/9        0              —         0  116.976  no — stopped at step 0
+restart (default)    9/9        9          12.67         1   32.429  yes
+```
+
+- `restarts` は、2 回目の試行で解けたステップの数である。解き直しが 1 つも無ければ、この列は出ない。
+- `NR it/plastic` には 1 回目の試行の反復も入る。解き直しのコストはここに出る。
+- ステップごとに見るには `run.result.step_results[i].n_restarts` と `.residual_history` (2 回分が続けて入る)。
+- 最初の試行で解けるステップは、どちらの integrator でもビット単位で同じ結果になる。差が出るのは解き直したステップと、その先だけである。
+
 2 つの実装が**一致するか**を確かめるのは `compare_models` ではなく [`crosscheck`](verification.md) の役割である (ステップごとに誤差を測り、合否を返す)。
 
 実行例: `examples/example_compare_models.py`
