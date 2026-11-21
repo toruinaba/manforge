@@ -9,6 +9,7 @@ through it step by step (in Japanese).
 pyproject.toml                  returnmap pinned to a release tag
 conftest.py                     only for running from a returnmap checkout
 src/mymodels/voce/
+  README.md                     the formulation
   model.py                      J2Voce (the physics), J2Voce1D, J2Voce3D (+ hand-written solver)
   verification.py               what is checked: MODELS, UMATS
   fortran/voce_3d.f90           the UMAT: the port of J2Voce3D

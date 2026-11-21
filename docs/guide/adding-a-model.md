@@ -32,6 +32,7 @@ mymodels/                          ← リポジトリ
   src/mymodels/
     voce/                          ← 1 ファミリ
       __init__.py                  公開するクラス
+      README.md                    定式化 (式、状態変数、パラメータ)
       model.py                     モデル本体
       verification.py              検証の宣言 (MODELS、UMATS)
       fortran/voce_3d.f90          UMAT のソース (C まで進むモデルだけ)
@@ -301,7 +302,8 @@ gfortran の無いホストでは Docker を使う。returnmap の `Dockerfile` 
 1. ファミリの中の import を `returnmap.models.<family>` に変える。
 2. `returnmap/models/__init__.py` の `__all__` にクラスを足す。
 3. 全パラメータに `param_meta` を書く (組み込みモデルは、目安の値で計算が通ることをテストで確かめている)。
-4. [組み込みモデルと次元選択](models.md) の表と `CHANGELOG.md` に足す。
+4. ファミリの `README.md` に定式化を書き、`docs/guide/models/<family>.md` から取り込む。
+5. [組み込みモデルと次元選択](models.md) の表と `CHANGELOG.md` に足す。
 
 ## 確認の一覧
 
