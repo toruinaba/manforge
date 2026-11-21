@@ -53,7 +53,7 @@ result.history("ep")                          # 状態量の履歴
 ```
 
 - 各パラメータの意味・単位・目安の値は `AFKinematic1D.param_meta` にある。
-- 試験データに合わせる (手で調整 → フィット) 手順は、[チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) を参照。
+- 試験データに対するパラメータの同定 (手動の調整 → フィッティング) は、[試験データに合わせる](https://toruinaba.github.io/returnmap/guide/tutorial.html) を参照。
 - 載荷履歴は `FieldHistory(FieldType.STRAIN, 配列)` で直接与えるか、`cyclic_strain` / `triangular_strain` / `sine_strain` / `decaying_cyclic_strain` (+ 各 stress 版) で作る。
 
 実行できる使用例は `examples/` を参照。
@@ -67,7 +67,7 @@ result.history("ep")                          # 状態量の履歴
 
 | ページ | 内容 |
 |---|---|
-| [チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
+| [試験データに合わせる](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験の記録に対するパラメータの同定: 候補の比較、フィッティング、全点での仕上げ |
 | [組み込みモデルと次元選択](https://toruinaba.github.io/returnmap/guide/models.html) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
 | [応答を計算する](https://toruinaba.github.io/returnmap/guide/simulation.html) | モデルの選び方、載荷履歴の作り方、結果の読み方、応力での載荷、解けなかったとき |
 | [パラメータフィッティング](https://toruinaba.github.io/returnmap/guide/fitting.html) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
