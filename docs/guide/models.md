@@ -9,6 +9,8 @@
 | 同上 + crack closure | `J2IsotropicDamageCrackClosure*` | 損傷の駆動力 Y を主値で引張/圧縮に分ける | 同上 |
 | 同上 + 準片側 | `J2IsotropicDamageUnilateral*` | 応力も分解し、圧縮で剛性が回復する | 同上 |
 | Armstrong-Frederick | `AFKinematic*` | 移動硬化 (閉形式で更新) | [式](models/af_kinematic.md) |
+| Chaboche (背応力 1 つ) | `ChabocheKinematic*` | 移動硬化 + 飽和する等方硬化 (閉形式で更新) | [式](models/chaboche_single.md) |
+| Chaboche (背応力 3 つ) | `ChabocheKinematicMulti*` | 背応力と等方硬化を 3 項ずつ重ねる (閉形式で更新) | [式](models/chaboche_multi.md) |
 | Ohno-Wang 型 | `OWKinematic*` | 移動硬化 (implicit な発展則) | [式](models/ow_kinematic.md) |
 | Yoshida-Uemori | `YUKinematic*` | 二曲面 + 停留曲面。3D と PS は手書きの NR と手導出ヤコビアンを持つ | [式](models/yu_kinematic.md) |
 
@@ -22,6 +24,8 @@
 models/j2_isotropic
 models/j2_damage
 models/af_kinematic
+models/chaboche_single
+models/chaboche_multi
 models/ow_kinematic
 models/yu_kinematic
 ```

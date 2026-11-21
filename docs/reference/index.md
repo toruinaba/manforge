@@ -6,7 +6,7 @@
 | パッケージ | 中身 |
 |---|---|
 | [`returnmap.core`](core.md) | モデルを書く: `MaterialModel`、状態変数の宣言、次元、`hand_block`、`verified_against_fortran`、結果型 |
-| [`returnmap.models`](models.md) | 参照モデル (J2 / 損傷 / AF / OW / YU) |
+| [`returnmap.models`](models.md) | 参照モデル (J2 / 損傷 / AF / Chaboche / OW / YU) |
 | [`returnmap.simulation`](simulation.md) | integrator、driver、載荷履歴、`compare_models`、`FortranModule` |
 | [`returnmap.fitting`](fitting.md) | `fit_params`、`FitTarget`、`ParameterSpace` |
 | [`returnmap.verification`](verification.md) | 検査: `check_model` (まとめて回す)、`check_hand_blocks`、`check_solution`、`check_tangent`、`crosscheck`、`compare_jacobians`、`check_bindings`。UMAT の宣言 `Umat` |

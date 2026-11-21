@@ -12,7 +12,7 @@
 - **汎用 NR ソルバ** — 未知数は `[σ, Δλ, implicit 状態]`。閉形式で更新できる状態 (explicit) は未知数に入らない。Broyden 更新 (`nr_jacobian="broyden"`) で数倍高速化
 - **多次元対応** — 3D ソリッド / 平面ひずみ / 平面応力 / 1D を `StressDimension` で統一管理
 - **手導出の照合** — 手で導出したヤコビアンのブロックをモデル上で宣言し、自動微分とブロックごとに照合
-- **組み込みモデル** — J2 等方硬化 / J2 + Lemaitre 損傷 / Armstrong-Frederick / Ohno-Wang / YU を同梱
+- **組み込みモデル** — J2 等方硬化 / J2 + Lemaitre 損傷 / Armstrong-Frederick / Chaboche / Ohno-Wang / Yoshida-Uemori を同梱
 - **サービス契約層** — WebAPI などへの組み込み用に plain な入出力の `ModelRegistry` / `run_simulation` を提供
 
 ## インストール
@@ -20,9 +20,9 @@
 **使う** — PyPI には未公開なので、GitHub のタグから入れる (依存は numpy / scipy / autograd):
 
 ```bash
-pip install "git+https://github.com/toruinaba/returnmap@v0.3.2"
+pip install "git+https://github.com/toruinaba/returnmap@v0.4.0"
 # 図も描くなら matplotlib を足す:
-pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.3.2"
+pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.4.0"
 ```
 
 **開発する** — リポジトリを取ってきて、テストや Fortran のビルドまで含めた環境を作る:

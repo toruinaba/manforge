@@ -31,6 +31,18 @@ from returnmap.models.af_kinematic import (
     AFKinematicPS,
     AFKinematic1D,
 )
+from returnmap.models.chaboche_single import (
+    ChabocheKinematic,
+    ChabocheKinematic3D,
+    ChabocheKinematicPS,
+    ChabocheKinematic1D,
+)
+from returnmap.models.chaboche_multi import (
+    ChabocheKinematicMulti,
+    ChabocheKinematicMulti3D,
+    ChabocheKinematicMultiPS,
+    ChabocheKinematicMulti1D,
+)
 from returnmap.models.ow_kinematic import (
     OWKinematic,
     OWKinematic3D,
@@ -65,6 +77,14 @@ __all__ = [
     "AFKinematic3D",
     "AFKinematicPS",
     "AFKinematic1D",
+    "ChabocheKinematic",
+    "ChabocheKinematic3D",
+    "ChabocheKinematicPS",
+    "ChabocheKinematic1D",
+    "ChabocheKinematicMulti",
+    "ChabocheKinematicMulti3D",
+    "ChabocheKinematicMultiPS",
+    "ChabocheKinematicMulti1D",
     "OWKinematic",
     "OWKinematic3D",
     "OWKinematicPS",
