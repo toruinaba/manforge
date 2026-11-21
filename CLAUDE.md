@@ -27,7 +27,7 @@ make docker-build && make docker-test
 make docs                    # HTML → docs/_build/html。警告はエラー扱い
 ```
 
-There is no linter configured. The only CI workflow builds the documentation (`.github/workflows/docs.yml`: `make docs` on every pull request, and publication to GitHub Pages from `main`); tests are not run in CI.
+There is no linter configured. The only CI workflow builds the documentation (`.github/workflows/docs.yml`: `make docs` on every pull request, and publication to GitHub Pages from `main` — https://toruinaba.github.io/returnmap/); tests are not run in CI.
 
 ## Documentation
 

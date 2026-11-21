@@ -2,8 +2,8 @@
 
 The layout a repository of your own models takes, complete and runnable:
 J2 plasticity with Voce hardening, from the Python model to a verified UMAT.
-[`docs/guide/adding-a-model.md`](../../docs/guide/adding-a-model.md) walks
-through it step by step (in Japanese).
+The guide walks through it step by step (in Japanese):
+<https://toruinaba.github.io/returnmap/guide/adding-a-model.html>.
 
 ```
 pyproject.toml                  returnmap pinned to a release tag

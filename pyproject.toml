@@ -29,6 +29,7 @@ fortran = ["meson>=1.10.2", "ninja>=1.13.0"]
 [project.urls]
 Homepage = "https://github.com/toruinaba/returnmap"
 Repository = "https://github.com/toruinaba/returnmap"
+Documentation = "https://toruinaba.github.io/returnmap/"
 
 [project.scripts]
 returnmap = "returnmap.cli:main"

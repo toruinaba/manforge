@@ -14,7 +14,7 @@
 - **既存のページの抜けを埋めた** — 「シミュレーション実行」に載荷履歴の作り方と、解けなかったときの扱い。
   「モデルを作る」に、折れと切り替えを滑らかに書くための smooth 関数と、切り替えで有限の量を出し入れする形の
   注意。README と目次を、2 つの使い道(既存のモデルを使う / 自分のモデルを UMAT にする)で分けた。
-- **文書の公開** — `main` に入るたびに GitHub Actions が文書をビルドして GitHub Pages に公開する。
+- **文書の公開** — <https://toruinaba.github.io/returnmap/>。`main` に入るたびに GitHub Actions が文書をビルドして GitHub Pages に公開する。
   プルリクエストでは、文書のビルド(警告はエラー)だけを行う。
 - **`OWKinematic` の `gamma` に単位を付けた**(`param_meta` の `unit="1/MPa"`)。発展則が
   `γ·‖α‖·α` なので、Armstrong-Frederick の `gamma`(無次元)とは単位が違う。値と計算は変わらない。
