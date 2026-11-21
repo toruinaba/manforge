@@ -53,7 +53,7 @@ result.history("ep")                          # 状態量の履歴
 ```
 
 - 各パラメータの意味・単位・目安の値は `AFKinematic1D.param_meta` にある。
-- 試験データに合わせる (手で調整 → フィット) 手順は、[チュートリアル](https://github.com/toruinaba/returnmap/blob/main/docs/guide/tutorial.md) を参照。
+- 試験データに合わせる (手で調整 → フィット) 手順は、[チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) を参照。
 - 載荷履歴は `FieldHistory(FieldType.STRAIN, 配列)` で直接与えるか、`cyclic_strain` / `triangular_strain` / `sine_strain` / `decaying_cyclic_strain` (+ 各 stress 版) で作る。
 
 実行できる使用例は `examples/` を参照。
@@ -61,38 +61,38 @@ result.history("ep")                          # 状態量の履歴
 
 ## ドキュメント
 
-ガイドは [`docs/`](docs/) にある (日本語)。API リファレンスは docstring (英語) から生成する。
+**<https://toruinaba.github.io/returnmap/>** で公開している。ガイド (日本語) と API リファレンス (英語、docstring から生成) がある。
 
 **既存のモデルを使う**
 
 | ページ | 内容 |
 |---|---|
-| [チュートリアル](docs/guide/tutorial.md) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
-| [組み込みモデルと次元選択](docs/guide/models.md) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
-| [シミュレーション実行](docs/guide/simulation.md) | ひずみ制御 / 応力制御 / 混合制御、載荷履歴の作り方、解けなかったとき |
-| [パラメータフィッティング](docs/guide/fitting.md) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
-| [モデルを比べる](docs/guide/comparing.md) | `compare_models`: 応答、計算コスト、フィットの良さ |
+| [チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
+| [組み込みモデルと次元選択](https://toruinaba.github.io/returnmap/guide/models.html) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
+| [シミュレーション実行](https://toruinaba.github.io/returnmap/guide/simulation.html) | ひずみ制御 / 応力制御 / 混合制御、載荷履歴の作り方、解けなかったとき |
+| [パラメータフィッティング](https://toruinaba.github.io/returnmap/guide/fitting.html) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
+| [モデルを比べる](https://toruinaba.github.io/returnmap/guide/comparing.html) | `compare_models`: 応答、計算コスト、フィットの良さ |
 
 **自分のモデルを UMAT にする**
 
 | ページ | 内容 |
 |---|---|
-| [新しいモデルを足す](docs/guide/adding-a-model.md) | Python のモデルから検証済みの UMAT までの手順: 置き場所、検証の宣言、手書きの解法、UMAT |
-| [モデルを作る](docs/guide/writing-models.md) | Explicit / Implicit、`flow`、滑らかな切り替え、弾性ステップのフック、閉形式ソルバ |
-| [検証ワークフロー](docs/guide/verification.md) | `check_model`、手導出ブロックの照合、接線の差分検査、2 つの実装の比較 |
-| [Fortran UMAT クロス検証](docs/guide/fortran.md) | UMAT の宣言 → ビルド → Python との比較 |
+| [新しいモデルを足す](https://toruinaba.github.io/returnmap/guide/adding-a-model.html) | Python のモデルから検証済みの UMAT までの手順: 置き場所、検証の宣言、手書きの解法、UMAT |
+| [モデルを作る](https://toruinaba.github.io/returnmap/guide/writing-models.html) | Explicit / Implicit、`flow`、滑らかな切り替え、弾性ステップのフック、閉形式ソルバ |
+| [検証ワークフロー](https://toruinaba.github.io/returnmap/guide/verification.html) | `check_model`、手導出ブロックの照合、接線の差分検査、2 つの実装の比較 |
+| [Fortran UMAT クロス検証](https://toruinaba.github.io/returnmap/guide/fortran.html) | UMAT の宣言 → ビルド → Python との比較 |
 
 **仕組みと、そのほか**
 
 | ページ | 内容 |
 |---|---|
-| [概念](docs/concepts.md) | 三層構造、import 元の 7 パッケージ、integrator の種類、Voigt 規約と `FlowVector`、非収束の扱い |
-| [サービスに組み込む](docs/guide/service.md) | `ModelRegistry`、`run_simulation` |
-| [開発](docs/development.md) | テスト、例、ドキュメントのビルド |
-| [変更履歴](CHANGELOG.md) | 版ごとの変更と、0.1.0 からの移行の対応表 |
-| [設計メモ](docs/design/api-redesign.md) | API 再設計の方針と決定の記録 |
+| [概念](https://toruinaba.github.io/returnmap/concepts.html) | 三層構造、import 元の 7 パッケージ、integrator の種類、Voigt 規約と `FlowVector`、非収束の扱い |
+| [サービスに組み込む](https://toruinaba.github.io/returnmap/guide/service.html) | `ModelRegistry`、`run_simulation` |
+| [開発](https://toruinaba.github.io/returnmap/development.html) | テスト、例、ドキュメントのビルド |
+| [変更履歴](https://toruinaba.github.io/returnmap/changelog.html) | 版ごとの変更と、0.1.0 からの移行の対応表 |
+| [設計メモ](https://toruinaba.github.io/returnmap/design/api-redesign.html) | API 再設計の方針と決定の記録 |
 
-HTML 版 (API リファレンスを含む) は手元でビルドする:
+文書のソースは [`docs/`](docs/) と、各モデルの `README.md` (定式化) にある。`main` に入るたびに自動でビルドされ、公開される。手元でビルドするには:
 
 ```bash
 uv sync --extra docs
