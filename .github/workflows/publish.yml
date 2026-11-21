@@ -1,0 +1,77 @@
+# Publishes a release to PyPI.
+#
+# A version on PyPI cannot be replaced or reused once it is uploaded, so
+# publishing is a deliberate step: it runs when a GitHub Release is published,
+# not on every tag or push.  The release's tag must be "v" + the version in
+# pyproject.toml, and the model tests must pass against the built wheel,
+# installed outside the checkout — what is tested is what is uploaded.
+#
+# Pull requests that touch the packaging run the build job only, so that a
+# broken build is found before a release is cut.
+#
+# Uploading uses PyPI's Trusted Publishing (no API token is stored here).  It
+# needs a publisher registered once, by hand, on pypi.org: owner "toruinaba",
+# repository "returnmap", workflow "publish.yml", environment "pypi".
+name: publish
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - pyproject.toml
+      - .github/workflows/publish.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: The release tag names the version in pyproject.toml
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(uv version --short)"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::release tag $TAG, but pyproject.toml says $version (expected v$version)"
+            exit 1
+          fi
+      - name: Build the sdist and the wheel
+        run: uv build
+      - name: Test the wheel, installed outside the checkout
+        run: |
+          uv venv "$RUNNER_TEMP/wheel-env"
+          uv pip install --python "$RUNNER_TEMP/wheel-env/bin/python" dist/*.whl pytest
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pytest --pyargs returnmap.models -m "not slow" -q -p no:cacheprovider
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/returnmap/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

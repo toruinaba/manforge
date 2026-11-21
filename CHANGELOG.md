@@ -3,6 +3,20 @@
 このファイルは、利用者から見える変更を版ごとにまとめる。設計の経緯と理由は
 [`docs/design/api-redesign.md`](docs/design/api-redesign.md) にある。
 
+## 0.4.1(2026-11-21)
+
+PyPI から入れられるようにした。計算の結果と API は 0.4.0 から変わらない。
+
+- **`pip install returnmap`** — PyPI に公開する。今までの GitHub のタグからの入れ方
+  (`pip install "git+https://github.com/toruinaba/returnmap@v0.4.1"`)も使える。
+- **公開の手順** — GitHub Release を公開すると、GitHub Actions(`.github/workflows/publish.yml`)が sdist と wheel を
+  作り、wheel を入れた環境でモデルのテストを通してから PyPI に上げる。リリースのタグが `pyproject.toml` の版と
+  合わなければ止まる。手順は「開発」のページにある。
+- **sdist の中身を絞った** — パッケージ本体(`src/`)と README、変更履歴、ライセンスだけにした。今までは
+  リポジトリのほぼ全部(文書、例、開発用のファイル)が入っていた。wheel の中身は変わらない。
+- **パッケージの情報** — 分類(classifiers)、キーワード、変更履歴と Issue へのリンクを足した。README の中の
+  リポジトリ内への相対リンクを、PyPI のページでも開ける URL に変えた。
+
 ## 0.4.0(2026-11-21)
 
 Chaboche モデルを 2 つ足し、文書を整えて公開した。既存のモデルの計算結果は 0.3.2 から変わらない。

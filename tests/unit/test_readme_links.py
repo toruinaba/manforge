@@ -44,3 +44,11 @@ def test_the_main_readme_links_to_every_guide_page_group():
     for page in ("guide/tutorial.html", "guide/models.html", "guide/adding-a-model.html",
                  "concepts.html", "changelog.html"):
         assert page in links, f"README.md does not link to {page}"
+
+
+def test_the_main_readme_has_no_link_relative_to_the_repository():
+    """README.md is also the project page on PyPI, where a relative link is dead."""
+    targets = re.findall(r"\]\(([^)\s]+)\)", (REPO / "README.md").read_text(encoding="utf-8"))
+    assert targets, "README.md has no link at all"
+    relative = [t for t in targets if not t.startswith(("https://", "#"))]
+    assert not relative, f"README.md links relative to the repository: {relative}"
