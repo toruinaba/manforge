@@ -17,5 +17,5 @@ dist/
 # Sphinx build output
 docs/_build/
 __marimo__/
-# Figures the examples write next to where they are run
-output_*.png
+# What the examples write next to where they are run (figures, CSV)
+output_*
