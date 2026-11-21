@@ -7,7 +7,7 @@
 ## 1. インストール
 
 ```bash
-pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.3.2"
+pip install "returnmap[examples] @ git+https://github.com/toruinaba/returnmap@v0.4.0"
 ```
 
 `[examples]` は図を描くための matplotlib を足す。計算だけなら要らない。
@@ -36,7 +36,7 @@ import returnmap.models as models
 from returnmap.models import AFKinematic1D
 
 [name for name in models.__all__ if name.endswith("1D")]
-# ['J2Isotropic1D', 'J2IsotropicDamage1D', ..., 'AFKinematic1D', 'OWKinematic1D', 'YUKinematic1D']
+# ['J2Isotropic1D', 'J2IsotropicDamage1D', ..., 'AFKinematic1D', 'ChabocheKinematic1D', ..., 'YUKinematic1D']
 
 for name, meta in AFKinematic1D.param_meta.items():      # 何を与えるモデルか
     print(name, meta.doc, meta.unit, meta.default, meta.bounds)
