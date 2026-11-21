@@ -45,6 +45,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 | スクリプト | 内容 |
 |-----------|------|
+| `examples/example_response.py` | 応答を計算する: モデル、載荷履歴、結果、応力での載荷、解けなかったとき ([応答を計算する](guide/simulation.md) のコードそのもの) |
 | `examples/example_j2_uniaxial.py` | 繰返し単軸 + tangent 検証 + ヒステリシスのプロット |
 | `examples/example_j2_damage.py` | J2 + Lemaitre 損傷: 損傷の進展と剛性低下 |
 | `examples/example_j2_damage_crack_closure.py` | crack closure 係数 h による引張/圧縮の違い |

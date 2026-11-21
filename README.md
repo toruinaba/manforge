@@ -69,7 +69,7 @@ result.history("ep")                          # 状態量の履歴
 |---|---|
 | [チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
 | [組み込みモデルと次元選択](https://toruinaba.github.io/returnmap/guide/models.html) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
-| [シミュレーション実行](https://toruinaba.github.io/returnmap/guide/simulation.html) | ひずみ制御 / 応力制御 / 混合制御、載荷履歴の作り方、解けなかったとき |
+| [応答を計算する](https://toruinaba.github.io/returnmap/guide/simulation.html) | モデルの選び方、載荷履歴の作り方、結果の読み方、応力での載荷、解けなかったとき |
 | [パラメータフィッティング](https://toruinaba.github.io/returnmap/guide/fitting.html) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
 | [モデルを比べる](https://toruinaba.github.io/returnmap/guide/comparing.html) | `compare_models`: 応答、計算コスト、フィットの良さ |
 

@@ -1,89 +1,264 @@
-# シミュレーション実行
+# 応答を計算する
 
-モデルに載荷履歴を与えて、応力・ひずみ・状態量の履歴を計算する。integrator が 1 ステップの応力更新 (UMAT 1 回分) を行い、driver がそれを履歴に沿って進める。
+モデルに載荷履歴を与え、応力・ひずみ・状態量の履歴を計算する手順を示す。フィッティング、モデルの比較、検証は、いずれも内部でこの計算を行う。
 
-```python
-from returnmap.models import AFKinematic3D
-from returnmap.simulation import (
-    StrainDriver, StressDriver, PythonIntegrator, FieldHistory, FieldType)
+コードは [`examples/example_response.py`](https://github.com/toruinaba/returnmap/blob/main/examples/example_response.py) の各節であり、上から順に実行できる。
 
-model = AFKinematic3D.at_defaults()
-load = FieldHistory.cyclic_strain([0.01, -0.01, 0.01], n_per_segment=40, ntens=model.ntens)
+## 1. 最小の計算
 
-# ひずみ制御
-result = StrainDriver(PythonIntegrator(model)).run(load)
-result.stress    # np.ndarray (N, ntens)
-result.strain    # np.ndarray (N, ntens)
+Armstrong-Frederick モデルによる、単軸の引張・圧縮の繰返し。
 
-# 状態変数の履歴 — 事前の指定は不要。結果から名前で取り出す
-result.history("ep")       # np.ndarray (N,)
-result.history("alpha")    # np.ndarray (N, ntens)
-
-# 応力制御 (目標応力を外側 NR で満たすひずみを解く)
-result = StressDriver(PythonIntegrator(model)).run(
-    FieldHistory(FieldType.STRESS, stress_target))
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 1. 最小の計算"
+:end-before: "# %%"
 ```
 
-**混合制御** — 一部成分はひずみ指定・残りは応力指定 (例: 3D モデルで ε11 を駆動し σ22..σ23 = 0 の単軸応力試験を再現):
-
-```python
-from returnmap.simulation import MixedDriver
-driver = MixedDriver(PythonIntegrator(model), prescribed_strain_idx=[0])
-result = driver.run(load_eps11)   # load.data は (N, 1) — ε11 のみ
+```text
+ステップ数           : 150
+最初の折返しでの応力 : 394.9 MPa
+最後の累積塑性ひずみ : 0.0650
 ```
 
-**iter_run** — ステップごとに `DriverStep` を受け取り、途中分岐・打切りができる:
+計算は次の 4 つで構成される。
 
-```python
-for step in StrainDriver(PythonIntegrator(model)).iter_run(load):
-    if step.result.is_plastic:
-        print(f"Plasticity onset at step {step.index}")
-        break
+| 要素 | 上の例 | 役割 |
+|---|---|---|
+| モデル | `AFKinematic1D` | 構成則。降伏条件、硬化則、材料パラメータを持つ |
+| 載荷履歴 | `FieldHistory` | ステップごとのひずみ (または応力) の値 |
+| integrator | `PythonIntegrator` | 1 ステップ分の応力更新を解く。Abaqus による UMAT の呼び出し 1 回に相当する |
+| driver | `StrainDriver` | integrator を載荷履歴に沿って繰り返し呼ぶ |
+
+結果 `result` は、応力 `result.stress`、ひずみ `result.strain`、状態量の履歴 `result.history(名前)` を持つ (4 節)。
+
+単位系は規定しない。パラメータを MPa で与えた場合、応力は MPa で返る。
+
+## 2. モデルの選択
+
+組み込みモデルは `returnmap.models` から import する。クラス名の末尾は応力状態を表す。
+
+| 末尾 | 応力状態 | 成分数 |
+|---|---|---|
+| `1D` | 単軸応力 | 1 |
+| `3D` | 3 次元 | 6 |
+| `PS` | 平面応力 | 3 |
+
+単軸試験の計算には `1D` を用いる。モデルの一覧、定式化、パラメータの定義、平面ひずみの指定方法は [組み込みモデルと次元選択](models.md) を参照。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 2. モデルの選択"
+:end-before: "# %%"
 ```
 
-## 載荷履歴を作る
-
-載荷履歴は `FieldHistory` で、ひずみか応力の種類 (`FieldType`) と、ステップごとの値の配列を持つ。配列は**累積値** (増分ではない) で、形は `(ステップ数, ntens)` である。1 成分だけの履歴は 1 次元の配列でもよい。
-
-```python
-import numpy as np
-from returnmap.simulation import FieldHistory, FieldType
-
-load = FieldHistory(FieldType.STRAIN, np.linspace(0.0, 0.02, 101)[1:])   # 配列をそのまま渡す
+```text
+E         Young's modulus                   MPa   210000.0  (1000.0, 1000000.0)
+nu        Poisson's ratio                              0.3  (0.0, 0.49)
+sigma_y0  Initial yield stress              MPa      250.0  (1.0, 5000.0)
+C_k       Kinematic hardening modulus (AF)  MPa    20000.0  (0.0, 1000000.0)
+gamma     Dynamic recovery coefficient (AF)          100.0  (0.0, 10000.0)
+{'E': 206000.0, 'nu': 0.3, 'sigma_y0': 250.0, 'C_k': 40000.0, 'gamma': 100.0}
 ```
 
-よく使う形は、作る関数がある (応力の履歴は `_strain` を `_stress` に替えた名前)。
+| 名前 | 内容 |
+|---|---|
+| `Model.param_meta` | 各パラメータの説明、単位、目安の値、範囲 |
+| `Model(**params)` | 全パラメータをキーワードで指定して構築する。既定値は無い。名前の不足・誤りは `TypeError` |
+| `Model.at_defaults()` | 目安の値で構築する |
+| `model.with_params(...)` | 指定したパラメータだけを置き換えた新しいモデルを返す。元のモデルは変更されない |
+| `model.params` | 現在のパラメータ値 (dict) |
+
+## 3. 載荷履歴の作成
+
+`FieldHistory` は、種類 (ひずみ / 応力) と、ステップごとの値の配列を持つ。
+
+- 値は累積値であり、増分ではない。
+- 初期値 0 は配列に含めない。配列の先頭は、第 1 ステップ終了時の値である。
+- 配列の形は `(ステップ数, 成分数)`。1 成分の履歴は 1 次元配列でもよい。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 3. 載荷履歴の作成"
+:end-before: "# %%"
+```
+
+```text
+(100,) (150, 1)
+```
+
+生成関数は次のとおり。応力履歴の生成関数は、名前の `_strain` を `_stress` に置き換えたものである。
 
 | 関数 | 形 |
 |---|---|
-| `FieldHistory.cyclic_strain(peaks, n_per_segment=20)` | 0 から始めて、`peaks` の値を順に直線で結ぶ |
+| `FieldHistory.cyclic_strain(peaks, n_per_segment=20)` | 0 から始め、`peaks` の値を順に直線で結ぶ |
 | `FieldHistory.triangular_strain(amplitude, n_cycles)` | 一定振幅の三角波 (`mean=` で平均値) |
 | `FieldHistory.sine_strain(amplitude, n_cycles, n_per_cycle=80)` | 正弦波 |
-| `FieldHistory.decaying_cyclic_strain(amplitude, n_cycles, decay=0.5)` | 振幅が指数的に変わる繰返し |
+| `FieldHistory.decaying_cyclic_strain(amplitude, n_cycles, decay=0.5)` | 振幅が指数的に変化する繰返し |
 
-- **多成分のモデル**には `ntens=model.ntens` を渡す。動かす成分は `component=` で選び (既定は 0 = 11 成分)、ほかの成分は 0 になる。複数の成分を同時に動かす履歴は、配列を自分で作って渡す。
-- **成分の並びとせん断の扱い**は [概念](../concepts.md) の Voigt 規約に従う。ひずみのせん断成分は工学ひずみ (γ = 2ε) で与える。
-- **`*1D` のモデルは単軸応力**である。3D のモデルにひずみの 11 成分だけを与えると、横方向が拘束された単軸ひずみになる。3D のモデルで単軸応力の試験を再現するには、上の混合制御を使う。
-- **刻みの細かさは精度に効く。** 1 ステップは後退 Euler で積分するので、粗い刻みは応答に誤差を残す。刻みを変えて結果が動かないことを確かめるとよい。
+多成分のモデル (`3D`、`PS`) では、次を指定する。
 
-## 解けなかったとき
+| 項目 | 指定 |
+|---|---|
+| 成分数 | 生成関数に `ntens=model.ntens` を渡す |
+| 載荷する成分 | `component=` (既定は 0 = 11 成分)。他の成分は 0 になる |
+| 複数成分の同時載荷 | 形 `(ステップ数, 成分数)` の配列を `FieldHistory` に直接渡す |
+| 成分の順序 | `[11, 22, 33, 12, 13, 23]` |
+| せん断成分 | ひずみは工学ひずみ (γ = 2ε)、応力はテンソル成分 ([概念](../concepts.md) の Voigt 規約) |
 
-リターンマッピングが収束しなかったステップがあると、既定では `RuntimeError` になる。値として受け取るには、integrator を `raise_on_nonconverged=False` で作る。
+### 刻みの影響
 
-```python
-result = StrainDriver(PythonIntegrator(model, raise_on_nonconverged=False)).run(load)
-result.converged       # False なら途中で止まっている
-result.failed_step     # 止まったステップの番号 (0 始まり)。完走なら None
-len(result.stress)     # 完了したステップの数。解けなかったステップは入らない
+1 ステップは後退 Euler 法で積分される。刻みが粗いと、応答に誤差が残る。1.5 % の単調引張を、ステップ数を変えて計算した結果を示す。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 3b. 刻みの影響"
+:end-before: "# %%"
 ```
 
-解けないのは、たいてい 1 ステップの増分が大きすぎるときである。フレームワークは 2 つの手当てを持つ。
+```text
+    5 ステップ: 387.4 MPa
+   50 ステップ: 394.9 MPa
+ 1000 ステップ: 395.9 MPa
+```
 
-- **解き直し (既定で有効)**: 自動微分の NR は、失敗したステップを塑性側の初期値から 1 回解き直す。`result.step_results[i].n_restarts` に残る。
-- **増分の分割 (選んで使う)**: `SubSteppingIntegrator(PythonIntegrator(model))` は、解けなかった増分を 2、4、8 … 分割して解き直す。
+1000 ステップの結果に対する差は、5 ステップで 2 %、50 ステップで 0.3 % である。刻みは、細かくしても結果が変わらない範囲で選ぶ。
 
-どちらでも解けないときは、載荷履歴の刻みを細かくする。詳しくは [概念](../concepts.md) の「非収束との付き合い方」を参照。
+## 4. 結果の参照
 
-## ステップごとの情報
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 4. 結果の参照"
+:end-before: "# %%"
+```
 
-各ステップの詳細 (`dlambda`, `n_iterations`, NR 残差履歴 `residual_history`) は `result.step_results[i]` / `step.result` から参照できる。`StressDriver`/`MixedDriver` では `step.n_outer_iter` / `step.residual_inf` で外側 NR を確認できる。
+```text
+(150, 1) (150, 1)
+['stress', 'alpha', 'ep']
+(150,) (150, 1)
+True 3 5.37e-04
+```
+
+| 属性 | 形 | 内容 |
+|---|---|---|
+| `result.stress` | `(ステップ数, 成分数)` | 応力。`1D` のモデルでも 2 次元である (曲線は `result.stress[:, 0]`) |
+| `result.strain` | `(ステップ数, 成分数)` | ひずみ |
+| `result.history(名前)` | スカラーは `(ステップ数,)`、テンソルは `(ステップ数, 成分数)` | 状態量の履歴。指定できる名前は `model.state_names` |
+| `result.step_results[i]` | — | i 番目のステップの記録。`is_plastic` (塑性か)、`n_iterations` (反復回数)、`dlambda` (塑性乗数の増分) など |
+| `result.converged`、`result.failed_step` | — | 非収束の有無と位置 (6 節) |
+
+`AFKinematic1D` の状態量は、`ep` (累積塑性ひずみ) と `alpha` (背応力) である。
+
+### ステップ単位の実行
+
+`iter_run` は、1 ステップ進むごとに結果を返す。条件を判定して途中で打ち切る場合に用いる。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 4b. ステップ単位の実行"
+:end-before: "# %%"
+```
+
+```text
+降伏したステップ: 4 (ひずみ 0.0015)
+```
+
+### 作図
+
+応力-ひずみ曲線は、`result.strain` と `result.stress` をそのまま描く。matplotlib は `pip install "returnmap[examples]"` で入る。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 4c. 作図"
+:end-before: "# %%"
+```
+
+## 5. 応力制御と混合制御
+
+driver は、載荷履歴で与える量に応じて選ぶ。
+
+| 与える量 | driver |
+|---|---|
+| 全成分のひずみ | `StrainDriver` |
+| 全成分の応力 | `StressDriver` |
+| 一部の成分はひずみ、残りの成分は応力 (既定は 0) | `MixedDriver` |
+
+### 応力制御
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 5. 応力制御"
+:end-before: "# %%"
+```
+
+```text
+400 MPa でのひずみ: 1.66 %
+```
+
+`StressDriver` は、目標応力を満たすひずみを、ステップごとに反復で求める。計算時間はひずみ制御より長い。
+
+### 3D モデルでの単軸応力
+
+3D のモデルで引張試験を計算する場合は、`MixedDriver` を用いる。`StrainDriver` に ε11 のみを与えると、他のひずみ成分が 0 に拘束された単軸ひずみ状態となり、単軸応力とは異なる応力になる。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 5b. 3D モデルでの単軸応力"
+:end-before: "# %%"
+```
+
+```text
+単軸ひずみ: σ11 =  2817.4 MPa, σ22 =  2453.8 MPa
+単軸応力  : σ11 =   394.9 MPa, σ22 =     0.0 MPa
+```
+
+- `prescribed_strain_idx=[0]` は、成分 0 (11 成分) をひずみで与える指定である。残りの成分は、応力が 0 になるように解かれる。
+- 載荷履歴には、ひずみで与える成分のみを書く (この例では 1 列)。
+- 単軸応力の結果 (394.9 MPa) は、1 節の `1D` のモデルと一致する。
+
+## 6. 非収束時の扱い
+
+1 ステップの増分が大きい場合、応力更新の反復が収束しないことがある。既定の動作は `RuntimeError` の送出である。
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 6. 非収束時の扱い"
+:end-before: "# %%"
+```
+
+```text
+既定では例外になる
+False 6 6
+```
+
+`raise_on_nonconverged=False` で作った integrator では、例外を送出せず、収束したステップまでの結果を返す。
+
+| 属性 | 内容 |
+|---|---|
+| `result.converged` | 全ステップが収束した場合に `True` |
+| `result.failed_step` | 収束しなかったステップの番号 (0 始まり)。全ステップが収束した場合は `None` |
+| `result.stress` など | 収束したステップのみを含む (この例では 6 ステップ) |
+
+### 対処
+
+```{literalinclude} ../../examples/example_response.py
+:language: python
+:start-after: "# %% 6b. 対処"
+```
+
+```text
+True
+True [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1]
+```
+
+| 方法 | 内容 |
+|---|---|
+| 刻みを細かくする | 載荷履歴のステップ数を増やす。精度の面でも有効である (3 節) |
+| 増分の自動分割 | `SubSteppingIntegrator` で integrator を包む。収束しなかった増分のみを 2、4、8 … 分割して解く。分割数は `n_substeps` に記録される (この例では 7 番目のステップが 2 分割)。収束する増分の結果は変わらない |
+
+integrator は、非収束を報告する前に、失敗したステップを別の初期値から 1 回解き直す。詳細は [概念](../concepts.md) の「非収束との付き合い方」を参照。
+
+## 関連ページ
+
+- 試験データへのフィッティング: [チュートリアル](tutorial.md)
+- 複数のモデル、パラメータの比較: [モデルを比べる](comparing.md)
+- 各モデルの定式化とパラメータ: [組み込みモデルと次元選択](models.md)
