@@ -15,6 +15,7 @@ guide/models
 guide/simulation
 guide/fitting
 guide/comparing
+guide/adding-a-model
 guide/writing-models
 guide/verification
 guide/fortran

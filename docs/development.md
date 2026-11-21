@@ -16,7 +16,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 ### モデルのテスト
 
-ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、検証の宣言 (`verification.py`)、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
+新しいファミリを足す手順は [新しいモデルを足す](guide/adding-a-model.md) にある。ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、検証の宣言 (`verification.py`)、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
 
 | 名前 | 役割 |
 |---|---|
@@ -53,6 +53,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 | `examples/notebook_tuning.py` | 同じ調整をスライダーで行う marimo ノートブック (`uv sync --extra notebook`) |
 | `examples/example_compare_models.py` | 複数モデルの比較: 応答 / 計算コスト / フィットの良さ / 非収束 |
 | `examples/example_custom_model_workflow.py` | 自作モデルの定義 → 検証の通しワークフロー |
+| `examples/model_family/` | モデルのリポジトリの雛形: J2 + Voce 硬化を、Python のモデル、手書きの解法、UMAT まで ([新しいモデルを足す](guide/adding-a-model.md)) |
 | `examples/example_fortran_crosscheck.py` | Fortran UMAT のビルド → 実行 → クロス検証 (要 gfortran) |
 | `examples/example_service.py` | service 層: registry → describe → run_simulation (非収束込み) |
 

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mymodels"
+version = "0.1.0"
+description = "Constitutive models built on returnmap (the layout docs/guide/adding-a-model.md walks through)"
+requires-python = ">=3.10"
+dependencies = [
+    "returnmap>=0.3.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+fortran = ["meson", "ninja"]          # the f2py build backend, for the UMAT
+
+# returnmap is not on PyPI: pin it to a release tag.
+[tool.uv.sources]
+returnmap = { git = "https://github.com/toruinaba/returnmap", tag = "v0.3.2" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mymodels"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/mymodels"]
+addopts = "--strict-markers --import-mode=importlib"
+# The slow / fortran markers, and fortran/ (where the UMATs are built) on
+# sys.path, come from the pytest plugin returnmap ships.

@@ -66,6 +66,7 @@ result.history("ep")                          # 状態量の履歴
 | [シミュレーション実行](docs/guide/simulation.md) | ひずみ制御 / 応力制御 / 混合制御、状態量の履歴 |
 | [パラメータフィッティング](docs/guide/fitting.md) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
 | [モデルを比べる](docs/guide/comparing.md) | `compare_models`: 応答、計算コスト、フィットの良さ |
+| [新しいモデルを足す](docs/guide/adding-a-model.md) | Python のモデルから検証済みの UMAT までの手順: 置き場所、検証の宣言、手書きの解法、UMAT |
 | [モデルを作る](docs/guide/writing-models.md) | Explicit / Implicit、`flow`、弾性ステップのフック、閉形式ソルバ |
 | [検証ワークフロー](docs/guide/verification.md) | ヤコビアンの照合、手導出ブロック、FD tangent、クロスチェック |
 | [Fortran UMAT クロス検証](docs/guide/fortran.md) | ビルド → 読み込み → 比較 |
