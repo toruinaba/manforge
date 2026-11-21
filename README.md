@@ -53,7 +53,7 @@ result.history("ep")                          # 状態量の履歴
 ```
 
 - 各パラメータの意味・単位・目安の値は `AFKinematic1D.param_meta` にある。
-- 試験データに合わせる (手で調整 → フィット) 手順は、[チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) を参照。
+- 試験データに対するパラメータの同定 (手動の調整 → フィッティング) は、[試験データに合わせる](https://toruinaba.github.io/returnmap/guide/tutorial.html) を参照。
 - 載荷履歴は `FieldHistory(FieldType.STRAIN, 配列)` で直接与えるか、`cyclic_strain` / `triangular_strain` / `sine_strain` / `decaying_cyclic_strain` (+ 各 stress 版) で作る。
 
 実行できる使用例は `examples/` を参照。
@@ -67,7 +67,7 @@ result.history("ep")                          # 状態量の履歴
 
 | ページ | 内容 |
 |---|---|
-| [チュートリアル](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験データにモデルを合わせる: 手で調整、フィット、パラメータを振る |
+| [試験データに合わせる](https://toruinaba.github.io/returnmap/guide/tutorial.html) | 試験の記録に対するパラメータの同定: 候補の比較、フィッティング、全点での仕上げ |
 | [組み込みモデルと次元選択](https://toruinaba.github.io/returnmap/guide/models.html) | 参照モデルの一覧と定式化 (式、パラメータ、飽和値)、次元の選び方 |
 | [応答を計算する](https://toruinaba.github.io/returnmap/guide/simulation.html) | モデルの選び方、載荷履歴の作り方、結果の読み方、応力での載荷、解けなかったとき |
 | [パラメータフィッティング](https://toruinaba.github.io/returnmap/guide/fitting.html) | `fit_params`、`ParameterSpace`、複数カーブ、PCM |
@@ -77,10 +77,12 @@ result.history("ep")                          # 状態量の履歴
 
 | ページ | 内容 |
 |---|---|
-| [新しいモデルを足す](https://toruinaba.github.io/returnmap/guide/adding-a-model.html) | Python のモデルから検証済みの UMAT までの手順: 置き場所、検証の宣言、手書きの解法、UMAT |
+| [新しいモデルを足す](https://toruinaba.github.io/returnmap/guide/adding-a-model.html) | Python のモデルから検証済みの UMAT までの概要: 段階、リポジトリの構成、完了の条件 |
+| [モデルを書く](https://toruinaba.github.io/returnmap/guide/model-python.html) | 段階 A: モデルの定義、検証の宣言、検査の報告 |
+| [手書きの解法を照合する](https://toruinaba.github.io/returnmap/guide/model-hand-written.html) | 段階 B: 手書きのリターンマッピングと接線を、自動微分を基準に検査する |
+| [UMAT を確かめる](https://toruinaba.github.io/returnmap/guide/model-umat.html) | 段階 C: UMAT の宣言、ビルド、Python のモデルとの比較、不一致の調査 |
 | [モデルを作る](https://toruinaba.github.io/returnmap/guide/writing-models.html) | Explicit / Implicit、`flow`、滑らかな切り替え、弾性ステップのフック、閉形式ソルバ |
 | [検証ワークフロー](https://toruinaba.github.io/returnmap/guide/verification.html) | `check_model`、手導出ブロックの照合、接線の差分検査、2 つの実装の比較 |
-| [Fortran UMAT クロス検証](https://toruinaba.github.io/returnmap/guide/fortran.html) | UMAT の宣言 → ビルド → Python との比較 |
 
 **仕組みと、そのほか**
 

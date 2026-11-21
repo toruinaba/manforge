@@ -45,18 +45,15 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 | スクリプト | 内容 |
 |-----------|------|
-| `examples/example_response.py` | 応答を計算する: モデル、載荷履歴、結果、応力での載荷、解けなかったとき ([応答を計算する](guide/simulation.md) のコードそのもの) |
-| `examples/example_j2_uniaxial.py` | 繰返し単軸 + tangent 検証 + ヒステリシスのプロット |
+| `examples/example_response.py` | [応答を計算する](guide/simulation.md) のコード: モデル、載荷履歴、結果、応力制御と混合制御、非収束時の扱い |
 | `examples/example_j2_damage.py` | J2 + Lemaitre 損傷: 損傷の進展と剛性低下 |
 | `examples/example_j2_damage_crack_closure.py` | crack closure 係数 h による引張/圧縮の違い |
 | `examples/example_j2_damage_unilateral.py` | 準片側モデル: 圧縮での剛性回復 |
 | `examples/example_fit_j2.py` | パラメータフィッティング (基本 / ParameterSpace / 複数ターゲット / PCM) |
-| `examples/example_identification.py` | 試験データへの合わせ込み: 手で調整 → フィット → 全点で仕上げ → パラメータを振る (約 50 秒) |
-| `examples/notebook_tuning.py` | 同じ調整をスライダーで行う marimo ノートブック (`uv sync --extra notebook`) |
-| `examples/example_compare_models.py` | 複数モデルの比較: 応答 / 計算コスト / フィットの良さ / 非収束 |
-| `examples/example_custom_model_workflow.py` | 自作モデルの定義 → 検証の通しワークフロー |
-| `examples/model_family/` | モデルのリポジトリの雛形: J2 + Voce 硬化を、Python のモデル、手書きの解法、UMAT まで ([新しいモデルを足す](guide/adding-a-model.md)) |
-| `examples/example_fortran_crosscheck.py` | Fortran UMAT のビルド → 実行 → クロス検証 (要 gfortran) |
+| `examples/example_identification.py` | [試験データに合わせる](guide/tutorial.md) のコード: 候補の比較、フィッティング、全点での仕上げ (約 50 秒) |
+| `examples/notebook_tuning.py` | 同じ調整をスライダーで行う marimo のノートブック (`uv sync --extra notebook`) |
+| `examples/example_compare_models.py` | [モデルを比べる](guide/comparing.md) のコード: 応答、計算コスト、フィットの良さ、パラメータスタディ、解法の比較 |
+| `examples/model_family/` | モデルのリポジトリの雛形: J2 + Voce 硬化を、Python のモデル、手書きの解法、UMAT まで ([新しいモデルを足す](guide/adding-a-model.md) と、それに続く 3 ページのコード)。`report.py` は検査の報告を表示し、`umat_crosscheck.py` は UMAT との比較を個別に実行する (要 gfortran) |
 | `examples/example_service.py` | service 層: registry → describe → run_simulation (非収束込み) |
 
 ## ドキュメント

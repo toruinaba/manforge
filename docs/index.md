@@ -9,7 +9,7 @@
 
 | したいこと | 読むページ |
 |---|---|
-| 試験データに既存のモデルを合わせる | [チュートリアル](guide/tutorial.md) |
+| 試験データに既存のモデルを合わせる | [試験データに合わせる](guide/tutorial.md) |
 | どんなモデルがあるか、式を知る | [組み込みモデルと次元選択](guide/models.md) |
 | 載荷履歴を与えて応答を計算する | [応答を計算する](guide/simulation.md) |
 | モデルやパラメータを比べる | [モデルを比べる](guide/comparing.md) |
@@ -32,9 +32,11 @@ guide/comparing
 :maxdepth: 1
 
 guide/adding-a-model
+guide/model-python
+guide/model-hand-written
+guide/model-umat
 guide/writing-models
 guide/verification
-guide/fortran
 ```
 
 ```{toctree}
