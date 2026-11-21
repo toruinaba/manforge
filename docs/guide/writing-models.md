@@ -101,6 +101,52 @@ def flow(self, state):                       # engineering shear で導出済み
 
 生の ndarray を返すと境界で `TypeError`。モデル内で ×2/÷2 の変換算術を書かないことが設計意図 ([概念](../concepts.md) の「Voigt 規約と FlowVector」)。
 
+## 折れと切り替えを滑らかに書く — smooth 関数
+
+モデルの式は自動微分され、NR で解かれる。絶対値、ノルム、`max`、条件分岐のような折れや段差がそのまま入っていると、その点で導関数が定まらず (`sqrt(0)` の微分は無限大になる)、NR がそこで止まる。`returnmap.utils` に、折れの無い近似がある。
+
+| 関数 | 置き換えるもの | 式 |
+|---|---|---|
+| `smooth_sqrt(x)` | `sqrt(x)` | √(x + ε²) |
+| `smooth_abs(x)` | `abs(x)` | √(x² + ε²) |
+| `smooth_norm(v)` | ベクトルのノルム | √(v·v + ε²) |
+| `smooth_direction(v)` | `v / ‖v‖` | v / `smooth_norm(v)` |
+| `smooth_macaulay(x)` | `max(x, 0)` | (x + `smooth_abs(x)`) / 2 |
+| `smooth_max(a, b)` / `smooth_min(a, b)` | `max` / `min` | — |
+| `smooth_heaviside(x, beta=500)` | `x > 0` の切り替え | ½ (1 + tanh(βx/2)) |
+
+```python
+from returnmap.utils import smooth_heaviside, smooth_macaulay
+
+dp_D = smooth_macaulay(ep - self.p_D) - smooth_macaulay(ep_n - self.p_D)   # しきい値を超えた分
+C_k = self.C_1 - (self.C_1 - self.C_2) * smooth_heaviside(theta_max - (self.B - self.Y))
+```
+
+- **`eps` は 0 での割り算を防ぐだけの値** (既定 1e-12) で、応答には現れない。
+- **`smooth_heaviside` の幅は、引数の単位で決まる。** 既定の `beta=500` では、0 から 1 への遷移 (1 % → 99 %) が引数の値で ±0.01 の幅になる。引数が応力 (MPa) なら ±0.01 MPa で、実質的に段差である。ひずみのように小さな数で測る量を渡すときは、幅がその量の変化に対して意味のある大きさになるよう、`beta` を決めるか引数に倍率を掛ける。
+- **手書きの経路と UMAT には、同じ関数を同じ係数で書く。** 係数が違うと、遷移の帯の中で 2 つの実装が別の方程式を解くことになる。
+
+### 切り替えで有限の量を出し入れしない
+
+切り替えに掛ける量が、切り替わる点で 0 にならない形は避ける。
+
+```python
+# 切り替わる点で段差になる: gate が 0 → 1 に動くと、R が dR だけ跳ぶ
+R_new = R_n + smooth_heaviside(g) * dR
+
+# 切り替わる点でつながる: 掛ける量が g とともに 0 になる
+r_new = r_n + self.h * smooth_macaulay(g)
+```
+
+上の形では、解が切り替えの縁に来るステップで残差がほぼ不連続になる。Newton 反復が切り替えの両側を往復して収束しないことがある。収束しても、そのステップでは増分をわずかに変えるだけで解けたり解けなかったりして、接線の差分検査が成り立たないことがある。平滑化の幅を広げても段差の大きさは変わらないので、それだけでは直らない。
+
+式の定義としてこの形が避けられないモデルもある (Yoshida-Uemori の限界曲面の膨張は、停留の判定でこの形になる)。その場合は次の 2 つを知っておく。
+
+- 切り替わるステップでは、解き直しや細かい刻みが要ることがある。
+- 切り替えを定数として微分した手導出は、そのステップでだけ近似になる。許容値を緩めず、`approx_when` で宣言する ([検証ワークフロー](verification.md))。
+
+主値の符号で分ける量 (引張と圧縮の分解) は、ここの関数ではなく主値分解の関数を使う (下の「非線形な弾性」)。
+
 ## 弾塑性分岐のカスタム — elastic_check / elastic_update_state
 
 既定の弾性判定は `yield_function(state_trial) <= 0`。**弾性域が降伏関数の内部と一致しないモデル** (subloading-surface 系が典型: 分岐が 2 条件の論理和になり、1 つの滑らかな関数のゼロ等値面で書けない) のみ `elastic_check(inc) -> bool` を override する。弾性ステップでも動く状態量 (応力に追従する正規降伏比など) は `elastic_update_state(inc)` に書く。古典的塑性では両方ともデフォルトで正しい。詳細な設計理由は `core/material/base.py` の docstring。
