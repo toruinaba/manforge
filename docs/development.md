@@ -76,3 +76,25 @@ make docs            # docs/_build/html/index.html を生成
 - 公開パッケージの `__all__` に載っているのに、リファレンスに項目が無い名前 (docstring の無いクラスや関数、`docs/reference/` に説明の無い定数)
 
 docstring の中で他の名前を参照するときは、公開パッケージのパスで書く (`` :class:`~returnmap.core.MaterialModel` ``)。
+
+## リリース
+
+版は PyPI (<https://pypi.org/project/returnmap/>) に公開する。**PyPI に上げた版は、差し替えも同じ番号での上げ直しもできない** (できるのは取り下げの印を付けることだけ)。そのため公開は、タグを打っただけでは始まらず、GitHub Release を公開したときに始まる。
+
+1. 版を上げるプルリクエストを出す: `pyproject.toml` の `version`、`src/returnmap/__init__.py` の予備の値、`uv lock`、`CHANGELOG.md` の節。
+2. `main` に入ったら、その版の GitHub Release を公開する (タグは `v` + 版)。
+
+   ```bash
+   gh release create v0.4.1 --target main --title "v0.4.1" --notes "変更履歴: https://toruinaba.github.io/returnmap/changelog.html"
+   ```
+
+3. GitHub Actions (`.github/workflows/publish.yml`) が次を行う。どこかで失敗すれば何も上がらないので、直してやり直せる。
+   - リリースのタグが `pyproject.toml` の版と同じであることを確かめる。
+   - sdist と wheel を作る (`uv build`)。
+   - wheel を checkout の外の環境に入れ、モデルのテスト (`pytest --pyargs returnmap.models -m "not slow"`) を通す。上げるものそのものを試すためである。
+   - PyPI に上げる。
+4. 新しい環境で `pip install returnmap==<版>` が入ることを確かめる。
+
+PyPI への認証は Trusted Publishing で行い、トークンはリポジトリに置かない。PyPI 側に、このリポジトリの `publish.yml` (environment は `pypi`) を公開元として登録してある。
+
+`pyproject.toml` か `publish.yml` を変えるプルリクエストでは、ビルドと wheel のテストだけが走る (公開はしない)。手元で同じものを作るには `uv build` を使う。sdist に入るのは `src/` と README、変更履歴、ライセンスだけである (`pyproject.toml` の `[tool.hatch.build.targets.sdist]`)。

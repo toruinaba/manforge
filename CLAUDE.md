@@ -27,7 +27,7 @@ make docker-build && make docker-test
 make docs                    # HTML → docs/_build/html。警告はエラー扱い
 ```
 
-There is no linter configured. The only CI workflow builds the documentation (`.github/workflows/docs.yml`: `make docs` on every pull request, and publication to GitHub Pages from `main` — https://toruinaba.github.io/returnmap/); tests are not run in CI.
+There is no linter configured. There are two CI workflows, and neither runs the test suite on ordinary pull requests. `.github/workflows/docs.yml` builds the documentation (`make docs` on every pull request, and publication to GitHub Pages from `main` — https://toruinaba.github.io/returnmap/). `.github/workflows/publish.yml` publishes to PyPI when a GitHub Release is published (the tag must be `v` + the version in `pyproject.toml`; the model tests run against the built wheel first), and runs the build and the wheel test alone on pull requests that touch `pyproject.toml` or the workflow. A version on PyPI cannot be replaced, so a release is cut only when the user asks — the steps are in `docs/development.md`.
 
 ## Documentation
 
