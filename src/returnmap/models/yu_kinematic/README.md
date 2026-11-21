@@ -79,7 +79,7 @@ $$
 - **未知数**: $[\boldsymbol\sigma, \Delta\lambda, \boldsymbol\theta, \boldsymbol\beta]$。$\boldsymbol\theta$ と $\boldsymbol\beta$ の発展則は残差として書く。
 - **$R$、$\boldsymbol{q}$、$r$、$p$、$\theta_\mathrm{max}$**: 閉じた形で更新する (Explicit)。$R$ は $R_{n+1} = (R_n + k R_\mathrm{sat}\Delta\lambda)/(1 + k\,\Delta\lambda)$ である。
 - **停留曲面**: 後退 Euler の式から $r_{n+1} = \tfrac{1}{2}\left(r_n + \sqrt{r_n^2 + 6hF/(1 + \mu)}\right)$、$\boldsymbol{q}_{n+1} = \boldsymbol{q}_n + \mu\,(\boldsymbol\beta_{n+1} - \boldsymbol{q}_n)/(1 + \mu)$ となる ($F = (\boldsymbol\beta_{n+1} - \boldsymbol{q}_n):\Delta\boldsymbol\beta$)。$\mu$ は、$\boldsymbol\beta_{n+1}$ が更新後の曲面の上にある条件を内側の Newton 反復で解いて求める。
-- **切り替えの平滑化**: 停留の判定と $C_1 \to C_2$ の切り替えは、滑らかにした Heaviside 関数 $\tfrac{1}{2}(1 + \tanh(250\,x))$ で行う ($x$ は応力の単位。遷移の幅は ±0.01 MPa 程度)。停留の判定には、ステップ開始時の曲面に対する $g = \bar{(\boldsymbol\beta_{n+1} - \boldsymbol{q}_n)} - r_n$ を使う。$C$ の切り替えには、ステップ開始時の $\theta_\mathrm{max}$ を使う。
+- **切り替えの平滑化**: 停留の判定と $C_1 \to C_2$ の切り替えは、滑らかにした Heaviside 関数 $\tfrac{1}{2}(1 + \tanh(250\,x))$ で行う ($x$ は応力の単位。遷移の幅は ±0.01 MPa 程度)。停留の判定には、ステップ開始時の曲面に対する $g = \sqrt{\tfrac{3}{2}\,(\boldsymbol\beta_{n+1} - \boldsymbol{q}_n):(\boldsymbol\beta_{n+1} - \boldsymbol{q}_n)} - r_n$ を使う。$C$ の切り替えには、ステップ開始時の $\theta_\mathrm{max}$ を使う。
 
 ## 性質
 
