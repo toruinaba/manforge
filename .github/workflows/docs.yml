@@ -1,0 +1,59 @@
+# Builds the documentation, and publishes it to GitHub Pages from main.
+#
+# The build is `make docs`, the same command as on a developer's machine:
+# warnings are errors, so an unresolved cross-reference, a dead link inside
+# docs/, or a public name missing from the API reference fails the run.  Pull
+# requests are built but not published.
+#
+# Publishing needs Pages switched on once, by hand: repository Settings ->
+# Pages -> Build and deployment -> Source: "GitHub Actions".
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  # A newer push to a pull request replaces the run in progress; a deployment
+  # from main is left to finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install the package and the documentation tools
+        run: uv sync --locked --extra docs
+      - name: Build (warnings are errors)
+        run: make docs
+      - name: Upload the site
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_build/html
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

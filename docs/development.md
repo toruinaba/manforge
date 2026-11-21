@@ -67,6 +67,8 @@ uv sync --extra docs
 make docs            # docs/_build/html/index.html を生成
 ```
 
+公開版は GitHub Pages にある。`main` に入るたびに、GitHub Actions (`.github/workflows/docs.yml`) が同じ `make docs` でビルドして公開する。プルリクエストではビルドだけを行い、公開はしない。
+
 `make docs` は警告をエラーとして扱う。次のどれかがあるとビルドが失敗する:
 
 - 解決できない相互参照 (改名・削除された名前へのリンク)
