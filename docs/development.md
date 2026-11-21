@@ -16,7 +16,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 ### モデルのテスト
 
-新しいファミリを足す手順は [新しいモデルを足す](guide/adding-a-model.md) にある。ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、検証の宣言 (`verification.py`)、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
+新しいファミリを足す手順と、1 つのディレクトリに入れる範囲 (1 つのモデルと、それを継承した変種) は [新しいモデルを足す](guide/adding-a-model.md) にある。ファミリのディレクトリは、そのモデルに属するものを全部持つ: モデル本体、検証の宣言 (`verification.py`)、UMAT のソース (`fortran/`)、テスト (`tests/`)。テストは公開の import パス (`returnmap.core` など) とそのファミリの中のものだけを import する — ディレクトリごと動かせるようにするためである。
 
 | 名前 | 役割 |
 |---|---|
