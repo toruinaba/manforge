@@ -12,7 +12,7 @@ E        : Young's modulus
 nu       : Poisson's ratio
 sigma_y0 : Initial yield stress (constant — no isotropic hardening)
 C_k      : Kinematic hardening modulus
-gamma    : Dynamic recovery parameter (Ohno-Wang nonlinearity)
+gamma    : Dynamic recovery parameter (Ohno-Wang nonlinearity), in 1/stress
 
 Internal state
 --------------
@@ -88,7 +88,8 @@ class OWKinematic(MaterialModel):
                               default=250.0, bounds=(1.0, 5e3)),
         "C_k": ParamMeta(doc="Kinematic hardening modulus (Ohno-Wang)", unit="MPa",
                          default=20_000.0, bounds=(0.0, 1e6)),
-        "gamma": ParamMeta(doc="Critical-state coefficient (Ohno-Wang)",
+        # γ multiplies ‖α‖·α, so it carries 1/stress — unlike the AF γ.
+        "gamma": ParamMeta(doc="Critical-state coefficient (Ohno-Wang)", unit="1/MPa",
                            default=100.0, bounds=(0.0, 1e4)),
     }
     alpha = Implicit(shape=NTENS, doc="backstress tensor (deviatoric)")

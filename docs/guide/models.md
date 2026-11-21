@@ -2,17 +2,29 @@
 
 モデルファミリごとに親クラス (物理) + 次元特化の具象クラスがある:
 
-| ファミリ | クラス (`*` は `3D` / `PS` / `1D`) | 内容 |
-|---|---|---|
-| J2 等方硬化 | `J2Isotropic*` | 3D と 1D は閉形式のリターンマッピングを持つ |
-| J2 + Lemaitre 損傷 | `J2IsotropicDamage*` | 弱連成 |
-| 同上 + crack closure | `J2IsotropicDamageCrackClosure*` | 損傷の駆動力 Y を主値で引張/圧縮に分ける |
-| 同上 + 準片側 | `J2IsotropicDamageUnilateral*` | 応力も分解し、圧縮で剛性が回復する |
-| Armstrong-Frederick | `AFKinematic*` | 移動硬化 (閉形式で更新) |
-| Ohno-Wang | `OWKinematic*` | 移動硬化 (implicit な発展則) |
-| Yoshida-Uemori | `YUKinematic*` | 二曲面 + 停留曲面。3D と PS は手書きの NR と手導出ヤコビアンを持つ |
+| ファミリ | クラス (`*` は `3D` / `PS` / `1D`) | 内容 | 定式化 |
+|---|---|---|---|
+| J2 等方硬化 | `J2Isotropic*` | 3D と 1D は閉形式のリターンマッピングを持つ | [式](models/j2_isotropic.md) |
+| J2 + Lemaitre 損傷 | `J2IsotropicDamage*` | 弱連成 | [式](models/j2_damage.md) |
+| 同上 + crack closure | `J2IsotropicDamageCrackClosure*` | 損傷の駆動力 Y を主値で引張/圧縮に分ける | 同上 |
+| 同上 + 準片側 | `J2IsotropicDamageUnilateral*` | 応力も分解し、圧縮で剛性が回復する | 同上 |
+| Armstrong-Frederick | `AFKinematic*` | 移動硬化 (閉形式で更新) | [式](models/af_kinematic.md) |
+| Ohno-Wang 型 | `OWKinematic*` | 移動硬化 (implicit な発展則) | [式](models/ow_kinematic.md) |
+| Yoshida-Uemori | `YUKinematic*` | 二曲面 + 停留曲面。3D と PS は手書きの NR と手導出ヤコビアンを持つ | [式](models/yu_kinematic.md) |
 
 各ファミリには、次元を固定しない親クラス (`J2Isotropic`、`AFKinematic` など) もある。
+
+定式化のページは、式、状態変数、パラメータ、飽和値などの性質、検証の範囲をファミリごとにまとめている。本文は各ファミリのディレクトリにある `README.md` で、モデルの隣に置いてある。
+
+```{toctree}
+:hidden:
+
+models/j2_isotropic
+models/j2_damage
+models/af_kinematic
+models/ow_kinematic
+models/yu_kinematic
+```
 
 ```python
 from returnmap.models import AFKinematic3D

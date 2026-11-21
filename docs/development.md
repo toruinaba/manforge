@@ -20,6 +20,7 @@ uv run pytest src/returnmap/models/yu_kinematic -m "not fortran"    # 1 ファ�
 
 | 名前 | 役割 |
 |---|---|
+| `README.md` | 定式化: 式、状態変数、パラメータ、性質、検証の範囲。[組み込みモデルと次元選択](guide/models.md) から読める |
 | `verification.py` | 検証の宣言。`MODELS` (検査にかけるモデル)、必要なら `histories(model)` (標準の履歴に足す載荷履歴)、UMAT があれば `UMATS` (ソース、リンクするライブラリ) |
 | `tests/test_verification.py` | 共通の検査 `check_model` を `MODELS` に回す。どのファミリも同じ数行で、**この名前は共通の検査専用** |
 | `tests/test_model.py` | モデルの関数ごとの確認 (integrator を使わない) |

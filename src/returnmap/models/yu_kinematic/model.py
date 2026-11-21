@@ -549,8 +549,10 @@ class YUKinematicPS(YUKinematic):
     is (2/3)Y times smaller than the norm-form Δλ used by ``YUKinematic``.
     Every 2/3 and Y factor below follows from that substitution.
 
-    Only the autograd path is provided: the framework builds the NR Jacobian
-    and consistent tangent by differentiating the methods below.
+    Provides ``user_defined_return_mapping`` and ``user_defined_tangent``
+    with a hand-derived Jacobian, whose blocks are declared with
+    ``@hand_block`` and checked against the autodiff Jacobian of the
+    residual below.
     """
 
     dimension = PLANE_STRESS_P
