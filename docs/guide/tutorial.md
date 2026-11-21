@@ -201,4 +201,5 @@ np.savetxt("af_fitted.csv",
 - 使えるモデルと次元の選び方: [組み込みモデルと次元選択](models.md)
 - 3D や応力制御で走らせる: [シミュレーション実行](simulation.md)
 - モデルどうしの比較と計算コスト: [モデルを比べる](comparing.md)
-- 自分のモデルを書く: [モデルを作る](writing-models.md)
+- 自分のモデルを足して、検査して、UMAT まで進める: [新しいモデルを足す](adding-a-model.md)
+- モデルに書けるフックの一覧: [モデルを作る](writing-models.md)
