@@ -1,12 +1,12 @@
 # 応答を計算する
 
-既存のモデルに載荷履歴を与えて、応力とひずみの履歴を計算する。試験データに合わせるときも、モデルを比べるときも、自分のモデルを確かめるときも、中で行うのはこの計算である。
+モデルに載荷履歴を与え、応力・ひずみ・状態量の履歴を計算する手順を示す。フィッティング、モデルの比較、検証は、いずれも内部でこの計算を行う。
 
-このページのコードは [`examples/example_response.py`](https://github.com/toruinaba/returnmap/blob/main/examples/example_response.py) の各節で、上から順にそのまま実行できる。
+コードは [`examples/example_response.py`](https://github.com/toruinaba/returnmap/blob/main/examples/example_response.py) の各節であり、上から順に実行できる。
 
 ## 1. 最小の計算
 
-単軸の引張と圧縮の繰返しを、Armstrong-Frederick モデルで計算する。
+Armstrong-Frederick モデルによる、単軸の引張・圧縮の繰返し。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
@@ -20,29 +20,34 @@
 最後の累積塑性ひずみ : 0.0650
 ```
 
-計算に要るものは 3 つある。
+計算は次の 4 つで構成される。
 
-- **モデル** — 構成則。降伏条件と硬化則を持ち、材料パラメータを与えて作る。`AFKinematic1D` は移動硬化のモデルで、末尾の `1D` は単軸応力を表す。
-- **載荷履歴** — ステップごとのひずみ (または応力) の値。ここでは 0 → +1.5 % → −1.5 % → +1.5 % を、区間ごとに 50 ステップで進める。
-- **解き方** — `PythonIntegrator` は、1 ステップ分の応力の更新を解く。Abaqus が UMAT を 1 回呼ぶのに当たる。`StrainDriver` は、それを載荷履歴に沿って繰り返す。この文書では前者を integrator、後者を driver と呼ぶ。
+| 要素 | 上の例 | 役割 |
+|---|---|---|
+| モデル | `AFKinematic1D` | 構成則。降伏条件、硬化則、材料パラメータを持つ |
+| 載荷履歴 | `FieldHistory` | ステップごとのひずみ (または応力) の値 |
+| integrator | `PythonIntegrator` | 1 ステップ分の応力更新を解く。Abaqus による UMAT の呼び出し 1 回に相当する |
+| driver | `StrainDriver` | integrator を載荷履歴に沿って繰り返し呼ぶ |
 
-`result` が計算の結果で、応力 `result.stress`、ひずみ `result.strain`、状態量の履歴 `result.history(名前)` を持つ。単位は決められていない。パラメータを MPa で与えれば、応力は MPa で返る。
+結果 `result` は、応力 `result.stress`、ひずみ `result.strain`、状態量の履歴 `result.history(名前)` を持つ (4 節)。
 
-## 2. モデルを選ぶ
+単位系は規定しない。パラメータを MPa で与えた場合、応力は MPa で返る。
 
-組み込みのモデルは `returnmap.models` にある。クラス名の末尾が、応力の状態を表す。
+## 2. モデルの選択
 
-| 末尾 | 応力の状態 | 成分の数 |
+組み込みモデルは `returnmap.models` から import する。クラス名の末尾は応力状態を表す。
+
+| 末尾 | 応力状態 | 成分数 |
 |---|---|---|
 | `1D` | 単軸応力 | 1 |
 | `3D` | 3 次元 | 6 |
 | `PS` | 平面応力 | 3 |
 
-**単軸の試験を計算するなら `1D` を使う。** どんなモデルがあるか、それぞれの式とパラメータの意味は [組み込みモデルと次元選択](models.md) にある。平面ひずみの使い方もそこにある。
+単軸試験の計算には `1D` を用いる。モデルの一覧、定式化、パラメータの定義、平面ひずみの指定方法は [組み込みモデルと次元選択](models.md) を参照。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 2. モデルを選ぶ"
+:start-after: "# %% 2. モデルの選択"
 :end-before: "# %%"
 ```
 
@@ -55,18 +60,25 @@ gamma     Dynamic recovery coefficient (AF)          100.0  (0.0, 10000.0)
 {'E': 206000.0, 'nu': 0.3, 'sigma_y0': 250.0, 'C_k': 40000.0, 'gamma': 100.0}
 ```
 
-- **`param_meta`** は、各パラメータの意味、単位、目安の値、ありうる範囲を持つ。モデルに何を与えればよいかは、これを見れば分かる。
-- **パラメータはすべて必須**で、既定値は無い。キーワードで渡す。足りない名前や綴りの違う名前があれば、その名前を挙げたエラーになる。
-- **`at_defaults()`** は、目安の値を入れたモデルを作る。値にこだわらず、まず動かしたいときに使う。
-- **`with_params(...)`** は、一部の値だけを変えた新しいモデルを返す。元のモデルは変わらない。パラメータを振るときに使う。
+| 名前 | 内容 |
+|---|---|
+| `Model.param_meta` | 各パラメータの説明、単位、目安の値、範囲 |
+| `Model(**params)` | 全パラメータをキーワードで指定して構築する。既定値は無い。名前の不足・誤りは `TypeError` |
+| `Model.at_defaults()` | 目安の値で構築する |
+| `model.with_params(...)` | 指定したパラメータだけを置き換えた新しいモデルを返す。元のモデルは変更されない |
+| `model.params` | 現在のパラメータ値 (dict) |
 
-## 3. 載荷履歴を作る
+## 3. 載荷履歴の作成
 
-載荷履歴は `FieldHistory` で、ひずみか応力かの種類と、ステップごとの値の配列を持つ。値は**その時点までの累積値**で、増分ではない。計算は 0 から始まるので、配列には最初のステップの終わりの値から書く。
+`FieldHistory` は、種類 (ひずみ / 応力) と、ステップごとの値の配列を持つ。
+
+- 値は累積値であり、増分ではない。
+- 初期値 0 は配列に含めない。配列の先頭は、第 1 ステップ終了時の値である。
+- 配列の形は `(ステップ数, 成分数)`。1 成分の履歴は 1 次元配列でもよい。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 3. 載荷履歴を作る"
+:start-after: "# %% 3. 載荷履歴の作成"
 :end-before: "# %%"
 ```
 
@@ -74,27 +86,32 @@ gamma     Dynamic recovery coefficient (AF)          100.0  (0.0, 10000.0)
 (100,) (150, 1)
 ```
 
-配列をそのまま渡すほかに、よく使う形には作る関数がある。応力の履歴を作る関数は、名前の `_strain` を `_stress` に替えたものである。
+生成関数は次のとおり。応力履歴の生成関数は、名前の `_strain` を `_stress` に置き換えたものである。
 
 | 関数 | 形 |
 |---|---|
-| `FieldHistory.cyclic_strain(peaks, n_per_segment=20)` | 0 から始めて、`peaks` の値を順に直線で結ぶ |
+| `FieldHistory.cyclic_strain(peaks, n_per_segment=20)` | 0 から始め、`peaks` の値を順に直線で結ぶ |
 | `FieldHistory.triangular_strain(amplitude, n_cycles)` | 一定振幅の三角波 (`mean=` で平均値) |
 | `FieldHistory.sine_strain(amplitude, n_cycles, n_per_cycle=80)` | 正弦波 |
-| `FieldHistory.decaying_cyclic_strain(amplitude, n_cycles, decay=0.5)` | 振幅が指数的に変わる繰返し |
+| `FieldHistory.decaying_cyclic_strain(amplitude, n_cycles, decay=0.5)` | 振幅が指数的に変化する繰返し |
 
-成分が複数あるモデル (`3D`、`PS`) では、次の 2 点に注意する。
+多成分のモデル (`3D`、`PS`) では、次を指定する。
 
-- **成分の数を合わせる。** 作る関数には `ntens=model.ntens` を渡す。動かす成分は `component=` で選び (既定は 0、つまり 11 成分)、ほかの成分は 0 になる。複数の成分を同時に動かす履歴は、形が `(ステップ数, 成分の数)` の配列を自分で作って渡す。
-- **せん断ひずみは工学ひずみで与える。** 成分の並びは `[11, 22, 33, 12, 13, 23]` で、ひずみのせん断成分は γ = 2ε である。応力のせん断成分はテンソルの成分そのままである ([概念](../concepts.md) の Voigt 規約)。
+| 項目 | 指定 |
+|---|---|
+| 成分数 | 生成関数に `ntens=model.ntens` を渡す |
+| 載荷する成分 | `component=` (既定は 0 = 11 成分)。他の成分は 0 になる |
+| 複数成分の同時載荷 | 形 `(ステップ数, 成分数)` の配列を `FieldHistory` に直接渡す |
+| 成分の順序 | `[11, 22, 33, 12, 13, 23]` |
+| せん断成分 | ひずみは工学ひずみ (γ = 2ε)、応力はテンソル成分 ([概念](../concepts.md) の Voigt 規約) |
 
-### 刻みを変えて確かめる
+### 刻みの影響
 
-**刻みの細かさは結果に効く。** 1 ステップの中は後退 Euler 法で積分するので、刻みが粗いと応答に誤差が残る。同じ 1.5 % の引張を、刻みを変えて計算すると次のようになる。
+1 ステップは後退 Euler 法で積分される。刻みが粗いと、応答に誤差が残る。1.5 % の単調引張を、ステップ数を変えて計算した結果を示す。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 3b. 刻みを変えて確かめる"
+:start-after: "# %% 3b. 刻みの影響"
 :end-before: "# %%"
 ```
 
@@ -104,13 +121,13 @@ gamma     Dynamic recovery coefficient (AF)          100.0  (0.0, 10000.0)
  1000 ステップ: 395.9 MPa
 ```
 
-5 ステップでは 2 % ずれ、50 ステップで 0.3 % になる。使う刻みを決めるときは、細かくしても結果が動かないことを一度確かめる。
+1000 ステップの結果に対する差は、5 ステップで 2 %、50 ステップで 0.3 % である。刻みは、細かくしても結果が変わらない範囲で選ぶ。
 
-## 4. 結果を読む
+## 4. 結果の参照
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 4. 結果を読む"
+:start-after: "# %% 4. 結果の参照"
 :end-before: "# %%"
 ```
 
@@ -121,17 +138,23 @@ gamma     Dynamic recovery coefficient (AF)          100.0  (0.0, 10000.0)
 True 3 5.37e-04
 ```
 
-- **応力とひずみ** — `result.stress` と `result.strain` は、形が `(ステップ数, 成分の数)` の配列である。`1D` のモデルでも 2 次元なので、曲線を取り出すには `result.stress[:, 0]` と書く。
-- **状態量** — `result.history(名前)` で取り出す。使える名前は `model.state_names` にある。上の例では `ep` が累積塑性ひずみ、`alpha` が背応力である。スカラーの状態量は長さがステップ数の配列、テンソルの状態量は応力と同じ形になる。
-- **ステップごとの詳細** — `result.step_results[i]` が i 番目のステップの記録で、塑性だったか (`is_plastic`)、反復の回数 (`n_iterations`)、塑性乗数の増分 (`dlambda`) などを持つ。
+| 属性 | 形 | 内容 |
+|---|---|---|
+| `result.stress` | `(ステップ数, 成分数)` | 応力。`1D` のモデルでも 2 次元である (曲線は `result.stress[:, 0]`) |
+| `result.strain` | `(ステップ数, 成分数)` | ひずみ |
+| `result.history(名前)` | スカラーは `(ステップ数,)`、テンソルは `(ステップ数, 成分数)` | 状態量の履歴。指定できる名前は `model.state_names` |
+| `result.step_results[i]` | — | i 番目のステップの記録。`is_plastic` (塑性か)、`n_iterations` (反復回数)、`dlambda` (塑性乗数の増分) など |
+| `result.converged`、`result.failed_step` | — | 非収束の有無と位置 (6 節) |
 
-### 1 ステップずつ受け取る
+`AFKinematic1D` の状態量は、`ep` (累積塑性ひずみ) と `alpha` (背応力) である。
 
-`run` の代わりに `iter_run` を使うと、ステップを 1 つ進めるたびに結果を受け取れる。途中で条件を見て止めたいときに使う。
+### ステップ単位の実行
+
+`iter_run` は、1 ステップ進むごとに結果を返す。条件を判定して途中で打ち切る場合に用いる。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 4b. 1 ステップずつ受け取る"
+:start-after: "# %% 4b. ステップ単位の実行"
 :end-before: "# %%"
 ```
 
@@ -139,31 +162,31 @@ True 3 5.37e-04
 降伏したステップ: 4 (ひずみ 0.0015)
 ```
 
-### 図にする
+### 作図
 
-応力-ひずみ曲線は、2 つの配列をそのまま描けばよい。図を描くための matplotlib は `pip install "returnmap[examples]"` で一緒に入る。
+応力-ひずみ曲線は、`result.strain` と `result.stress` をそのまま描く。matplotlib は `pip install "returnmap[examples]"` で入る。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 4c. 図にする"
+:start-after: "# %% 4c. 作図"
 :end-before: "# %%"
 ```
 
-## 5. 応力で載荷する、3D のモデルで単軸応力にする
+## 5. 応力制御と混合制御
 
-ここまでは、すべての成分のひずみを与えた。与えるものが違えば、driver を替える。
+driver は、載荷履歴で与える量に応じて選ぶ。
 
-| 与えるもの | driver |
+| 与える量 | driver |
 |---|---|
-| すべての成分のひずみ | `StrainDriver` |
-| すべての成分の応力 | `StressDriver` |
+| 全成分のひずみ | `StrainDriver` |
+| 全成分の応力 | `StressDriver` |
 | 一部の成分はひずみ、残りの成分は応力 (既定は 0) | `MixedDriver` |
 
-### 応力で載荷する
+### 応力制御
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 5. 応力で載荷する"
+:start-after: "# %% 5. 応力制御"
 :end-before: "# %%"
 ```
 
@@ -171,15 +194,15 @@ True 3 5.37e-04
 400 MPa でのひずみ: 1.66 %
 ```
 
-`StressDriver` は、与えた応力になるひずみを、ステップごとに反復で求める。そのぶん、ひずみを与える計算より時間がかかる。
+`StressDriver` は、目標応力を満たすひずみを、ステップごとに反復で求める。計算時間はひずみ制御より長い。
 
-### 3D のモデルで単軸応力にする
+### 3D モデルでの単軸応力
 
-**3D のモデルで引張試験を計算するときは、`MixedDriver` を使う。** ε11 だけを与えてほかのひずみを 0 のままにすると、横方向が拘束された単軸ひずみになり、引張試験とは違う応力が出る。
+3D のモデルで引張試験を計算する場合は、`MixedDriver` を用いる。`StrainDriver` に ε11 のみを与えると、他のひずみ成分が 0 に拘束された単軸ひずみ状態となり、単軸応力とは異なる応力になる。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 5b. 3D のモデルで単軸応力にする"
+:start-after: "# %% 5b. 3D モデルでの単軸応力"
 :end-before: "# %%"
 ```
 
@@ -188,15 +211,17 @@ True 3 5.37e-04
 単軸応力  : σ11 =   394.9 MPa, σ22 =     0.0 MPa
 ```
 
-`prescribed_strain_idx=[0]` は「成分 0 (11 成分) はひずみで与える」という指定で、残りの成分は応力が 0 になるように解かれる。載荷履歴には、ひずみで与える成分だけを書く (ここでは 1 列)。結果は 1 節の `1D` のモデルと同じ 394.9 MPa になる。
+- `prescribed_strain_idx=[0]` は、成分 0 (11 成分) をひずみで与える指定である。残りの成分は、応力が 0 になるように解かれる。
+- 載荷履歴には、ひずみで与える成分のみを書く (この例では 1 列)。
+- 単軸応力の結果 (394.9 MPa) は、1 節の `1D` のモデルと一致する。
 
-## 6. 解けなかったとき
+## 6. 非収束時の扱い
 
-1 ステップの増分が大きいと、応力の更新の反復が収束しないことがある。そのときは、既定では `RuntimeError` になる。
+1 ステップの増分が大きい場合、応力更新の反復が収束しないことがある。既定の動作は `RuntimeError` の送出である。
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 6. 解けなかったとき"
+:start-after: "# %% 6. 非収束時の扱い"
 :end-before: "# %%"
 ```
 
@@ -205,17 +230,19 @@ True 3 5.37e-04
 False 6 6
 ```
 
-integrator を `raise_on_nonconverged=False` で作ると、例外の代わりに、解けたところまでの結果が返る。
+`raise_on_nonconverged=False` で作った integrator では、例外を送出せず、収束したステップまでの結果を返す。
 
-- `result.converged` が `False` なら、途中で止まっている。
-- `result.failed_step` は、解けなかったステップの番号 (0 始まり) である。最後まで解ければ `None` になる。
-- `result.stress` などの配列には、完了したステップだけが入る。上の例では 6 ステップ分である。
+| 属性 | 内容 |
+|---|---|
+| `result.converged` | 全ステップが収束した場合に `True` |
+| `result.failed_step` | 収束しなかったステップの番号 (0 始まり)。全ステップが収束した場合は `None` |
+| `result.stress` など | 収束したステップのみを含む (この例では 6 ステップ) |
 
-### 刻みを細かくする、増分を分割する
+### 対処
 
 ```{literalinclude} ../../examples/example_response.py
 :language: python
-:start-after: "# %% 6b. 刻みを細かくする、増分を分割する"
+:start-after: "# %% 6b. 対処"
 ```
 
 ```text
@@ -223,13 +250,15 @@ True
 True [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1]
 ```
 
-- **刻みを細かくする。** まずこれを試す。3 節のとおり、精度のためにも細かい刻みが要る。
-- **増分を分割する。** `SubSteppingIntegrator` で integrator を包むと、解けなかった増分だけを 2、4、8 … と分割して解き直す。上の例では 7 番目のステップだけが 2 分割されている (`n_substeps`)。解けている増分には何もしないので、結果は変わらない。
+| 方法 | 内容 |
+|---|---|
+| 刻みを細かくする | 載荷履歴のステップ数を増やす。精度の面でも有効である (3 節) |
+| 増分の自動分割 | `SubSteppingIntegrator` で integrator を包む。収束しなかった増分のみを 2、4、8 … 分割して解く。分割数は `n_substeps` に記録される (この例では 7 番目のステップが 2 分割)。収束する増分の結果は変わらない |
 
-integrator 自身も、失敗したステップを別の初期値から 1 回解き直してから、解けなかったと報告する。この仕組みと、どういうときに解けなくなるかは [概念](../concepts.md) の「非収束との付き合い方」にある。
+integrator は、非収束を報告する前に、失敗したステップを別の初期値から 1 回解き直す。詳細は [概念](../concepts.md) の「非収束との付き合い方」を参照。
 
-## 次に読むもの
+## 関連ページ
 
-- 試験の記録に合うパラメータを探す: [チュートリアル](tutorial.md)
-- 複数のモデルやパラメータを並べて比べる: [モデルを比べる](comparing.md)
-- 各モデルの式とパラメータ: [組み込みモデルと次元選択](models.md)
+- 試験データへのフィッティング: [チュートリアル](tutorial.md)
+- 複数のモデル、パラメータの比較: [モデルを比べる](comparing.md)
+- 各モデルの定式化とパラメータ: [組み込みモデルと次元選択](models.md)
